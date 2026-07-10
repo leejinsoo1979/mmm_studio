@@ -64,9 +64,11 @@ function validateOrigin(request: Request): NextResponse | null {
 }
 
 function validateAuth(request: Request): NextResponse | null {
+  if (isLoopbackRequest(request) || isFirstPartyBrowserRequest(request)) return null
+
   const token = process.env.PASCAL_SCENE_API_TOKEN
   if (!token) {
-    if (isLoopbackRequest(request)) return null
+    if (process.env.PASCAL_SCENE_API_REQUIRE_TOKEN !== 'true') return null
     return sceneApiJson(request, { error: 'scene_api_token_required' }, { status: 503 })
   }
 
@@ -153,6 +155,14 @@ function isSameOrigin(request: Request, origin: string): boolean {
 function isLoopbackRequest(request: Request): boolean {
   const host = request.headers.get('host') ?? new URL(request.url).host
   return isLoopbackHostname(stripPort(host))
+}
+
+function isFirstPartyBrowserRequest(request: Request): boolean {
+  const origin = request.headers.get('origin')
+  if (origin && isSameOrigin(request, origin)) return true
+
+  const fetchSite = request.headers.get('sec-fetch-site')?.toLowerCase()
+  return fetchSite === 'same-origin' || fetchSite === 'same-site'
 }
 
 function isLoopbackHostname(hostname: string): boolean {

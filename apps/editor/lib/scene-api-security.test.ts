@@ -5,6 +5,7 @@ const OLD_ENV = { ...process.env }
 
 afterEach(() => {
   restoreEnv('PASCAL_SCENE_API_TOKEN')
+  restoreEnv('PASCAL_SCENE_API_REQUIRE_TOKEN')
   restoreEnv('PASCAL_SCENE_API_ORIGINS')
   restoreEnv('PASCAL_SCENE_API_RATE_LIMIT')
 })
@@ -34,6 +35,7 @@ test('allows wildcard development hosts without a token', () => {
 
 test('requires a token for non-loopback scene API requests', async () => {
   delete process.env.PASCAL_SCENE_API_TOKEN
+  process.env.PASCAL_SCENE_API_REQUIRE_TOKEN = 'true'
   const request = new Request('https://editor.example/api/scenes', {
     headers: { host: 'editor.example' },
   })
@@ -42,6 +44,28 @@ test('requires a token for non-loopback scene API requests', async () => {
 
   expect(response?.status).toBe(503)
   expect(await response?.json()).toEqual({ error: 'scene_api_token_required' })
+})
+
+test('allows app server requests when token auth is not explicitly required', () => {
+  delete process.env.PASCAL_SCENE_API_TOKEN
+  delete process.env.PASCAL_SCENE_API_REQUIRE_TOKEN
+  const request = new Request('https://editor.example/api/scenes', {
+    headers: { host: 'editor.example' },
+  })
+
+  expect(guardSceneApiRequest(request)).toBeNull()
+})
+
+test('allows first-party browser scene API requests without a token', () => {
+  delete process.env.PASCAL_SCENE_API_TOKEN
+  const request = new Request('https://editor.example/api/scenes', {
+    headers: {
+      host: 'editor.example',
+      'sec-fetch-site': 'same-origin',
+    },
+  })
+
+  expect(guardSceneApiRequest(request)).toBeNull()
 })
 
 test('accepts bearer token auth when configured', () => {
