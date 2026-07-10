@@ -199,7 +199,19 @@ const PANEL_DEFAULT_BOTTOM_OFFSET = 96
 const MIN_GRID_SCREEN_SPACING = 12
 const GRID_COORDINATE_PRECISION = 6
 const VISIBLE_GRID_STEPS_METERS = [
-  0.01, 0.02, 0.05, 0.1, 0.2, WALL_GRID_STEP, 1, 2, 5, 10, 20, 50, 100,
+  0.01,
+  0.02,
+  0.05,
+  0.1,
+  0.2,
+  WALL_GRID_STEP,
+  1,
+  2,
+  5,
+  10,
+  20,
+  50,
+  100,
 ] as const
 const MAX_VISIBLE_GRID_STEP_METERS =
   VISIBLE_GRID_STEPS_METERS[VISIBLE_GRID_STEPS_METERS.length - 1]!
@@ -5177,23 +5189,20 @@ function FloorplanWallDimensions({
     const leftDistance = Math.hypot(leftMid.x - planCenter.x, leftMid.y - planCenter.y)
     const rightDistance = Math.hypot(rightMid.x - planCenter.x, rightMid.y - planCenter.y)
     const leftIsInner = leftDistance <= rightDistance
-    const faces = leftIsInner
-      ? [
-          {
-            id: `${wall.id}:right:outer`,
-            start: boundary.startRight,
-            end: boundary.endRight,
-            outward: -1,
-          },
-        ]
-      : [
-          {
-            id: `${wall.id}:left:outer`,
-            start: boundary.startLeft,
-            end: boundary.endLeft,
-            outward: 1,
-          },
-        ]
+    const faces = [
+      {
+        id: `${wall.id}:left:${leftIsInner ? 'inner' : 'outer'}`,
+        start: boundary.startLeft,
+        end: boundary.endLeft,
+        outward: 1,
+      },
+      {
+        id: `${wall.id}:right:${leftIsInner ? 'outer' : 'inner'}`,
+        start: boundary.startRight,
+        end: boundary.endRight,
+        outward: -1,
+      },
+    ]
 
     const spans = (openingsByWallId.get(wall.id) ?? [])
       .map((opening) => {
