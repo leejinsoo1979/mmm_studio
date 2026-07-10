@@ -50,6 +50,12 @@ type MutableMaterial = Material & {
   wireframe?: boolean
 }
 
+type MutablePbrMaterial = Material & {
+  color?: { set: (value: string) => void }
+  metalness?: number
+  roughness?: number
+}
+
 type CapturedSingleItemMaterialData = {
   captured: true
   authoredMaterials: Material
@@ -128,6 +134,24 @@ const isCapturedMaterialArray = (
 const isGlassMaterial = (material: Material): boolean =>
   material === glassMaterial || material.name.toLowerCase() === 'glass'
 
+const blackSteelMaterialCache = new WeakMap<Material, Material>()
+
+const isBlackSteelMaterialName = (name: string): boolean =>
+  /(?:^|[_\s.-])(metal|steel|frame)(?:[_\s.-]|$)/i.test(name)
+
+function getBlackSteelMaterial(material: Material): Material {
+  const cached = blackSteelMaterialCache.get(material)
+  if (cached) return cached
+
+  const next = material.clone() as MutablePbrMaterial
+  next.color?.set('#050505')
+  next.metalness = Math.max(next.metalness ?? 0, 0.85)
+  next.roughness = Math.min(next.roughness ?? 0.38, 0.42)
+  next.needsUpdate = true
+  blackSteelMaterialCache.set(material, next)
+  return next
+}
+
 const clampGeometryGroups = (mesh: Mesh, matCount: number): void => {
   if (mesh.geometry.groups.length === 0) return
 
@@ -162,9 +186,12 @@ const resolveItemMaterial = (
     textures: boolean
   },
 ): Material => {
+  if (authoredMaterial.name.toLowerCase() === 'glass') return glassMaterial
+  if (isBlackSteelMaterialName(authoredMaterial.name)) {
+    return getBlackSteelMaterial(authoredMaterial)
+  }
   // Monochrome (textures off): collapse to the themed furnishing clay colour.
   if (!textures) return createSurfaceRoleMaterial('furnishing', colorPreset)
-  if (authoredMaterial.name.toLowerCase() === 'glass') return glassMaterial
   if (slotId != null) {
     const override = resolveMaterialRef(nodeSlots?.[slotId], sceneMaterials, shading)
     if (override) return override

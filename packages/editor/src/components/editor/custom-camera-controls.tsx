@@ -488,9 +488,11 @@ export const CustomCameraControls = () => {
         target: [...pose.target],
         azimuth: targetAzimuth,
         viewWidth: viewWidthUpdate.viewWidth,
-        publishOnComplete:
-          Math.abs(viewWidthUpdate.viewWidth - pose.viewWidth) >=
-          NAVIGATION_SYNC_VIEW_WIDTH_EPSILON,
+        // A 2D-originated zoom can request a closer view than the 3D camera can
+        // physically match. Do not echo the camera-clamped width back into the
+        // floorplan, or the 2D view visibly zooms itself back out after the user
+        // stops scrolling.
+        publishOnComplete: false,
       }
       // Match 3D settle time to 2D exponential decay (τ=90ms). SmoothDamp's
       // effective time constant is smoothTime/2, so smoothTime=0.18 gives

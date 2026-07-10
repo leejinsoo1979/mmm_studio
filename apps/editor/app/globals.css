@@ -187,6 +187,48 @@ body {
   scrollbar-width: none; /* Firefox */
 }
 
+.dark-scrollbar,
+[data-sidebar="content"],
+[data-slot="sidebar-content"] {
+  scrollbar-color: #4a4a4a #161616;
+  scrollbar-width: thin;
+}
+
+.dark-scrollbar::-webkit-scrollbar,
+[data-sidebar="content"]::-webkit-scrollbar,
+[data-slot="sidebar-content"]::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: #161616;
+}
+
+.dark-scrollbar::-webkit-scrollbar-track,
+[data-sidebar="content"]::-webkit-scrollbar-track,
+[data-slot="sidebar-content"]::-webkit-scrollbar-track {
+  background: #161616;
+}
+
+.dark-scrollbar::-webkit-scrollbar-thumb,
+[data-sidebar="content"]::-webkit-scrollbar-thumb,
+[data-slot="sidebar-content"]::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 2px solid #161616;
+  border-radius: 999px;
+  background: #4a4a4a;
+}
+
+.dark-scrollbar::-webkit-scrollbar-thumb:hover,
+[data-sidebar="content"]::-webkit-scrollbar-thumb:hover,
+[data-slot="sidebar-content"]::-webkit-scrollbar-thumb:hover {
+  background: #626262;
+}
+
+.dark-scrollbar::-webkit-scrollbar-corner,
+[data-sidebar="content"]::-webkit-scrollbar-corner,
+[data-slot="sidebar-content"]::-webkit-scrollbar-corner {
+  background: #161616;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

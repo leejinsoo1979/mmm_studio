@@ -287,7 +287,7 @@ const PostProcessingPasses = ({
     // useFrame's null-pipeline branch direct-renders. Before this check the
     // URL flag only skipped the pipeline at render time; the build still
     // allocated every pass.
-    if (disablePostFx || perfDisable.postFx) {
+    if (disablePostFx || perfDisable.postFx || shading === 'performance') {
       hasPipelineErrorRef.current = false
       if (renderPipelineRef.current) {
         renderPipelineRef.current.dispose()

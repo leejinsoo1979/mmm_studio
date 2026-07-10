@@ -1,13 +1,14 @@
 'use client'
 
 import { Icon } from '@iconify/react'
-import { type LucideIcon, Trash2 } from 'lucide-react'
+import { type LucideIcon, Pipette, Trash2 } from 'lucide-react'
 import Image from 'next/image'
+import { hasActivePaintMaterial } from './../../../lib/material-paint'
 import { cn } from './../../../lib/utils'
 import useEditor from './../../../store/use-editor'
 import { ActionButton } from './action-button'
 
-type ControlId = 'select' | 'box-select' | 'zone' | 'delete'
+type ControlId = 'select' | 'box-select' | 'zone' | 'eyedropper' | 'delete'
 
 type ControlConfig = {
   id: ControlId
@@ -39,6 +40,13 @@ const controls: ControlConfig[] = [
     activeColor: 'bg-green-500/20 text-green-400',
   },
   {
+    id: 'eyedropper',
+    icon: Pipette,
+    label: 'Pick material',
+    color: 'hover:bg-purple-500/20 hover:text-purple-400',
+    activeColor: 'bg-purple-500/20 text-purple-400',
+  },
+  {
     id: 'delete',
     icon: Trash2,
     label: 'Delete',
@@ -60,12 +68,18 @@ export function ControlModes() {
   const isSiteEditing = phase === 'site'
 
   const structureLayer = useEditor((state) => state.structureLayer)
+  const activePaintMaterial = useEditor((state) => state.activePaintMaterial)
+  const paintEraser = useEditor((state) => state.paintEraser)
 
   const getIsActive = (id: ControlId): boolean => {
     if (id === 'select') return mode === 'select' && selectionTool === 'click'
     if (id === 'box-select') return mode === 'select' && selectionTool === 'marquee'
     if (id === 'zone')
       return mode === 'build' && phase === 'structure' && structureLayer === 'zones'
+    if (id === 'eyedropper')
+      return (
+        mode === 'material-paint' && !paintEraser && !hasActivePaintMaterial(activePaintMaterial)
+      )
     return mode === id
   }
 
@@ -89,6 +103,16 @@ export function ControlModes() {
         setPhase('structure')
         setStructureLayer('zones')
         setMode('build')
+      }
+    } else if (id === 'eyedropper') {
+      if (getIsActive('eyedropper')) {
+        setMode('select')
+      } else {
+        // Enter paint mode with nothing to apply: clicks inspect the surface
+        // and open the material inspector instead of painting.
+        useEditor.getState().setActivePaintMaterial(null)
+        useEditor.getState().setPaintEraser(false)
+        setMode('material-paint')
       }
     } else {
       setMode(id)

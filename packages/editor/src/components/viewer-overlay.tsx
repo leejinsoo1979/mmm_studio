@@ -120,13 +120,20 @@ const SHADING_OPTIONS = [
 ] as const
 
 const TEXTURE_OPTIONS = [
-  { id: true, name: 'Colored', detail: 'Show materials, textures & colors', icon: Palette },
-  { id: false, name: 'Monochrome', detail: 'Flat clay surfaces by role', icon: Square },
+  { id: 'colored', name: 'Colored', detail: 'Show materials, textures & colors', icon: Palette },
+  {
+    id: 'monochrome-outline',
+    name: 'Monochrome Outline',
+    detail: 'Clay surfaces with light edge lines',
+    icon: PenLine,
+  },
+  { id: 'monochrome', name: 'Monochrome', detail: 'Flat clay surfaces by role', icon: Square },
 ] as const
 
 function RenderModeMenu() {
   const shading = useViewer((s) => s.shading)
   const textures = useViewer((s) => s.textures)
+  const edges = useViewer((s) => s.edges)
   const active = SHADING_OPTIONS.find((o) => o.id === shading) ?? SHADING_OPTIONS[0]
   const ActiveIcon = active.icon
   return (
@@ -162,17 +169,34 @@ function RenderModeMenu() {
         <DropdownMenuSeparator />
         {TEXTURE_OPTIONS.map((option) => {
           const OptionIcon = option.icon
+          const isActive =
+            option.id === 'colored'
+              ? textures
+              : option.id === 'monochrome-outline'
+                ? !textures && edges === 'soft'
+                : !textures && edges === 'off'
           return (
             <DropdownMenuItem
               key={option.name}
-              onSelect={() => useViewer.getState().setTextures(option.id)}
+              onSelect={() => {
+                const viewer = useViewer.getState()
+                if (option.id === 'colored') {
+                  viewer.setTextures(true)
+                } else if (option.id === 'monochrome-outline') {
+                  viewer.setTextures(false)
+                  viewer.setEdges('soft')
+                } else {
+                  viewer.setTextures(false)
+                  viewer.setEdges('off')
+                }
+              }}
             >
               <OptionIcon />
               <div className="flex flex-col">
                 <span className="text-foreground">{option.name}</span>
                 <span className="text-muted-foreground text-xs">{option.detail}</span>
               </div>
-              {textures === option.id ? <Check className="ml-auto text-foreground" /> : null}
+              {isActive ? <Check className="ml-auto text-foreground" /> : null}
             </DropdownMenuItem>
           )
         })}

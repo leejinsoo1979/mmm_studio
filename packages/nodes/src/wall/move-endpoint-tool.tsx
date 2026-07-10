@@ -20,6 +20,7 @@ import {
   formatAngleRadians,
   getAngleToSegmentReference,
   getSegmentAngleReferenceAtPoint,
+  getWallResizeGridStep,
   isAlignmentGuideActive,
   isAngleSnapActive,
   isMagneticSnapActive,
@@ -333,6 +334,9 @@ export const MoveWallEndpointTool: React.FC<{ target: MovingWallEndpoint }> = ({
         start: fixedPoint,
         angleSnap: isAngleSnapActive(),
         magnetic: isMagneticSnapActive(),
+        // Resizing an existing wall quantizes at 10mm (panel Length steps),
+        // not the coarse draft lattice — see `getWallResizeGridStep`.
+        step: getWallResizeGridStep(),
       })
       const snappedPoint = snapResult.point
 

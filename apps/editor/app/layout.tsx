@@ -1,5 +1,4 @@
 import { Agentation } from 'agentation'
-import { GeistPixelSquare } from 'geist/font/pixel'
 import { Barlow } from 'next/font/google'
 import localFont from 'next/font/local'
 import { ClientBootstrap } from './client-bootstrap'
@@ -8,16 +7,12 @@ import './globals.css'
 const geistSans = localFont({
   src: './fonts/GeistVF.woff',
   variable: '--font-geist-sans',
+  preload: false,
 })
 const geistMono = localFont({
   src: './fonts/GeistMonoVF.woff',
   variable: '--font-geist-mono',
-})
-const chillax = localFont({
-  src: './fonts/Chillax-Variable.woff2',
-  variable: '--font-chillax',
-  display: 'swap',
-  weight: '200 700',
+  preload: false,
 })
 
 const barlow = Barlow({
@@ -25,6 +20,7 @@ const barlow = Barlow({
   weight: ['400', '500', '600', '700'],
   variable: '--font-barlow',
   display: 'swap',
+  preload: false,
 })
 
 export default function RootLayout({
@@ -33,15 +29,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html
-      className={`${geistSans.variable} ${geistMono.variable} ${GeistPixelSquare.variable} ${barlow.variable} ${chillax.variable}`}
-      lang="en"
-    >
-      <head>
-        {process.env.NODE_ENV === 'development' && (
-          <script async crossOrigin="anonymous" src="//unpkg.com/react-scan/dist/auto.global.js" />
-        )}
-      </head>
+    <html className={`${geistSans.variable} ${geistMono.variable} ${barlow.variable}`} lang="en">
+      <head />
       <body className="font-sans">
         <ClientBootstrap>{children}</ClientBootstrap>
         {process.env.NODE_ENV === 'development' && <Agentation />}

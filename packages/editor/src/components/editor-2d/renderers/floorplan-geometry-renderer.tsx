@@ -3,6 +3,23 @@
 import { type FloorplanGeometry, loadAssetUrl } from '@pascal-app/core'
 import { memo, useEffect, useId, useState } from 'react'
 
+async function resolveFloorplanAssetUrl(url: string): Promise<string | null> {
+  if (
+    url.startsWith('asset://') ||
+    url.startsWith('blob:') ||
+    url.startsWith('data:') ||
+    url.startsWith('http://') ||
+    url.startsWith('https://')
+  ) {
+    return loadAssetUrl(url)
+  }
+
+  // Catalog material maps are sometimes stored as `materials/...` rather
+  // than `/materials/...`. An SVG image resolves the former relative to the
+  // current `/scene/:id` route, which silently 404s and leaves the slab white.
+  return url.startsWith('/') ? url : `/${url}`
+}
+
 /**
  * Pure-data → SVG converter. Walks a `FloorplanGeometry` tree returned by
  * `def.floorplan(node, ctx)` and emits the matching React-SVG nodes.
@@ -204,7 +221,7 @@ function FloorplanTexturePath({
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
-    loadAssetUrl(geometry.url).then((url) => {
+    resolveFloorplanAssetUrl(geometry.url).then((url) => {
       if (!cancelled) setResolvedUrl(url)
     })
     return () => {
@@ -300,7 +317,7 @@ function FloorplanImage({
     }
     let cancelled = false
     setResolvedUrl(null)
-    loadAssetUrl(url).then((next) => {
+    resolveFloorplanAssetUrl(url).then((next) => {
       if (!cancelled) setResolvedUrl(next)
     })
     return () => {

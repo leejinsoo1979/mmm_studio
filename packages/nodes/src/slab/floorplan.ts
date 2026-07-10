@@ -102,7 +102,7 @@ export function buildSlabFloorplan(node: SlabNode, ctx: GeometryContext): Floorp
 
   const stroke = showSelectedChrome && palette ? palette.selectedStroke : '#475569'
   const floorMaterial = resolveFloorMaterial(node, ctx)
-  const fill = showSelectedChrome ? '#ffffff' : floorMaterial.color
+  const fill = floorMaterial.color
 
   // Slab body. Uses `fillOpacity` / `strokeOpacity` independently so the
   // outline stays crisp while the fill stays translucent — zones under
@@ -130,21 +130,21 @@ export function buildSlabFloorplan(node: SlabNode, ctx: GeometryContext): Floorp
       repeat: floorMaterial.repeat,
       rotation: floorMaterial.rotation,
       offset: floorMaterial.offset,
-      opacity: showSelectedChrome ? 0.58 : 0.92,
+      opacity: 0.92,
     })
   }
   children.push({
     kind: 'path',
     d: segments.join(' '),
-    fill: floorMaterial.url ? (showSelectedChrome ? '#ffffff' : 'transparent') : fill,
-    fillOpacity: showSelectedChrome ? 0.28 : floorMaterial.url ? 0 : 0.82,
+    fill: floorMaterial.url ? 'transparent' : fill,
+    fillOpacity: floorMaterial.url ? 0 : 0.82,
     stroke,
     strokeWidth: showSelectedChrome ? 0.04 : 0.03,
     strokeOpacity: showSelectedChrome ? 0.96 : 0.85,
   })
 
   // Hatch overlay on selected — same `<defs>` pattern as the wall.
-  if (isSelected && palette) {
+  if (isSelected && palette && !floorMaterial.url) {
     children.push({
       kind: 'hatch',
       points: outer,

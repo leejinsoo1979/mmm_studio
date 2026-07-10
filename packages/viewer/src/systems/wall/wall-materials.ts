@@ -29,6 +29,7 @@ import {
 type SceneMaterials = Record<SceneMaterialId, SceneMaterial> | undefined
 
 const DEFAULT_WALL_COLOR = '#f2f0ed'
+const WALL_CAP_COLOR = '#050505'
 
 const WALL_HIGHLIGHT_PROFILES = {
   delete: {
@@ -281,7 +282,7 @@ export function getSelectionHighlightMaterials(materials: WallMaterialArray): Wa
 
 function createInvisibleWallMaterial(color: string, shading: RenderShading): Material {
   const material =
-    shading === 'solid'
+    shading === 'solid' || shading === 'performance'
       ? new MeshLambertNodeMaterial({
           transparent: true,
           color,
@@ -301,7 +302,7 @@ function createInvisibleWallMaterial(color: string, shading: RenderShading): Mat
 
 function createTranslucentWallMaterial(color: string, shading: RenderShading): Material {
   const material =
-    shading === 'solid'
+    shading === 'solid' || shading === 'performance'
       ? new MeshLambertNodeMaterial({
           transparent: true,
           color,
@@ -359,8 +360,8 @@ export function getMaterialsForWall(
 ): WallMaterials {
   const cacheKey = `${wallNode.id}-${shading}-${textures}-${colorPreset}-${sceneTheme ?? 'base'}`
   const materialHash = textures
-    ? getWallMaterialHash(wallNode, shading, sceneMaterials)
-    : JSON.stringify({ textures, colorPreset, sceneTheme })
+    ? `${WALL_CAP_COLOR}:${getWallMaterialHash(wallNode, shading, sceneMaterials)}`
+    : JSON.stringify({ textures, colorPreset, sceneTheme, cap: WALL_CAP_COLOR })
 
   const existing = wallMaterialCache.get(cacheKey)
   if (existing && existing.materialHash === materialHash) {
@@ -378,22 +379,24 @@ export function getMaterialsForWall(
   }
 
   const wallRoleMaterial = createSurfaceRoleMaterial('wall', colorPreset, undefined, sceneTheme)
+  const wallCapMaterial = createDefaultMaterial(WALL_CAP_COLOR, 0.86, shading)
 
   // Colored mode: each face resolves slot-first (node.slots ref → legacy inline
   // fields → declared slot default, parity with the retired DEFAULT_WALL_MATERIAL).
   // Textures-off collapses every face to the themed wall role (the guaranteed
-  // escape hatch). The edge/cap slot (index 0) stays role-based.
+  // escape hatch). The edge/cap slot (index 0) stays dark so top sections read
+  // like the 2D wall cut line.
   const visible: WallMaterialArray = textures
     ? [
-        wallRoleMaterial,
+        wallCapMaterial,
         resolveWallFaceMaterial(wallNode, 'interior', shading, sceneMaterials),
         resolveWallFaceMaterial(wallNode, 'exterior', shading, sceneMaterials),
       ]
-    : [wallRoleMaterial, wallRoleMaterial, wallRoleMaterial]
+    : [wallCapMaterial, wallRoleMaterial, wallRoleMaterial]
 
   const wallRoleColor = resolveSurfaceColor('wall', colorPreset, sceneTheme)
   const invisible: WallMaterialArray = [
-    createInvisibleWallMaterial(wallRoleColor, textures ? shading : 'solid'),
+    createInvisibleWallMaterial(WALL_CAP_COLOR, textures ? shading : 'solid'),
     createInvisibleWallMaterial(
       textures
         ? resolveWallFaceColor(wallNode, 'interior', sceneMaterials, wallRoleColor)
@@ -409,7 +412,7 @@ export function getMaterialsForWall(
   ]
 
   const translucent: WallMaterialArray = [
-    createTranslucentWallMaterial(wallRoleColor, textures ? shading : 'solid'),
+    createTranslucentWallMaterial(WALL_CAP_COLOR, textures ? shading : 'solid'),
     createTranslucentWallMaterial(
       textures
         ? resolveWallFaceColor(wallNode, 'interior', sceneMaterials, wallRoleColor)

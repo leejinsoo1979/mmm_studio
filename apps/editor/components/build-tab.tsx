@@ -74,9 +74,9 @@ const DOOR1_ASSET: AssetInput = {
   thumbnail: '/icons/door.webp',
   src: '/items/door1/model.glb',
   dimensions: [0.9, 2.1, 0.12],
-  offset: [0, 0, 0],
-  rotation: [0, 0, 0],
-  scale: [1, 1, 1],
+  offset: [0, 0.005, -0.014],
+  rotation: [0, Math.PI / 2, 0],
+  scale: [0.23, 0.1, 0.1125],
   attachTo: 'wall-side',
   source: 'library',
   tags: ['door', 'wall', 'glb'],
@@ -356,7 +356,7 @@ export function BuildTab() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="dark-scrollbar min-h-0 flex-1 overflow-y-auto">
         <TooltipProvider delayDuration={0} disableHoverableContent>
           <Section title="Import Floor Plan">
             <div className="grid grid-cols-3 gap-2">

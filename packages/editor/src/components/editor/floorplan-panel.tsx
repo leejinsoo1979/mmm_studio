@@ -22,6 +22,7 @@ import {
   getRenderableSlabPolygon,
   getWallChordFrame,
   getWallCurveLength,
+  getWallMiterBoundaryPoints,
   getWallPlanFootprint,
   type ItemNode,
   isCurvedWall,
@@ -86,6 +87,7 @@ import {
   worldToFloorplanLocalPoint,
 } from '../../lib/floorplan'
 import { guideEmitter } from '../../lib/guide-events'
+import { parseMeasurement } from '../../lib/measurement-parser'
 import {
   formatLinearMeasurement,
   type LinearUnit,
@@ -186,7 +188,7 @@ import { useFloorplanSceneData } from './use-floorplan-scene-data'
 
 const FALLBACK_VIEW_SIZE = 12
 const FLOORPLAN_PADDING = 2
-const MIN_VIEWPORT_WIDTH_RATIO = 0.08
+const MIN_VIEWPORT_WIDTH_RATIO = 0.002
 const MAX_VIEWPORT_WIDTH_RATIO = 40
 const PANEL_MIN_WIDTH = 420
 const PANEL_MIN_HEIGHT = 320
@@ -196,7 +198,11 @@ const PANEL_MARGIN = 16
 const PANEL_DEFAULT_BOTTOM_OFFSET = 96
 const MIN_GRID_SCREEN_SPACING = 12
 const GRID_COORDINATE_PRECISION = 6
-const MAJOR_GRID_STEP = WALL_GRID_STEP * 2
+const VISIBLE_GRID_STEPS_METERS = [
+  0.01, 0.02, 0.05, 0.1, 0.2, WALL_GRID_STEP, 1, 2, 5, 10, 20, 50, 100,
+] as const
+const MAX_VISIBLE_GRID_STEP_METERS =
+  VISIBLE_GRID_STEPS_METERS[VISIBLE_GRID_STEPS_METERS.length - 1]!
 const FLOORPLAN_MINOR_GRID_STROKE_WIDTH = 0.14
 const FLOORPLAN_MAJOR_GRID_STROKE_WIDTH = 0.26
 const FLOORPLAN_WALL_THICKNESS_SCALE = 1.18
@@ -2336,6 +2342,36 @@ type DraftWallMeasurement = {
   }[]
 }
 
+type WallDimensionEditableGap = {
+  currentLength: number
+  maxCenterS: number
+  minCenterS: number
+  openingId: AnyNodeId
+  sign: 1 | -1
+}
+
+function getBareLengthUnit(unit: LinearUnit): string {
+  if (unit === 'imperial') return 'ft'
+  if (unit === 'centimeter') return 'cm'
+  return 'mm'
+}
+
+function parseDimensionLabelInput(value: string, unit: LinearUnit): number | null {
+  const parsed = parseMeasurement(
+    value,
+    { kind: 'length', unitId: 'm' },
+    {
+      bareUnit: getBareLengthUnit(unit),
+      system: unit === 'imperial' ? 'imperial' : 'metric',
+    },
+  )
+  if (parsed !== null) return parsed
+
+  const numeric = Number.parseFloat(value)
+  if (!Number.isFinite(numeric)) return null
+  return linearUnitToMeters(numeric, unit)
+}
+
 function FloorplanDraftWallMeasurement({
   measurement,
   measurementStroke,
@@ -2857,15 +2893,15 @@ function getVisibleGridSteps(
   majorStep: number
 } {
   const pixelsPerUnit = surfaceWidth / Math.max(viewportWidth, Number.EPSILON)
-  let minorStep = WALL_GRID_STEP
-
-  while (minorStep * pixelsPerUnit < MIN_GRID_SCREEN_SPACING) {
-    minorStep *= 2
-  }
+  const minorStep =
+    VISIBLE_GRID_STEPS_METERS.find((step) => step * pixelsPerUnit >= MIN_GRID_SCREEN_SPACING) ??
+    MAX_VISIBLE_GRID_STEP_METERS
+  const majorStep =
+    VISIBLE_GRID_STEPS_METERS.find((step) => step >= minorStep * 10) ?? minorStep * 10
 
   return {
     minorStep,
-    majorStep: Math.max(MAJOR_GRID_STEP, minorStep * 2),
+    majorStep,
   }
 }
 
@@ -5073,6 +5109,8 @@ function FloorplanLinearDraftLayer({
 
 function FloorplanWallDimensions({
   walls,
+  wallMiterData,
+  openings,
   unit,
   unitsPerPixel,
   sceneRotationDeg,
@@ -5081,6 +5119,8 @@ function FloorplanWallDimensions({
   labelText,
 }: {
   walls: WallNode[]
+  wallMiterData: ReturnType<typeof calculateLevelMiters>
+  openings: Array<DoorNode | WindowNode>
   unit: LinearUnit
   unitsPerPixel: number
   sceneRotationDeg: number
@@ -5094,21 +5134,172 @@ function FloorplanWallDimensions({
   const fontSize = Math.max(unitsPerPixel * 10, 0.08)
   const padX = unitsPerPixel * 6
   const padY = unitsPerPixel * 3
+  const [editingDimension, setEditingDimension] = useState<{
+    id: string
+    value: string
+  } | null>(null)
+  const openingsByWallId = new Map<string, Array<DoorNode | WindowNode>>()
+  for (const opening of openings) {
+    if (opening.visible === false) continue
+    const wallId = opening.wallId ?? opening.parentId
+    if (!wallId) continue
+    const entries = openingsByWallId.get(wallId) ?? []
+    entries.push(opening)
+    openingsByWallId.set(wallId, entries)
+  }
+  const planCenter = walls.reduce(
+    (sum, wall) => ({
+      x: sum.x + wall.start[0] + wall.end[0],
+      y: sum.y + wall.start[1] + wall.end[1],
+    }),
+    { x: 0, y: 0 },
+  )
+  const centerDivisor = Math.max(walls.length * 2, 1)
+  planCenter.x /= centerDivisor
+  planCenter.y /= centerDivisor
+  const wallFaces = walls.flatMap((wall) => {
+    const boundary = getWallMiterBoundaryPoints(wall, wallMiterData)
+    if (!boundary) return []
+    const wallDx = wall.end[0] - wall.start[0]
+    const wallDy = wall.end[1] - wall.start[1]
+    const wallLength = Math.hypot(wallDx, wallDy)
+    if (!Number.isFinite(wallLength) || wallLength < 0.01) return []
+    const wallUx = wallDx / wallLength
+    const wallUy = wallDy / wallLength
+    const leftMid = {
+      x: (boundary.startLeft.x + boundary.endLeft.x) / 2,
+      y: (boundary.startLeft.y + boundary.endLeft.y) / 2,
+    }
+    const rightMid = {
+      x: (boundary.startRight.x + boundary.endRight.x) / 2,
+      y: (boundary.startRight.y + boundary.endRight.y) / 2,
+    }
+    const leftDistance = Math.hypot(leftMid.x - planCenter.x, leftMid.y - planCenter.y)
+    const rightDistance = Math.hypot(rightMid.x - planCenter.x, rightMid.y - planCenter.y)
+    const leftIsInner = leftDistance <= rightDistance
+    const faces = leftIsInner
+      ? [
+          {
+            id: `${wall.id}:right:outer`,
+            start: boundary.startRight,
+            end: boundary.endRight,
+            outward: -1,
+          },
+        ]
+      : [
+          {
+            id: `${wall.id}:left:outer`,
+            start: boundary.startLeft,
+            end: boundary.endLeft,
+            outward: 1,
+          },
+        ]
+
+    const spans = (openingsByWallId.get(wall.id) ?? [])
+      .map((opening) => {
+        const start = Math.max(0, opening.position[0] - opening.width / 2)
+        const end = Math.min(wallLength, opening.position[0] + opening.width / 2)
+        return start < end ? { end, opening, start } : null
+      })
+      .filter(
+        (span): span is { end: number; opening: DoorNode | WindowNode; start: number } =>
+          span !== null,
+      )
+      .sort((a, b) => a.start - b.start)
+
+    return faces.flatMap((face) => {
+      const faceStartS =
+        (face.start.x - wall.start[0]) * wallUx + (face.start.y - wall.start[1]) * wallUy
+      const faceEndS = (face.end.x - wall.start[0]) * wallUx + (face.end.y - wall.start[1]) * wallUy
+      const faceMinS = Math.min(faceStartS, faceEndS)
+      const faceMaxS = Math.max(faceStartS, faceEndS)
+      const faceSpan = faceMaxS - faceMinS
+      if (!Number.isFinite(faceSpan) || faceSpan < 0.01) return []
+
+      const pointAtS = (s: number) => {
+        const t = (s - faceStartS) / (faceEndS - faceStartS)
+        return {
+          x: face.start.x + (face.end.x - face.start.x) * t,
+          y: face.start.y + (face.end.y - face.start.y) * t,
+        }
+      }
+
+      const segments: Array<{
+        editableGap: WallDimensionEditableGap | null
+        start: number
+        end: number
+      }> = []
+      let cursor = faceMinS
+      let previousSpan: (typeof spans)[number] | null = null
+      for (let spanIndex = 0; spanIndex < spans.length; spanIndex += 1) {
+        const span = spans[spanIndex]!
+        const openingStart = Math.max(faceMinS, Math.min(faceMaxS, span.start))
+        const openingEnd = Math.max(faceMinS, Math.min(faceMaxS, span.end))
+        if (openingStart - cursor >= 0.01) {
+          const nextSpan = spans[spanIndex + 1] ?? null
+          segments.push({
+            start: cursor,
+            end: openingStart,
+            editableGap: {
+              currentLength: openingStart - cursor,
+              openingId: span.opening.id as AnyNodeId,
+              sign: 1,
+              minCenterS: previousSpan
+                ? previousSpan.end + span.opening.width / 2
+                : span.opening.width / 2,
+              maxCenterS: nextSpan
+                ? nextSpan.start - span.opening.width / 2
+                : wallLength - span.opening.width / 2,
+            },
+          })
+        }
+        cursor = Math.max(cursor, openingEnd)
+        previousSpan = span
+      }
+      if (faceMaxS - cursor >= 0.01) {
+        const lastSpan = spans[spans.length - 1] ?? null
+        const previousToLastSpan = spans[spans.length - 2] ?? null
+        segments.push({
+          start: cursor,
+          end: faceMaxS,
+          editableGap: lastSpan
+            ? {
+                currentLength: faceMaxS - cursor,
+                openingId: lastSpan.opening.id as AnyNodeId,
+                sign: -1,
+                minCenterS: previousToLastSpan
+                  ? previousToLastSpan.end + lastSpan.opening.width / 2
+                  : lastSpan.opening.width / 2,
+                maxCenterS: wallLength - lastSpan.opening.width / 2,
+              }
+            : null,
+        })
+      }
+
+      return segments.map((segment, index) => ({
+        ...face,
+        editableGap: segment.editableGap,
+        id: `${face.id}:segment:${index}`,
+        start: pointAtS(segment.start),
+        end: pointAtS(segment.end),
+      }))
+    })
+  })
 
   return (
     <g pointerEvents="none">
-      {walls.map((wall) => {
-        const dx = wall.end[0] - wall.start[0]
-        const dy = wall.end[1] - wall.start[1]
+      {wallFaces.map((face) => {
+        const dx = face.end.x - face.start.x
+        const dy = face.end.y - face.start.y
         const length = Math.hypot(dx, dy)
         if (!Number.isFinite(length) || length < 0.01) return null
 
         const ux = dx / length
         const uy = dy / length
-        const nx = -uy
-        const ny = ux
-        const start = [wall.start[0] + nx * offset, wall.start[1] + ny * offset] as const
-        const end = [wall.end[0] + nx * offset, wall.end[1] + ny * offset] as const
+        const nx = -uy * face.outward
+        const ny = ux * face.outward
+        const start = [face.start.x + nx * offset, face.start.y + ny * offset] as const
+        const end = [face.end.x + nx * offset, face.end.y + ny * offset] as const
         const mid = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2] as const
         const label = formatMeasurement(length, unit)
         const plateWidth = Math.max(
@@ -5121,25 +5312,61 @@ function FloorplanWallDimensions({
         screenDeg = ((((screenDeg + 180) % 360) + 360) % 360) - 180
         if (screenDeg > 90) labelAngleDeg -= 180
         else if (screenDeg <= -90) labelAngleDeg += 180
+        const editGap = face.editableGap
+        const isEditing = editingDimension?.id === face.id
+        let dimensionCommitStarted = false
+        const startEditingGap = () => {
+          if (!editGap) return
+          setEditingDimension({
+            id: face.id,
+            value: formatLinearMeasurement(editGap.currentLength, unit),
+          })
+        }
+        const commitEditingGap = (raw: string) => {
+          if (dimensionCommitStarted) return
+          dimensionCommitStarted = true
+          if (!editGap) return
+          const current = useScene.getState().nodes[editGap.openingId]
+          if (!(current?.type === 'door' || current?.type === 'window')) return
+
+          const nextLength = parseDimensionLabelInput(raw, unit)
+          setEditingDimension(null)
+          if (nextLength === null || nextLength < 0.01) return
+
+          const delta = nextLength - editGap.currentLength
+          const nextCenterS = Math.min(
+            Math.max(current.position[0] + delta * editGap.sign, editGap.minCenterS),
+            editGap.maxCenterS,
+          )
+          if (!Number.isFinite(nextCenterS)) return
+          if (Math.abs(nextCenterS - current.position[0]) < 1e-6) return
+
+          useScene.getState().updateNode(current.id as AnyNodeId, {
+            position: [nextCenterS, current.position[1], current.position[2]],
+          })
+          if (current.parentId) {
+            useScene.getState().markDirty(current.parentId as AnyNodeId)
+          }
+        }
 
         return (
-          <g key={`wall-dimension-${wall.id}`}>
+          <g key={`wall-dimension-${face.id}`}>
             <line
               stroke={stroke}
               strokeWidth={1}
               vectorEffect="non-scaling-stroke"
-              x1={wall.start[0]}
+              x1={face.start.x}
               x2={start[0] + nx * overshoot}
-              y1={wall.start[1]}
+              y1={face.start.y}
               y2={start[1] + ny * overshoot}
             />
             <line
               stroke={stroke}
               strokeWidth={1}
               vectorEffect="non-scaling-stroke"
-              x1={wall.end[0]}
+              x1={face.end.x}
               x2={end[0] + nx * overshoot}
-              y1={wall.end[1]}
+              y1={face.end.y}
               y2={end[1] + ny * overshoot}
             />
             <line
@@ -5153,7 +5380,7 @@ function FloorplanWallDimensions({
             />
             {[start, end].map((point, index) => (
               <line
-                key={`${wall.id}-tick-${index}`}
+                key={`${face.id}-tick-${index}`}
                 stroke={stroke}
                 strokeWidth={1.25}
                 vectorEffect="non-scaling-stroke"
@@ -5163,7 +5390,30 @@ function FloorplanWallDimensions({
                 y2={point[1] + ny * tickHalf}
               />
             ))}
-            <g transform={`translate(${mid[0]} ${mid[1]}) rotate(${labelAngleDeg})`}>
+            <g
+              onClick={(event) => {
+                if (!editGap) return
+                event.preventDefault()
+                event.stopPropagation()
+                startEditingGap()
+              }}
+              onDoubleClick={(event) => {
+                if (!editGap) return
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onKeyDown={(event) => {
+                if (!editGap) return
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                event.stopPropagation()
+                startEditingGap()
+              }}
+              pointerEvents={editGap ? 'auto' : 'none'}
+              style={editGap ? { cursor: 'text' } : undefined}
+              tabIndex={editGap ? 0 : undefined}
+              transform={`translate(${mid[0]} ${mid[1]}) rotate(${labelAngleDeg})`}
+            >
               <rect
                 fill={labelBackground}
                 height={plateHeight}
@@ -5176,16 +5426,58 @@ function FloorplanWallDimensions({
                 x={-plateWidth / 2}
                 y={-plateHeight / 2}
               />
-              <text
-                dominantBaseline="middle"
-                fill={labelText}
-                fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
-                fontSize={fontSize}
-                fontWeight={700}
-                textAnchor="middle"
-              >
-                {label}
-              </text>
+              {isEditing ? (
+                <foreignObject
+                  height={plateHeight}
+                  width={plateWidth}
+                  x={-plateWidth / 2}
+                  y={-plateHeight / 2}
+                >
+                  <input
+                    autoFocus
+                    onBlur={() => commitEditingGap(editingDimension.value)}
+                    onChange={(event) =>
+                      setEditingDimension({ id: face.id, value: event.currentTarget.value })
+                    }
+                    onClick={(event) => event.stopPropagation()}
+                    onFocus={(event) => event.currentTarget.select()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        commitEditingGap(event.currentTarget.value)
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault()
+                        setEditingDimension(null)
+                      }
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      border: 'none',
+                      outline: 'none',
+                      background: 'transparent',
+                      color: labelText,
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      textAlign: 'center',
+                    }}
+                    value={editingDimension.value}
+                  />
+                </foreignObject>
+              ) : (
+                <text
+                  dominantBaseline="middle"
+                  fill={labelText}
+                  fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                  fontSize={fontSize}
+                  fontWeight={700}
+                  textAnchor="middle"
+                >
+                  {label}
+                </text>
+              )}
             </g>
           </g>
         )
@@ -6467,8 +6759,12 @@ export function FloorplanPanel({
 
     const rawWidth = maxX - minX
     const rawHeight = maxY - minY
-    const paddedWidth = rawWidth + FLOORPLAN_PADDING * 2
-    const paddedHeight = rawHeight + FLOORPLAN_PADDING * 2
+    // Reserve model-space room for exterior dimension chains only when the
+    // automatic fit is computed. Do not alter the final SVG viewBox: doing so
+    // changes the wheel-zoom baseline and makes zoom-out accelerate/jump.
+    const dimensionPadding = showDimensions ? Math.max(rawWidth, rawHeight) * 0.12 : 0
+    const paddedWidth = rawWidth + (FLOORPLAN_PADDING + dimensionPadding) * 2
+    const paddedHeight = rawHeight + (FLOORPLAN_PADDING + dimensionPadding) * 2
     const width = Math.max(FALLBACK_VIEW_SIZE, paddedWidth, paddedHeight * svgAspectRatio)
     const centerX = (minX + maxX) / 2
     const centerY = (minY + maxY) / 2
@@ -6488,6 +6784,7 @@ export function FloorplanPanel({
     floorplanSceneRotationDeg,
     floorplanStairEntries,
     measuredSceneBBox,
+    showDimensions,
     svgAspectRatio,
     visibleSitePolygon,
     visibleZonePolygons,
@@ -7754,7 +8051,7 @@ export function FloorplanPanel({
       }
       const localCenter = rotateSvgPoint(nextCenterSvg, -floorplanSceneRotationDeg)
 
-      smoothFloorplanNavigationView(
+      applyFloorplanNavigationView(
         localCenter,
         latestFloorplanUserRotationDegRef.current,
         nextWidth,
@@ -7770,7 +8067,7 @@ export function FloorplanPanel({
       floorplanSceneRotationDeg,
       getSvgPointFromClientPoint,
       publishFloorplanNavigationPose,
-      smoothFloorplanNavigationView,
+      applyFloorplanNavigationView,
       svgAspectRatio,
       viewBox,
       viewport,
@@ -10775,7 +11072,12 @@ export function FloorplanPanel({
       event.preventDefault()
       event.stopPropagation()
 
-      const widthFactor = Math.exp(event.deltaY * (event.ctrlKey ? 0.003 : 0.0015))
+      const sensitivity = event.ctrlKey
+        ? 0.004
+        : event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? 0.045
+          : 0.003
+      const widthFactor = Math.exp(clamp(event.deltaY * sensitivity, -0.8, 0.8))
       zoomViewportAtClientPoint(event.clientX, event.clientY, widthFactor)
     }
 
@@ -11294,11 +11596,13 @@ export function FloorplanPanel({
                   <FloorplanWallDimensions
                     labelBackground={isDark ? '#0f172a' : '#ffffff'}
                     labelText={isDark ? '#e2e8f0' : '#171717'}
+                    openings={openings}
                     sceneRotationDeg={floorplanSceneRotationDeg}
                     stroke={palette.measurementStroke}
                     unit={unit}
                     unitsPerPixel={floorplanUnitsPerPixel}
-                    walls={walls}
+                    walls={floorplanWalls}
+                    wallMiterData={wallMiterData}
                   />
                 )}
               </FloorplanRenderProvider>

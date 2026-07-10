@@ -212,13 +212,24 @@ const multiplyScales = (
 ): [number, number, number] => [a[0] * b[0], a[1] * b[1], a[2] * b[2]]
 
 type MutableGhostMaterial = Material & {
+  color?: { set: (value: string) => void }
   depthWrite?: boolean
+  metalness?: number
   opacity?: number
+  roughness?: number
   transparent?: boolean
 }
 
+const isBlackSteelMaterialName = (name: string): boolean =>
+  /(?:^|[_\s.-])(metal|steel|frame)(?:[_\s.-]|$)/i.test(name)
+
 function makeGhostMaterial(material: Material): Material {
   const next = material.clone() as MutableGhostMaterial
+  if (isBlackSteelMaterialName(material.name)) {
+    next.color?.set('#050505')
+    next.metalness = Math.max(next.metalness ?? 0, 0.85)
+    next.roughness = Math.min(next.roughness ?? 0.38, 0.42)
+  }
   next.transparent = true
   next.opacity = Math.max(next.opacity ?? 1, 0.9)
   next.depthWrite = false
@@ -398,9 +409,14 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
 
     updateLineGeometry(edgesRef, getBoxEdgePoints(bounds))
 
-    const oldBasePlaneGeometry = basePlaneRef.current.geometry
-    basePlaneRef.current.geometry = nextBasePlaneGeometry
-    oldBasePlaneGeometry.dispose()
+    const basePlane = basePlaneRef.current
+    if (basePlane) {
+      const oldBasePlaneGeometry = basePlane.geometry
+      basePlane.geometry = nextBasePlaneGeometry
+      oldBasePlaneGeometry.dispose()
+    } else {
+      nextBasePlaneGeometry.dispose()
+    }
   }, [])
 
   const updateDimensionGuides = useCallback((bounds: PreviewBounds) => {
@@ -2604,6 +2620,11 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
   const initialHeightGuideGeometry = useMemo(() => createLineGeometry(), [])
   const placementGhostScale =
     initialDraft?.scale ?? config.defaultScale ?? ([1, 1, 1] as [number, number, number])
+  // Catalog/model assets use the cloned GLB itself as the placement ghost.
+  // The dimensions box describes the logical snap footprint, not the authored
+  // mesh bounds, so drawing both made the box look like an incorrectly-sized
+  // ghost and often obscured the real model.
+  const showFallbackBounds = !config.asset?.src
   const currentDimensionBounds = dimensionBounds ?? initialDimensionBounds
   // Feed the footprint shape to the per-frame surface publisher, which orients
   // and positions the forward-facing triangle via `useFacingPose`.
@@ -2715,21 +2736,25 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
   return (
     <group ref={cursorGroupRef}>
       {config.asset && <PlacementModelGhost asset={config.asset} nodeScale={placementGhostScale} />}
-      <lineSegments
-        geometry={initialEdgeGeometry}
-        layers={EDITOR_LAYER}
-        material={edgeMaterial}
-        ref={edgesRef}
-        renderOrder={999}
-      />
-      {measurementContent}
-      <mesh
-        geometry={basePlaneGeometry}
-        layers={EDITOR_LAYER}
-        material={basePlaneMaterial}
-        ref={basePlaneRef}
-        renderOrder={999}
-      />
+      {showFallbackBounds ? (
+        <>
+          <lineSegments
+            geometry={initialEdgeGeometry}
+            layers={EDITOR_LAYER}
+            material={edgeMaterial}
+            ref={edgesRef}
+            renderOrder={999}
+          />
+          {measurementContent}
+          <mesh
+            geometry={basePlaneGeometry}
+            layers={EDITOR_LAYER}
+            material={basePlaneMaterial}
+            ref={basePlaneRef}
+            renderOrder={999}
+          />
+        </>
+      ) : null}
     </group>
   )
 }

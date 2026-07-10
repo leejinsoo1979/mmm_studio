@@ -17,7 +17,7 @@ import {
   useState,
 } from 'react'
 import * as THREE from 'three/webgpu'
-import { hasDrawableGeometry } from '../../lib/drawable-geometry'
+import { ensureSecondaryUv, hasDrawableGeometry } from '../../lib/drawable-geometry'
 import { PERF_OVERLAY_ENABLED, pushGpuSample } from '../../lib/gpu-perf'
 import { applyIsolation, clearIsolation } from '../../lib/isolation'
 import { ensureKtx2Support } from '../../lib/ktx2-loader'
@@ -143,7 +143,7 @@ function installEmptyDrawGuard(renderer: THREE.WebGPURenderer) {
       clippingContext: any,
       passId: any,
     ) => {
-      if (!hasDrawableGeometry(geometry)) {
+      if (!hasDrawableGeometry(geometry, group)) {
         if (warnedEmptyDraw && !warnedEmptyDraw.has(geometry ?? object)) {
           warnedEmptyDraw.add(geometry ?? object)
           console.warn(
@@ -153,6 +153,7 @@ function installEmptyDrawGuard(renderer: THREE.WebGPURenderer) {
         }
         return
       }
+      ensureSecondaryUv(geometry)
       ;(renderer as any).renderObject(
         object,
         scene,
@@ -468,7 +469,16 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   // conservative mobile limit to avoid excessive heat and render-target memory.
   const coarsePointer =
     typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
-  const maxDpr = shading === 'hyper' ? (coarsePointer ? 1.5 : 2) : coarsePointer ? 1.25 : 1.5
+  const maxDpr =
+    shading === 'performance'
+      ? 1
+      : shading === 'hyper'
+        ? coarsePointer
+          ? 1.5
+          : 2
+        : coarsePointer
+          ? 1.25
+          : 1.5
   const showGpuFallback = !canMountViewer || rendererInitFailed
   // When we can't mount the GPU canvas, the SceneReadyTracker never mounts and
   // the host editor would otherwise wait on its scene-readiness timeout. Signal
@@ -522,10 +532,10 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       }}
       shadows={{
         type: THREE.PCFShadowMap,
-        enabled: true,
+        enabled: shading !== 'performance',
       }}
     >
-      <FrameLimiter fps={shading === 'hyper' ? 60 : 50} />
+      <FrameLimiter fps={shading === 'performance' ? 30 : shading === 'hyper' ? 60 : 50} />
       <ViewerCamera />
       <GPUDeviceWatcher />
       <ToneMappingExposure />

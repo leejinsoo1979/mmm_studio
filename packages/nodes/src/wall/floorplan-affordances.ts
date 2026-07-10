@@ -13,6 +13,7 @@ import {
 import {
   alignFloorplanDraftPoint,
   getSegmentGridStep,
+  getWallResizeGridStep,
   isAlignmentGuideActive,
   isAngleSnapActive,
   isMagneticSnapActive,
@@ -197,7 +198,10 @@ export const wallMoveEndpointAffordance: FloorplanAffordance<WallNode> = {
           start: angleLocked ? fixedPoint : undefined,
           angleSnap: angleLocked,
           magnetic: isMagneticSnapActive(),
-          gridSnap: (p) => snapBuildingLocalToWorldGrid(p, getSegmentGridStep()),
+          // Resizing quantizes at 10mm (panel Length steps), not the draft
+          // lattice — mirrors the 3D endpoint tool (`move-endpoint-tool.tsx`).
+          step: getWallResizeGridStep(),
+          gridSnap: (p) => snapBuildingLocalToWorldGrid(p, getWallResizeGridStep()),
         })
         // Figma-style alignment on the dragged corner — snaps it onto another
         // object's edge / wall face and publishes a guide. The guide is

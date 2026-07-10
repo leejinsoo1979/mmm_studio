@@ -21,7 +21,11 @@ import { resolveCdnUrl } from './asset-url'
 import { isKtx2Url, ktx2Loader } from './ktx2-loader'
 import { getSceneTheme } from './scene-themes'
 
-export type RenderShading = 'solid' | 'rendered' | 'hyper'
+export type RenderShading = 'performance' | 'solid' | 'rendered' | 'hyper'
+
+function usesSimpleLighting(shading: RenderShading): boolean {
+  return shading === 'performance' || shading === 'solid'
+}
 export type ColorPreset = 'clay' | 'white' | 'mono' | 'blueprint'
 
 export const CLAY_PALETTE: Record<SurfaceRole, string> = {
@@ -475,8 +479,9 @@ export function createMaterialFromPreset(
     return materialCache.get(cacheKey)!
   }
 
-  const material =
-    shading === 'solid' ? new MeshLambertNodeMaterial() : new MeshStandardNodeMaterial()
+  const material = usesSimpleLighting(shading)
+    ? new MeshLambertNodeMaterial()
+    : new MeshStandardNodeMaterial()
   applyMaterialPresetToMaterials(material, preset)
   materialCache.set(cacheKey, material)
   return material
@@ -527,52 +532,51 @@ export function createMaterial(
 
   const usesPhysical =
     (props.clearcoat ?? 0) > 0 || (props.transmission ?? 0) > 0 || props.ior !== undefined
-  const threeMaterial =
-    shading === 'solid'
-      ? new MeshLambertNodeMaterial(materialParams)
-      : usesPhysical
-        ? new MeshPhysicalNodeMaterial({
-            ...materialParams,
-            roughness: props.roughness,
-            metalness: props.metalness,
-            emissive: props.emissiveColor ?? '#000000',
-            emissiveIntensity: props.emissiveIntensity ?? 0,
-            clearcoat: props.clearcoat ?? 0,
-            clearcoatRoughness: props.clearcoatRoughness ?? 0,
-            transmission: props.transmission ?? 0,
-            ior: props.ior ?? 1.5,
-            normalMap,
-            normalScale: new THREE.Vector2(
-              textureConfig?.normalScale ?? 1,
-              textureConfig?.normalScale ?? 1,
-            ),
-            roughnessMap,
-            metalnessMap,
-            emissiveMap,
-            displacementMap,
-            displacementScale: textureConfig?.displacementScale ?? 0,
-            aoMap,
-            aoMapIntensity: textureConfig?.aoIntensity ?? 1,
-          })
-        : new MeshStandardNodeMaterial({
-            ...materialParams,
-            roughness: props.roughness,
-            metalness: props.metalness,
-            emissive: props.emissiveColor ?? '#000000',
-            emissiveIntensity: props.emissiveIntensity ?? 0,
-            normalMap,
-            normalScale: new THREE.Vector2(
-              textureConfig?.normalScale ?? 1,
-              textureConfig?.normalScale ?? 1,
-            ),
-            roughnessMap,
-            metalnessMap,
-            emissiveMap,
-            displacementMap,
-            displacementScale: textureConfig?.displacementScale ?? 0,
-            aoMap,
-            aoMapIntensity: textureConfig?.aoIntensity ?? 1,
-          })
+  const threeMaterial = usesSimpleLighting(shading)
+    ? new MeshLambertNodeMaterial(materialParams)
+    : usesPhysical
+      ? new MeshPhysicalNodeMaterial({
+          ...materialParams,
+          roughness: props.roughness,
+          metalness: props.metalness,
+          emissive: props.emissiveColor ?? '#000000',
+          emissiveIntensity: props.emissiveIntensity ?? 0,
+          clearcoat: props.clearcoat ?? 0,
+          clearcoatRoughness: props.clearcoatRoughness ?? 0,
+          transmission: props.transmission ?? 0,
+          ior: props.ior ?? 1.5,
+          normalMap,
+          normalScale: new THREE.Vector2(
+            textureConfig?.normalScale ?? 1,
+            textureConfig?.normalScale ?? 1,
+          ),
+          roughnessMap,
+          metalnessMap,
+          emissiveMap,
+          displacementMap,
+          displacementScale: textureConfig?.displacementScale ?? 0,
+          aoMap,
+          aoMapIntensity: textureConfig?.aoIntensity ?? 1,
+        })
+      : new MeshStandardNodeMaterial({
+          ...materialParams,
+          roughness: props.roughness,
+          metalness: props.metalness,
+          emissive: props.emissiveColor ?? '#000000',
+          emissiveIntensity: props.emissiveIntensity ?? 0,
+          normalMap,
+          normalScale: new THREE.Vector2(
+            textureConfig?.normalScale ?? 1,
+            textureConfig?.normalScale ?? 1,
+          ),
+          roughnessMap,
+          metalnessMap,
+          emissiveMap,
+          displacementMap,
+          displacementScale: textureConfig?.displacementScale ?? 0,
+          aoMap,
+          aoMapIntensity: textureConfig?.aoIntensity ?? 1,
+        })
 
   materialCache.set(cacheKey, threeMaterial)
   return threeMaterial
@@ -623,7 +627,7 @@ export function createDefaultMaterial(
   side: THREE.Side = THREE.FrontSide,
 ): THREE.Material {
   const resolvedSide = resolveNodeMaterialSide(side)
-  if (shading === 'solid') {
+  if (usesSimpleLighting(shading)) {
     return new MeshLambertNodeMaterial({
       color,
       side: resolvedSide,
@@ -725,14 +729,13 @@ export function DEFAULT_WINDOW_MATERIAL(shading: RenderShading = 'rendered'): TH
     transparent: true,
     side: THREE.FrontSide,
   }
-  const material =
-    shading === 'solid'
-      ? new MeshLambertNodeMaterial(params)
-      : new MeshStandardNodeMaterial({
-          ...params,
-          roughness: 0.1,
-          metalness: 0.1,
-        })
+  const material = usesSimpleLighting(shading)
+    ? new MeshLambertNodeMaterial(params)
+    : new MeshStandardNodeMaterial({
+        ...params,
+        roughness: 0.1,
+        metalness: 0.1,
+      })
   defaultMaterialCache.set(cacheKey, material)
   return material
 }

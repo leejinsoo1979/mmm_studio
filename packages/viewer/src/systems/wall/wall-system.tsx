@@ -617,8 +617,19 @@ function applyWorldPlanarWallUVs(
   geometry: THREE.BufferGeometry,
   worldMatrix: THREE.Matrix4,
 ): THREE.BufferGeometry {
+  const sourceGroups = geometry.groups.map((group) => ({
+    start: group.start,
+    count: group.count,
+    materialIndex: group.materialIndex ?? 0,
+  }))
   const target = geometry.index ? geometry.toNonIndexed() : geometry
   if (target !== geometry) geometry.dispose()
+  if (target !== geometry && sourceGroups.length > 0) {
+    target.clearGroups()
+    for (const group of sourceGroups) {
+      target.addGroup(group.start, group.count, group.materialIndex)
+    }
+  }
 
   const position = target.getAttribute('position')
   if (!position || position.count === 0) return target

@@ -32,13 +32,16 @@ import {
   Eye,
   EyeOff,
   Footprints,
+  Gauge,
   Gem,
   Grid2X2,
   Magnet,
+  Palette,
   PenLine,
   Ruler,
   SlidersHorizontal,
   Sparkles,
+  Square,
   SunMedium,
   SwatchBook,
 } from 'lucide-react'
@@ -132,9 +135,26 @@ const wallModeConfig: Record<string, { icon: string; label: string }> = {
 }
 
 const SHADING_OPTIONS = [
+  {
+    id: 'performance',
+    name: 'Performance',
+    detail: 'Lowest rendering — textures with minimal GPU effects',
+    icon: Gauge,
+  },
   { id: 'solid', name: 'Solid', detail: 'Flat and fast — no ambient occlusion', icon: Box },
   { id: 'rendered', name: 'Rendered', detail: 'Full ambient occlusion', icon: Sparkles },
   { id: 'hyper', name: 'Hyper', detail: 'Sharper lighting, shadows and detail', icon: Gem },
+] as const
+
+const TEXTURE_OPTIONS = [
+  { id: 'colored', name: 'Colored', detail: 'Show materials, textures & colors', icon: Palette },
+  {
+    id: 'monochrome-outline',
+    name: 'Monochrome Outline',
+    detail: 'Clay surfaces with light edge lines',
+    icon: PenLine,
+  },
+  { id: 'monochrome', name: 'Monochrome', detail: 'Flat clay surfaces by role', icon: Square },
 ] as const
 
 function ViewModeControl() {
@@ -345,6 +365,8 @@ function DisplayMenu() {
   const setCameraMode = useViewer((state) => state.setCameraMode)
   const shading = useViewer((state) => state.shading)
   const setShading = useViewer((state) => state.setShading)
+  const textures = useViewer((state) => state.textures)
+  const setTextures = useViewer((state) => state.setTextures)
   const sceneTheme = useViewer((state) => state.sceneTheme)
   const setSceneTheme = useViewer((state) => state.setSceneTheme)
   const edges = useViewer((state) => state.edges)
@@ -516,6 +538,39 @@ function DisplayMenu() {
                   {shading === option.id ? (
                     <Check className="ml-auto h-4 w-4 text-foreground" />
                   ) : null}
+                </DropdownMenuItem>
+              )
+            })}
+            <DropdownMenuSeparator />
+            {TEXTURE_OPTIONS.map((option) => {
+              const OptionIcon = option.icon
+              const isActive =
+                option.id === 'colored'
+                  ? textures
+                  : option.id === 'monochrome-outline'
+                    ? !textures && edges === 'soft'
+                    : !textures && edges === 'off'
+              return (
+                <DropdownMenuItem
+                  key={option.name}
+                  onSelect={() => {
+                    if (option.id === 'colored') {
+                      setTextures(true)
+                    } else if (option.id === 'monochrome-outline') {
+                      setTextures(false)
+                      setEdges('soft')
+                    } else {
+                      setTextures(false)
+                      setEdges('off')
+                    }
+                  }}
+                >
+                  <OptionIcon className="h-4 w-4" />
+                  <div className="flex flex-col">
+                    <span className="text-foreground">{option.name}</span>
+                    <span className="text-muted-foreground text-xs">{option.detail}</span>
+                  </div>
+                  {isActive ? <Check className="ml-auto h-4 w-4 text-foreground" /> : null}
                 </DropdownMenuItem>
               )
             })}

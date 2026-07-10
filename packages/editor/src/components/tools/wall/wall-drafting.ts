@@ -61,6 +61,16 @@ export function getSegmentGridStep(): number {
   return resolveSnapFlags(getActiveSnappingMode()).grid ? useEditor.getState().gridSnapStep : 0
 }
 
+// Resizing an existing wall (endpoint drag) quantizes to 10mm — the same
+// steps as the panel's Length input — rather than the coarse draft lattice:
+// extending a wall shouldn't jump in 0.5m increments. Drafting NEW walls
+// keeps the lattice (`getSegmentGridStep`).
+export const WALL_RESIZE_GRID_STEP = 0.01
+
+export function getWallResizeGridStep(): number {
+  return resolveSnapFlags(getActiveSnappingMode()).grid ? WALL_RESIZE_GRID_STEP : 0
+}
+
 export function snapScalarToGrid(value: number, step = WALL_GRID_STEP): number {
   if (step <= 0) return value
   return Math.round(value / step) * step

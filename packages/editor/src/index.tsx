@@ -150,6 +150,7 @@ export { ToolManager } from './components/tools/tool-manager'
 export {
   createWallOnCurrentLevel,
   getSegmentGridStep,
+  getWallResizeGridStep,
   isSegmentLongEnough,
   snapPointToGrid,
   snapScalarToGrid,

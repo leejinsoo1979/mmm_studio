@@ -107,26 +107,16 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
 
   const points = polygon.map((p) => [p.x, p.y] as FloorplanPoint)
 
-  // Stroke colour shifts: selected → theme accent; hover (when not
-  // selected) → palette.wallHoverStroke (light blue from the legacy);
-  // otherwise the dark grey carries through. Mirrors the legacy
-  // `wallStroke` ternary in floorplan-panel.tsx around line 4356.
-  const stroke =
-    showSelectedChrome && palette
-      ? palette.selectedStroke
-      : isHovered && palette
-        ? palette.wallHoverStroke
-        : '#1f2937'
-  const fill = showSelectedChrome ? '#ffffff' : '#374151'
+  const fill = '#111111'
 
   const children: FloorplanGeometry[] = [
     {
       kind: 'polygon',
       points,
       fill,
-      stroke,
-      strokeWidth: showSelectedChrome ? 0.03 : 0.02,
-      opacity: 0.92,
+      stroke: 'transparent',
+      strokeWidth: 0,
+      opacity: 1,
       // Once the wall is selected, the body keeps catching the pointer
       // so the cursor stays neutral (no drag/pointer affordance from
       // the slab below leaking through), but only the side-arrows and
@@ -135,17 +125,6 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
       cursor: isSelected ? 'default' : undefined,
     },
   ]
-
-  // Selection hatch overlay — only when the wall is *the* selected item
-  // (not when it's just marquee-highlighted), matching the legacy.
-  if (isSelected && palette) {
-    children.push({
-      kind: 'hatch',
-      points,
-      color: palette.selectedHatch,
-      opacity: 1,
-    })
-  }
 
   // Hit-line on the centerline. Stroke width is in screen pixels so it
   // stays clickable at any zoom. Skipped while selected — the user has

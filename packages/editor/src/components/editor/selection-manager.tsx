@@ -770,6 +770,9 @@ export const SelectionManager = () => {
       // with both fields undefined drives the same apply/preview paths as a
       // real material; only the enabled-gate differs (no material required).
       const paintEnabled = eraser || hasActivePaintMaterial(activePaintMaterial)
+      // Eyedropper: paint mode with nothing to apply and no eraser — clicking a
+      // surface inspects it (opens the material inspector) instead of painting.
+      const picking = !paintEnabled
       const paintSpec: ActivePaintMaterial = eraser
         ? {
             material: undefined,
@@ -823,7 +826,7 @@ export const SelectionManager = () => {
         return {
           key: `${node.type}:${node.id}:${role ?? 'unsupported'}:${eraser ? 'erase' : 'paint'}:${scope}`,
           hoveredId: node.id as AnyNodeId,
-          hoverMode: compatible ? 'paint-ready' : 'paint-disabled',
+          hoverMode: compatible || (picking && role !== null) ? 'paint-ready' : 'paint-disabled',
           role: role as MaterialTargetRole | null,
           paintHover:
             compatible && role
@@ -897,7 +900,7 @@ export const SelectionManager = () => {
                       restores[index]?.()
                   }
                 }
-              : () => previewCursor('not-allowed'),
+              : () => previewCursor(picking && role !== null ? 'crosshair' : 'not-allowed'),
         }
       }
 
@@ -923,7 +926,7 @@ export const SelectionManager = () => {
             segmentTarget ? segmentTarget.id : roofNode.id
           }:${role ?? 'unsupported'}:${eraser ? 'erase' : 'paint'}`,
           hoveredId: (segmentTarget ? segmentTarget.id : roofNode.id) as AnyNodeId,
-          hoverMode: compatible ? 'paint-ready' : 'paint-disabled',
+          hoverMode: compatible || (picking && role !== null) ? 'paint-ready' : 'paint-disabled',
           role,
           // Roof isn't on the slot model (role-specific fields, custom commit),
           // so it offers only the single surface — but still labels it.
@@ -973,7 +976,7 @@ export const SelectionManager = () => {
                         paintSpec,
                       )
                     : applyRoofPaintPreview(roofNode as RoofNode, role, paintSpec)
-              : () => previewCursor('not-allowed'),
+              : () => previewCursor(picking && role !== null ? 'crosshair' : 'not-allowed'),
         }
       }
 
@@ -1162,6 +1165,11 @@ export const SelectionManager = () => {
     if (mode !== 'select') return
     if (movingNode || isCurveReshape) return
 
+    // Surface inspection belongs to material-paint/eyedropper mode. Entering
+    // the regular V selection tool closes any previous material target and
+    // node clicks below only perform object selection/move actions.
+    useEditor.getState().setSelectedMaterialTarget(null)
+
     const onPointerDown = (event: NodeEvent) => {
       const pointer = pointerEventFromNodeEvent(event)
       if (pointer.button !== 0 || !isCommandModifier(pointer)) return
@@ -1274,7 +1282,7 @@ export const SelectionManager = () => {
   useEffect(() => {
     if (mode !== 'select') return
     let owns = false
-    let prevKey = ' '
+    let prevKey = '\0'
     const applyCursor = () => {
       const { selection, hoveredId } = useViewer.getState()
       const sole = selection.selectedIds.length === 1 ? selection.selectedIds[0] : null
@@ -1530,75 +1538,6 @@ export const SelectionManager = () => {
           modifierKeysRef.current,
           selectedIdsBeforeRouting,
         )
-
-        let nextMaterialTargetHandled = false
-
-        // Registry-driven paint-target resolve on click. Kinds with
-        // `capabilities.paint` route through this entry — wall,
-        // chimney, dormer use it today. The legacy stair / roof /
-        // single-surface arms below stay until they migrate too.
-        if (nodeToSelect.type === node.type) {
-          const paintCap = nodeRegistry.get(node.type)?.capabilities?.paint
-          if (paintCap) {
-            const materialIndex = getIntersectionMaterialIndex(
-              getEventObject(event),
-              event.faceIndex,
-            )
-            const role = paintCap.resolveRole({
-              node,
-              materialIndex: materialIndex ?? null,
-              normal: event.normal,
-              localPosition: event.localPosition as readonly [number, number, number] | undefined,
-              hitObjectName: event.nativeEvent.object?.name,
-              hitObject: getEventObject(event),
-              ray: event.nativeEvent.ray,
-            })
-            if (role) {
-              setSelectedMaterialTargetForNode(nodeToSelect, role as MaterialTargetRole)
-              nextMaterialTargetHandled = true
-            }
-          }
-        }
-
-        if (
-          !nextMaterialTargetHandled &&
-          (node.type === 'stair' || node.type === 'stair-segment') &&
-          nodeToSelect.type === 'stair'
-        ) {
-          setSelectedMaterialTargetForNode(
-            nodeToSelect,
-            resolveStairMaterialTarget(event as StairEvent | StairSegmentEvent),
-          )
-          nextMaterialTargetHandled = true
-        }
-
-        if (
-          !nextMaterialTargetHandled &&
-          (node.type === 'roof' || node.type === 'roof-segment') &&
-          nodeToSelect.type === 'roof'
-        ) {
-          setSelectedMaterialTargetForNode(
-            nodeToSelect,
-            resolveRoofMaterialTarget(event as RoofEvent | RoofSegmentEvent),
-          )
-          nextMaterialTargetHandled = true
-        }
-
-        if (
-          !nextMaterialTargetHandled &&
-          (node.type === 'fence' ||
-            node.type === 'slab' ||
-            node.type === 'ceiling' ||
-            node.type === 'shelf') &&
-          nodeToSelect.type === node.type
-        ) {
-          setSelectedMaterialTargetForNode(nodeToSelect, 'surface')
-          nextMaterialTargetHandled = true
-        }
-
-        if (!nextMaterialTargetHandled && useEditor.getState().selectedMaterialTarget) {
-          useEditor.getState().setSelectedMaterialTarget(null)
-        }
       }
     }
 
@@ -1931,12 +1870,12 @@ const SelectionStateSync = () => {
   useEffect(() => {
     if (!selectedMaterialTarget) return
 
-    if (!singleSelectedId) {
-      setSelectedMaterialTarget(null)
-      return
-    }
-
-    const selectedNode = useScene.getState().nodes[singleSelectedId as AnyNodeId]
+    // A paint/eyedropper click deliberately clears the normal object selection
+    // so the sampled material is not covered by the purple selection overlay.
+    // Validate the material target itself instead of requiring selectedIds to
+    // contain it; grid clicks and the inspector close button explicitly clear
+    // selectedMaterialTarget when the user is done.
+    const selectedNode = useScene.getState().nodes[selectedMaterialTarget.nodeId]
     if (
       !selectedNode ||
       (!nodeRegistry.get(selectedNode.type)?.capabilities?.paint &&
@@ -1951,7 +1890,7 @@ const SelectionStateSync = () => {
       return
     }
 
-    if (selectedMaterialTarget.nodeId !== selectedNode.id) {
+    if (singleSelectedId && selectedMaterialTarget.nodeId !== singleSelectedId) {
       setSelectedMaterialTarget(null)
     }
   }, [selectedMaterialTarget, setSelectedMaterialTarget, singleSelectedId])
@@ -1964,6 +1903,7 @@ const SelectionMaterialSync = () => {
   const previewSelectedIds = useViewer((s) => s.previewSelectedIds)
   const hoveredId = useViewer((s) => s.hoveredId)
   const hoverHighlightMode = useViewer((s) => s.hoverHighlightMode)
+  const selectedMaterialTarget = useEditor((s) => s.selectedMaterialTarget)
   const activeHighlightKindsRef = useRef(new Map<string, HighlightKind>())
   const highlightedMaterialsRef = useRef(
     new Map<
@@ -2043,6 +1983,10 @@ const SelectionMaterialSync = () => {
     const nextHighlightKinds = new Map<string, HighlightKind>()
 
     for (const id of new Set([...selectedIds, ...previewSelectedIds])) {
+      // Keep the logical node selection while its material inspector is open,
+      // but restore the original surface material so tint/roughness edits can
+      // be judged without the purple selection overlay.
+      if (id === selectedMaterialTarget?.nodeId) continue
       nextHighlightKinds.set(id, 'selection')
     }
 
@@ -2052,7 +1996,14 @@ const SelectionMaterialSync = () => {
 
     activeHighlightKindsRef.current = nextHighlightKinds
     syncSelectionMaterials()
-  }, [hoverHighlightMode, hoveredId, previewSelectedIds, selectedIds, syncSelectionMaterials])
+  }, [
+    hoverHighlightMode,
+    hoveredId,
+    previewSelectedIds,
+    selectedIds,
+    selectedMaterialTarget,
+    syncSelectionMaterials,
+  ])
 
   useEffect(() => {
     return useScene.subscribe((state, prevState) => {

@@ -107,7 +107,7 @@ export function Lights() {
     // ortho shadow camera so the building (plus a margin) is fully covered from
     // the light's direction. Direction comes from the live solar controls;
     // position/distance and the frustum extents follow the fitted bounds.
-    if (shadows) {
+    if (shadows && shading !== 'performance') {
       const now = state.clock.elapsedTime
       if (now - lastBoundsTime.current >= BOUNDS_REFRESH_INTERVAL) {
         lastBoundsTime.current = now
@@ -261,7 +261,9 @@ export function Lights() {
     <>
       {theme.lights.map((light, index) => (
         <directionalLight
-          castShadow={Boolean(light.castShadow) && !SHADOWS_DISABLED && shadows}
+          castShadow={
+            Boolean(light.castShadow) && !SHADOWS_DISABLED && shadows && shading !== 'performance'
+          }
           // Remount on quality changes so three allocates a shadow target at
           // the new map size instead of retaining the existing GPU texture.
           key={`${shading}-${index}-${light.position.join(',')}`}
@@ -274,7 +276,7 @@ export function Lights() {
           shadow-normalBias={0.3}
           shadow-radius={1.5}
         >
-          {light.castShadow && !SHADOWS_DISABLED && shadows ? (
+          {light.castShadow && !SHADOWS_DISABLED && shadows && shading !== 'performance' ? (
             <orthographicCamera
               attach="shadow-camera"
               bottom={-shadowCameraSize}

@@ -898,6 +898,7 @@ function PaintCursorLayer({
   }, [active, containerRef])
 
   const hasPaint = paintEraser || hasActivePaintMaterial(activePaintMaterial)
+  const isEyedropper = active && !hasPaint
   const badgeState: PaintCursorBadgeState = !hasPaint
     ? 'empty'
     : paintHover != null
@@ -906,21 +907,32 @@ function PaintCursorLayer({
   const swatchColor = getActivePaintMaterialSwatchColor(activePaintMaterial, sceneMaterials)
   const swatchImageUrl = getActivePaintMaterialSwatchImageUrl(activePaintMaterial, sceneMaterials)
 
-  if (!active || !position) return null
+  if (!active) return null
 
   return (
-    <div
-      className="pointer-events-none absolute z-40"
-      style={{ left: 0, top: 0, transform: `translate(${position.x}px, ${position.y}px)` }}
-    >
-      <PaintCursorBadge
-        isEraser={paintEraser}
-        position={{ x: 0, y: 0 }}
-        state={badgeState}
-        swatchColor={swatchColor}
-        swatchImageUrl={swatchImageUrl}
-      />
-    </div>
+    <>
+      {isEyedropper ? (
+        <style>
+          {
+            '[data-pascal-viewer-3d], [data-pascal-viewer-3d] canvas { cursor: url("/icons/eyedropper-cursor.svg") 4 20, crosshair !important; }'
+          }
+        </style>
+      ) : null}
+      {position && !isEyedropper ? (
+        <div
+          className="pointer-events-none absolute z-40"
+          style={{ left: 0, top: 0, transform: `translate(${position.x}px, ${position.y}px)` }}
+        >
+          <PaintCursorBadge
+            isEraser={paintEraser}
+            position={{ x: 0, y: 0 }}
+            state={badgeState}
+            swatchColor={swatchColor}
+            swatchImageUrl={swatchImageUrl}
+          />
+        </div>
+      ) : null}
+    </>
   )
 }
 

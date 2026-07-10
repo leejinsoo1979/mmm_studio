@@ -13,8 +13,9 @@ import {
   useScene,
 } from '@pascal-app/core'
 import { useEditor } from '@pascal-app/editor'
-import { X } from 'lucide-react'
-import { useState } from 'react'
+import { useViewer } from '@pascal-app/viewer'
+import { RotateCcw, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Material, Mesh, Texture, Vector2 } from 'three'
 
@@ -149,10 +150,13 @@ function InspectorSlider({
 function InspectorMaterialEditor({
   value,
   onChange,
+  activeTab,
 }: {
   value: MaterialSchema
   onChange: (value: MaterialSchema) => void
+  activeTab: (typeof MATERIAL_TABS)[number]
 }) {
+  const initialValue = useRef(structuredClone(value))
   const properties: MaterialProperties = value.properties ?? {
     color: '#ffffff',
     roughness: 0.5,
@@ -163,91 +167,225 @@ function InspectorMaterialEditor({
   }
   const update = (patch: Partial<MaterialProperties>) =>
     onChange({ ...value, preset: 'custom', properties: { ...properties, ...patch } })
+  const updateTexture = (patch: Partial<NonNullable<MaterialSchema['texture']>>) => {
+    if (!value.texture) return
+    onChange({ ...value, preset: 'custom', texture: { ...value.texture, ...patch } })
+  }
 
-  return (
-    <div>
+  const colorControl = (label: string, field: 'color' | 'emissiveColor', fallback: string) => {
+    const color = properties[field] ?? fallback
+    return (
       <div className="mb-3 flex items-center justify-between border-white/8 border-b pb-3">
-        <span className="text-[#b5b5b5] text-xs">색상</span>
+        <span className="text-[#b5b5b5] text-xs">{label}</span>
         <div className="flex items-center gap-2">
           <input
             className="h-8 w-8 cursor-pointer rounded-md border border-white/10 bg-transparent p-0"
-            onChange={(event) => update({ color: event.target.value })}
+            onChange={(event) => update({ [field]: event.target.value })}
             type="color"
-            value={properties.color}
+            value={color}
           />
           <input
             className="h-8 w-24 rounded-md border border-white/5 bg-[#242424] px-2 text-[#aaa] text-xs uppercase outline-none"
-            onChange={(event) => update({ color: event.target.value })}
-            value={properties.color}
+            onChange={(event) => update({ [field]: event.target.value })}
+            value={color}
           />
         </div>
       </div>
-      <InspectorSlider
-        label="러프니스"
-        onChange={(roughness) => update({ roughness })}
-        value={properties.roughness}
+    )
+  }
+
+  const mapField = (
+    label: string,
+    field: 'url' | 'normalUrl' | 'roughnessUrl' | 'metalnessUrl' | 'emissiveUrl' | 'aoUrl',
+  ) => (
+    <label className="mb-3 block text-[#b5b5b5] text-xs">
+      <span className="mb-1.5 block">{label}</span>
+      <input
+        className="h-9 w-full rounded-md border border-white/5 bg-[#242424] px-3 text-[#aaa] text-xs outline-none focus:border-[#7567ff]/60"
+        disabled={!value.texture}
+        onChange={(event) => updateTexture({ [field]: event.target.value || undefined })}
+        placeholder={value.texture ? 'Texture URL' : 'Base Color 맵을 먼저 적용하세요'}
+        value={value.texture?.[field] ?? ''}
       />
-      <InspectorSlider
-        label="메탈릭"
-        onChange={(metalness) => update({ metalness })}
-        value={properties.metalness}
-      />
-      <InspectorSlider
-        label="이미시브"
-        max={20}
-        onChange={(emissiveIntensity) => update({ emissiveIntensity })}
-        step={0.05}
-        value={properties.emissiveIntensity ?? 0}
-      />
-      <InspectorSlider
-        label="클리어코트"
-        onChange={(clearcoat) => update({ clearcoat })}
-        value={properties.clearcoat ?? 0}
-      />
-      <InspectorSlider
-        label="투과"
-        onChange={(transmission) =>
-          update({ transmission, transparent: transmission > 0 || properties.transparent })
-        }
-        value={properties.transmission ?? 0}
-      />
-      <InspectorSlider
-        label="불투명도"
-        onChange={(opacity) =>
-          update({ opacity, transparent: opacity < 1 || properties.transparent })
-        }
-        value={properties.opacity}
-      />
-      {value.texture ? (
-        <div className="mt-4 border-white/8 border-t pt-3">
-          <InspectorSlider
-            label="타일링 X"
-            max={20}
-            min={0.05}
-            onChange={(x) =>
-              onChange({
-                ...value,
-                texture: { ...value.texture!, repeat: [x, value.texture?.repeat?.[1] ?? x] },
-              })
-            }
-            step={0.05}
-            value={value.texture.repeat?.[0] ?? value.texture.scale ?? 1}
-          />
-          <InspectorSlider
-            label="타일링 Y"
-            max={20}
-            min={0.05}
-            onChange={(y) =>
-              onChange({
-                ...value,
-                texture: { ...value.texture!, repeat: [value.texture?.repeat?.[0] ?? y, y] },
-              })
-            }
-            step={0.05}
-            value={value.texture.repeat?.[1] ?? value.texture.scale ?? 1}
-          />
-        </div>
-      ) : null}
+    </label>
+  )
+
+  return (
+    <div className="flex min-h-full flex-col">
+      <div className="flex-1">
+        {(activeTab === '일반' || activeTab === '맵') && value.texture?.url ? (
+          <div className="mb-3 flex items-center justify-between border-white/8 border-b pb-3">
+            <span className="text-[#b5b5b5] text-xs">Base Color</span>
+            <div className="flex min-w-0 items-center gap-2 rounded-md bg-[#242424] p-1.5 pr-3">
+              <span
+                className="h-8 w-10 shrink-0 rounded bg-cover bg-center"
+                style={{ backgroundImage: `url("${value.texture.url}")` }}
+              />
+              <span className="max-w-36 truncate text-[#999] text-[11px]">
+                {value.texture.url.split('/').pop()}
+              </span>
+            </div>
+          </div>
+        ) : null}
+        {activeTab === '일반' ? (
+          <>
+            {colorControl('Tint', 'color', '#ffffff')}
+            <InspectorSlider
+              label="러프니스"
+              onChange={(roughness) => update({ roughness })}
+              value={properties.roughness}
+            />
+            <InspectorSlider
+              label="메탈릭"
+              onChange={(metalness) => update({ metalness })}
+              value={properties.metalness}
+            />
+          </>
+        ) : null}
+        {activeTab === '색상' ? (
+          <>
+            {colorControl('기본 색상', 'color', '#ffffff')}
+            {colorControl('이미시브 색상', 'emissiveColor', '#000000')}
+            <InspectorSlider
+              label="이미시브 강도"
+              max={20}
+              onChange={(emissiveIntensity) => update({ emissiveIntensity })}
+              step={0.05}
+              value={properties.emissiveIntensity ?? 0}
+            />
+          </>
+        ) : null}
+        {activeTab === '맵' ? (
+          <>
+            {mapField('Base Color', 'url')}
+            {mapField('Normal', 'normalUrl')}
+            {mapField('Roughness', 'roughnessUrl')}
+            {mapField('Metallic', 'metalnessUrl')}
+            {mapField('Emissive', 'emissiveUrl')}
+            {mapField('AO', 'aoUrl')}
+          </>
+        ) : null}
+        {activeTab === '범프' ? (
+          <>
+            <InspectorSlider
+              label="노멀 강도"
+              max={5}
+              onChange={(normalScale) => updateTexture({ normalScale })}
+              value={value.texture?.normalScale ?? 1}
+            />
+            <InspectorSlider
+              label="변위 강도"
+              max={2}
+              onChange={(displacementScale) => updateTexture({ displacementScale })}
+              value={value.texture?.displacementScale ?? 0}
+            />
+          </>
+        ) : null}
+        {activeTab === '반사' ? (
+          <>
+            <InspectorSlider
+              label="메탈릭"
+              onChange={(metalness) => update({ metalness })}
+              value={properties.metalness}
+            />
+            <InspectorSlider
+              label="클리어코트"
+              onChange={(clearcoat) => update({ clearcoat })}
+              value={properties.clearcoat ?? 0}
+            />
+            <InspectorSlider
+              label="투과"
+              onChange={(transmission) =>
+                update({ transmission, transparent: transmission > 0 || properties.transparent })
+              }
+              value={properties.transmission ?? 0}
+            />
+            <InspectorSlider
+              label="굴절률"
+              max={2.333}
+              min={1}
+              onChange={(ior) => update({ ior })}
+              value={properties.ior ?? 1.5}
+            />
+          </>
+        ) : null}
+        {activeTab === '거칠기' ? (
+          <>
+            <InspectorSlider
+              label="러프니스"
+              onChange={(roughness) => update({ roughness })}
+              value={properties.roughness}
+            />
+            <InspectorSlider
+              label="코트 거칠기"
+              onChange={(clearcoatRoughness) => update({ clearcoatRoughness })}
+              value={properties.clearcoatRoughness ?? 0}
+            />
+          </>
+        ) : null}
+        {activeTab === '고급' ? (
+          <>
+            <InspectorSlider
+              label="불투명도"
+              onChange={(opacity) =>
+                update({ opacity, transparent: opacity < 1 || properties.transparent })
+              }
+              value={properties.opacity}
+            />
+            <InspectorSlider
+              label="AO 강도"
+              max={5}
+              onChange={(aoIntensity) => updateTexture({ aoIntensity })}
+              value={value.texture?.aoIntensity ?? 1}
+            />
+            {value.texture ? (
+              <>
+                <InspectorSlider
+                  label="타일링 X"
+                  max={20}
+                  min={0.05}
+                  onChange={(x) =>
+                    onChange({
+                      ...value,
+                      texture: { ...value.texture!, repeat: [x, value.texture?.repeat?.[1] ?? x] },
+                    })
+                  }
+                  step={0.05}
+                  value={value.texture.repeat?.[0] ?? value.texture.scale ?? 1}
+                />
+                <InspectorSlider
+                  label="타일링 Y"
+                  max={20}
+                  min={0.05}
+                  onChange={(y) =>
+                    onChange({
+                      ...value,
+                      texture: { ...value.texture!, repeat: [value.texture?.repeat?.[0] ?? y, y] },
+                    })
+                  }
+                  step={0.05}
+                  value={value.texture.repeat?.[1] ?? value.texture.scale ?? 1}
+                />
+                <InspectorSlider
+                  label="회전"
+                  max={6.283}
+                  onChange={(rotation) => updateTexture({ rotation })}
+                  step={0.01}
+                  value={value.texture.rotation ?? 0}
+                />
+              </>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+      <button
+        className="mt-6 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-white/10 text-[#bbb] text-sm transition hover:bg-white/5 hover:text-white"
+        onClick={() => onChange(structuredClone(initialValue.current))}
+        type="button"
+      >
+        <RotateCcw className="h-4 w-4" />
+        재질 속성 초기화
+      </button>
     </div>
   )
 }
@@ -324,6 +462,16 @@ export function MaterialSurfaceInspector() {
   const nodes = useScene((state) => state.nodes)
   const sceneMaterials = useScene((state) => state.materials)
   const selectedNode = useScene((state) => (target ? state.nodes[target.nodeId] : undefined))
+
+  useEffect(() => {
+    if (!target) return
+    const viewer = useViewer.getState()
+    viewer.setPreviewSelectedIds([])
+    viewer.setHoveredId(null)
+    viewer.setHoverHighlightMode('default')
+    viewer.outliner.selectedObjects.length = 0
+    viewer.outliner.hoveredObjects.length = 0
+  }, [target])
 
   if (typeof document === 'undefined' || !target || !selectedNode) {
     return null
@@ -440,7 +588,12 @@ export function MaterialSurfaceInspector() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
         {editableMaterial ? (
-          <InspectorMaterialEditor onChange={updateMaterial} value={editableMaterial} />
+          <InspectorMaterialEditor
+            activeTab={activeTab}
+            key={`${target.nodeId}:${target.role}`}
+            onChange={updateMaterial}
+            value={editableMaterial}
+          />
         ) : (
           <p className="text-[#888] text-sm">이 표면에 적용된 재질이 없습니다.</p>
         )}

@@ -12,7 +12,6 @@ import {
 import {
   isGridSnapActive,
   isMagneticSnapActive,
-  snapToHalf,
   triggerSFX,
   useEditor,
   usePlacementPreview,
@@ -27,11 +26,32 @@ import {
 } from '../shared/wall-attach-target'
 import { clampToWall, hasWallChildOverlap } from './door-math'
 
+const DOOR_MOVE_STEP_M = 0.01
+const snapDoorMoveStep = (value: number) => Math.round(value / DOOR_MOVE_STEP_M) * DOOR_MOVE_STEP_M
+const snapDoorMoveStepWithinWall = (
+  wall: Pick<WallNode, 'start' | 'end'>,
+  localX: number,
+  width: number,
+) => {
+  const dx = wall.end[0] - wall.start[0]
+  const dz = wall.end[1] - wall.start[1]
+  const wallLength = Math.sqrt(dx * dx + dz * dz)
+  const min = width / 2
+  const max = wallLength - width / 2
+  if (max < min) return snapDoorMoveStep(localX)
+
+  const minStep = Math.ceil(min / DOOR_MOVE_STEP_M) * DOOR_MOVE_STEP_M
+  const maxStep = Math.floor(max / DOOR_MOVE_STEP_M) * DOOR_MOVE_STEP_M
+  if (maxStep < minStep) return Math.max(min, Math.min(max, localX))
+
+  return Math.max(minStep, Math.min(maxStep, snapDoorMoveStep(localX)))
+}
+
 /**
  * 2D floor-plan move handler for door — kicks in when the user clicks
  * "Move" on the door inspector (or action menu) and the floor-plan
  * view is active. Pointer in plan space → snap to nearest wall →
- * project onto wall axis → snap local-X to 0.5m grid → clamp inside
+ * project onto wall axis → snap local-X to 1cm steps → clamp inside
  * wall bounds → commit via `useScene.updateNodes`.
  *
  * Mirrors the 3D `move-tool.tsx` behaviour minus the R3F event plumbing:
@@ -117,10 +137,9 @@ export const doorFloorplanMoveTarget: FloorplanMoveTarget<DoorNode> = ({ node })
   // position, quantized by the live grid step in grid mode else a gentle fixed
   // cadence — so grid mode ticks once per cell (not on every micro mouse-move
   // while the door sits in a cell) while lines/off still tick as the door moves.
-  const FREE_STEP_M = 0.1
   let lastStepKey: string | null = null
   const tickGridStep = (...coords: number[]) => {
-    const step = isGridSnapActive() ? useEditor.getState().gridSnapStep : FREE_STEP_M
+    const step = isGridSnapActive() ? useEditor.getState().gridSnapStep : DOOR_MOVE_STEP_M
     const key = coords.map((c) => Math.round(c / step)).join(',')
     if (key !== lastStepKey) {
       lastStepKey = key
@@ -198,7 +217,7 @@ export const doorFloorplanMoveTarget: FloorplanMoveTarget<DoorNode> = ({ node })
       // Figma-style along-wall alignment first (edge-to-edge with other
       // openings / wall ends); it competes with — and wins over — the grid
       // snap. Follows the magnetic ("lines") mode; the grid component lives in
-      // `snapToHalf` (mode-aware → raw when grid is off).
+      // the door's centimeter move step.
       const neighborX = !isMagneticSnapActive()
         ? null
         : snapLocalXToNeighbors({
@@ -208,7 +227,7 @@ export const doorFloorplanMoveTarget: FloorplanMoveTarget<DoorNode> = ({ node })
             selfId: nodeId,
             nodes,
           })
-      const snappedLocalX = neighborX ?? snapToHalf(hit.localX)
+      const snappedLocalX = snapDoorMoveStepWithinWall(hit.wall, neighborX ?? hit.localX, node.width)
       const { clampedX, clampedY } = clampToWall(hit.wall, snappedLocalX, node.width, node.height)
 
       // One click per real position step, keyed on the SNAPPED along-wall value

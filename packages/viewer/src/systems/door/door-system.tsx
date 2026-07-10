@@ -188,6 +188,11 @@ export const DoorSystem = () => {
 
 function tagDoorSlot(mesh: THREE.Mesh): THREE.Mesh {
   mesh.userData.slotId = currentDoorSlot
+  // Shadow flags are not inherited from the invisible door hitbox root.
+  // Every opaque visual part must cast independently or sunlight passes
+  // through the wall opening as if the closed door did not exist.
+  mesh.castShadow = currentDoorSlot !== 'glass'
+  mesh.receiveShadow = true
   return mesh
 }
 

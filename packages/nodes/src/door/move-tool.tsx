@@ -56,6 +56,27 @@ const edgeMaterial = new LineBasicNodeMaterial({
   depthWrite: false,
 })
 
+const DOOR_MOVE_STEP_M = 0.01
+const snapDoorMoveStep = (value: number) => Math.round(value / DOOR_MOVE_STEP_M) * DOOR_MOVE_STEP_M
+const snapDoorMoveStepWithinWall = (
+  wallNode: Pick<WallEvent['node'], 'start' | 'end'>,
+  localX: number,
+  width: number,
+) => {
+  const dx = wallNode.end[0] - wallNode.start[0]
+  const dz = wallNode.end[1] - wallNode.start[1]
+  const wallLength = Math.sqrt(dx * dx + dz * dz)
+  const min = width / 2
+  const max = wallLength - width / 2
+  if (max < min) return snapDoorMoveStep(localX)
+
+  const minStep = Math.ceil(min / DOOR_MOVE_STEP_M) * DOOR_MOVE_STEP_M
+  const maxStep = Math.floor(max / DOOR_MOVE_STEP_M) * DOOR_MOVE_STEP_M
+  if (maxStep < minStep) return Math.max(min, Math.min(max, localX))
+
+  return Math.max(minStep, Math.min(maxStep, snapDoorMoveStep(localX)))
+}
+
 const MoveDoorTool: React.FC<{ node: DoorNode }> = ({ node: movingDoorNode }) => {
   const cursorGroupRef = useRef<Group>(null!)
 
@@ -174,12 +195,11 @@ const MoveDoorTool: React.FC<{ node: DoorNode }> = ({ node: movingDoorNode }) =>
     // door sits in a cell) while lines/off still tick as the door moves. Two
     // guards prevent a doubled cue: `lastStepKey` (cell change) + `lastTickFrame`
     // (one per pointermove — wall + grid paths can both run on the same move).
-    const FREE_STEP_M = 0.1
     let lastStepKey: string | null = null
     let lastTickFrame = -1
     const tickGridStep = (frame: number, ...coords: number[]) => {
       if (frame === lastTickFrame) return
-      const step = isGridSnapActive() ? useEditor.getState().gridSnapStep : FREE_STEP_M
+      const step = isGridSnapActive() ? useEditor.getState().gridSnapStep : DOOR_MOVE_STEP_M
       const key = coords.map((c) => Math.round(c / step)).join(',')
       if (key === lastStepKey) return
       lastStepKey = key
@@ -293,16 +313,17 @@ const MoveDoorTool: React.FC<{ node: DoorNode }> = ({ node: movingDoorNode }) =>
         }
       }
       const targetLocalX = dragAnchor.startX + (rawLocalX - dragAnchor.rawX)
-      const localX = resolveWallSlideAlignment({
+      const alignedLocalX = resolveWallSlideAlignment({
         wallNode: event.node,
         rawLocalX: targetLocalX,
         width: movingDoorNode.width,
         candidates: alignmentCandidates,
         // Along-wall alignment guides display in every snapping mode; the
         // magnetic pull onto them lands only in "lines" mode. The grid
-        // component lives in `snapToHalf` (itself mode-aware).
+        // component is finalized by the door's centimeter move step.
         applySnap: isMagneticSnapActive(),
       })
+      const localX = snapDoorMoveStepWithinWall(event.node, alignedLocalX, movingDoorNode.width)
       const { clampedX, clampedY } = clampToWall(
         event.node,
         localX,
