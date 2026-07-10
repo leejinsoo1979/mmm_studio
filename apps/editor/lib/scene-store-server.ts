@@ -1,5 +1,6 @@
 import type { SceneOperations } from '@pascal-app/mcp/operations'
 import type { SceneStore } from '@pascal-app/mcp/storage'
+import { MemorySceneStore } from './memory-scene-store'
 
 /**
  * Per-process singleton. The factory is async because backend modules are
@@ -12,10 +13,24 @@ let cachedOperations: Promise<SceneOperations> | null = null
 export function getSceneStore(): Promise<SceneStore> {
   if (!cachedStore) {
     cachedStore = (async () => {
+      if (process.env.PASCAL_SCENE_STORE === 'memory') {
+        return new MemorySceneStore()
+      }
+
       const mod = (await import('@pascal-app/mcp/storage')) as {
         createSceneStore: (env?: NodeJS.ProcessEnv) => Promise<SceneStore>
       }
-      return mod.createSceneStore(process.env)
+      try {
+        const store = await mod.createSceneStore(process.env)
+        await store.list({ limit: 0 })
+        return store
+      } catch (error) {
+        console.warn(
+          '[scene-store] Falling back to in-memory store:',
+          error instanceof Error ? error.message : error,
+        )
+        return new MemorySceneStore()
+      }
     })()
   }
   return cachedStore

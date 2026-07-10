@@ -11,13 +11,25 @@ import {
   type User,
 } from 'firebase/auth'
 
+const defaultFirebaseConfig = {
+  apiKey: 'AIzaSyA-lpDfDYDUbjKHnmabVwjICN33eMB-PNI',
+  authDomain: 'mmm-studio-7a14c.firebaseapp.com',
+  projectId: 'mmm-studio-7a14c',
+  storageBucket: 'mmm-studio-7a14c.firebasestorage.app',
+  messagingSenderId: '864501140667',
+  appId: '1:864501140667:web:9d28b3a785cb0cd44c2d9e',
+}
+
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? defaultFirebaseConfig.apiKey,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ?? defaultFirebaseConfig.authDomain,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? defaultFirebaseConfig.projectId,
+  storageBucket:
+    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? defaultFirebaseConfig.storageBucket,
+  messagingSenderId:
+    process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ??
+    defaultFirebaseConfig.messagingSenderId,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ?? defaultFirebaseConfig.appId,
 }
 
 export function isFirebaseConfigured(): boolean {
