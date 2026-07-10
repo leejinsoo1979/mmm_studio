@@ -3,6 +3,7 @@
 import { MaterialPaintPanel, useEditor } from '@pascal-app/editor'
 import { Paintbrush } from 'lucide-react'
 import { useEffect } from 'react'
+import { MaterialSurfaceInspector } from './material-surface-inspector'
 
 export function MaterialTab() {
   useEffect(() => {
@@ -21,6 +22,7 @@ export function MaterialTab() {
 
   return (
     <div className="flex h-full flex-col bg-[#1b1b1b] text-[#efefef]">
+      <MaterialSurfaceInspector />
       <div className="border-[#343434] border-b px-6 py-6">
         <div className="flex items-center gap-3">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#7779ff]/15 text-[#8f91ff]">

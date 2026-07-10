@@ -407,6 +407,7 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
   const suppressRemoteSaveUntilRef = useRef(0)
   const [conflict, setConflict] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [sceneName, setSceneName] = useState(meta.name)
 
   useEffect(() => {
     const bounds = computeInitialSceneBounds(initialScene)
@@ -449,7 +450,7 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
             'Content-Type': 'application/json',
             'If-Match': String(versionRef.current),
           },
-          body: JSON.stringify({ name: meta.name, graph }),
+          body: JSON.stringify({ name: sceneName, graph }),
           // `keepalive` lets the request outlive a page unload (the autosave
           // flush on refresh/close). Browsers cap keepalive bodies at 64KB, so
           // only the unload flush opts in — normal debounced saves omit it and
@@ -474,7 +475,34 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
         setSaveError(error instanceof Error ? error.message : 'Save failed')
       }
     },
-    [meta.id, meta.name],
+    [meta.id, sceneName],
+  )
+
+  const handleRename = useCallback(
+    async (name: string) => {
+      const response = await fetch(`/api/scenes/${meta.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'If-Match': String(versionRef.current),
+        },
+        body: JSON.stringify({ name }),
+      })
+      if (response.status === 409) {
+        setConflict(true)
+        throw new Error('Version conflict')
+      }
+      if (!response.ok) {
+        const message = `Rename failed (${response.status})`
+        setSaveError(message)
+        throw new Error(message)
+      }
+      const next = (await response.json()) as SceneMeta
+      versionRef.current = next.version
+      setSceneName(next.name)
+      setSaveError(null)
+    },
+    [meta.id],
   )
 
   useEffect(() => {
@@ -554,7 +582,9 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
       )}
       <Editor
         layoutVersion="v2"
-        navbarSlot={<EditorHeader sceneId={meta.id} sceneName={meta.name} />}
+        navbarSlot={
+          <EditorHeader onRename={handleRename} sceneId={meta.id} sceneName={sceneName} />
+        }
         onLoad={handleLoad}
         onSave={handleSave}
         onThumbnailCapture={handleThumb}

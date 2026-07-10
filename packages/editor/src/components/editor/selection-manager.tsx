@@ -111,6 +111,7 @@ type PaintInteraction = {
   apply: (() => void) | null
   hoverMode: HoverHighlightMode
   hoveredId: AnyNodeId
+  role: MaterialTargetRole | null
   preview: (() => PaintPreviewCleanup | null) | null
   // What the paint HUD chip should show for this hover (scopes + labels), or
   // null when the surface isn't paintable.
@@ -823,6 +824,7 @@ export const SelectionManager = () => {
           key: `${node.type}:${node.id}:${role ?? 'unsupported'}:${eraser ? 'erase' : 'paint'}:${scope}`,
           hoveredId: node.id as AnyNodeId,
           hoverMode: compatible ? 'paint-ready' : 'paint-disabled',
+          role: role as MaterialTargetRole | null,
           paintHover:
             compatible && role
               ? {
@@ -922,6 +924,7 @@ export const SelectionManager = () => {
           }:${role ?? 'unsupported'}:${eraser ? 'erase' : 'paint'}`,
           hoveredId: (segmentTarget ? segmentTarget.id : roofNode.id) as AnyNodeId,
           hoverMode: compatible ? 'paint-ready' : 'paint-disabled',
+          role,
           // Roof isn't on the slot model (role-specific fields, custom commit),
           // so it offers only the single surface — but still labels it.
           paintHover:
@@ -984,6 +987,7 @@ export const SelectionManager = () => {
           key: `${node.type}:${node.id}:unsupported`,
           hoveredId: node.id as AnyNodeId,
           hoverMode: 'paint-disabled',
+          role: null,
           paintHover: null,
           apply: null,
           preview: () => previewCursor('not-allowed'),
@@ -1052,9 +1056,12 @@ export const SelectionManager = () => {
 
       event.stopPropagation()
 
-      if (!interaction.apply) {
-        return
+      if (interaction.role) {
+        useViewer.getState().setSelection({ selectedIds: [interaction.hoveredId] })
+        setSelectedMaterialTargetForNode(event.node, interaction.role)
+        useEditor.getState().primeMaterialPaintFromSelection()
       }
+      if (!interaction.apply) return
 
       interaction.apply()
       sfxEmitter.emit('sfx:paint-apply')

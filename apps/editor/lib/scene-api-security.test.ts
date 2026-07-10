@@ -23,6 +23,15 @@ test('allows loopback scene API requests without a token', () => {
   expect(guardSceneApiRequest(request)).toBeNull()
 })
 
+test('allows wildcard development hosts without a token', () => {
+  delete process.env.PASCAL_SCENE_API_TOKEN
+  const request = new Request('http://0.0.0.0:3002/api/scenes', {
+    headers: { host: '0.0.0.0:3002' },
+  })
+
+  expect(guardSceneApiRequest(request)).toBeNull()
+})
+
 test('requires a token for non-loopback scene API requests', async () => {
   delete process.env.PASCAL_SCENE_API_TOKEN
   const request = new Request('https://editor.example/api/scenes', {

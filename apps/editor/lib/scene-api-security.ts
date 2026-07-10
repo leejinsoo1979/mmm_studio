@@ -156,7 +156,14 @@ function isLoopbackRequest(request: Request): boolean {
 
 function isLoopbackHostname(hostname: string): boolean {
   const h = hostname.toLowerCase()
-  return h === 'localhost' || h.endsWith('.localhost') || h === '127.0.0.1' || h === '::1'
+  return (
+    h === 'localhost' ||
+    h.endsWith('.localhost') ||
+    h === '127.0.0.1' ||
+    h === '0.0.0.0' ||
+    h === '::1' ||
+    h === '::'
+  )
 }
 
 function parseUrl(value: string): URL | null {

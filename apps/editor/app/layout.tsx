@@ -13,6 +13,12 @@ const geistMono = localFont({
   src: './fonts/GeistMonoVF.woff',
   variable: '--font-geist-mono',
 })
+const chillax = localFont({
+  src: './fonts/Chillax-Variable.woff2',
+  variable: '--font-chillax',
+  display: 'swap',
+  weight: '200 700',
+})
 
 const barlow = Barlow({
   subsets: ['latin'],
@@ -28,7 +34,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      className={`${geistSans.variable} ${geistMono.variable} ${GeistPixelSquare.variable} ${barlow.variable}`}
+      className={`${geistSans.variable} ${geistMono.variable} ${GeistPixelSquare.variable} ${barlow.variable} ${chillax.variable}`}
       lang="en"
     >
       <head>
