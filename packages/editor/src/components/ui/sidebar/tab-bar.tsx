@@ -67,35 +67,35 @@ interface IconRailProps {
 export function IconRail({ tabs, activeTab, collapsed, onIconClick }: IconRailProps) {
   return (
     <TooltipProvider delayDuration={0} disableHoverableContent>
-      <div className="flex h-full w-14 shrink-0 flex-col items-center gap-1 border-border/50 border-r py-2">
-        {tabs.map((tab) => {
-          // Only show the active highlight while the panel is open. When
-          // collapsed nothing is "open", so every icon reads as unselected.
-          const showActive = activeTab === tab.id && !collapsed
-          return (
-            <Tooltip key={tab.id}>
-              <TooltipTrigger asChild>
-                <button
-                  className={cn(
-                    'group flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-200 [&_img]:transition-[opacity,filter] [&_img]:duration-200',
-                    showActive
-                      ? 'bg-accent text-foreground shadow-sm [&_img]:opacity-100 [&_img]:grayscale-0'
-                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground [&_img]:opacity-60 [&_img]:grayscale hover:[&_img]:opacity-100 hover:[&_img]:grayscale-0',
-                  )}
-                  onClick={() => {
-                    triggerSFX('sfx:menu-click')
-                    onIconClick(tab.id)
-                  }}
-                  onMouseEnter={() => triggerSFX('sfx:menu-hover')}
-                  type="button"
-                >
-                  {tab.icon ?? tab.label.charAt(0)}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">{tab.label}</TooltipContent>
-            </Tooltip>
-          )
-        })}
+      <div className="flex h-full w-[100px] shrink-0 flex-col items-center justify-between border-[#343434] border-r bg-[#292929] py-8">
+        <div className="flex flex-col items-center gap-8">
+          {tabs.map((tab) => {
+            const showActive = activeTab === tab.id && !collapsed
+            return (
+              <Tooltip key={tab.id}>
+                <TooltipTrigger asChild>
+                  <button
+                    className={cn(
+                      'group flex h-14 w-14 items-center justify-center rounded-2xl text-[#b8b8b8] transition-all duration-200 [&_svg]:h-9 [&_svg]:w-9 [&_svg]:stroke-[1.75] [&_svg]:transition-colors [&_img]:transition-[opacity,filter] [&_img]:duration-200',
+                      showActive
+                        ? 'bg-[#303036] text-[#7779ff] shadow-[inset_0_0_0_1px_rgba(120,122,255,0.08)] [&_img]:opacity-100 [&_img]:grayscale-0'
+                        : 'hover:bg-[#303030] hover:text-[#e5e5e5] [&_img]:opacity-55 [&_img]:grayscale hover:[&_img]:opacity-100 hover:[&_img]:grayscale-0',
+                    )}
+                    onClick={() => {
+                      triggerSFX('sfx:menu-click')
+                      onIconClick(tab.id)
+                    }}
+                    onMouseEnter={() => triggerSFX('sfx:menu-hover')}
+                    type="button"
+                  >
+                    {tab.icon ?? tab.label.charAt(0)}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{tab.label}</TooltipContent>
+              </Tooltip>
+            )
+          })}
+        </div>
       </div>
     </TooltipProvider>
   )

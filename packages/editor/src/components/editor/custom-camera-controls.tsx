@@ -38,6 +38,7 @@ const tempTarget = new Vector3()
 const syncTarget = new Vector3()
 const syncSpherical = new Spherical()
 const keyboardPanSpherical = new Spherical()
+const DEFAULT_CAMERA_POSITION = [0, 20, 20] as const
 const DEFAULT_MAX_POLAR_ANGLE = Math.PI / 2 - 0.1
 const DEBUG_MAX_POLAR_ANGLE = Math.PI - 0.05
 const NAVIGATION_SYNC_POSITION_EPSILON = 0.001
@@ -404,7 +405,15 @@ export const CustomCameraControls = () => {
     if (firstLoad.current) {
       firstLoad.current = false
       clearPendingFloorplanNavigationPose()
-      controls.current.setLookAt(20, 20, 20, 0, 0, 0, true)
+      controls.current.setLookAt(
+        DEFAULT_CAMERA_POSITION[0],
+        DEFAULT_CAMERA_POSITION[1],
+        DEFAULT_CAMERA_POSITION[2],
+        0,
+        0,
+        0,
+        true,
+      )
     }
     controls.current.getTarget(currentTarget)
     clearPendingFloorplanNavigationPose()
@@ -929,9 +938,9 @@ export const CustomCameraControls = () => {
     const distance = Math.max(maxDim * 2, 15)
 
     controls.current.setLookAt(
-      tempCenter.x + distance * 0.7,
+      tempCenter.x,
       tempCenter.y + distance * 0.5,
-      tempCenter.z + distance * 0.7,
+      tempCenter.z + distance,
       tempCenter.x,
       tempCenter.y,
       tempCenter.z,
@@ -1136,7 +1145,15 @@ export const CustomCameraControls = () => {
       if (!bounds) {
         // Restore default framing pose when no bounds were computed.
         clearPendingFloorplanNavigationPose()
-        controls.current.setLookAt(20, 20, 20, 0, 0, 0, true)
+        controls.current.setLookAt(
+          DEFAULT_CAMERA_POSITION[0],
+          DEFAULT_CAMERA_POSITION[1],
+          DEFAULT_CAMERA_POSITION[2],
+          0,
+          0,
+          0,
+          true,
+        )
         return
       }
       const [cx, cz] = bounds.center
@@ -1147,7 +1164,7 @@ export const CustomCameraControls = () => {
       const distance = Math.max(maxExtent * 1.4, 15)
       const height = Math.max(maxExtent * 0.8, 10)
       clearPendingFloorplanNavigationPose()
-      controls.current.setLookAt(cx + distance * 0.7, height, cz + distance * 0.7, cx, 0, cz, true)
+      controls.current.setLookAt(cx, height, cz + distance, cx, 0, cz, true)
     }
 
     emitter.on('camera-controls:capture', handleNodeCapture)

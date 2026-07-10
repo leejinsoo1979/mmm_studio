@@ -23,7 +23,6 @@ import { createPortal, useFrame } from '@react-three/fiber'
 import { useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { formatLinearMeasurement } from '../../lib/measurements'
-import useEditor from '../../store/use-editor'
 
 const GUIDE_Y_OFFSET = 0.08
 const LABEL_LIFT = 0.08
@@ -65,33 +64,15 @@ type WallFaceLine = {
 
 export function WallMeasurementLabel() {
   const selectedIds = useViewer((state) => state.selection.selectedIds)
-  const levelId = useViewer((state) => state.selection.levelId)
   const nodes = useScene((state) => state.nodes)
-  const showDimensions = useEditor((state) => state.showDimensions)
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
   const selectedNode = selectedId ? nodes[selectedId as AnyNodeId] : null
   const selectedWall = selectedNode?.type === 'wall' ? selectedNode : null
-  const walls = useMemo(
-    () =>
-      showDimensions
-        ? Object.values(nodes).filter(
-            (node): node is WallNode =>
-              node.type === 'wall' && (!levelId || node.parentId === levelId),
-          )
-        : selectedWall
-          ? [selectedWall]
-          : [],
-    [levelId, nodes, selectedWall, showDimensions],
-  )
 
-  return (
-    <>
-      {walls.map((wall) => (
-        <WallMeasurementPortal key={wall.id} wall={wall} />
-      ))}
-    </>
-  )
+  if (!selectedWall) return null
+
+  return <WallMeasurementPortal wall={selectedWall} />
 }
 
 function WallMeasurementPortal({ wall }: { wall: WallNode }) {
