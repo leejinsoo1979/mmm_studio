@@ -16,6 +16,7 @@ import {
   type FenceNode,
   type ItemNode,
   type LevelNode,
+  type LightNode,
   nodeRegistry,
   type RoofNode,
   type RoofSegmentNode,
@@ -257,6 +258,7 @@ type EditorState = {
   setMovingNode: (
     node:
       | ItemNode
+      | LightNode
       | WindowNode
       | DoorNode
       | ElevatorNode

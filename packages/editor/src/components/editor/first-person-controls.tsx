@@ -1409,9 +1409,25 @@ export const FirstPersonControls = () => {
  */
 export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
   const [isLocked, setIsLocked] = useState(false)
+  const hoveredId = useViewer((state) => state.hoveredId)
+  const hoveredNode = useScene((state) =>
+    hoveredId ? state.nodes[hoveredId as AnyNodeId] : undefined,
+  )
+  const interactiveDoor = useInteractive((state) =>
+    hoveredId ? state.doors[hoveredId as AnyNodeId] : undefined,
+  )
   const hasPlacedSpawn = useScene((state) =>
     Object.values(state.nodes).some((node) => node.type === 'spawn'),
   )
+  const doorInteractionLabel = useMemo(() => {
+    if (hoveredNode?.type !== 'door' || hoveredNode.openingKind === 'opening') return null
+
+    const openAmount = isOperationDoorType(hoveredNode.doorType)
+      ? (interactiveDoor?.operationState ?? hoveredNode.operationState ?? 0)
+      : (interactiveDoor?.swingAngle ?? hoveredNode.swingAngle ?? 0) / DOOR_SWING_OPEN_ANGLE
+
+    return openAmount >= 0.5 ? 'Close door' : 'Open door'
+  }, [hoveredNode, interactiveDoor])
 
   useEffect(() => {
     const handlePointerLockChange = () => {
@@ -1436,9 +1452,19 @@ export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
     <>
       {isLocked && (
         <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center">
-          <div className="relative h-7 w-7">
-            <div className="absolute top-1/2 left-1/2 h-px w-7 -translate-x-1/2 -translate-y-1/2 bg-white/60" />
-            <div className="absolute top-1/2 left-1/2 h-7 w-px -translate-x-1/2 -translate-y-1/2 bg-white/60" />
+          <div className="flex -translate-y-1/2 flex-col items-center gap-4">
+            <div className="relative h-7 w-7">
+              <div className="absolute top-1/2 left-1/2 h-px w-7 -translate-x-1/2 -translate-y-1/2 bg-white/60" />
+              <div className="absolute top-1/2 left-1/2 h-7 w-px -translate-x-1/2 -translate-y-1/2 bg-white/60" />
+            </div>
+            {doorInteractionLabel && (
+              <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-black/65 px-3 py-2 text-sm text-white shadow-lg backdrop-blur-md">
+                <kbd className="flex h-6 min-w-6 items-center justify-center rounded-md border border-white/25 bg-white/10 px-1.5 font-mono text-xs">
+                  E
+                </kbd>
+                <span>{doorInteractionLabel}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

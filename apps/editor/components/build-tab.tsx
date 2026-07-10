@@ -1,6 +1,6 @@
 'use client'
 
-import { nodeRegistry } from '@pascal-app/core'
+import { type AssetInput, nodeRegistry } from '@pascal-app/core'
 import { triggerSFX, useEditor } from '@pascal-app/editor'
 import { useLiquidLineToolOptions } from '@pascal-app/nodes'
 import { ChevronLeft, Search } from 'lucide-react'
@@ -44,6 +44,7 @@ type BuildType = {
   id: string
   label: string
   iconSrc: string
+  asset?: AssetInput
   kind?: BuildToolKind
 }
 
@@ -66,6 +67,21 @@ const IMPORT_ITEMS: BuildType[] = [
   { id: 'import-image', label: 'Import Image', iconSrc: '/icons/floorplan.webp' },
 ]
 
+const DOOR1_ASSET: AssetInput = {
+  id: 'door1-glb',
+  category: 'furniture',
+  name: 'Door1',
+  thumbnail: '/icons/door.webp',
+  src: '/items/door1/model.glb',
+  dimensions: [0.9, 2.1, 0.12],
+  offset: [0, 0, 0],
+  rotation: [0, 0, 0],
+  scale: [1, 1, 1],
+  attachTo: 'wall-side',
+  source: 'library',
+  tags: ['door', 'wall', 'glb'],
+}
+
 const BUILD_SECTIONS: BuildSection[] = [
   {
     id: 'walls',
@@ -83,6 +99,7 @@ const BUILD_SECTIONS: BuildSection[] = [
       { id: 'door', label: 'Single Door', iconSrc: '/icons/door.webp', kind: 'door' },
       { id: 'double-door', label: 'Double Door', iconSrc: '/icons/door.webp', kind: 'door' },
       { id: 'sliding-door', label: 'Sliding Door', iconSrc: '/icons/door.webp', kind: 'door' },
+      { id: 'door1-glb', label: 'Door1 GLB', iconSrc: '/icons/door.webp', asset: DOOR1_ASSET },
     ],
   },
   {
@@ -166,6 +183,17 @@ function activateBuildTool(kind: BuildToolKind | MepToolKind): void {
   ed.setTool(kind)
 }
 
+function activateItemAssetTool(asset: AssetInput): void {
+  const ed = useEditor.getState()
+  ed.setPhase('structure')
+  ed.setStructureLayer('elements')
+  ed.setCatalogCategory(null)
+  ed.setSelectedItem(asset)
+  ed.setToolDefaults('item', null)
+  ed.setMode('build')
+  ed.setTool('item')
+}
+
 function activateRoofFeatureTool(kind: string): void {
   const ed = useEditor.getState()
   ed.setPhase('structure')
@@ -237,6 +265,7 @@ function Section({ children, title }: { children: React.ReactNode; title: string
 export function BuildTab() {
   const activeTool = useEditor((s) => s.tool)
   const mode = useEditor((s) => s.mode)
+  const selectedItem = useEditor((s) => s.selectedItem)
   const follow = useLiquidLineToolOptions((s) => s.follow)
   const toggleFollow = useLiquidLineToolOptions((s) => s.toggleFollow)
 
@@ -267,6 +296,8 @@ export function BuildTab() {
   const isMepActive = mode === 'build' && !!activeTool && MEP_TOOL_KINDS.has(activeTool)
 
   const isTypeActive = (type: BuildType) => {
+    if (type.asset)
+      return mode === 'build' && activeTool === 'item' && selectedItem?.id === type.asset.id
     if (type.id === 'mep') return isMepActive
     if (type.id === 'roof')
       return mode === 'build' && (activeTool === 'roof' || isRoofFeatureActive)
@@ -283,6 +314,10 @@ export function BuildTab() {
           : mode === 'build' && activeTool === item.kind
 
   const handleTypeClick = useCallback((type: BuildType) => {
+    if (type.asset) {
+      activateItemAssetTool(type.asset)
+      return
+    }
     if (type.id === 'mep') {
       activateBuildTool('duct-segment')
       return

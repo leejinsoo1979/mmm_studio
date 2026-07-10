@@ -2,7 +2,7 @@
 
 import { type LightNode, useRegistry } from '@pascal-app/core'
 import { useNodeEvents, useViewer } from '@pascal-app/viewer'
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { Group, SpotLight } from 'three'
 
 const LightRenderer = ({ node }: { node: LightNode }) => {
@@ -26,6 +26,11 @@ const LightRenderer = ({ node }: { node: LightNode }) => {
 
   const active = node.visible !== false && node.enabled
   const castShadow = active && shadows && node.castShadow && node.kind !== 'area'
+  const glowScale = useMemo(() => {
+    const intensity = active ? node.intensity : 0
+    return Math.min(1.2, 0.42 + Math.sqrt(intensity) * 0.12)
+  }, [active, node.intensity])
+  const displayColor = active ? node.color : '#777777'
 
   return (
     <group
@@ -69,19 +74,73 @@ const LightRenderer = ({ node }: { node: LightNode }) => {
       {!walkthroughMode && (
         <group {...handlers}>
           <mesh>
-            <sphereGeometry args={[0.12, 16, 12]} />
-            <meshBasicMaterial color={node.color} depthTest={false} toneMapped={false} />
+            <sphereGeometry args={[0.13, 24, 16]} />
+            <meshBasicMaterial
+              color={displayColor}
+              depthTest={false}
+              depthWrite={false}
+              toneMapped={false}
+            />
           </mesh>
+          {active && (
+            <mesh scale={[glowScale, glowScale, glowScale]}>
+              <sphereGeometry args={[0.38, 32, 20]} />
+              <meshBasicMaterial
+                color={node.color}
+                depthTest={false}
+                depthWrite={false}
+                opacity={0.16}
+                toneMapped={false}
+                transparent
+              />
+            </mesh>
+          )}
+          {active && (
+            <mesh scale={[glowScale * 1.65, glowScale * 1.65, glowScale * 1.65]}>
+              <sphereGeometry args={[0.38, 32, 20]} />
+              <meshBasicMaterial
+                color={node.color}
+                depthTest={false}
+                depthWrite={false}
+                opacity={0.055}
+                toneMapped={false}
+                transparent
+              />
+            </mesh>
+          )}
           {node.kind === 'spot' && (
             <mesh position={[0, -0.22, 0]} rotation={[0, 0, Math.PI]}>
               <coneGeometry args={[0.2, 0.4, 20, 1, true]} />
-              <meshBasicMaterial color={node.color} opacity={0.32} transparent wireframe />
+              <meshBasicMaterial
+                color={displayColor}
+                opacity={active ? 0.34 : 0.16}
+                toneMapped={false}
+                transparent
+                wireframe
+              />
             </mesh>
           )}
           {node.kind === 'area' && (
             <mesh position={[0, 0, 0.02]}>
               <planeGeometry args={[node.width, node.height]} />
-              <meshBasicMaterial color={node.color} opacity={0.22} transparent wireframe />
+              <meshBasicMaterial
+                color={displayColor}
+                opacity={active ? 0.48 : 0.18}
+                toneMapped={false}
+                transparent
+              />
+            </mesh>
+          )}
+          {node.kind === 'area' && active && (
+            <mesh position={[0, 0, 0.01]} scale={[1.08, 1.08, 1]}>
+              <planeGeometry args={[node.width, node.height]} />
+              <meshBasicMaterial
+                color={node.color}
+                depthWrite={false}
+                opacity={0.16}
+                toneMapped={false}
+                transparent
+              />
             </mesh>
           )}
         </group>

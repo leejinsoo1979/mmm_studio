@@ -10,8 +10,8 @@ export const LightNode = BaseNode.extend({
   position: z.tuple([z.number(), z.number(), z.number()]).default([0, 2.4, 0]),
   rotation: z.tuple([z.number(), z.number(), z.number()]).default([0, 0, 0]),
   color: z.string().default('#fff1d6'),
-  intensity: z.number().min(0).max(100).default(4),
-  distance: z.number().min(0).max(100).default(8),
+  intensity: z.number().min(0).max(100).default(10),
+  distance: z.number().min(0).max(100).default(12),
   decay: z.number().min(0).max(4).default(2),
   angle: z
     .number()

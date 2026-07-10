@@ -215,6 +215,7 @@ type NodeDeps = {
   siblingEpoch: number
   committedNodes: Record<string, AnyNode> | null
   interactiveElevators: unknown
+  materials: ReturnType<typeof useScene.getState>['materials'] | null
 }
 
 type CacheEntry = {
@@ -1239,6 +1240,7 @@ const FloorplanRegistryEntry = memo(function FloorplanRegistryEntry({
   const liveOverrides = floorplanVisible
     ? useLiveNodeOverrides.getState().overrides
     : EMPTY_LIVE_OVERRIDES
+  const materials = useScene((state) => (node.type === 'slab' ? state.materials : null))
 
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<SVGGElement>) => onEntryPointerDown(nodeId, event),
@@ -1303,6 +1305,7 @@ const FloorplanRegistryEntry = memo(function FloorplanRegistryEntry({
     liveOverride,
     liveOverrides,
     moving,
+    materials,
     node,
     nodeId,
     nodes,
@@ -1360,6 +1363,7 @@ type BuildFloorplanEntryGeometryArgs = {
   liveOverride: LiveNodeOverrides | undefined
   liveOverrides: Map<string, LiveNodeOverrides>
   moving: boolean
+  materials: ReturnType<typeof useScene.getState>['materials'] | null
   node: AnyNode
   nodeId: AnyNodeId
   nodes: Record<string, AnyNode>
@@ -1382,6 +1386,7 @@ function buildFloorplanEntryGeometry({
   liveOverride,
   liveOverrides,
   moving,
+  materials,
   node,
   nodeId,
   nodes,
@@ -1419,6 +1424,7 @@ function buildFloorplanEntryGeometry({
     // committed state via `ctx`, so committed sibling edits still invalidate.
     committedNodes: dependsOnSiblingInputs ? nodes : null,
     interactiveElevators,
+    materials,
   }
   const cached = geometryCache.get(nodeId)
   if (cached && nodeDepsEqual(cached.deps, deps)) return cached
@@ -1486,6 +1492,7 @@ function buildFloorplanEntryGeometry({
         siblings: ctxOverrides.siblings,
         parent: ctxOverrides.parent,
         levelData,
+        materials: materials ?? undefined,
         viewState: palette
           ? {
               selected,
@@ -1497,7 +1504,10 @@ function buildFloorplanEntryGeometry({
             }
           : undefined,
       }
-    : buildContext(effectiveNode, contextNodes, viewState, levelData)
+    : {
+        ...buildContext(effectiveNode, contextNodes, viewState, levelData),
+        materials: materials ?? undefined,
+      }
   const geometry = (builder as (n: AnyNode, c: GeometryContext) => FloorplanGeometry | null)(
     effectiveNode,
     ctx,
@@ -2717,6 +2727,7 @@ function nodeDepsEqual(a: NodeDeps, b: NodeDeps): boolean {
     'siblingEpoch',
     'committedNodes',
     'interactiveElevators',
+    'materials',
   ]
   for (const key of keys) {
     if (!depsValueEqual(a[key], b[key])) return false

@@ -3,8 +3,14 @@
 import { emitter, type GridEvent, LightNode, useScene } from '@pascal-app/core'
 import { CursorSphere, isGridSnapActive, triggerSFX, useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
-import { useEffect, useRef } from 'react'
-import type { Group } from 'three'
+import { forwardRef, useEffect, useRef } from 'react'
+import { DoubleSide, type Group } from 'three'
+import {
+  type FloorPlacementClickTriggerEvent,
+  getLevelLocalSnappedPosition,
+  stopPlacementCommitPropagation,
+  subscribeFloorPlacementClicks,
+} from '../shared/floor-placement'
 
 type LightToolDefaults = { kind?: LightNode['kind']; height?: number }
 
@@ -29,39 +35,84 @@ const LightTool = () => {
         ? Math.round(event.localPosition[2] / step) * step
         : event.localPosition[2]
       lastPosition = [x, placementHeight, z]
-      cursorRef.current?.position.set(x, placementHeight, z)
+      cursorRef.current?.position.set(x, 0, z)
     }
 
-    const onClick = (event: GridEvent) => {
-      const position = lastPosition ?? [
-        event.localPosition[0],
-        placementHeight,
-        event.localPosition[2],
-      ]
+    const onClick = (event: FloorPlacementClickTriggerEvent) => {
+      const fallback = getLevelLocalSnappedPosition(
+        levelId,
+        event,
+        useEditor.getState().gridSnapStep,
+        !isGridSnapActive(),
+      )
+      const position = lastPosition ?? [fallback[0], placementHeight, fallback[2]]
       const light = LightNode.parse({
         name: `${kind[0]?.toUpperCase()}${kind.slice(1)} Light`,
         kind,
         position,
         rotation: kind === 'area' ? [-Math.PI / 2, 0, 0] : [0, 0, 0],
-        intensity: kind === 'area' ? 6 : 4,
+        intensity: kind === 'area' ? 12 : 10,
+        distance: kind === 'area' ? 0 : 12,
+        castShadow: kind !== 'area',
       })
       useScene.getState().createNode(light, levelId)
       useViewer.getState().setSelection({ selectedIds: [light.id] })
+      stopPlacementCommitPropagation(event)
       triggerSFX('sfx:structure-build')
       useEditor.getState().setMode('select')
       useEditor.getState().setTool(null)
     }
 
     emitter.on('grid:move', onMove)
-    emitter.on('grid:click', onClick)
+    const unsubscribeClicks = subscribeFloorPlacementClicks(onClick)
     return () => {
       emitter.off('grid:move', onMove)
-      emitter.off('grid:click', onClick)
+      unsubscribeClicks()
     }
   }, [levelId])
 
   if (!levelId) return null
-  return <CursorSphere color="#ffd88a" height={0.25} ref={cursorRef} />
+  return <LightPlacementPreview ref={cursorRef} />
 }
+
+const LightPlacementPreview = forwardRef<Group>(function LightPlacementPreview(_, ref) {
+  const defaults = useEditor((state) => state.toolDefaults.light ?? {}) as LightToolDefaults
+  const kind = defaults.kind ?? 'point'
+  const placementHeight = defaults.height ?? (kind === 'area' ? 2.2 : 2.4)
+
+  return (
+    <group ref={ref}>
+      <CursorSphere color="#ffd88a" dotAtTip height={placementHeight} showTooltip={false} />
+      <group position={[0, placementHeight, 0]}>
+        <mesh>
+          <sphereGeometry args={[0.16, 24, 16]} />
+          <meshBasicMaterial color="#fff1d6" toneMapped={false} />
+        </mesh>
+        <mesh>
+          <sphereGeometry args={[0.34, 32, 20]} />
+          <meshBasicMaterial color="#ffd88a" opacity={0.16} toneMapped={false} transparent />
+        </mesh>
+        {kind === 'spot' && (
+          <mesh position={[0, -0.34, 0]} rotation={[0, 0, Math.PI]}>
+            <coneGeometry args={[0.28, 0.65, 28, 1, true]} />
+            <meshBasicMaterial color="#ffd88a" opacity={0.2} toneMapped={false} transparent />
+          </mesh>
+        )}
+        {kind === 'area' && (
+          <mesh rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[1.2, 0.6]} />
+            <meshBasicMaterial
+              color="#fff1d6"
+              opacity={0.42}
+              side={DoubleSide}
+              toneMapped={false}
+              transparent
+            />
+          </mesh>
+        )}
+      </group>
+    </group>
+  )
+})
 
 export default LightTool

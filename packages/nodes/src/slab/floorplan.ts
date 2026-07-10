@@ -2,9 +2,57 @@ import {
   type FloorplanGeometry,
   type FloorplanPoint,
   type GeometryContext,
+  getMaterialPresetByRef,
   getRenderableSlabPolygon,
+  parseMaterialRef,
+  resolveMaterial,
+  type SceneMaterialId,
   type SlabNode,
 } from '@pascal-app/core'
+
+function resolveFloorMaterial(node: SlabNode, ctx: GeometryContext) {
+  const ref = node.slots?.surface ?? node.materialPreset
+  const parsed = parseMaterialRef(ref)
+  if (parsed?.kind === 'library') {
+    const preset = getMaterialPresetByRef(ref)
+    if (preset) {
+      return {
+        color: preset.mapProperties.color,
+        url: preset.maps.albedoMap,
+        repeat: [preset.mapProperties.repeatX, preset.mapProperties.repeatY] as FloorplanPoint,
+        rotation: preset.mapProperties.rotation,
+        offset: [0, 0] as FloorplanPoint,
+      }
+    }
+  }
+  if (parsed?.kind === 'scene') {
+    const material = ctx.materials?.[parsed.id as SceneMaterialId]?.material
+    if (material) {
+      const props = resolveMaterial(material)
+      return {
+        color: props.color,
+        url: material.texture?.url,
+        repeat: (material.texture?.repeat ?? [
+          material.texture?.scale ?? 1,
+          material.texture?.scale ?? 1,
+        ]) as FloorplanPoint,
+        rotation: material.texture?.rotation ?? 0,
+        offset: (material.texture?.offset ?? [0, 0]) as FloorplanPoint,
+      }
+    }
+  }
+  const props = resolveMaterial(node.material)
+  return {
+    color: props.color,
+    url: node.material?.texture?.url,
+    repeat: (node.material?.texture?.repeat ?? [
+      node.material?.texture?.scale ?? 1,
+      node.material?.texture?.scale ?? 1,
+    ]) as FloorplanPoint,
+    rotation: node.material?.texture?.rotation ?? 0,
+    offset: (node.material?.texture?.offset ?? [0, 0]) as FloorplanPoint,
+  }
+}
 
 /**
  * Stage C floor-plan builder for slab. Renders the slab polygon as a
@@ -53,24 +101,47 @@ export function buildSlabFloorplan(node: SlabNode, ctx: GeometryContext): Floorp
   }
 
   const stroke = showSelectedChrome && palette ? palette.selectedStroke : '#475569'
-  const fill = showSelectedChrome ? '#ffffff' : '#cbd5e1'
+  const floorMaterial = resolveFloorMaterial(node, ctx)
+  const fill = showSelectedChrome ? '#ffffff' : floorMaterial.color
 
   // Slab body. Uses `fillOpacity` / `strokeOpacity` independently so the
   // outline stays crisp while the fill stays translucent — zones under
   // the slab read through, and on the selected state the hatch overlay
   // (`{ kind: 'hatch' }` below) carries the visual weight without the
   // background going opaque-white.
-  const children: FloorplanGeometry[] = [
-    {
-      kind: 'path',
+  const children: FloorplanGeometry[] = []
+  if (floorMaterial.url) {
+    const xs = outer.map((point) => point[0])
+    const ys = outer.map((point) => point[1])
+    const minX = Math.min(...xs)
+    const maxX = Math.max(...xs)
+    const minY = Math.min(...ys)
+    const maxY = Math.max(...ys)
+    children.push({
+      kind: 'texture-path',
       d: segments.join(' '),
-      fill,
-      fillOpacity: showSelectedChrome ? 0.45 : 0.6,
-      stroke,
-      strokeWidth: showSelectedChrome ? 0.04 : 0.03,
-      strokeOpacity: showSelectedChrome ? 0.96 : 0.85,
-    },
-  ]
+      url: floorMaterial.url,
+      bounds: {
+        x: minX,
+        y: minY,
+        width: Math.max(0.01, maxX - minX),
+        height: Math.max(0.01, maxY - minY),
+      },
+      repeat: floorMaterial.repeat,
+      rotation: floorMaterial.rotation,
+      offset: floorMaterial.offset,
+      opacity: showSelectedChrome ? 0.58 : 0.92,
+    })
+  }
+  children.push({
+    kind: 'path',
+    d: segments.join(' '),
+    fill: floorMaterial.url ? (showSelectedChrome ? '#ffffff' : 'transparent') : fill,
+    fillOpacity: showSelectedChrome ? 0.28 : floorMaterial.url ? 0 : 0.82,
+    stroke,
+    strokeWidth: showSelectedChrome ? 0.04 : 0.03,
+    strokeOpacity: showSelectedChrome ? 0.96 : 0.85,
+  })
 
   // Hatch overlay on selected — same `<defs>` pattern as the wall.
   if (isSelected && palette) {

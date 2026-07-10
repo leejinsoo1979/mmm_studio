@@ -1,7 +1,7 @@
 'use client'
 
 import { type FloorplanGeometry, loadAssetUrl } from '@pascal-app/core'
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useId, useState } from 'react'
 
 /**
  * Pure-data → SVG converter. Walks a `FloorplanGeometry` tree returned by
@@ -172,6 +172,9 @@ function renderNode(
         />
       )
 
+    case 'texture-path':
+      return <FloorplanTexturePath geometry={g} key={keyHint} />
+
     case 'group': {
       const transform = formatTransform(g.transform)
       return (
@@ -190,6 +193,65 @@ function renderNode(
     default:
       return null
   }
+}
+
+function FloorplanTexturePath({
+  geometry,
+}: {
+  geometry: Extract<FloorplanGeometry, { kind: 'texture-path' }>
+}) {
+  const id = useId().replace(/:/g, '')
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    loadAssetUrl(geometry.url).then((url) => {
+      if (!cancelled) setResolvedUrl(url)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [geometry.url])
+  if (!resolvedUrl) return null
+  const repeatX = Math.max(0.05, geometry.repeat?.[0] ?? 1)
+  const repeatY = Math.max(0.05, geometry.repeat?.[1] ?? 1)
+  const tileWidth = 1 / repeatX
+  const tileHeight = 1 / repeatY
+  const offsetX = (geometry.offset?.[0] ?? 0) * tileWidth
+  const offsetY = (geometry.offset?.[1] ?? 0) * tileHeight
+  const rotation = ((geometry.rotation ?? 0) * 180) / Math.PI
+
+  return (
+    <>
+      <defs>
+        <pattern
+          height={tileHeight}
+          id={id}
+          patternTransform={`translate(${offsetX} ${offsetY}) rotate(${rotation})`}
+          patternUnits="userSpaceOnUse"
+          width={tileWidth}
+          x={geometry.bounds.x}
+          y={geometry.bounds.y}
+        >
+          <image
+            height={tileHeight}
+            href={resolvedUrl}
+            preserveAspectRatio="xMidYMid slice"
+            width={tileWidth}
+          />
+        </pattern>
+      </defs>
+      <path
+        d={geometry.d}
+        fill={`url(#${id})`}
+        fillRule="evenodd"
+        opacity={geometry.opacity}
+        pointerEvents="none"
+        stroke={geometry.stroke}
+        strokeOpacity={geometry.strokeOpacity}
+        strokeWidth={geometry.strokeWidth}
+      />
+    </>
+  )
 }
 
 function pointsToAttr(points: readonly (readonly [number, number])[]): string {

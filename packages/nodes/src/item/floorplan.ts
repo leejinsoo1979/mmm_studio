@@ -199,10 +199,13 @@ export function buildItemFloorplan(node: ItemNode, ctx: GeometryContext): Floorp
       // the registry layer's wrapping `<g>` only fires onPointerDown when
       // the child renders a paintable surface. `fill="none"` would make
       // clicks pass through to whatever's beneath, breaking selection.
-      fill: floorPlanUrl ? 'transparent' : '#fef3c7',
-      stroke: '#92400e',
-      strokeWidth: 0.012,
-      opacity: 0.85,
+      fill: floorPlanUrl ? 'transparent' : '#e2e8f0',
+      fillOpacity: floorPlanUrl ? undefined : 0.14,
+      stroke: floorPlanUrl ? '#92400e' : '#475569',
+      strokeWidth: floorPlanUrl ? 0.012 : 1.2,
+      vectorEffect: floorPlanUrl ? undefined : 'non-scaling-stroke',
+      strokeOpacity: floorPlanUrl ? undefined : 0.72,
+      opacity: floorPlanUrl ? 0.85 : 1,
     },
   ]
   // Asset thumbnail — top-down PNG capture from the asset modal. Drawn

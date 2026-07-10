@@ -13,6 +13,13 @@ import {
 import { useViewer } from '@pascal-app/viewer'
 import { Move, Trash2 } from 'lucide-react'
 
+type TupleIndex = 0 | 1 | 2
+const AXES = ['x', 'y', 'z'] as const
+
+function tupleValue(tuple: readonly [number, number, number], index: TupleIndex): number {
+  return tuple[index]
+}
+
 export default function LightPanel() {
   const selectedId = useViewer((state) => state.selection.selectedIds[0])
   const setSelection = useViewer((state) => state.setSelection)
@@ -155,44 +162,52 @@ export default function LightPanel() {
       </PanelSection>
 
       <PanelSection title="Position">
-        {(['x', 'y', 'z'] as const).map((axis, index) => (
-          <SliderControl
-            key={axis}
-            label={axis.toUpperCase()}
-            max={node.position[index] + 5}
-            min={node.position[index] - 5}
-            onChange={(value) => {
-              const position = [...node.position] as LightNode['position']
-              position[index] = value
-              update({ position })
-            }}
-            precision={2}
-            step={0.05}
-            unit="m"
-            value={node.position[index]}
-          />
-        ))}
+        {AXES.map((axis, index) => {
+          const tupleIndex = index as TupleIndex
+          const value = tupleValue(node.position, tupleIndex)
+          return (
+            <SliderControl
+              key={axis}
+              label={axis.toUpperCase()}
+              max={value + 5}
+              min={value - 5}
+              onChange={(nextValue) => {
+                const position = [...node.position] as LightNode['position']
+                position[tupleIndex] = nextValue
+                update({ position })
+              }}
+              precision={2}
+              step={0.05}
+              unit="m"
+              value={value}
+            />
+          )
+        })}
       </PanelSection>
 
       {node.kind !== 'point' && (
         <PanelSection title="Direction">
-          {(['x', 'y', 'z'] as const).map((axis, index) => (
-            <SliderControl
-              key={axis}
-              label={`${axis.toUpperCase()} rotation`}
-              max={180}
-              min={-180}
-              onChange={(value) => {
-                const rotation = [...node.rotation] as LightNode['rotation']
-                rotation[index] = (value * Math.PI) / 180
-                update({ rotation })
-              }}
-              precision={0}
-              step={1}
-              unit="°"
-              value={(node.rotation[index] * 180) / Math.PI}
-            />
-          ))}
+          {AXES.map((axis, index) => {
+            const tupleIndex = index as TupleIndex
+            const value = tupleValue(node.rotation, tupleIndex)
+            return (
+              <SliderControl
+                key={axis}
+                label={`${axis.toUpperCase()} rotation`}
+                max={180}
+                min={-180}
+                onChange={(nextValue) => {
+                  const rotation = [...node.rotation] as LightNode['rotation']
+                  rotation[tupleIndex] = (nextValue * Math.PI) / 180
+                  update({ rotation })
+                }}
+                precision={0}
+                step={1}
+                unit="°"
+                value={(value * 180) / Math.PI}
+              />
+            )
+          })}
         </PanelSection>
       )}
 

@@ -321,6 +321,19 @@ export type FloorplanGeometry =
       opacity?: number
     }
   | {
+      kind: 'texture-path'
+      d: string
+      url: string
+      bounds: { x: number; y: number; width: number; height: number }
+      repeat?: FloorplanPoint
+      rotation?: number
+      offset?: FloorplanPoint
+      opacity?: number
+      stroke?: string
+      strokeWidth?: number
+      strokeOpacity?: number
+    }
+  | {
       kind: 'group'
       children: FloorplanGeometry[]
       /** Optional transform applied to all children. Rotation in radians. */
