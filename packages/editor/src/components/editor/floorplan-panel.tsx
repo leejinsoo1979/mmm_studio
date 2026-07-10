@@ -5071,6 +5071,129 @@ function FloorplanLinearDraftLayer({
   )
 }
 
+function FloorplanWallDimensions({
+  walls,
+  unit,
+  unitsPerPixel,
+  sceneRotationDeg,
+  stroke,
+  labelBackground,
+  labelText,
+}: {
+  walls: WallNode[]
+  unit: LinearUnit
+  unitsPerPixel: number
+  sceneRotationDeg: number
+  stroke: string
+  labelBackground: string
+  labelText: string
+}) {
+  const offset = unitsPerPixel * 20
+  const overshoot = unitsPerPixel * 5
+  const tickHalf = unitsPerPixel * 4
+  const fontSize = Math.max(unitsPerPixel * 10, 0.08)
+  const padX = unitsPerPixel * 6
+  const padY = unitsPerPixel * 3
+
+  return (
+    <g pointerEvents="none">
+      {walls.map((wall) => {
+        const dx = wall.end[0] - wall.start[0]
+        const dy = wall.end[1] - wall.start[1]
+        const length = Math.hypot(dx, dy)
+        if (!Number.isFinite(length) || length < 0.01) return null
+
+        const ux = dx / length
+        const uy = dy / length
+        const nx = -uy
+        const ny = ux
+        const start = [wall.start[0] + nx * offset, wall.start[1] + ny * offset] as const
+        const end = [wall.end[0] + nx * offset, wall.end[1] + ny * offset] as const
+        const mid = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2] as const
+        const label = formatMeasurement(length, unit)
+        const plateWidth = Math.max(
+          label.length * unitsPerPixel * 6.2 + padX * 2,
+          unitsPerPixel * 38,
+        )
+        const plateHeight = fontSize + padY * 2
+        let labelAngleDeg = (Math.atan2(dy, dx) * 180) / Math.PI
+        let screenDeg = labelAngleDeg + sceneRotationDeg
+        screenDeg = ((((screenDeg + 180) % 360) + 360) % 360) - 180
+        if (screenDeg > 90) labelAngleDeg -= 180
+        else if (screenDeg <= -90) labelAngleDeg += 180
+
+        return (
+          <g key={`wall-dimension-${wall.id}`}>
+            <line
+              stroke={stroke}
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+              x1={wall.start[0]}
+              x2={start[0] + nx * overshoot}
+              y1={wall.start[1]}
+              y2={start[1] + ny * overshoot}
+            />
+            <line
+              stroke={stroke}
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+              x1={wall.end[0]}
+              x2={end[0] + nx * overshoot}
+              y1={wall.end[1]}
+              y2={end[1] + ny * overshoot}
+            />
+            <line
+              stroke={stroke}
+              strokeWidth={1.25}
+              vectorEffect="non-scaling-stroke"
+              x1={start[0]}
+              x2={end[0]}
+              y1={start[1]}
+              y2={end[1]}
+            />
+            {[start, end].map((point, index) => (
+              <line
+                key={`${wall.id}-tick-${index}`}
+                stroke={stroke}
+                strokeWidth={1.25}
+                vectorEffect="non-scaling-stroke"
+                x1={point[0] - nx * tickHalf}
+                x2={point[0] + nx * tickHalf}
+                y1={point[1] - ny * tickHalf}
+                y2={point[1] + ny * tickHalf}
+              />
+            ))}
+            <g transform={`translate(${mid[0]} ${mid[1]}) rotate(${labelAngleDeg})`}>
+              <rect
+                fill={labelBackground}
+                height={plateHeight}
+                opacity={0.94}
+                rx={unitsPerPixel * 3}
+                stroke={stroke}
+                strokeWidth={0.75}
+                vectorEffect="non-scaling-stroke"
+                width={plateWidth}
+                x={-plateWidth / 2}
+                y={-plateHeight / 2}
+              />
+              <text
+                dominantBaseline="middle"
+                fill={labelText}
+                fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                fontSize={fontSize}
+                fontWeight={700}
+                textAnchor="middle"
+              >
+                {label}
+              </text>
+            </g>
+          </g>
+        )
+      })}
+    </g>
+  )
+}
+
 const EMPTY_DRAFT_ANCHOR_POINTS: Array<{ x: number; y: number; isPrimary: boolean }> = []
 
 export function FloorplanPanel({
@@ -5130,6 +5253,7 @@ export function FloorplanPanel({
   const showGuides = useViewer((state) => state.showGuides)
   const setShowGuides = useViewer((state) => state.setShowGuides)
   const selectedItem = useEditor((state) => state.selectedItem)
+  const showDimensions = useEditor((state) => state.showDimensions)
 
   const setFloorplanHovered = useEditor((state) => state.setFloorplanHovered)
   // Panel is permanently mounted and toggled via `display: none` in
@@ -11166,6 +11290,17 @@ export function FloorplanPanel({
                       `floorplan-wall-move-ghost-layer.tsx`. */}
                   <FloorplanWallMoveGhostLayer />
                 </g>
+                {showDimensions && (
+                  <FloorplanWallDimensions
+                    labelBackground={isDark ? '#0f172a' : '#ffffff'}
+                    labelText={isDark ? '#e2e8f0' : '#171717'}
+                    sceneRotationDeg={floorplanSceneRotationDeg}
+                    stroke={palette.measurementStroke}
+                    unit={unit}
+                    unitsPerPixel={floorplanUnitsPerPixel}
+                    walls={walls}
+                  />
+                )}
               </FloorplanRenderProvider>
               {/* Cursor-driven placement ghost for movingNode when the
                   active kind is registry-driven. Renders via a portal

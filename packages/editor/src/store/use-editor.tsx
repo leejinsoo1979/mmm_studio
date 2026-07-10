@@ -396,6 +396,8 @@ type EditorState = {
   // snap. On by default; toggled from the Display menu.
   magneticSnap: boolean
   setMagneticSnap: (enabled: boolean) => void
+  showDimensions: boolean
+  setShowDimensions: (enabled: boolean) => void
   // Per-context, user-cyclable snapping mode (see `lib/snapping-mode.ts`). Each
   // activity (wall / item / polygon) keeps its own mode + default, because they
   // want different snapping — drawing a wall wants grid + angle, nudging an item
@@ -458,6 +460,7 @@ type PersistedEditorLayoutState = Pick<
   | 'floorplanSelectionTool'
   | 'gridSnapStep'
   | 'magneticSnap'
+  | 'showDimensions'
   | 'snappingModeByContext'
   | 'continuationByContext'
   | 'showReferenceFloor'
@@ -483,6 +486,7 @@ export const DEFAULT_PERSISTED_EDITOR_LAYOUT_STATE: PersistedEditorLayoutState =
   floorplanSelectionTool: 'click',
   gridSnapStep: 0.5,
   magneticSnap: true,
+  showDimensions: false,
   snappingModeByContext: {
     wall: defaultSnappingModeFor('wall'),
     item: defaultSnappingModeFor('item'),
@@ -651,6 +655,7 @@ function normalizePersistedEditorLayoutState(
       : DEFAULT_PERSISTED_EDITOR_LAYOUT_STATE.gridSnapStep,
     // Default on: only an explicit persisted `false` disables it.
     magneticSnap: state?.magneticSnap !== false,
+    showDimensions: state?.showDimensions === true,
     snappingModeByContext: {
       wall: migrateSnappingMode(state?.snappingModeByContext?.wall, 'wall'),
       item: migrateSnappingMode(state?.snappingModeByContext?.item, 'item'),
@@ -1116,6 +1121,8 @@ const useEditor = create<EditorState>()(
       },
       magneticSnap: DEFAULT_PERSISTED_EDITOR_LAYOUT_STATE.magneticSnap,
       setMagneticSnap: (enabled) => set({ magneticSnap: enabled }),
+      showDimensions: DEFAULT_PERSISTED_EDITOR_LAYOUT_STATE.showDimensions,
+      setShowDimensions: (enabled) => set({ showDimensions: enabled }),
       snappingModeByContext: DEFAULT_PERSISTED_EDITOR_LAYOUT_STATE.snappingModeByContext,
       setSnappingMode: (context, mode) =>
         set((state) => ({
@@ -1241,6 +1248,7 @@ const useEditor = create<EditorState>()(
         floorplanSelectionTool: state.floorplanSelectionTool,
         gridSnapStep: state.gridSnapStep,
         magneticSnap: state.magneticSnap,
+        showDimensions: state.showDimensions,
         snappingModeByContext: state.snappingModeByContext,
         continuationByContext: state.continuationByContext,
         showReferenceFloor: state.showReferenceFloor,

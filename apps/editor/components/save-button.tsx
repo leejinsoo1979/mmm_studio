@@ -19,7 +19,13 @@ interface SaveButtonProps {
 /**
  * Creates a new empty scene and navigates the user to it.
  */
-export function CreateSceneButton({ label = 'Create new scene' }: { label?: string } = {}) {
+export function CreateSceneButton({
+  className,
+  label = 'Create new scene',
+}: {
+  className?: string
+  label?: string
+} = {}) {
   const router = useRouter()
   const [isCreating, setIsCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -50,7 +56,10 @@ export function CreateSceneButton({ label = 'Create new scene' }: { label?: stri
     <div className="flex items-center gap-3">
       {error && <span className="text-destructive text-xs">{error}</span>}
       <button
-        className="rounded-md border border-border bg-accent px-3 py-1.5 font-medium text-sm hover:bg-accent/80 disabled:opacity-50"
+        className={
+          className ??
+          'rounded-md border border-border bg-accent px-3 py-1.5 font-medium text-sm hover:bg-accent/80 disabled:opacity-50'
+        }
         disabled={isCreating}
         onClick={handleCreate}
         type="button"

@@ -8,7 +8,6 @@ import {
   getWallMiterBoundaryPoints,
   getWallPlanFootprint,
   getWallSurfacePolygon,
-  type ItemNode,
   isCurvedWall,
   type Point2D,
   pointToKey,
@@ -24,6 +23,7 @@ import { createPortal, useFrame } from '@react-three/fiber'
 import { useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { formatLinearMeasurement } from '../../lib/measurements'
+import useEditor from '../../store/use-editor'
 
 const GUIDE_Y_OFFSET = 0.08
 const LABEL_LIFT = 0.08
@@ -65,30 +65,54 @@ type WallFaceLine = {
 
 export function WallMeasurementLabel() {
   const selectedIds = useViewer((state) => state.selection.selectedIds)
+  const levelId = useViewer((state) => state.selection.levelId)
   const nodes = useScene((state) => state.nodes)
+  const showDimensions = useEditor((state) => state.showDimensions)
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
   const selectedNode = selectedId ? nodes[selectedId as AnyNodeId] : null
-  const measurableNode = selectedNode?.type === 'item' ? selectedNode : null
+  const selectedWall = selectedNode?.type === 'wall' ? selectedNode : null
+  const walls = useMemo(
+    () =>
+      showDimensions
+        ? Object.values(nodes).filter(
+            (node): node is WallNode =>
+              node.type === 'wall' && (!levelId || node.parentId === levelId),
+          )
+        : selectedWall
+          ? [selectedWall]
+          : [],
+    [levelId, nodes, selectedWall, showDimensions],
+  )
 
+  return (
+    <>
+      {walls.map((wall) => (
+        <WallMeasurementPortal key={wall.id} wall={wall} />
+      ))}
+    </>
+  )
+}
+
+function WallMeasurementPortal({ wall }: { wall: WallNode }) {
   const [objectState, setObjectState] = useState<{
     id: AnyNodeId
     object: THREE.Object3D
   } | null>(null)
-  const selectedObject = selectedId && objectState?.id === selectedId ? objectState.object : null
+  const wallObject = objectState?.id === wall.id ? objectState.object : null
 
   useFrame(() => {
-    if (!selectedId || selectedObject) return
+    if (wallObject) return
 
-    const nextObject = sceneRegistry.nodes.get(selectedId)
+    const nextObject = sceneRegistry.nodes.get(wall.id)
     if (nextObject) {
-      setObjectState({ id: selectedId as AnyNodeId, object: nextObject })
+      setObjectState({ id: wall.id, object: nextObject })
     }
   })
 
-  if (!(measurableNode && selectedObject)) return null
+  if (!wallObject) return null
 
-  return createPortal(<SelectedMeasurementAnnotation node={measurableNode} />, selectedObject)
+  return createPortal(<WallMeasurementAnnotation wall={wall} />, wallObject)
 }
 
 function getLevelWalls(
@@ -499,14 +523,6 @@ function MeasurementLabel({
       </div>
     </Html>
   )
-}
-
-function SelectedMeasurementAnnotation({ node }: { node: WallNode | ItemNode }) {
-  if (node.type === 'wall') {
-    return <WallMeasurementAnnotation wall={node} />
-  }
-
-  return null
 }
 
 function WallMeasurementAnnotation({ wall }: { wall: WallNode }) {
