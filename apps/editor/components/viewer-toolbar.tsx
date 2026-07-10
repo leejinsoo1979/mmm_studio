@@ -10,6 +10,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
+  Slider,
   useEditor,
   useSidebarStore,
   type ViewMode,
@@ -31,12 +32,14 @@ import {
   Eye,
   EyeOff,
   Footprints,
+  Gem,
   Grid2X2,
   Magnet,
   PenLine,
   Ruler,
   SlidersHorizontal,
   Sparkles,
+  SunMedium,
   SwatchBook,
 } from 'lucide-react'
 import Image from 'next/image'
@@ -131,6 +134,7 @@ const wallModeConfig: Record<string, { icon: string; label: string }> = {
 const SHADING_OPTIONS = [
   { id: 'solid', name: 'Solid', detail: 'Flat and fast — no ambient occlusion', icon: Box },
   { id: 'rendered', name: 'Rendered', detail: 'Full ambient occlusion', icon: Sparkles },
+  { id: 'hyper', name: 'Hyper', detail: 'Sharper lighting, shadows and detail', icon: Gem },
 ] as const
 
 function ViewModeControl() {
@@ -282,6 +286,55 @@ const UNIT_OPTIONS = [
 ] as const
 
 const SUBMENU_CONTENT_CLASS = 'min-w-56 rounded-xl border-border/45 bg-popover/95 backdrop-blur-xl'
+const MONTH_NAMES = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const
+
+function SunSlider({
+  label,
+  value,
+  displayValue,
+  min,
+  max,
+  step,
+  onValueChange,
+}: {
+  label: string
+  value: number
+  displayValue: string
+  min: number
+  max: number
+  step: number
+  onValueChange: (value: number) => void
+}) {
+  return (
+    <div className="space-y-2 px-2 py-2" onKeyDown={(event) => event.stopPropagation()}>
+      <div className="flex items-center justify-between text-xs">
+        <span>{label}</span>
+        <span className="tabular-nums text-muted-foreground">{displayValue}</span>
+      </div>
+      <Slider
+        aria-label={label}
+        max={max}
+        min={min}
+        onValueChange={([next]) => next !== undefined && onValueChange(next)}
+        step={step}
+        value={[value]}
+      />
+    </div>
+  )
+}
 
 function DisplayMenu() {
   const showGrid = useViewer((state) => state.showGrid)
@@ -298,6 +351,12 @@ function DisplayMenu() {
   const setEdges = useViewer((state) => state.setEdges)
   const shadows = useViewer((state) => state.shadows)
   const setShadows = useViewer((state) => state.setShadows)
+  const sunTime = useViewer((state) => state.sunTime)
+  const setSunTime = useViewer((state) => state.setSunTime)
+  const sunMonth = useViewer((state) => state.sunMonth)
+  const setSunMonth = useViewer((state) => state.setSunMonth)
+  const sunAzimuth = useViewer((state) => state.sunAzimuth)
+  const setSunAzimuth = useViewer((state) => state.setSunAzimuth)
   const magneticSnap = useEditor((state) => state.magneticSnap)
   const setMagneticSnap = useEditor((state) => state.setMagneticSnap)
   const showDimensions = useEditor((state) => state.showDimensions)
@@ -392,6 +451,51 @@ function DisplayMenu() {
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
+
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <SunMedium className="h-4 w-4" />
+            <span>Sun position</span>
+            <span className="ml-auto text-muted-foreground text-xs">
+              {`${Math.floor(sunTime).toString().padStart(2, '0')}:${Math.round((sunTime % 1) * 60)
+                .toString()
+                .padStart(2, '0')}`}
+            </span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-64 rounded-xl border-border/45 bg-popover/95 p-2 backdrop-blur-xl">
+            <SunSlider
+              displayValue={`${Math.floor(sunTime).toString().padStart(2, '0')}:${Math.round(
+                (sunTime % 1) * 60,
+              )
+                .toString()
+                .padStart(2, '0')}`}
+              label="Time"
+              max={24}
+              min={0}
+              onValueChange={setSunTime}
+              step={0.25}
+              value={sunTime}
+            />
+            <SunSlider
+              displayValue={MONTH_NAMES[Math.round(sunMonth) - 1] ?? 'Jun'}
+              label="Season"
+              max={12}
+              min={1}
+              onValueChange={setSunMonth}
+              step={1}
+              value={sunMonth}
+            />
+            <SunSlider
+              displayValue={`${Math.round(sunAzimuth)}°`}
+              label="North offset"
+              max={359}
+              min={0}
+              onValueChange={setSunAzimuth}
+              step={1}
+              value={sunAzimuth}
+            />
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
 
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>

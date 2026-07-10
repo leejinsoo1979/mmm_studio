@@ -14,6 +14,7 @@ import {
   Eye,
   EyeOff,
   FileJson,
+  Gem,
   Grid3X3,
   Hexagon,
   Layers,
@@ -296,6 +297,14 @@ export function EditorCommands() {
         icon: <Sparkles className="h-4 w-4" />,
         keywords: ['rendered', 'shading', 'render', 'mode', 'quality'],
         execute: () => run(() => useViewer.getState().setShading('rendered')),
+      },
+      {
+        id: 'editor.viewer.shading-hyper',
+        label: 'Switch to Hyper Render',
+        group: 'Viewer Controls',
+        icon: <Gem className="h-4 w-4" />,
+        keywords: ['hyper', 'shading', 'render', 'mode', 'quality', 'ultra'],
+        execute: () => run(() => useViewer.getState().setShading('hyper')),
       },
       {
         id: 'editor.viewer.camera-snapshot',

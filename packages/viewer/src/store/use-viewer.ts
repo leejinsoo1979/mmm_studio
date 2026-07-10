@@ -39,6 +39,13 @@ type ViewerState = {
   sceneTheme: string
   setSceneTheme: (id: string) => void
 
+  sunTime: number
+  setSunTime: (hours: number) => void
+  sunMonth: number
+  setSunMonth: (month: number) => void
+  sunAzimuth: number
+  setSunAzimuth: (degrees: number) => void
+
   renderContext: RenderContext
   setRenderContext: (context: RenderContext) => void
 
@@ -148,6 +155,9 @@ type PersistedViewerState = Partial<
     ViewerState,
     | 'cameraMode'
     | 'sceneTheme'
+    | 'sunTime'
+    | 'sunMonth'
+    | 'sunAzimuth'
     | 'shadingByContext'
     | 'textures'
     | 'colorPreset'
@@ -161,7 +171,7 @@ type PersistedViewerState = Partial<
 >
 
 const CAMERA_MODES = ['perspective', 'orthographic'] as const
-const RENDER_SHADINGS = ['solid', 'rendered'] as const
+const RENDER_SHADINGS = ['solid', 'rendered', 'hyper'] as const
 const COLOR_PRESETS = ['clay', 'white', 'mono', 'blueprint'] as const
 const EDGE_MODES = ['off', 'soft', 'strong'] as const
 const UNITS = ['metric', 'imperial', 'millimeter', 'centimeter'] as const
@@ -215,6 +225,10 @@ function normalizePersistedViewerState(value: unknown): PersistedViewerState {
       'perspective',
     ),
     sceneTheme: pickString(state.sceneTheme, SCENE_THEME_IDS, 'studio'),
+    sunTime: typeof state.sunTime === 'number' ? Math.min(24, Math.max(0, state.sunTime)) : 12,
+    sunMonth: typeof state.sunMonth === 'number' ? Math.min(12, Math.max(1, state.sunMonth)) : 6,
+    sunAzimuth:
+      typeof state.sunAzimuth === 'number' ? Math.min(359, Math.max(0, state.sunAzimuth)) : 0,
     shadingByContext: normalizeShadingByContext(state.shadingByContext),
     textures: typeof state.textures === 'boolean' ? state.textures : true,
     colorPreset: pickString<ColorPreset>(state.colorPreset, COLOR_PRESETS, 'clay'),
@@ -244,6 +258,13 @@ const useViewer = create<ViewerState>()(
 
       sceneTheme: 'studio',
       setSceneTheme: (id) => set({ sceneTheme: id }),
+
+      sunTime: 12,
+      setSunTime: (hours) => set({ sunTime: Math.min(24, Math.max(0, hours)) }),
+      sunMonth: 6,
+      setSunMonth: (month) => set({ sunMonth: Math.min(12, Math.max(1, month)) }),
+      sunAzimuth: 0,
+      setSunAzimuth: (degrees) => set({ sunAzimuth: Math.min(359, Math.max(0, degrees)) }),
 
       renderContext: 'editor',
       setRenderContext: (context) => set({ renderContext: context }),
@@ -414,6 +435,9 @@ const useViewer = create<ViewerState>()(
       partialize: (state) => ({
         cameraMode: state.cameraMode,
         sceneTheme: state.sceneTheme,
+        sunTime: state.sunTime,
+        sunMonth: state.sunMonth,
+        sunAzimuth: state.sunAzimuth,
         shadingByContext: state.shadingByContext,
         textures: state.textures,
         colorPreset: state.colorPreset,

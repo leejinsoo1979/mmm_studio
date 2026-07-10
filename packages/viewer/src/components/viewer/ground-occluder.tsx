@@ -3,10 +3,16 @@ import { useMemo } from 'react'
 import * as THREE from 'three'
 import { unionPolygons } from '../../lib/polygon-union'
 import { getSceneTheme } from '../../lib/scene-themes'
+import { getSolarPosition } from '../../lib/solar-position'
 import useViewer from '../../store/use-viewer'
 
 export const GroundOccluder = () => {
-  const bgColor = useViewer((state) => getSceneTheme(state.sceneTheme).ground)
+  const bgColor = useViewer((state) => {
+    const daylight = getSolarPosition(state.sunTime, state.sunMonth, state.sunAzimuth).daylight
+    return new THREE.Color(getSceneTheme(state.sceneTheme).ground)
+      .lerp(new THREE.Color('#101722'), 1 - daylight)
+      .getHex()
+  })
 
   const nodes = useScene((state) => state.nodes)
 

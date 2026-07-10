@@ -416,6 +416,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   }, [])
 
   const isDark = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
+  const shading = useViewer((state) => state.shading)
   const transparentBackground = useViewer((state) => state.transparentBackground)
   useLayoutEffect(() => {
     if (transparent === undefined) return
@@ -463,10 +464,11 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   }, [defaultColorPreset, defaultShading, defaultTextures, hasDefaultRender, renderContext])
 
   // Coarse-pointer devices (phones/tablets) get a tighter DPR ceiling to keep
-  // fragment-shader cost down — saves another ~30% over 1.5x on high-DPI mobile.
-  // Desktops (fine pointer) keep the original 1.5 cap.
-  const maxDpr =
-    typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5
+  // fragment-shader cost down. Hyper raises both ceilings, while retaining a
+  // conservative mobile limit to avoid excessive heat and render-target memory.
+  const coarsePointer =
+    typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
+  const maxDpr = shading === 'hyper' ? (coarsePointer ? 1.5 : 2) : coarsePointer ? 1.25 : 1.5
   const showGpuFallback = !canMountViewer || rendererInitFailed
   // When we can't mount the GPU canvas, the SceneReadyTracker never mounts and
   // the host editor would otherwise wait on its scene-readiness timeout. Signal
@@ -523,7 +525,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         enabled: true,
       }}
     >
-      <FrameLimiter fps={50} />
+      <FrameLimiter fps={shading === 'hyper' ? 60 : 50} />
       <ViewerCamera />
       <GPUDeviceWatcher />
       <ToneMappingExposure />

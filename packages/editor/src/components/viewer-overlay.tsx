@@ -26,6 +26,7 @@ import {
   ChevronRight,
   Diamond,
   Footprints,
+  Gem,
   Layers,
   Palette,
   PenLine,
@@ -115,6 +116,7 @@ const wallModeConfig = {
 const SHADING_OPTIONS = [
   { id: 'solid', name: 'Solid', detail: 'Flat and fast — no ambient occlusion', icon: Box },
   { id: 'rendered', name: 'Rendered', detail: 'Full ambient occlusion', icon: Sparkles },
+  { id: 'hyper', name: 'Hyper', detail: 'Sharper lighting, shadows and detail', icon: Gem },
 ] as const
 
 const TEXTURE_OPTIONS = [

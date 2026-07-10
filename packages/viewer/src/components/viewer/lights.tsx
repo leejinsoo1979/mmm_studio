@@ -9,6 +9,7 @@ import type {
 } from 'three/webgpu'
 import * as THREE from 'three/webgpu'
 import { getSceneTheme } from '../../lib/scene-themes'
+import { getSolarPosition } from '../../lib/solar-position'
 import useViewer from '../../store/use-viewer'
 
 // Diagnostic toggle: `?disable=shadows` skips the shadow-map render pass
@@ -26,6 +27,10 @@ const SHADOWS_DISABLED =
 // intensity 1). The aesthetic prototype runs these near-black (≈1.0); this is a
 // deliberate middle ground — present, but not the heavy contact shadow there.
 const MAX_SHADOW_INTENSITY = 0.55
+const NIGHT_SUN_COLOR = new THREE.Color('#ff9a5a')
+const NIGHT_SKY_COLOR = new THREE.Color('#18233d')
+const NIGHT_GROUND_COLOR = new THREE.Color('#080b12')
+const NIGHT_AMBIENT_COLOR = new THREE.Color('#26365c')
 
 // Shadow frustum framing. The frustum is fit to the BUILDING geometry (not the
 // camera): we union the bounds of all registered scene nodes, fit a sphere, and
@@ -55,6 +60,14 @@ export function Lights() {
   const sceneTheme = useViewer((state) => state.sceneTheme)
   const theme = getSceneTheme(sceneTheme)
   const shadows = useViewer((state) => state.shadows)
+  const shading = useViewer((state) => state.shading)
+  const sunTime = useViewer((state) => state.sunTime)
+  const sunMonth = useViewer((state) => state.sunMonth)
+  const sunAzimuth = useViewer((state) => state.sunAzimuth)
+  const solarPosition = useMemo(
+    () => getSolarPosition(sunTime, sunMonth, sunAzimuth),
+    [sunAzimuth, sunMonth, sunTime],
+  )
 
   const lightRefs = useRef<Array<DirectionalLight | null>>([])
   const shadowCamera = useRef<OrthographicCamera>(null)
@@ -92,8 +105,8 @@ export function Lights() {
     // than the camera. We refresh the union bounds on an interval (cheap enough,
     // and bounds only change while editing), fit a sphere, and size + place the
     // ortho shadow camera so the building (plus a margin) is fully covered from
-    // the light's direction. The light DIRECTION stays exactly as the theme
-    // specifies; only its position/distance and the frustum extents change.
+    // the light's direction. Direction comes from the live solar controls;
+    // position/distance and the frustum extents follow the fitted bounds.
     if (shadows) {
       const now = state.clock.elapsedTime
       if (now - lastBoundsTime.current >= BOUNDS_REFRESH_INTERVAL) {
@@ -139,8 +152,7 @@ export function Lights() {
         const config = theme.lights[index]
         const light = lightRefs.current[index]
         if (!(config?.castShadow && light)) continue
-        const [ox, oy, oz] = config.position
-        const dir = shadowDir.current.set(ox, oy, oz)
+        const dir = shadowDir.current.copy(solarPosition.direction)
         if (dir.lengthSq() === 0) dir.set(0, 1, 0)
         dir.normalize().multiplyScalar(distance)
         light.position.set(focus.x + dir.x, focus.y + dir.y, focus.z + dir.z)
@@ -192,13 +204,20 @@ export function Lights() {
       const light = lightRefs.current[index]
       if (!(config && light)) continue
 
-      light.intensity = THREE.MathUtils.lerp(light.intensity, config.intensity, dt)
+      const daylightScale = config.castShadow
+        ? 0.03 + solarPosition.daylight * 0.97
+        : 0.12 + solarPosition.daylight * 0.88
+      light.intensity = THREE.MathUtils.lerp(light.intensity, config.intensity * daylightScale, dt)
       let target = lightTargets.current[index]
       if (!target) {
         target = new THREE.Color()
         lightTargets.current[index] = target
       }
       target.set(config.color)
+      if (config.castShadow) {
+        const horizonWarmth = 1 - THREE.MathUtils.smoothstep(solarPosition.elevation, 0, 0.5)
+        target.lerp(NIGHT_SUN_COLOR, horizonWarmth * 0.55)
+      }
       light.color.lerp(target, dt)
 
       if (config.castShadow && light.shadow) {
@@ -215,22 +234,25 @@ export function Lights() {
     if (hemiRef.current && theme.hemi) {
       hemiRef.current.intensity = THREE.MathUtils.lerp(
         hemiRef.current.intensity,
-        theme.hemi.intensity,
+        theme.hemi.intensity * (0.15 + solarPosition.daylight * 0.85),
         dt,
       )
       targets.hemiSky.set(theme.hemi.sky)
+      targets.hemiSky.lerp(NIGHT_SKY_COLOR, 1 - solarPosition.daylight)
       hemiRef.current.color.lerp(targets.hemiSky, dt)
       targets.hemiGround.set(theme.hemi.ground)
+      targets.hemiGround.lerp(NIGHT_GROUND_COLOR, 1 - solarPosition.daylight)
       hemiRef.current.groundColor.lerp(targets.hemiGround, dt)
     }
 
     if (ambientRef.current) {
       ambientRef.current.intensity = THREE.MathUtils.lerp(
         ambientRef.current.intensity,
-        theme.ambient.intensity,
+        theme.ambient.intensity * (0.12 + solarPosition.daylight * 0.88),
         dt,
       )
       targets.ambColor.set(theme.ambient.color)
+      targets.ambColor.lerp(NIGHT_AMBIENT_COLOR, 1 - solarPosition.daylight)
       ambientRef.current.color.lerp(targets.ambColor, dt)
     }
   })
@@ -240,13 +262,15 @@ export function Lights() {
       {theme.lights.map((light, index) => (
         <directionalLight
           castShadow={Boolean(light.castShadow) && !SHADOWS_DISABLED && shadows}
-          key={`${index}-${light.position.join(',')}`}
+          // Remount on quality changes so three allocates a shadow target at
+          // the new map size instead of retaining the existing GPU texture.
+          key={`${shading}-${index}-${light.position.join(',')}`}
           position={light.position}
           ref={(ref) => {
             lightRefs.current[index] = ref
           }}
           shadow-bias={-0.002}
-          shadow-mapSize={[1024, 1024]}
+          shadow-mapSize={shading === 'hyper' ? [2048, 2048] : [1024, 1024]}
           shadow-normalBias={0.3}
           shadow-radius={1.5}
         >

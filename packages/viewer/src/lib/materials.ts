@@ -17,7 +17,7 @@ import { resolveCdnUrl } from './asset-url'
 import { isKtx2Url, ktx2Loader } from './ktx2-loader'
 import { getSceneTheme } from './scene-themes'
 
-export type RenderShading = 'solid' | 'rendered'
+export type RenderShading = 'solid' | 'rendered' | 'hyper'
 export type ColorPreset = 'clay' | 'white' | 'mono' | 'blueprint'
 
 export const CLAY_PALETTE: Record<SurfaceRole, string> = {

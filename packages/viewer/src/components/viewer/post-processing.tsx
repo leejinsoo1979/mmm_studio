@@ -29,6 +29,7 @@ import { inkedEdges } from '../../lib/ink-edges'
 import { GRID_LAYER, OVERLAY_LAYER, SCENE_LAYER, ZONE_LAYER } from '../../lib/layers'
 import { mergedOutline } from '../../lib/merged-outline-node'
 import { getSceneTheme } from '../../lib/scene-themes'
+import { getSolarPosition } from '../../lib/solar-position'
 import useViewer from '../../store/use-viewer'
 
 // SSGI Parameters - adjust these to fine-tune global illumination and ambient occlusion
@@ -46,6 +47,12 @@ export const SSGI_PARAMS = {
   useScreenSpaceSampling: true,
   useTemporalFiltering: false,
 }
+
+const HYPER_SSGI_PARAMS = {
+  sliceCount: 2,
+  stepCount: 8,
+  denoiseRadius: 6,
+} as const
 
 // Diagnostic toggles for thermal A/B testing. Add `?disable=ao,denoise,outline,postFx`
 // to the URL (any subset) and reload to skip those passes. Each flag prevents
@@ -145,6 +152,7 @@ const PostProcessingPasses = ({
   const bgUniform = useRef(uniform(new Color(initBg)))
   const bgCurrent = useRef(new Color(initBg))
   const bgTarget = useRef(new Color())
+  const nightBackground = useRef(new Color('#080d19'))
 
   // Ink-line colour follows the scene-theme background luminance (dark lines on
   // light scenes, light on dark), refreshed each frame like the background.
@@ -187,6 +195,13 @@ const PostProcessingPasses = ({
   const edges = useViewer((s) => s.edges)
   const inkOpacityOverride = useViewer((s) => s.inkOpacity)
   const transparentBackground = useViewer((s) => s.transparentBackground)
+  const sunTime = useViewer((s) => s.sunTime)
+  const sunMonth = useViewer((s) => s.sunMonth)
+  const sunAzimuth = useViewer((s) => s.sunAzimuth)
+  const solarPosition = useMemo(
+    () => getSolarPosition(sunTime, sunMonth, sunAzimuth),
+    [sunAzimuth, sunMonth, sunTime],
+  )
   const lastProjectIdRef = useRef(projectId)
 
   // Bump this to force a pipeline rebuild (used by retry logic)
@@ -280,7 +295,8 @@ const PostProcessingPasses = ({
       renderPipelineRef.current = null
       return
     }
-    const ssgiEnabled = shading === 'rendered' && SSGI_PARAMS.enabled && !perfDisable.ao
+    const ssgiEnabled = shading !== 'solid' && SSGI_PARAMS.enabled && !perfDisable.ao
+    const hyper = shading === 'hyper'
     const denoiseEnabled = ssgiEnabled && !perfDisable.denoise
     const outlineEnabled = !perfDisable.outline
     const inkEnabled = edges !== 'off'
@@ -389,8 +405,8 @@ const PostProcessingPasses = ({
         diffuseTexture.type = UnsignedByteType
 
         const giPass = ssgi(scenePassColor, scenePassDepth, sceneNormal, camera as any)
-        giPass.sliceCount.value = SSGI_PARAMS.sliceCount
-        giPass.stepCount.value = SSGI_PARAMS.stepCount
+        giPass.sliceCount.value = hyper ? HYPER_SSGI_PARAMS.sliceCount : SSGI_PARAMS.sliceCount
+        giPass.stepCount.value = hyper ? HYPER_SSGI_PARAMS.stepCount : SSGI_PARAMS.stepCount
         giPass.radius.value = SSGI_PARAMS.radius
         giPass.expFactor.value = SSGI_PARAMS.expFactor
         giPass.thickness.value = SSGI_PARAMS.thickness
@@ -411,7 +427,7 @@ const PostProcessingPasses = ({
           const aoAsRgb = vec4(giTexture.a, giTexture.a, giTexture.a, float(1))
           const denoisePass = denoise(aoAsRgb, scenePassDepth, sceneNormal, camera)
           denoisePass.index.value = 0
-          denoisePass.radius.value = 4
+          denoisePass.radius.value = hyper ? HYPER_SSGI_PARAMS.denoiseRadius : 4
           ao = (denoisePass as any).r
         } else {
           // Diagnostic path: feed raw noisy SSGI AO straight through. Will
@@ -562,8 +578,11 @@ const PostProcessingPasses = ({
       return
     }
 
-    // Animate background colour toward the current scene theme target (same lerp as AnimatedBackground)
-    bgTarget.current.set(getSceneTheme(useViewer.getState().sceneTheme).background)
+    // Animate the theme background into a true night sky as the sun drops.
+    const viewerState = useViewer.getState()
+    bgTarget.current
+      .set(getSceneTheme(viewerState.sceneTheme).background)
+      .lerp(nightBackground.current, 1 - solarPosition.daylight)
     bgCurrent.current.lerp(bgTarget.current, Math.min(delta, 0.1) * 4)
     bgUniform.current.value.copy(bgCurrent.current)
     // Ink colour follows the (lerping) background luminance — snaps dark↔light.
