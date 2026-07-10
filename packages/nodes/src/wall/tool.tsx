@@ -1,14 +1,23 @@
 import {
   type AnyNode,
+  type AnyNodeId,
+  type CeilingNode,
   calculateLevelMiters,
   collectAlignmentAnchors,
+  detectSpacesForLevel,
   emitter,
   type GridEvent,
   getWallMiterBoundaryPoints,
   type LevelNode,
+  pauseSceneHistory,
+  planAutoCeilingsForLevel,
+  planAutoSlabsForLevel,
   type Point2D,
+  projectAutoSlabsForPlan,
   resolveAlignment,
   resolveBuildingForLevel,
+  resumeSceneHistory,
+  type SlabNode,
   useScene,
   type WallMiterData,
   type WallNode,
@@ -485,6 +494,76 @@ function getCurrentLevelWalls(): WallNode[] {
   return getLevelWalls(currentLevelId ?? null, nodes)
 }
 
+function getLevelSlabs(levelId: string, nodes: Record<string, AnyNode>): SlabNode[] {
+  return Object.values(nodes).filter(
+    (entry): entry is SlabNode => entry?.type === 'slab' && (entry.parentId ?? null) === levelId,
+  )
+}
+
+function getLevelCeilings(levelId: string, nodes: Record<string, AnyNode>): CeilingNode[] {
+  return Object.values(nodes).filter(
+    (entry): entry is CeilingNode =>
+      entry?.type === 'ceiling' && (entry.parentId ?? null) === levelId,
+  )
+}
+
+function flushAutoSurfacesForCurrentLevel() {
+  const levelId = useViewer.getState().selection.levelId
+  if (!levelId) return
+
+  const sceneState = useScene.getState()
+  const levelWalls = getLevelWalls(levelId, sceneState.nodes)
+  const { roomPolygons } = detectSpacesForLevel(levelId, levelWalls)
+  const existingSlabs = getLevelSlabs(levelId, sceneState.nodes)
+  const slabPlan = planAutoSlabsForLevel(roomPolygons, existingSlabs)
+  const ceilingPlan = planAutoCeilingsForLevel(
+    roomPolygons,
+    getLevelCeilings(levelId, sceneState.nodes),
+    {
+      walls: levelWalls,
+      slabs: projectAutoSlabsForPlan(existingSlabs, slabPlan),
+    },
+  )
+
+  const update = [
+    ...slabPlan.update.map((entry) => ({
+      id: entry.id as AnyNodeId,
+      data: entry.data,
+    })),
+    ...ceilingPlan.update.map((entry) => ({
+      id: entry.id as AnyNodeId,
+      data: entry.data,
+    })),
+  ]
+  const create = [
+    ...slabPlan.create.map((slab) => ({
+      node: slab,
+      parentId: levelId as AnyNodeId,
+    })),
+    ...ceilingPlan.create.map((ceiling) => ({
+      node: ceiling,
+      parentId: levelId as AnyNodeId,
+    })),
+  ]
+  const deleteIds = [
+    ...slabPlan.delete.map((id) => id as AnyNodeId),
+    ...ceilingPlan.delete.map((id) => id as AnyNodeId),
+  ]
+
+  if (update.length === 0 && create.length === 0 && deleteIds.length === 0) return
+
+  pauseSceneHistory(useScene)
+  try {
+    sceneState.applyNodeChanges({
+      update,
+      create,
+      delete: deleteIds,
+    })
+  } finally {
+    resumeSceneHistory(useScene)
+  }
+}
+
 // Walls on the level directly beneath the active one. Levels share the same
 // local XZ origin (they only differ in world Y), so these walls live in the
 // identical coordinate frame and can be fed straight into the snap pipeline —
@@ -736,6 +815,7 @@ export const WallTool: React.FC = () => {
           snappedEnd,
         )
         if (!createdWall) return
+        flushAutoSurfacesForCurrentLevel()
 
         // The new segment is now a real node — make it an alignment target
         // for the next segment, and drop the just-shown guide.

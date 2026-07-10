@@ -87,7 +87,18 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const existing = await operations.loadStoredScene(id)
     if (!existing) {
-      return sceneApiJson(request, { error: 'not_found' }, { status: 404 })
+      const recovered = await operations.saveScene({
+        id,
+        name: parsed.data.name ?? 'Recovered scene',
+        projectId: null,
+        ownerId: userId,
+        graph: parsed.data.graph as never,
+        thumbnailUrl: parsed.data.thumbnailUrl ?? null,
+      })
+      return sceneApiJson(request, recovered, {
+        status: 201,
+        headers: { ETag: `"${recovered.version}"`, 'X-Scene-Recovered': 'true' },
+      })
     }
     if (!canAccessOwnedResource(existing.ownerId, userId)) {
       return sceneApiJson(request, { error: 'forbidden' }, { status: 403 })

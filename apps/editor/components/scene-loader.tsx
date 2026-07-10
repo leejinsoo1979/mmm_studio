@@ -160,7 +160,7 @@ const LOCAL_GLB_PLACEHOLDER_FLOOR_PLAN_URLS = new Set([
   'https://editor.pascal.app/icons/mesh.webp',
   'https://editor.pascal.app/icons/item.webp',
 ])
-const LOCAL_GLB_FLOORPLAN_MARKER = 'mmm-topview-edge-v2'
+const LOCAL_GLB_FLOORPLAN_MARKER = 'mmm-topview-visible-v3'
 
 type GlbInspection = {
   dimensions: [number, number, number]
@@ -521,15 +521,31 @@ function renderTopViewFloorPlanSvg(source: Object3D): string | null {
   const width = Math.max(96, Math.ceil((size.x + padding * 2) * scale))
   const height = Math.max(96, Math.ceil((size.z + padding * 2) * scale))
   const fillPaths: string[] = []
-  const edgePaths: string[] = []
-  const vertex = new Vector3()
+  const edgeCounts = new Map<string, { count: number; path: string }>()
   const a = new Vector3()
   const b = new Vector3()
   const c = new Vector3()
+  const ab = new Vector3()
+  const ac = new Vector3()
+  const normal = new Vector3()
+
+  const addBoundaryEdge = (p1: Vector3, p2: Vector3): void => {
+    const [x1, y1] = pointToSvg(p1, bounds, scale, padding)
+    const [x2, y2] = pointToSvg(p2, bounds, scale, padding)
+    const start = `${x1.toFixed(2)} ${y1.toFixed(2)}`
+    const end = `${x2.toFixed(2)} ${y2.toFixed(2)}`
+    const key = start < end ? `${start}|${end}` : `${end}|${start}`
+    const existing = edgeCounts.get(key)
+    if (existing) {
+      existing.count += 1
+    } else {
+      edgeCounts.set(key, { count: 1, path: `M${start}L${end}` })
+    }
+  }
 
   root.traverse((child) => {
     const mesh = child as Mesh
-    if (!mesh.isMesh || !mesh.geometry) return
+    if (!mesh.isMesh || !mesh.geometry || mesh.name === 'cutout') return
 
     const geometry = mesh.geometry
     const position = geometry.getAttribute('position')
@@ -537,7 +553,7 @@ function renderTopViewFloorPlanSvg(source: Object3D): string | null {
 
     const index = geometry.getIndex()
     const triangleCount = index ? Math.floor(index.count / 3) : Math.floor(position.count / 3)
-    const triangleStep = Math.max(1, Math.ceil(triangleCount / 4000))
+    const triangleStep = Math.max(1, Math.ceil(triangleCount / 6000))
 
     for (let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += triangleStep) {
       const ia = index ? index.getX(triangleIndex * 3) : triangleIndex * 3
@@ -546,30 +562,31 @@ function renderTopViewFloorPlanSvg(source: Object3D): string | null {
       a.fromBufferAttribute(position, ia).applyMatrix4(mesh.matrixWorld)
       b.fromBufferAttribute(position, ib).applyMatrix4(mesh.matrixWorld)
       c.fromBufferAttribute(position, ic).applyMatrix4(mesh.matrixWorld)
+
+      normal.crossVectors(ab.subVectors(b, a), ac.subVectors(c, a)).normalize()
+      if (normal.y < 0.28) continue
+
       const [ax, ay] = pointToSvg(a, bounds, scale, padding)
       const [bx, by] = pointToSvg(b, bounds, scale, padding)
       const [cx, cy] = pointToSvg(c, bounds, scale, padding)
       fillPaths.push(`M${ax.toFixed(2)} ${ay.toFixed(2)}L${bx.toFixed(2)} ${by.toFixed(2)}L${cx.toFixed(2)} ${cy.toFixed(2)}Z`)
+      addBoundaryEdge(a, b)
+      addBoundaryEdge(b, c)
+      addBoundaryEdge(c, a)
     }
-
-    const edges = new EdgesGeometry(geometry, 35)
-    const edgePosition = edges.getAttribute('position')
-    for (let i = 0; i + 1 < edgePosition.count; i += 2) {
-      vertex.fromBufferAttribute(edgePosition, i).applyMatrix4(mesh.matrixWorld)
-      const [x1, y1] = pointToSvg(vertex, bounds, scale, padding)
-      vertex.fromBufferAttribute(edgePosition, i + 1).applyMatrix4(mesh.matrixWorld)
-      const [x2, y2] = pointToSvg(vertex, bounds, scale, padding)
-      edgePaths.push(`M${x1.toFixed(2)} ${y1.toFixed(2)}L${x2.toFixed(2)} ${y2.toFixed(2)}`)
-    }
-    edges.dispose()
   })
 
-  if (!fillPaths.length && !edgePaths.length) return null
+  if (!fillPaths.length) return null
+
+  const edgePaths = [...edgeCounts.values()]
+    .filter((edge) => edge.count === 1)
+    .map((edge) => edge.path)
 
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" data-mmm-topview="${LOCAL_GLB_FLOORPLAN_MARKER}" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+    `<path d="${fillPaths.join('')}" fill="#fff" stroke="none"/>`,
     edgePaths.length
-      ? `<path d="${edgePaths.join('')}" fill="none" stroke="#111" stroke-width="0.75" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`
+      ? `<path d="${edgePaths.join('')}" fill="none" stroke="#222" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`
       : '',
     '</svg>',
   ].join('')

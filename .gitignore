@@ -33,6 +33,9 @@ build
 dist
 *.tsbuildinfo
 
+# Local persistent editor database
+apps/editor/data/
+
 
 # Debug
 npm-debug.log*

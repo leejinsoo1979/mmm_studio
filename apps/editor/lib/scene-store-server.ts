@@ -1,3 +1,4 @@
+import path from 'node:path'
 import type { SceneOperations } from '@pascal-app/mcp/operations'
 import type { SceneStore } from '@pascal-app/mcp/storage'
 import { MemorySceneStore } from './memory-scene-store'
@@ -21,7 +22,11 @@ export function getSceneStore(): Promise<SceneStore> {
         createSceneStore: (env?: NodeJS.ProcessEnv) => Promise<SceneStore>
       }
       try {
-        const store = await mod.createSceneStore(process.env)
+        const store = await mod.createSceneStore({
+          ...process.env,
+          PASCAL_DB_PATH:
+            process.env.PASCAL_DB_PATH ?? path.join(process.cwd(), 'data', 'pascal.db'),
+        })
         await store.list({ limit: 0 })
         return store
       } catch (error) {

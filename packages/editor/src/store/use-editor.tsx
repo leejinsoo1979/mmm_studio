@@ -844,7 +844,10 @@ const useEditor = create<EditorState>()(
             if (phase === 'structure' && structureLayer === 'zones') {
               set({ tool: 'zone' })
             } else if (phase === 'structure' && structureLayer === 'elements') {
-              set({ tool: 'wall' })
+              set((state) => ({
+                tool: 'wall',
+                continuationByContext: { ...state.continuationByContext, wall: 'room' },
+              }))
             } else if (phase === 'furnish') {
               set({ tool: 'item', catalogCategory: 'furniture' })
             }
@@ -862,7 +865,15 @@ const useEditor = create<EditorState>()(
         else scope.endIf((s) => s.kind === 'painting')
       },
       tool: DEFAULT_PERSISTED_EDITOR_UI_STATE.tool,
-      setTool: (tool) => set({ tool }),
+      setTool: (tool) =>
+        set((state) =>
+          tool === 'wall'
+            ? {
+                tool,
+                continuationByContext: { ...state.continuationByContext, wall: 'room' },
+              }
+            : { tool },
+        ),
       toolDefaults: {},
       setToolDefaults: (tool, defaults) =>
         set((state) => {

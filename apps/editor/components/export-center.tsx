@@ -68,6 +68,7 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
         body: JSON.stringify({ platform, quality: 'ultra' }),
       })
       const result = (await response.json()) as {
+        error?: string
         message?: string
         jobId?: string
         downloadUrl?: string
@@ -76,7 +77,12 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
       setBuildMessage(
         response.ok
           ? `${platform === 'macos' ? 'macOS' : 'Windows'} build queued${result.jobId ? ` · ${result.jobId}` : ''}`
-          : (result.message ?? `${platform} build service is not configured.`),
+          : (result.message ??
+              (result.error === 'forbidden'
+                ? '이 프로젝트의 소유자 계정으로 다시 로그인하세요.'
+                : result.error === 'builder_not_configured'
+                  ? `${platform} build service is not configured.`
+                  : `Runtime build failed: ${result.error ?? response.status}`)),
       )
       if (response.ok && result.jobId && !result.downloadUrl) {
         await waitForBuild(platform, result.jobId)

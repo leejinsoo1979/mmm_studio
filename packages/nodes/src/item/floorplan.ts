@@ -34,7 +34,7 @@ const LOCAL_GLB_PLACEHOLDER_PLAN_IMAGES = new Set([
   'https://editor.pascal.app/icons/mesh.webp',
   'https://editor.pascal.app/icons/item.webp',
 ])
-const LOCAL_GLB_FLOORPLAN_MARKER = 'mmm-topview-edge-v2'
+const LOCAL_GLB_FLOORPLAN_MARKER = 'mmm-topview-visible-v4'
 
 function isLocalGlbSource(src: string): boolean {
   return src.startsWith('asset://') || src.startsWith('data:model/gltf-binary')

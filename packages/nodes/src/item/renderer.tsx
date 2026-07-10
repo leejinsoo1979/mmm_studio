@@ -38,7 +38,7 @@ import { useGLTF } from '@react-three/drei/core/Gltf'
 import { useFrame } from '@react-three/fiber'
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { AnimationAction, Group, Material, Mesh, Object3D } from 'three'
-import { Box3, EdgesGeometry, MathUtils, Vector3 } from 'three'
+import { Box3, MathUtils, Vector3 } from 'three'
 import { positionLocal, smoothstep, time } from 'three/tsl'
 import { RoofFaceHostFrame } from '../shared/roof-face-host'
 
@@ -80,14 +80,14 @@ type ItemMeshUserData = Mesh['userData'] & {
 type SceneMaterials = ReturnType<typeof useScene.getState>['materials']
 
 const LOCAL_GLB_FLOORPLAN_MAX_PIXELS = 512
-const LOCAL_GLB_MAX_FLOORPLAN_SEGMENTS = 2800
+const LOCAL_GLB_MAX_FLOORPLAN_TRIANGLES = 6000
 const LOCAL_GLB_PLACEHOLDER_PLAN_IMAGES = new Set([
   '/icons/mesh.webp',
   '/icons/item.webp',
   'https://editor.pascal.app/icons/mesh.webp',
   'https://editor.pascal.app/icons/item.webp',
 ])
-const LOCAL_GLB_FLOORPLAN_MARKER = 'mmm-topview-edge-v2'
+const LOCAL_GLB_FLOORPLAN_MARKER = 'mmm-topview-visible-v4'
 
 function isLocalGlbSource(src: string): boolean {
   return src.startsWith('asset://') || src.startsWith('data:model/gltf-binary')
@@ -131,35 +131,61 @@ function renderItemSceneTopViewSvg(source: Object3D): string | null {
     return `${x.toFixed(2)} ${y.toFixed(2)}`
   }
 
-  const segments: string[] = []
+  const fills: string[] = []
+  const edgeCounts = new Map<string, { count: number; path: string }>()
   const a = new Vector3()
   const b = new Vector3()
+  const c = new Vector3()
+  const ab = new Vector3()
+  const ac = new Vector3()
+  const normal = new Vector3()
+
+  const addBoundaryEdge = (p1: Vector3, p2: Vector3): void => {
+    const start = toSvgPoint(p1)
+    const end = toSvgPoint(p2)
+    const key = start < end ? `${start}|${end}` : `${end}|${start}`
+    const existing = edgeCounts.get(key)
+    if (existing) {
+      existing.count += 1
+    } else {
+      edgeCounts.set(key, { count: 1, path: `M${start}L${end}` })
+    }
+  }
 
   root.traverse((child) => {
     const mesh = child as Mesh
     if (!mesh.isMesh || !mesh.geometry?.attributes.position || mesh.name === 'cutout') return
 
-    const edges = new EdgesGeometry(mesh.geometry, 35)
-    const position = edges.attributes.position
-    if (!position) {
-      edges.dispose()
-      return
-    }
-    const segmentCount = Math.floor(position.count / 2)
-    const stride = Math.max(1, Math.ceil(segmentCount / LOCAL_GLB_MAX_FLOORPLAN_SEGMENTS))
+    const position = mesh.geometry.attributes.position
+    const index = mesh.geometry.getIndex()
+    const triangleCount = index ? Math.floor(index.count / 3) : Math.floor(position.count / 3)
+    const stride = Math.max(1, Math.ceil(triangleCount / LOCAL_GLB_MAX_FLOORPLAN_TRIANGLES))
 
-    for (let segment = 0; segment < segmentCount; segment += stride) {
-      a.fromBufferAttribute(position, segment * 2).applyMatrix4(mesh.matrixWorld)
-      b.fromBufferAttribute(position, segment * 2 + 1).applyMatrix4(mesh.matrixWorld)
-      segments.push(`M${toSvgPoint(a)}L${toSvgPoint(b)}`)
-    }
+    for (let triangle = 0; triangle < triangleCount; triangle += stride) {
+      const ia = index ? index.getX(triangle * 3) : triangle * 3
+      const ib = index ? index.getX(triangle * 3 + 1) : triangle * 3 + 1
+      const ic = index ? index.getX(triangle * 3 + 2) : triangle * 3 + 2
+      a.fromBufferAttribute(position, ia).applyMatrix4(mesh.matrixWorld)
+      b.fromBufferAttribute(position, ib).applyMatrix4(mesh.matrixWorld)
+      c.fromBufferAttribute(position, ic).applyMatrix4(mesh.matrixWorld)
 
-    edges.dispose()
+      normal.crossVectors(ab.subVectors(b, a), ac.subVectors(c, a)).normalize()
+      if (normal.y < 0.28) continue
+
+      fills.push(`M${toSvgPoint(a)}L${toSvgPoint(b)}L${toSvgPoint(c)}Z`)
+      addBoundaryEdge(a, b)
+      addBoundaryEdge(b, c)
+      addBoundaryEdge(c, a)
+    }
   })
 
-  if (segments.length === 0) return null
+  if (fills.length === 0) return null
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" data-mmm-topview="${LOCAL_GLB_FLOORPLAN_MARKER}" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><path d="${segments.join('')}" fill="none" stroke="#111111" stroke-width="0.75" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`
+  const outlines = [...edgeCounts.values()]
+    .filter((edge) => edge.count === 1)
+    .map((edge) => edge.path)
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" data-mmm-topview="${LOCAL_GLB_FLOORPLAN_MARKER}" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><path d="${fills.join('')}" fill="#ffffff" stroke="none"/><path d="${outlines.join('')}" fill="none" stroke="#222222" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 
