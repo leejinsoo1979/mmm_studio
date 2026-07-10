@@ -3,12 +3,14 @@
 import {
   type AnyNodeId,
   generateSceneMaterialId,
+  getMaterialPresetByRef,
+  type MaterialSchema,
   type SceneMaterialId,
   toSceneMaterialRef,
   useScene,
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
-import { Eraser, Plus, RotateCcw } from 'lucide-react'
+import { Eraser, Plus, RotateCcw, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import {
   buildResetSurfaceMaterialUpdates,
@@ -34,6 +36,7 @@ export function MaterialPaintPanel() {
   const setActivePaintTarget = useEditor((state) => state.setActivePaintTarget)
   const paintEraser = useEditor((state) => state.paintEraser)
   const setPaintEraser = useEditor((state) => state.setPaintEraser)
+  const selectedMaterialTarget = useEditor((state) => state.selectedMaterialTarget)
   // Id of a just-created scene material whose inline editor should open on mount.
   const [autoEditMaterialId, setAutoEditMaterialId] = useState<SceneMaterialId | null>(null)
   const selectedIds = useViewer((state) => state.selection.selectedIds)
@@ -80,6 +83,60 @@ export function MaterialPaintPanel() {
     setAutoEditMaterialId(id)
   }
 
+  const makeActiveMaterialEditable = () => {
+    const ref = activePaintMaterial?.materialPreset
+    if (!ref?.startsWith('library:')) return
+    const preset = getMaterialPresetByRef(ref)
+    if (!preset) return
+    const id = generateSceneMaterialId()
+    const props = preset.mapProperties
+    const maps = preset.maps
+    const material: MaterialSchema = {
+      preset: 'custom',
+      properties: {
+        color: props.color,
+        roughness: props.roughness,
+        metalness: props.metalness,
+        emissiveColor: props.emissiveColor,
+        emissiveIntensity: props.emissiveIntensity,
+        opacity: props.opacity,
+        transparent: props.transparent,
+        side: props.side === 1 ? 'back' : props.side === 2 ? 'double' : 'front',
+      },
+      ...(maps.albedoMap
+        ? {
+            texture: {
+              url: maps.albedoMap,
+              normalUrl: maps.normalMap,
+              roughnessUrl: maps.roughnessMap,
+              metalnessUrl: maps.metalnessMap,
+              emissiveUrl: maps.emissiveMap,
+              displacementUrl: maps.displacementMap,
+              aoUrl: maps.aoMap,
+              repeat: [props.repeatX, props.repeatY],
+              rotation: props.rotation,
+              normalScale: (props.normalScaleX + props.normalScaleY) / 2,
+              displacementScale: props.displacementScale,
+              aoIntensity: props.aoMapIntensity,
+            },
+          }
+        : {}),
+    }
+    useScene.getState().addSceneMaterial({
+      id,
+      name: `Editable ${Object.keys(useScene.getState().materials).length + 1}`,
+      material,
+    })
+    const sceneRef = toSceneMaterialRef(id)
+    if (selectedNode && selectedMaterialTarget?.nodeId === selectedNode.id && 'slots' in selectedNode) {
+      const slots = { ...((selectedNode as { slots?: Record<string, string> }).slots ?? {}) }
+      slots[selectedMaterialTarget.role] = sceneRef
+      useScene.getState().updateNode(selectedNode.id, { slots } as never)
+    }
+    setActivePaintMaterial({ materialPreset: sceneRef, sourceTarget: activePaintTarget })
+    setAutoEditMaterialId(id)
+  }
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       {/* Fixed: eraser / reset. */}
@@ -105,6 +162,11 @@ export function MaterialPaintPanel() {
           Reset all
         </Button>
       </div>
+      {activePaintMaterial?.materialPreset?.startsWith('library:') ? (
+        <Button className="mb-2 w-full" onClick={makeActiveMaterialEditable} size="sm" variant="outline">
+          <SlidersHorizontal /> Make applied material editable
+        </Button>
+      ) : null}
 
       {/* Scrolls: category tabs (fixed inside) + catalog grid (the scroll). */}
       <div className="min-h-0 flex-1">

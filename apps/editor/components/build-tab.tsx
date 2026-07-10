@@ -1,7 +1,7 @@
 'use client'
 
 import { nodeRegistry } from '@pascal-app/core'
-import { MaterialPaintPanel, triggerSFX, useEditor } from '@pascal-app/editor'
+import { triggerSFX, useEditor } from '@pascal-app/editor'
 import { useLiquidLineToolOptions } from '@pascal-app/nodes'
 import { ChevronLeft, Search } from 'lucide-react'
 import Image from 'next/image'
@@ -45,7 +45,6 @@ type BuildType = {
   label: string
   iconSrc: string
   kind?: BuildToolKind
-  mode?: 'material-paint'
 }
 
 type BuildSection = {
@@ -128,7 +127,6 @@ const BUILD_SECTIONS: BuildSection[] = [
       { id: 'fence', label: 'Fence', iconSrc: '/icons/fence.webp', kind: 'fence' },
       { id: 'spawn', label: 'Spawn Point', iconSrc: '/icons/spawn-point.webp', kind: 'spawn' },
       { id: 'mep', label: 'MEP', iconSrc: '/icons/HVAC.webp' },
-      { id: 'painting', label: 'Painting', iconSrc: '/icons/paint.webp', mode: 'material-paint' },
     ],
   },
 ]
@@ -166,13 +164,6 @@ function activateBuildTool(kind: BuildToolKind | MepToolKind): void {
   ed.setToolDefaults(kind, null)
   ed.setMode('build')
   ed.setTool(kind)
-}
-
-function activatePaintMode(): void {
-  const ed = useEditor.getState()
-  ed.setPhase('structure')
-  ed.setStructureLayer('elements')
-  ed.setMode('material-paint')
 }
 
 function activateRoofFeatureTool(kind: string): void {
@@ -276,7 +267,6 @@ export function BuildTab() {
   const isMepActive = mode === 'build' && !!activeTool && MEP_TOOL_KINDS.has(activeTool)
 
   const isTypeActive = (type: BuildType) => {
-    if (type.mode === 'material-paint') return mode === 'material-paint'
     if (type.id === 'mep') return isMepActive
     if (type.id === 'roof')
       return mode === 'build' && (activeTool === 'roof' || isRoofFeatureActive)
@@ -293,10 +283,6 @@ export function BuildTab() {
           : mode === 'build' && activeTool === item.kind
 
   const handleTypeClick = useCallback((type: BuildType) => {
-    if (type.mode === 'material-paint') {
-      activatePaintMode()
-      return
-    }
     if (type.id === 'mep') {
       activateBuildTool('duct-segment')
       return
@@ -362,14 +348,6 @@ export function BuildTab() {
               </div>
             </Section>
           ))}
-
-          {mode === 'material-paint' ? (
-            <Section title="Material Paint">
-              <div className="rounded-[10px] border border-[#444] bg-[#202020] p-3">
-                <MaterialPaintPanel />
-              </div>
-            </Section>
-          ) : null}
 
           {mode === 'build' &&
           (activeTool === 'roof' || isRoofFeatureActive) &&

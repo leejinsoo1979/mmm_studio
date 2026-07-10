@@ -19,6 +19,7 @@ import { gutterDefinition } from './gutter'
 import { hvacEquipmentDefinition } from './hvac-equipment'
 import { itemDefinition } from './item'
 import { levelDefinition } from './level'
+import { lightDefinition } from './light'
 import { linesetDefinition } from './lineset'
 import { liquidLineDefinition } from './liquid-line'
 import { pipeFittingDefinition } from './pipe-fitting'
@@ -71,6 +72,7 @@ export const builtinPlugin: Plugin = {
     doorDefinition as unknown as AnyNodeDefinition,
     windowDefinition as unknown as AnyNodeDefinition,
     itemDefinition as unknown as AnyNodeDefinition,
+    lightDefinition as unknown as AnyNodeDefinition,
     // Stage A — wrap-exports the legacy renderer + system. Legacy
     // panels / move tools / floorplan branches still serve these.
     columnDefinition as unknown as AnyNodeDefinition,
@@ -131,6 +133,7 @@ export { gutterDefinition } from './gutter'
 export { hvacEquipmentDefinition } from './hvac-equipment'
 export { itemDefinition } from './item'
 export { levelDefinition } from './level'
+export { lightDefinition } from './light'
 export { linesetDefinition } from './lineset'
 export { liquidLineDefinition, useLiquidLineToolOptions } from './liquid-line'
 export { pipeFittingDefinition } from './pipe-fitting'

@@ -16,6 +16,7 @@ export type {
   GutterEvent,
   ItemEvent,
   LevelEvent,
+  LightEvent,
   NodeEvent,
   RidgeVentEvent,
   RoofEvent,

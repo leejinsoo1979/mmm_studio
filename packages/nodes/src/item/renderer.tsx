@@ -26,8 +26,8 @@ import {
   glassMaterial,
   NodeRenderer,
   type RenderShading,
-  resolveCdnUrl,
   resolveMaterialRef,
+  useAssetUrl,
   useItemLightPool,
   useNodeEvents,
   useViewer,
@@ -297,7 +297,13 @@ const multiplyScales = (
 ): [number, number, number] => [a[0] * b[0], a[1] * b[1], a[2] * b[2]]
 
 const ModelRenderer = ({ node }: { node: ItemNode }) => {
-  const { scene, nodes, animations } = useGLTF(resolveCdnUrl(node.asset.src) || '')
+  const modelUrl = useAssetUrl(node.asset.src)
+  if (!modelUrl) return <PreviewModel node={node} />
+  return <ResolvedModelRenderer node={node} url={modelUrl} />
+}
+
+const ResolvedModelRenderer = ({ node, url }: { node: ItemNode; url: string }) => {
+  const { scene, nodes, animations } = useGLTF(url)
   const ref = useRef<Group>(null!)
   const { actions } = useAnimations(animations, ref)
   const shading = useViewer((s) => s.shading)

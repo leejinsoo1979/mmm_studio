@@ -92,6 +92,7 @@ export {
   LOW_PROFILE_ITEM_SURFACE_MAX_HEIGHT,
 } from './nodes/item'
 export { LevelNode } from './nodes/level'
+export { LightKind, LightNode } from './nodes/light'
 export { LinesetNode } from './nodes/lineset'
 export { LiquidLineNode } from './nodes/liquid-line'
 export { PipeFittingNode } from './nodes/pipe-fitting'

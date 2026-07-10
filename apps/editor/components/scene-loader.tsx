@@ -3,7 +3,7 @@
 // Node registry bootstrap is loaded once at the root via
 // `<ClientBootstrap>` in `app/layout.tsx` — no per-page side-effect
 // import here.
-import { emitter } from '@pascal-app/core'
+import { type AssetInput, emitter, saveAsset } from '@pascal-app/core'
 import {
   applySceneGraphToEditor,
   Editor,
@@ -17,16 +17,23 @@ import {
   Box,
   Brush,
   DraftingCompass,
+  Layers,
   Lightbulb,
+  Loader2,
   PanelTop,
   Sparkles,
   SwatchBook,
+  Upload,
   UserRound,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Box3, Vector3 } from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { BuildTab } from './build-tab'
 import { EditorHeader } from './editor-header'
+import { LightingTab } from './lighting-tab'
+import { MaterialTab } from './material-tab'
 import { CommunityViewerToolbarLeft, CommunityViewerToolbarRight } from './viewer-toolbar'
 
 export interface SceneMeta {
@@ -43,6 +50,14 @@ export interface SceneMeta {
 }
 
 const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
+  {
+    id: 'site',
+    label: 'Scene',
+    component: () => null,
+    mobileDefaultSnap: 0.5,
+    mobileIcon: <Layers className="h-5 w-5" />,
+    icon: <Layers />,
+  },
   {
     id: 'draw',
     label: 'Draw',
@@ -62,7 +77,7 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
   {
     id: 'material',
     label: 'Material',
-    component: () => <CategoryPanel title="Material" />,
+    component: MaterialTab,
     mobileDefaultSnap: 0.5,
     mobileIcon: <SwatchBook className="h-5 w-5" />,
     icon: <SwatchBook />,
@@ -70,7 +85,7 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
   {
     id: 'lighting',
     label: 'Lighting',
-    component: () => <CategoryPanel title="Lighting" />,
+    component: LightingTab,
     mobileDefaultSnap: 0.5,
     mobileIcon: <Lightbulb className="h-5 w-5" />,
     icon: <Lightbulb />,
@@ -109,10 +124,183 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
   },
 ]
 
+const LOCAL_GLB_ITEMS_KEY = 'mmm-studio.local-glb-items.v1'
+const LOCAL_GLB_THUMBNAIL = 'https://editor.pascal.app/icons/mesh.webp'
+const FALLBACK_GLB_DIMENSIONS: [number, number, number] = [1, 1, 1]
+
+function loadLocalGlbItems(): AssetInput[] {
+  if (typeof window === 'undefined') return []
+
+  try {
+    const raw = window.localStorage.getItem(LOCAL_GLB_ITEMS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(isLocalGlbItem)
+  } catch {
+    return []
+  }
+}
+
+function persistLocalGlbItems(items: AssetInput[]) {
+  window.localStorage.setItem(LOCAL_GLB_ITEMS_KEY, JSON.stringify(items))
+}
+
+function isLocalGlbItem(value: unknown): value is AssetInput {
+  if (!value || typeof value !== 'object') return false
+  const item = value as Record<string, unknown>
+  return (
+    typeof item.id === 'string' &&
+    typeof item.name === 'string' &&
+    typeof item.src === 'string' &&
+    item.src.startsWith('asset://') &&
+    Array.isArray(item.dimensions)
+  )
+}
+
+function glbDisplayName(fileName: string): string {
+  const base = fileName
+    .replace(/\.[^.]+$/, '')
+    .replace(/[-_]+/g, ' ')
+    .trim()
+  return base || 'Local GLB'
+}
+
+function normalizeDimension(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 1
+  return Math.max(value, 0.01)
+}
+
+async function inspectGlb(file: File): Promise<{
+  dimensions: [number, number, number]
+  offset: [number, number, number]
+}> {
+  const buffer = await file.arrayBuffer()
+  const gltf = await new Promise<Awaited<ReturnType<GLTFLoader['parseAsync']>>>(
+    (resolve, reject) => {
+      new GLTFLoader().parse(buffer, '', resolve, reject)
+    },
+  )
+  const box = new Box3().setFromObject(gltf.scene)
+
+  if (box.isEmpty()) {
+    return { dimensions: FALLBACK_GLB_DIMENSIONS, offset: [0, 0, 0] }
+  }
+
+  const size = box.getSize(new Vector3())
+  const center = box.getCenter(new Vector3())
+  return {
+    dimensions: [
+      normalizeDimension(size.x),
+      normalizeDimension(size.y),
+      normalizeDimension(size.z),
+    ],
+    offset: [-center.x, -box.min.y, -center.z],
+  }
+}
+
+async function createLocalGlbItem(file: File): Promise<AssetInput> {
+  const lowerName = file.name.toLowerCase()
+  if (!lowerName.endsWith('.glb')) {
+    throw new Error('GLB 파일만 불러올 수 있습니다.')
+  }
+
+  const [inspection, assetUrl] = await Promise.all([
+    inspectGlb(file).catch(() => ({
+      dimensions: FALLBACK_GLB_DIMENSIONS,
+      offset: [0, 0, 0] as [number, number, number],
+    })),
+    saveAsset(file),
+  ])
+  const { dimensions, offset } = inspection
+  const id = crypto.randomUUID()
+
+  return {
+    id: `local-glb-${id}`,
+    category: 'furniture',
+    name: glbDisplayName(file.name),
+    thumbnail: LOCAL_GLB_THUMBNAIL,
+    src: assetUrl,
+    dimensions,
+    offset,
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    source: 'mine',
+    isDraft: true,
+    tags: ['floor', 'local', 'glb'],
+  }
+}
+
 function AssetTab() {
+  const [localItems, setLocalItems] = useState<AssetInput[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setLocalItems(loadLocalGlbItems())
+  }, [])
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setUploading(true)
+    setUploadError(null)
+    try {
+      const item = await createLocalGlbItem(file)
+      const nextItems = [item, ...loadLocalGlbItems().filter((existing) => existing.id !== item.id)]
+      persistLocalGlbItems(nextItems)
+      setLocalItems(nextItems)
+      useEditor.getState().setSelectedItem(item)
+      useEditor.getState().setTool('item')
+      useEditor.getState().setMode('build')
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'Could not import that GLB.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
   return (
     <div className="h-full bg-[#1b1b1b] text-[#efefef]">
-      <ItemsPanel showSourceFilter={false} showTagFilters={false} />
+      <ItemsPanel
+        extraItems={localItems}
+        leadingTile={
+          <button
+            className="group relative flex min-h-[122px] flex-col gap-1.5 rounded-xl border border-dashed border-[#555] bg-[#242424] p-1.5 text-left transition-colors hover:border-[#7779ff] hover:bg-[#2b2b32]"
+            disabled={uploading}
+            onClick={() => inputRef.current?.click()}
+            type="button"
+          >
+            <div className="flex aspect-square w-full items-center justify-center rounded-lg bg-[#202035] text-[#9a9cff]">
+              {uploading ? (
+                <Loader2 className="h-7 w-7 animate-spin" />
+              ) : (
+                <Upload className="h-7 w-7" />
+              )}
+            </div>
+            <span className="truncate px-0.5 font-medium text-[11px] text-[#d8d8d8]">
+              {uploading ? 'Importing...' : 'Import GLB'}
+            </span>
+            <input
+              accept=".glb,model/gltf-binary"
+              className="hidden"
+              onChange={handleFileChange}
+              ref={inputRef}
+              type="file"
+            />
+          </button>
+        }
+        showSourceFilter={false}
+        showTagFilters={false}
+      />
+      {uploadError && (
+        <div className="border-[#343434] border-t bg-[#251b1b] px-3 py-2 text-[#ff9a9a] text-xs">
+          {uploadError}
+        </div>
+      )}
     </div>
   )
 }

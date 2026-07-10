@@ -1,0 +1,1 @@
+export { lightDefinition } from './definition'

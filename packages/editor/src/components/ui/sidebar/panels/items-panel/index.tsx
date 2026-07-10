@@ -16,6 +16,7 @@ const PLACEMENT_TAGS = new Set(['floor', 'wall', 'ceiling', 'countertop'])
 
 export function ItemsPanel({
   items,
+  extraItems = [],
   onSearchChange,
   searchResults,
   leadingTile,
@@ -25,6 +26,7 @@ export function ItemsPanel({
   showTagFilters = true,
 }: {
   items?: AssetInput[]
+  extraItems?: AssetInput[]
   /** Called when the search query changes (community edition uses this for server-side search) */
   onSearchChange?: (query: string) => void
   /** When non-null and search is active, these results bypass local filtering (server search results) */
@@ -62,7 +64,7 @@ export function ItemsPanel({
       <FunctionTreePanel
         emptyState={emptyState}
         functionTree={functionTree}
-        items={items}
+        items={extraItems.length > 0 ? [...extraItems, ...(items ?? [])] : items}
         leadingTile={leadingTile}
         onSearchChange={onSearchChange}
         searchResults={searchResults}
@@ -72,6 +74,7 @@ export function ItemsPanel({
 
   return <LegacyItemsPanel
     emptyState={emptyState}
+    extraItems={extraItems}
     items={items}
     leadingTile={leadingTile}
     onSearchChange={onSearchChange}
@@ -83,6 +86,7 @@ export function ItemsPanel({
 
 function LegacyItemsPanel({
   items,
+  extraItems = [],
   onSearchChange,
   searchResults,
   leadingTile,
@@ -91,6 +95,7 @@ function LegacyItemsPanel({
   showTagFilters = true,
 }: {
   items?: AssetInput[]
+  extraItems?: AssetInput[]
   onSearchChange?: (query: string) => void
   searchResults?: AssetInput[] | null
   leadingTile?: React.ReactNode
@@ -138,7 +143,7 @@ function LegacyItemsPanel({
   }
 
   // Compute tags for the current category (for filter chips)
-  const baseItems = items ?? CATALOG_ITEMS
+  const baseItems = extraItems.length > 0 ? [...extraItems, ...(items ?? CATALOG_ITEMS)] : (items ?? CATALOG_ITEMS)
   // Apply the Library/Community/Mine filter before any category/tag work.
   // Items that don't carry a source field (e.g. seeded built-in catalog
   // entries from `CATALOG_ITEMS`) fall under "library".
@@ -385,7 +390,7 @@ function LegacyItemsPanel({
             activePlacementTag={isServerSearch ? null : activePlacementTag}
             category={activeCategory.catalogCategory}
             emptyState={emptyState}
-            items={activeSource && items ? items.filter(matchesSource) : items}
+            items={activeSource ? baseItems.filter(matchesSource) : baseItems}
             key={activeCategory.catalogCategory}
             leadingTile={leadingTile}
             overrideItems={

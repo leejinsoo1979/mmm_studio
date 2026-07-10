@@ -22,6 +22,7 @@ import type {
   HvacEquipmentNode,
   ItemNode,
   LevelNode,
+  LightNode,
   LinesetNode,
   LiquidLineNode,
   PipeFittingNode,
@@ -90,6 +91,7 @@ export type ItemEvent = NodeEvent<ItemNode>
 export type SiteEvent = NodeEvent<SiteNode>
 export type BuildingEvent = NodeEvent<BuildingNode>
 export type LevelEvent = NodeEvent<LevelNode>
+export type LightEvent = NodeEvent<LightNode>
 export type ZoneEvent = NodeEvent<ZoneNode>
 export type ShelfEvent = NodeEvent<ShelfNode>
 export type SlabEvent = NodeEvent<SlabNode>
@@ -259,6 +261,7 @@ type EditorEvents = GridEvents &
   NodeEvents<'building', BuildingEvent> &
   NodeEvents<'elevator', ElevatorEvent> &
   NodeEvents<'level', LevelEvent> &
+  NodeEvents<'light', LightEvent> &
   NodeEvents<'zone', ZoneEvent> &
   NodeEvents<'slab', SlabEvent> &
   NodeEvents<'shelf', ShelfEvent> &

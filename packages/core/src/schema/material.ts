@@ -19,6 +19,12 @@ export const MaterialProperties = z.object({
   color: z.string().default('#ffffff'),
   roughness: z.number().min(0).max(1).default(0.5),
   metalness: z.number().min(0).max(1).default(0),
+  emissiveColor: z.string().optional(),
+  emissiveIntensity: z.number().min(0).max(100).optional(),
+  clearcoat: z.number().min(0).max(1).optional(),
+  clearcoatRoughness: z.number().min(0).max(1).optional(),
+  transmission: z.number().min(0).max(1).optional(),
+  ior: z.number().min(1).max(2.333).optional(),
   opacity: z.number().min(0).max(1).default(1),
   transparent: z.boolean().default(false),
   side: z.enum(['front', 'back', 'double']).default('front'),
@@ -33,8 +39,19 @@ export const MaterialSchema = z.object({
   texture: z
     .object({
       url: AssetUrl,
+      normalUrl: AssetUrl.optional(),
+      roughnessUrl: AssetUrl.optional(),
+      metalnessUrl: AssetUrl.optional(),
+      emissiveUrl: AssetUrl.optional(),
+      displacementUrl: AssetUrl.optional(),
+      aoUrl: AssetUrl.optional(),
       repeat: z.tuple([z.number(), z.number()]).optional(),
       scale: z.number().optional(),
+      rotation: z.number().optional(),
+      offset: z.tuple([z.number(), z.number()]).optional(),
+      normalScale: z.number().optional(),
+      displacementScale: z.number().optional(),
+      aoIntensity: z.number().optional(),
     })
     .optional(),
 })

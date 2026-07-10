@@ -11,7 +11,11 @@ import {
   type SurfaceRole,
 } from '@pascal-app/core'
 import * as THREE from 'three'
-import { MeshLambertNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
+import {
+  MeshLambertNodeMaterial,
+  MeshPhysicalNodeMaterial,
+  MeshStandardNodeMaterial,
+} from 'three/webgpu'
 
 import { resolveCdnUrl } from './asset-url'
 import { isKtx2Url, ktx2Loader } from './ktx2-loader'
@@ -173,7 +177,7 @@ function getTextureChannel(slot?: TextureSlot): number {
 }
 
 function getCacheKey(props: MaterialProperties, shading: RenderShading): string {
-  return `${shading}-${props.color}-${props.roughness}-${props.metalness}-${props.opacity}-${props.transparent}-${props.side}`
+  return `${shading}-${props.color}-${props.roughness}-${props.metalness}-${props.emissiveColor ?? '#000000'}-${props.emissiveIntensity ?? 0}-${props.clearcoat ?? 0}-${props.clearcoatRoughness ?? 0}-${props.transmission ?? 0}-${props.ior ?? 1.5}-${props.opacity}-${props.transparent}-${props.side}`
 }
 
 function getTextureKey(material?: MaterialSchema): string {
@@ -181,7 +185,9 @@ function getTextureKey(material?: MaterialSchema): string {
   if (!texture) return 'none'
   const repeat = texture.repeat?.join('x') ?? 'default'
   const scale = texture.scale ?? 'default'
-  return `${texture.url}-${repeat}-${scale}`
+  const rotation = texture.rotation ?? 0
+  const offset = texture.offset?.join('x') ?? '0x0'
+  return `${texture.url}-${repeat}-${scale}-${rotation}-${offset}`
 }
 
 function getTexture(material?: MaterialSchema): THREE.Texture | undefined {
@@ -199,9 +205,36 @@ function getTexture(material?: MaterialSchema): THREE.Texture | undefined {
   const repeatX = textureConfig.repeat?.[0] ?? textureConfig.scale ?? 1
   const repeatY = textureConfig.repeat?.[1] ?? textureConfig.scale ?? 1
   texture.repeat.set(repeatX, repeatY)
+  texture.rotation = textureConfig.rotation ?? 0
+  texture.offset.set(textureConfig.offset?.[0] ?? 0, textureConfig.offset?.[1] ?? 0)
+  texture.center.set(0.5, 0.5)
   texture.updateMatrix()
   texture.colorSpace = THREE.SRGBColorSpace
 
+  textureCache.set(cacheKey, texture)
+  return texture
+}
+
+function getAuxTexture(
+  material: MaterialSchema | undefined,
+  url: string | undefined,
+  slot: TextureSlot,
+): THREE.Texture | undefined {
+  if (!(material?.texture && url)) return undefined
+  const cacheKey = `${getTextureKey(material)}-${slot}-${url}`
+  const cached = textureCache.get(cacheKey)
+  if (cached) return cached
+  const texture = pickTextureLoader(url).load(url)
+  texture.wrapS = THREE.RepeatWrapping
+  texture.wrapT = THREE.RepeatWrapping
+  const repeatX = material.texture.repeat?.[0] ?? material.texture.scale ?? 1
+  const repeatY = material.texture.repeat?.[1] ?? material.texture.scale ?? 1
+  texture.repeat.set(repeatX, repeatY)
+  texture.rotation = material.texture.rotation ?? 0
+  texture.offset.set(material.texture.offset?.[0] ?? 0, material.texture.offset?.[1] ?? 0)
+  texture.center.set(0.5, 0.5)
+  texture.colorSpace = slot === 'emissiveMap' ? THREE.SRGBColorSpace : THREE.NoColorSpace
+  texture.needsUpdate = true
   textureCache.set(cacheKey, texture)
   return texture
 }
@@ -470,6 +503,13 @@ export function createMaterial(
   }
 
   const map = getTexture(material)
+  const textureConfig = material?.texture
+  const normalMap = getAuxTexture(material, textureConfig?.normalUrl, 'normalMap')
+  const roughnessMap = getAuxTexture(material, textureConfig?.roughnessUrl, 'roughnessMap')
+  const metalnessMap = getAuxTexture(material, textureConfig?.metalnessUrl, 'metalnessMap')
+  const emissiveMap = getAuxTexture(material, textureConfig?.emissiveUrl, 'emissiveMap')
+  const displacementMap = getAuxTexture(material, textureConfig?.displacementUrl, 'displacementMap')
+  const aoMap = getAuxTexture(material, textureConfig?.aoUrl, 'aoMap')
   const materialParams: {
     color: string
     map?: THREE.Texture
@@ -485,14 +525,54 @@ export function createMaterial(
 
   if (map) materialParams.map = map
 
+  const usesPhysical =
+    (props.clearcoat ?? 0) > 0 || (props.transmission ?? 0) > 0 || props.ior !== undefined
   const threeMaterial =
     shading === 'solid'
       ? new MeshLambertNodeMaterial(materialParams)
-      : new MeshStandardNodeMaterial({
-          ...materialParams,
-          roughness: props.roughness,
-          metalness: props.metalness,
-        })
+      : usesPhysical
+        ? new MeshPhysicalNodeMaterial({
+            ...materialParams,
+            roughness: props.roughness,
+            metalness: props.metalness,
+            emissive: props.emissiveColor ?? '#000000',
+            emissiveIntensity: props.emissiveIntensity ?? 0,
+            clearcoat: props.clearcoat ?? 0,
+            clearcoatRoughness: props.clearcoatRoughness ?? 0,
+            transmission: props.transmission ?? 0,
+            ior: props.ior ?? 1.5,
+            normalMap,
+            normalScale: new THREE.Vector2(
+              textureConfig?.normalScale ?? 1,
+              textureConfig?.normalScale ?? 1,
+            ),
+            roughnessMap,
+            metalnessMap,
+            emissiveMap,
+            displacementMap,
+            displacementScale: textureConfig?.displacementScale ?? 0,
+            aoMap,
+            aoMapIntensity: textureConfig?.aoIntensity ?? 1,
+          })
+        : new MeshStandardNodeMaterial({
+            ...materialParams,
+            roughness: props.roughness,
+            metalness: props.metalness,
+            emissive: props.emissiveColor ?? '#000000',
+            emissiveIntensity: props.emissiveIntensity ?? 0,
+            normalMap,
+            normalScale: new THREE.Vector2(
+              textureConfig?.normalScale ?? 1,
+              textureConfig?.normalScale ?? 1,
+            ),
+            roughnessMap,
+            metalnessMap,
+            emissiveMap,
+            displacementMap,
+            displacementScale: textureConfig?.displacementScale ?? 0,
+            aoMap,
+            aoMapIntensity: textureConfig?.aoIntensity ?? 1,
+          })
 
   materialCache.set(cacheKey, threeMaterial)
   return threeMaterial
