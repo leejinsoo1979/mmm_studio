@@ -9,10 +9,10 @@ import { IconRail, type SidebarTab } from '../ui/sidebar/tab-bar'
 import { EditorLayoutMobile } from './editor-layout-mobile'
 
 const SIDEBAR_MIN_WIDTH = 300
+const SIDEBAR_DEFAULT_WIDTH = 304
 const SIDEBAR_MAX_WIDTH = 800
 const SIDEBAR_COLLAPSE_THRESHOLD = 220
-// Matches the `w-14` rail in <IconRail>; the resize math is relative to it.
-const RAIL_WIDTH = 56
+const RAIL_WIDTH = 48
 
 // ── Left column: resizable panel with tab bar ────────────────────────────────
 
@@ -35,6 +35,15 @@ function LeftColumn({
   const setActivePanel = useEditor((s) => s.setActiveSidebarPanel)
 
   const isResizing = useRef(false)
+  const didNormalizeInitialWidth = useRef(false)
+
+  useEffect(() => {
+    if (isCollapsed || didNormalizeInitialWidth.current) return
+    didNormalizeInitialWidth.current = true
+    if (Math.abs(width - SIDEBAR_DEFAULT_WIDTH) > 8) {
+      setWidth(SIDEBAR_DEFAULT_WIDTH)
+    }
+  }, [isCollapsed, setWidth, width])
 
   // Ensure active panel is a valid tab
   useEffect(() => {
@@ -86,7 +95,6 @@ function LeftColumn({
   useEffect(() => {
     const handlePointerMove = (e: PointerEvent) => {
       if (!isResizing.current) return
-      // Rail occupies the leftmost 48px; the panel starts after it.
       const newWidth = e.clientX - RAIL_WIDTH
       if (newWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
         setIsCollapsed(true)

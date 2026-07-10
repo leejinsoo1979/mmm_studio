@@ -3,14 +3,26 @@
 // Node registry bootstrap is loaded once at the root via
 // `<ClientBootstrap>` in `app/layout.tsx` — no per-page side-effect
 // import here.
+import { emitter } from '@pascal-app/core'
 import {
   applySceneGraphToEditor,
   Editor,
+  ItemsPanel,
   type SceneGraph,
   type SidebarTab,
+  useEditor,
 } from '@pascal-app/editor'
-import { Hammer, Layers } from 'lucide-react'
-import Image from 'next/image'
+import {
+  Bot,
+  Box,
+  Brush,
+  DraftingCompass,
+  Lightbulb,
+  PanelTop,
+  Sparkles,
+  SwatchBook,
+  UserRound,
+} from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BuildTab } from './build-tab'
@@ -32,38 +44,95 @@ export interface SceneMeta {
 
 const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
   {
-    id: 'site',
-    label: 'Scene',
-    component: () => null, // Built-in SitePanel handles this
-    mobileDefaultSnap: 0.5,
-    mobileIcon: <Layers className="h-5 w-5" />,
-    icon: (
-      <Image
-        alt=""
-        className="h-8 w-8 object-contain"
-        height={32}
-        src="/icons/scene.webp"
-        width={32}
-      />
-    ),
-  },
-  {
-    id: 'build',
-    label: 'Build',
+    id: 'draw',
+    label: 'Draw',
     component: BuildTab,
     mobileDefaultSnap: 0.5,
-    mobileIcon: <Hammer className="h-5 w-5" />,
-    icon: (
-      <Image
-        alt=""
-        className="h-8 w-8 object-contain"
-        height={32}
-        src="/icons/build.webp"
-        width={32}
-      />
-    ),
+    mobileIcon: <DraftingCompass className="h-5 w-5" />,
+    icon: <DraftingCompass />,
+  },
+  {
+    id: 'asset',
+    label: 'Asset',
+    component: AssetTab,
+    mobileDefaultSnap: 0.5,
+    mobileIcon: <Box className="h-5 w-5" />,
+    icon: <Box />,
+  },
+  {
+    id: 'material',
+    label: 'Material',
+    component: () => <CategoryPanel title="Material" />,
+    mobileDefaultSnap: 0.5,
+    mobileIcon: <SwatchBook className="h-5 w-5" />,
+    icon: <SwatchBook />,
+  },
+  {
+    id: 'lighting',
+    label: 'Lighting',
+    component: () => <CategoryPanel title="Lighting" />,
+    mobileDefaultSnap: 0.5,
+    mobileIcon: <Lightbulb className="h-5 w-5" />,
+    icon: <Lightbulb />,
+  },
+  {
+    id: 'public',
+    label: 'Public',
+    component: () => <CategoryPanel title="Public" />,
+    mobileDefaultSnap: 0.5,
+    mobileIcon: <PanelTop className="h-5 w-5" />,
+    icon: <PanelTop />,
+  },
+  {
+    id: 'advanced-tool',
+    label: 'Advanced Tool',
+    component: () => <CategoryPanel title="Advanced Tool" />,
+    mobileDefaultSnap: 0.5,
+    mobileIcon: <Sparkles className="h-5 w-5" />,
+    icon: <Sparkles />,
+  },
+  {
+    id: 'ai',
+    label: 'AI',
+    component: () => <CategoryPanel title="AI" />,
+    mobileDefaultSnap: 0.5,
+    mobileIcon: <Bot className="h-5 w-5" />,
+    icon: <Bot />,
+  },
+  {
+    id: 'my-page',
+    label: 'My Page',
+    component: () => <CategoryPanel title="My Page" />,
+    mobileDefaultSnap: 0.5,
+    mobileIcon: <UserRound className="h-5 w-5" />,
+    icon: <UserRound />,
   },
 ]
+
+function AssetTab() {
+  return (
+    <div className="h-full bg-[#1b1b1b] text-[#efefef]">
+      <ItemsPanel showSourceFilter={false} showTagFilters={false} />
+    </div>
+  )
+}
+
+function CategoryPanel({ title }: { title: string }) {
+  return (
+    <div className="flex h-full flex-col bg-[#1b1b1b] text-[#efefef]">
+      <div className="flex h-[124px] shrink-0 items-center border-[#343434] border-b px-8">
+        <h1 className="font-bold text-[32px] tracking-[-0.02em]">{title}</h1>
+      </div>
+      <div className="flex flex-1 items-center justify-center px-8 text-center">
+        <div className="max-w-[320px] rounded-[10px] border border-[#444] bg-[#202020] px-6 py-8 text-[#bdbdbd]">
+          <Brush className="mx-auto mb-4 h-9 w-9 text-[#7779ff]" />
+          <p className="font-semibold text-lg text-[#f0f0f0]">{title}</p>
+          <p className="mt-2 text-sm">This category is ready for its tools.</p>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 interface SceneLoaderProps {
   initialScene: SceneGraph
@@ -91,6 +160,58 @@ function sceneGraphSignature(graph: SceneGraphWithCollections): string {
   })
 }
 
+function computeInitialSceneBounds(graph: SceneGraph) {
+  const nodes = Object.values(graph.nodes ?? {}) as Array<Record<string, unknown>>
+  const bounds = {
+    minX: Number.POSITIVE_INFINITY,
+    minZ: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    maxZ: Number.NEGATIVE_INFINITY,
+    hasPoint: false,
+  }
+
+  const extend = (x: unknown, z: unknown) => {
+    if (typeof x !== 'number' || typeof z !== 'number') return
+    if (!(Number.isFinite(x) && Number.isFinite(z))) return
+    bounds.minX = Math.min(bounds.minX, x)
+    bounds.minZ = Math.min(bounds.minZ, z)
+    bounds.maxX = Math.max(bounds.maxX, x)
+    bounds.maxZ = Math.max(bounds.maxZ, z)
+    bounds.hasPoint = true
+  }
+
+  for (const node of nodes) {
+    const start = node.start
+    const end = node.end
+    const polygon = node.polygon
+    const position = node.position
+
+    if (Array.isArray(start)) extend(start[0], start[1])
+    if (Array.isArray(end)) extend(end[0], end[1])
+    if (Array.isArray(polygon)) {
+      for (const point of polygon) {
+        if (Array.isArray(point)) extend(point[0], point[1])
+      }
+    }
+    if (Array.isArray(position)) extend(position[0], position[2])
+  }
+
+  if (!bounds.hasPoint) return null
+
+  const min: [number, number] = [bounds.minX, bounds.minZ]
+  const max: [number, number] = [bounds.maxX, bounds.maxZ]
+  const center: [number, number] = [
+    (bounds.minX + bounds.maxX) / 2,
+    (bounds.minZ + bounds.maxZ) / 2,
+  ]
+  const size: [number, number] = [
+    Math.max(bounds.maxX - bounds.minX, 0.001),
+    Math.max(bounds.maxZ - bounds.minZ, 0.001),
+  ]
+
+  return { min, max, center, size }
+}
+
 export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
   const router = useRouter()
   const versionRef = useRef(meta.version)
@@ -98,6 +219,27 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
   const suppressRemoteSaveUntilRef = useRef(0)
   const [conflict, setConflict] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const bounds = computeInitialSceneBounds(initialScene)
+    const forceVisible3d = () => {
+      const editor = useEditor.getState()
+      editor.setActiveSidebarPanel('draw')
+      editor.setViewMode('3d')
+      emitter.emit('camera-controls:fit-scene', bounds ? { bounds } : {})
+    }
+
+    forceVisible3d()
+    const timers = [
+      window.setTimeout(forceVisible3d, 100),
+      window.setTimeout(forceVisible3d, 500),
+      window.setTimeout(forceVisible3d, 1500),
+    ]
+
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer)
+    }
+  }, [initialScene])
 
   const handleLoad = useCallback(async () => initialScene, [initialScene])
 
