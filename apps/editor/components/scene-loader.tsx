@@ -11,10 +11,10 @@ import {
 } from '@pascal-app/editor'
 import { Hammer, Layers } from 'lucide-react'
 import Image from 'next/image'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BuildTab } from './build-tab'
+import { EditorHeader } from './editor-header'
 import { CommunityViewerToolbarLeft, CommunityViewerToolbarRight } from './viewer-toolbar'
 
 export interface SceneMeta {
@@ -222,16 +222,9 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
           <p className="font-medium text-destructive text-xs">{saveError}</p>
         </div>
       )}
-      <div className="pointer-events-none absolute top-4 right-4 z-40 flex items-center gap-2">
-        <Link
-          className="pointer-events-auto rounded-md border border-border bg-background/90 px-3 py-1.5 font-medium text-xs shadow-sm backdrop-blur hover:bg-accent/40"
-          href="/scenes"
-        >
-          All scenes
-        </Link>
-      </div>
       <Editor
         layoutVersion="v2"
+        navbarSlot={<EditorHeader sceneId={meta.id} sceneName={meta.name} />}
         onLoad={handleLoad}
         onSave={handleSave}
         onThumbnailCapture={handleThumb}
