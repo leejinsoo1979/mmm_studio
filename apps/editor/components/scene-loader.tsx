@@ -3,7 +3,14 @@
 // Node registry bootstrap is loaded once at the root via
 // `<ClientBootstrap>` in `app/layout.tsx` — no per-page side-effect
 // import here.
-import { type AssetInput, emitter, saveAsset } from '@pascal-app/core'
+import {
+  type AnyNodeId,
+  type AssetInput,
+  emitter,
+  type ItemNode,
+  loadAssetUrl,
+  useScene,
+} from '@pascal-app/core'
 import {
   applySceneGraphToEditor,
   Editor,
@@ -28,7 +35,22 @@ import {
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Box3, Matrix4, Quaternion, Vector3 } from 'three'
+import {
+  Box3,
+  EdgesGeometry,
+  LineBasicMaterial,
+  LineSegments,
+  Matrix4,
+  MeshBasicMaterial,
+  OrthographicCamera,
+  Quaternion,
+  Scene,
+  Vector3,
+  WebGLRenderer,
+  type Mesh,
+  type Object3D,
+} from 'three'
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { BuildTab } from './build-tab'
 import { EditorHeader } from './editor-header'
@@ -127,10 +149,18 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
 ]
 
 const LOCAL_GLB_ITEMS_KEY = 'mmm-studio.local-glb-items.v1'
-const LOCAL_GLB_THUMBNAIL = 'https://editor.pascal.app/icons/mesh.webp'
+const LOCAL_GLB_THUMBNAIL = '/icons/item.webp'
 const FALLBACK_GLB_DIMENSIONS: [number, number, number] = [1, 1, 1]
 const CENTIMETER_MODEL_THRESHOLD = 20
 const MILLIMETER_MODEL_THRESHOLD = 1000
+const LOCAL_GLB_FLOORPLAN_MAX_PIXELS = 512
+const LOCAL_GLB_PLACEHOLDER_FLOOR_PLAN_URLS = new Set([
+  '/icons/mesh.webp',
+  '/icons/item.webp',
+  'https://editor.pascal.app/icons/mesh.webp',
+  'https://editor.pascal.app/icons/item.webp',
+])
+const LOCAL_GLB_FLOORPLAN_MARKER = 'mmm-topview-edge-v2'
 
 type GlbInspection = {
   dimensions: [number, number, number]
@@ -196,8 +226,21 @@ function isLocalGlbItem(value: unknown): value is AssetInput {
     typeof item.id === 'string' &&
     typeof item.name === 'string' &&
     typeof item.src === 'string' &&
-    item.src.startsWith('asset://') &&
+    isLocalGlbSource(item.src) &&
     Array.isArray(item.dimensions)
+  )
+}
+
+function isLocalGlbSource(src: string): boolean {
+  return src.startsWith('asset://') || src.startsWith('data:model/gltf-binary')
+}
+
+function isLocalGlbPlaceholderFloorPlan(url: string | undefined): boolean {
+  return (
+    !!url &&
+    (LOCAL_GLB_PLACEHOLDER_FLOOR_PLAN_URLS.has(url) ||
+      url.startsWith('data:image/png') ||
+      (url.startsWith('data:image/svg+xml') && !url.includes(LOCAL_GLB_FLOORPLAN_MARKER)))
   )
 }
 
@@ -343,7 +386,9 @@ async function inspectGlb(file: File): Promise<GlbInspection> {
   try {
     const gltf = await new Promise<Awaited<ReturnType<GLTFLoader['parseAsync']>>>(
       (resolve, reject) => {
-        new GLTFLoader().parse(buffer, '', resolve, reject)
+        const loader = new GLTFLoader()
+        loader.setMeshoptDecoder(MeshoptDecoder)
+        loader.parse(buffer, '', resolve, reject)
       },
     )
     return inspectionFromBox(new Box3().setFromObject(gltf.scene))
@@ -354,19 +399,225 @@ async function inspectGlb(file: File): Promise<GlbInspection> {
   }
 }
 
+async function parseGlbScene(buffer: ArrayBuffer): Promise<Object3D> {
+  const gltf = await new Promise<Awaited<ReturnType<GLTFLoader['parseAsync']>>>(
+    (resolve, reject) => {
+      const loader = new GLTFLoader()
+      loader.setMeshoptDecoder(MeshoptDecoder)
+      loader.parse(buffer.slice(0), '', resolve, reject)
+    },
+  )
+  return gltf.scene
+}
+
+function renderTopViewFloorPlanImage(source: Object3D): string | null {
+  if (typeof document === 'undefined') return null
+
+  const root = source.clone(true)
+  const box = new Box3().setFromObject(root)
+  if (box.isEmpty()) return null
+
+  const size = box.getSize(new Vector3())
+  if (size.x <= 0 || size.z <= 0) return null
+
+  const center = box.getCenter(new Vector3())
+  root.position.x -= center.x
+  root.position.y -= center.y
+  root.position.z -= center.z
+
+  const fillMaterial = new MeshBasicMaterial({ color: '#ffffff' })
+  const edgeMaterial = new LineBasicMaterial({
+    color: '#111111',
+    depthTest: false,
+    transparent: true,
+    opacity: 0.9,
+  })
+  const edgePairs: Array<{ mesh: Mesh; edge: LineSegments }> = []
+
+  root.traverse((child) => {
+    const mesh = child as Mesh
+    if (!mesh.isMesh || !mesh.geometry) return
+
+    mesh.material = fillMaterial
+    const edges = new LineSegments(new EdgesGeometry(mesh.geometry, 35), edgeMaterial)
+    edges.position.copy(mesh.position)
+    edges.quaternion.copy(mesh.quaternion)
+    edges.scale.copy(mesh.scale)
+    edges.renderOrder = 10
+    edgePairs.push({ mesh, edge: edges })
+    mesh.renderOrder = 1
+  })
+
+  for (const { mesh, edge } of edgePairs) mesh.parent?.add(edge)
+
+  const longest = Math.max(size.x, size.z)
+  const pixelWidth = Math.max(96, Math.round((LOCAL_GLB_FLOORPLAN_MAX_PIXELS * size.x) / longest))
+  const pixelHeight = Math.max(96, Math.round((LOCAL_GLB_FLOORPLAN_MAX_PIXELS * size.z) / longest))
+  const margin = 1.08
+  const halfWidth = Math.max((size.x * margin) / 2, 0.05)
+  const halfDepth = Math.max((size.z * margin) / 2, 0.05)
+  const camera = new OrthographicCamera(
+    -halfWidth,
+    halfWidth,
+    halfDepth,
+    -halfDepth,
+    0.01,
+    Math.max(size.y * 4, 10),
+  )
+  camera.position.set(0, Math.max(size.y * 2, 2), 0)
+  camera.up.set(0, 0, -1)
+  camera.lookAt(0, 0, 0)
+  camera.updateProjectionMatrix()
+
+  const renderScene = new Scene()
+  renderScene.add(root)
+
+  const renderer = new WebGLRenderer({
+    alpha: true,
+    antialias: true,
+    preserveDrawingBuffer: true,
+  })
+  renderer.setPixelRatio(1)
+  renderer.setClearColor(0xffffff, 0)
+  renderer.setSize(pixelWidth, pixelHeight, false)
+  renderer.render(renderScene, camera)
+  const dataUrl = renderer.domElement.toDataURL('image/png')
+
+  renderer.dispose()
+  fillMaterial.dispose()
+  edgeMaterial.dispose()
+  root.traverse((child) => {
+    if (child instanceof LineSegments) child.geometry.dispose()
+  })
+
+  return dataUrl
+}
+
+function pointToSvg(point: Vector3, bounds: Box3, scale: number, padding: number): [number, number] {
+  return [(point.x - bounds.min.x + padding) * scale, (point.z - bounds.min.z + padding) * scale]
+}
+
+function renderTopViewFloorPlanSvg(source: Object3D): string | null {
+  const root = source.clone(true)
+  const sourceBox = new Box3().setFromObject(root)
+  if (sourceBox.isEmpty()) return null
+
+  const sourceSize = sourceBox.getSize(new Vector3())
+  if (sourceSize.x <= 0 || sourceSize.z <= 0) return null
+
+  const center = sourceBox.getCenter(new Vector3())
+  root.position.x -= center.x
+  root.position.y -= center.y
+  root.position.z -= center.z
+  root.updateWorldMatrix(true, true)
+
+  const bounds = new Box3().setFromObject(root)
+  const size = bounds.getSize(new Vector3())
+  const longest = Math.max(size.x, size.z)
+  if (longest <= 0) return null
+
+  const padding = longest * 0.04
+  const scale = LOCAL_GLB_FLOORPLAN_MAX_PIXELS / (longest + padding * 2)
+  const width = Math.max(96, Math.ceil((size.x + padding * 2) * scale))
+  const height = Math.max(96, Math.ceil((size.z + padding * 2) * scale))
+  const fillPaths: string[] = []
+  const edgePaths: string[] = []
+  const vertex = new Vector3()
+  const a = new Vector3()
+  const b = new Vector3()
+  const c = new Vector3()
+
+  root.traverse((child) => {
+    const mesh = child as Mesh
+    if (!mesh.isMesh || !mesh.geometry) return
+
+    const geometry = mesh.geometry
+    const position = geometry.getAttribute('position')
+    if (!position || position.count <= 0) return
+
+    const index = geometry.getIndex()
+    const triangleCount = index ? Math.floor(index.count / 3) : Math.floor(position.count / 3)
+    const triangleStep = Math.max(1, Math.ceil(triangleCount / 4000))
+
+    for (let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += triangleStep) {
+      const ia = index ? index.getX(triangleIndex * 3) : triangleIndex * 3
+      const ib = index ? index.getX(triangleIndex * 3 + 1) : triangleIndex * 3 + 1
+      const ic = index ? index.getX(triangleIndex * 3 + 2) : triangleIndex * 3 + 2
+      a.fromBufferAttribute(position, ia).applyMatrix4(mesh.matrixWorld)
+      b.fromBufferAttribute(position, ib).applyMatrix4(mesh.matrixWorld)
+      c.fromBufferAttribute(position, ic).applyMatrix4(mesh.matrixWorld)
+      const [ax, ay] = pointToSvg(a, bounds, scale, padding)
+      const [bx, by] = pointToSvg(b, bounds, scale, padding)
+      const [cx, cy] = pointToSvg(c, bounds, scale, padding)
+      fillPaths.push(`M${ax.toFixed(2)} ${ay.toFixed(2)}L${bx.toFixed(2)} ${by.toFixed(2)}L${cx.toFixed(2)} ${cy.toFixed(2)}Z`)
+    }
+
+    const edges = new EdgesGeometry(geometry, 35)
+    const edgePosition = edges.getAttribute('position')
+    for (let i = 0; i + 1 < edgePosition.count; i += 2) {
+      vertex.fromBufferAttribute(edgePosition, i).applyMatrix4(mesh.matrixWorld)
+      const [x1, y1] = pointToSvg(vertex, bounds, scale, padding)
+      vertex.fromBufferAttribute(edgePosition, i + 1).applyMatrix4(mesh.matrixWorld)
+      const [x2, y2] = pointToSvg(vertex, bounds, scale, padding)
+      edgePaths.push(`M${x1.toFixed(2)} ${y1.toFixed(2)}L${x2.toFixed(2)} ${y2.toFixed(2)}`)
+    }
+    edges.dispose()
+  })
+
+  if (!fillPaths.length && !edgePaths.length) return null
+
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" data-mmm-topview="${LOCAL_GLB_FLOORPLAN_MARKER}" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+    edgePaths.length
+      ? `<path d="${edgePaths.join('')}" fill="none" stroke="#111" stroke-width="0.75" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`
+      : '',
+    '</svg>',
+  ].join('')
+
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
+
+async function createLocalGlbFloorPlanUrlFromBuffer(buffer: ArrayBuffer): Promise<string | null> {
+  try {
+    const scene = await parseGlbScene(buffer)
+    return renderTopViewFloorPlanSvg(scene) ?? renderTopViewFloorPlanImage(scene)
+  } catch {
+    return null
+  }
+}
+
+async function createLocalGlbFloorPlanUrl(file: File): Promise<string | null> {
+  return createLocalGlbFloorPlanUrlFromBuffer(await file.arrayBuffer())
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  const chunkSize = 0x8000
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+  }
+  return btoa(binary)
+}
+
+async function createPersistentGlbDataUrl(file: File): Promise<string> {
+  return `data:model/gltf-binary;base64,${arrayBufferToBase64(await file.arrayBuffer())}`
+}
+
 async function createLocalGlbItem(file: File): Promise<AssetInput> {
   const lowerName = file.name.toLowerCase()
   if (!lowerName.endsWith('.glb')) {
     throw new Error('GLB 파일만 불러올 수 있습니다.')
   }
 
-  const [inspection, assetUrl] = await Promise.all([
+  const [inspection, assetUrl, floorPlanUrl] = await Promise.all([
     inspectGlb(file).catch(() => ({
       dimensions: FALLBACK_GLB_DIMENSIONS,
       offset: [0, 0, 0] as [number, number, number],
       scale: [1, 1, 1] as [number, number, number],
     })),
-    saveAsset(file),
+    createPersistentGlbDataUrl(file),
+    createLocalGlbFloorPlanUrl(file),
   ])
   const { dimensions, offset, scale } = inspection
   const id = crypto.randomUUID()
@@ -376,6 +627,7 @@ async function createLocalGlbItem(file: File): Promise<AssetInput> {
     category: 'furniture',
     name: glbDisplayName(file.name),
     thumbnail: LOCAL_GLB_THUMBNAIL,
+    ...(floorPlanUrl ? { floorPlanUrl } : {}),
     src: assetUrl,
     dimensions,
     offset,
@@ -476,6 +728,70 @@ function CategoryPanel({ title }: { title: string }) {
       </div>
     </div>
   )
+}
+
+function LocalGlbFloorPlanSync() {
+  const generatingRef = useRef(new Set<string>())
+  const missingSignature = useScene((state) =>
+    Object.values(state.nodes)
+      .filter(
+        (node): node is ItemNode =>
+          node.type === 'item' &&
+          isLocalGlbSource(node.asset.src) &&
+          (!node.asset.floorPlanUrl || isLocalGlbPlaceholderFloorPlan(node.asset.floorPlanUrl)),
+      )
+      .map((node) => `${node.id}:${node.asset.src}`)
+      .join('|'),
+  )
+
+  useEffect(() => {
+    if (!missingSignature) return
+
+    const candidates = Object.values(useScene.getState().nodes).filter(
+      (node): node is ItemNode =>
+        node.type === 'item' &&
+        isLocalGlbSource(node.asset.src) &&
+        (!node.asset.floorPlanUrl || isLocalGlbPlaceholderFloorPlan(node.asset.floorPlanUrl)),
+    )
+
+    for (const node of candidates) {
+      if (generatingRef.current.has(node.id)) continue
+      generatingRef.current.add(node.id)
+
+      void (async () => {
+        try {
+          const resolvedUrl = await loadAssetUrl(node.asset.src)
+          if (!resolvedUrl) return
+
+          const response = await fetch(resolvedUrl)
+          if (!response.ok) return
+
+          const floorPlanUrl = await createLocalGlbFloorPlanUrlFromBuffer(
+            await response.arrayBuffer(),
+          )
+          if (!floorPlanUrl) return
+
+          const current = useScene.getState().nodes[node.id as AnyNodeId]
+          if (
+            current?.type !== 'item' ||
+            current.asset.src !== node.asset.src ||
+            (current.asset.floorPlanUrl &&
+              !isLocalGlbPlaceholderFloorPlan(current.asset.floorPlanUrl))
+          ) {
+            return
+          }
+
+          useScene.getState().updateNode(node.id as AnyNodeId, {
+            asset: { ...current.asset, floorPlanUrl },
+          } as Partial<ItemNode>)
+        } finally {
+          generatingRef.current.delete(node.id)
+        }
+      })()
+    }
+  }, [missingSignature])
+
+  return null
 }
 
 interface SceneLoaderProps {
@@ -764,6 +1080,7 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
         </div>
       )}
       <MaterialSurfaceInspector />
+      <LocalGlbFloorPlanSync />
       <Editor
         layoutVersion="v2"
         navbarSlot={

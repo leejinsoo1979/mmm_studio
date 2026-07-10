@@ -198,6 +198,14 @@ export {
 export { WindowNode, WindowType } from './nodes/window'
 export { ZoneNode } from './nodes/zone'
 export { generateSceneMaterialId, SceneMaterial, type SceneMaterialId } from './scene-material'
+export {
+  DEFAULT_RUNTIME_EXPERIENCE,
+  type ConfiguratorGroup,
+  type ConfiguratorOption,
+  type ConfiguratorTarget,
+  type RuntimeCameraPreset,
+  type RuntimeExperience,
+} from './runtime-experience'
 export type { AnyNodeId, AnyNodeType } from './types'
 // Union types
 export { AnyNode } from './types'

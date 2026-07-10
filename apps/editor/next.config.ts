@@ -5,18 +5,19 @@ const nextConfig: NextConfig = {
     browserToTerminal: true,
   },
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   transpilePackages: [
     'three',
     '@pascal-app/viewer',
     '@pascal-app/core',
     '@pascal-app/editor',
-    '@pascal-app/mcp',
     '@pascal-app/plugin-trees',
     '@dgreenheck/ez-tree',
   ],
+  serverExternalPackages: ['@pascal-app/mcp'],
   turbopack: {
+    root: new URL('../..', import.meta.url).pathname,
     resolveAlias: {
       react: './node_modules/react',
       three: './node_modules/three',

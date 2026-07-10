@@ -1,0 +1,38 @@
+{
+  "name": "@mmm-studio/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MMM Studio standalone Play runtime",
+  "main": "src/main.cjs",
+  "scripts": {
+    "dev": "electron .",
+    "build:mac": "electron-builder --mac dmg zip --publish never",
+    "build:windows": "electron-builder --win nsis portable --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "39.8.10",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "studio.mmm.runtime",
+    "productName": "MMM Studio Experience",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "runtime-config.json"
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

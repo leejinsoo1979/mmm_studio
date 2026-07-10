@@ -56,6 +56,7 @@ import { SettingsPanel, type SettingsPanelProps } from '../ui/sidebar/panels/set
 import { SitePanel, type SitePanelProps } from '../ui/sidebar/panels/site-panel'
 import type { SidebarTab } from '../ui/sidebar/tab-bar'
 import { usePluginPanels } from '../ui/sidebar/use-plugin-panels'
+import { CameraPresetBridge } from './camera-preset-bridge'
 import { CustomCameraControls } from './custom-camera-controls'
 import { EditorLayoutV2 } from './editor-layout-v2'
 import { ExportManager } from './export-manager'
@@ -69,6 +70,7 @@ import { GroupMoveHandle } from './group-move-handle'
 import { GroupRotateHandle } from './group-rotate-handle'
 import { NodeArrowHandles } from './node-arrow-handles'
 import { RiserDiagramPanel } from './riser-diagram-panel'
+import { RuntimePresenceAvatars } from './runtime-presence-avatars'
 import { SelectionManager } from './selection-manager'
 import { SiteEdgeLabels } from './site-edge-labels'
 import { SlabHoleHighlights } from './slab-hole-highlights'
@@ -752,6 +754,8 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
       {!(isLoading || noEditing) && <ToolManager />}
       {isFirstPersonMode && <FirstPersonControls />}
       <CustomCameraControls />
+      <CameraPresetBridge />
+      <RuntimePresenceAvatars />
       <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />
       {!isFirstPersonMode && <SiteEdgeLabels />}
       <InteractiveSystem />

@@ -1,0 +1,46 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function session(sessionId) {
+      return get(/databases/$(database)/documents/runtimeSessions/$(sessionId));
+    }
+
+    function canJoin(sessionId) {
+      return signedIn() &&
+        (session(sessionId).data.visibility == 'public' ||
+         session(sessionId).data.hostId == request.auth.uid ||
+         request.auth.uid in session(sessionId).data.invitedUserIds);
+    }
+
+    match /runtimeSessions/{sessionId} {
+      allow read: if canJoin(sessionId);
+      allow create: if signedIn() && request.resource.data.hostId == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.hostId == request.auth.uid;
+
+      match /participants/{userId} {
+        allow read: if canJoin(sessionId);
+        allow create, update, delete: if canJoin(sessionId) && request.auth.uid == userId;
+      }
+
+      match /messages/{messageId} {
+        allow read: if canJoin(sessionId);
+        allow create: if canJoin(sessionId) &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0 &&
+          request.resource.data.text.size() <= 1000;
+        allow update, delete: if false;
+      }
+
+      match /state/{stateId} {
+        allow read: if canJoin(sessionId);
+        allow write: if canJoin(sessionId);
+      }
+    }
+  }
+}

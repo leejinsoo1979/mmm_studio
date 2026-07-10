@@ -14,7 +14,7 @@ import {
 } from '@pascal-app/core'
 import { useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
-import { RotateCcw, X } from 'lucide-react'
+import { Check, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Material, Mesh, Texture, Vector2 } from 'three'
@@ -398,8 +398,8 @@ function materialFromRenderedSurface(nodeId: string, role: string): MaterialSche
   let matched: RenderedMaterial | null = null
   root.traverse((object) => {
     if (matched) return
-    const mesh = object as Mesh
-    if (!mesh.isMesh) return
+    if (!(object as { isMesh?: boolean }).isMesh) return
+    const mesh = object as unknown as Mesh
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
     const slotId = (mesh.userData as { slotId?: string | (string | null)[] }).slotId
     fallback ??= (materials[0] as RenderedMaterial | undefined) ?? null
@@ -461,6 +461,7 @@ export function MaterialSurfaceInspector() {
   const target = useEditor((state) => state.selectedMaterialTarget)
   const nodes = useScene((state) => state.nodes)
   const sceneMaterials = useScene((state) => state.materials)
+  const experience = useScene((state) => state.experience)
   const selectedNode = useScene((state) => (target ? state.nodes[target.nodeId] : undefined))
 
   useEffect(() => {
@@ -495,6 +496,26 @@ export function MaterialSurfaceInspector() {
   const renderedMaterial = materialFromRenderedSurface(target.nodeId, target.role)
   const editableMaterial =
     sceneMaterial?.material ?? effectiveSurface?.material ?? libraryMaterial ?? renderedMaterial
+  const currentConfigurator = experience.configurators.find(
+    (group) => group.target.nodeId === target.nodeId && group.target.role === target.role,
+  )
+
+  const updateConfigurator = (
+    update: (
+      group: NonNullable<typeof currentConfigurator>,
+    ) => NonNullable<typeof currentConfigurator> | null,
+  ) => {
+    if (!currentConfigurator) return
+    const next = update(currentConfigurator)
+    useScene.getState().setExperience({
+      ...experience,
+      configurators: next
+        ? experience.configurators.map((group) =>
+            group.id === currentConfigurator.id ? next : group,
+          )
+        : experience.configurators.filter((group) => group.id !== currentConfigurator.id),
+    })
+  }
 
   const assignMaterialRef = (nextRef: string) => {
     const paint = nodeRegistry.get(selectedNode.type)?.capabilities?.paint
@@ -526,6 +547,38 @@ export function MaterialSurfaceInspector() {
       materialPreset: nextRef,
       sourceTarget: useEditor.getState().activePaintTarget,
     })
+  }
+
+  const addConfiguratorOption = () => {
+    if (!materialRef) return
+    const optionId = `option_${crypto.randomUUID()}`
+    const existing = experience.configurators.find(
+      (group) => group.target.nodeId === target.nodeId && group.target.role === target.role,
+    )
+    const option = {
+      id: optionId,
+      label: sceneMaterial?.name ?? materialRef.replace(/^library:/, ''),
+      materialRef,
+      thumbnailUrl: editableMaterial?.texture?.url,
+    }
+    const configurators = existing
+      ? experience.configurators.map((group) =>
+          group.id === existing.id &&
+          !group.options.some((entry) => entry.materialRef === materialRef)
+            ? { ...group, options: [...group.options, option] }
+            : group,
+        )
+      : [
+          ...experience.configurators,
+          {
+            id: `config_${crypto.randomUUID()}`,
+            label: `${selectedNode.name ?? selectedNode.type} ${target.role}`,
+            target: { nodeId: target.nodeId, role: target.role },
+            defaultOptionId: optionId,
+            options: [option],
+          },
+        ]
+    useScene.getState().setExperience({ ...experience, configurators })
   }
 
   return createPortal(
@@ -598,6 +651,92 @@ export function MaterialSurfaceInspector() {
           <p className="text-[#888] text-sm">이 표면에 적용된 재질이 없습니다.</p>
         )}
       </div>
+      <footer className="border-white/10 border-t p-4">
+        {currentConfigurator ? (
+          <div className="mb-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
+            <div className="flex items-center gap-2">
+              <input
+                aria-label="Configurator group name"
+                className="h-8 min-w-0 flex-1 rounded-md bg-white/5 px-2 text-xs outline-none focus:ring-1 focus:ring-[#7567ff]"
+                onChange={(event) =>
+                  updateConfigurator((group) => ({ ...group, label: event.target.value }))
+                }
+                value={currentConfigurator.label}
+              />
+              <button
+                aria-label="Delete configurator group"
+                className="grid h-8 w-8 place-items-center rounded-md text-red-300/70 hover:bg-red-400/10 hover:text-red-300"
+                onClick={() => updateConfigurator(() => null)}
+                type="button"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="mt-2 max-h-28 space-y-1 overflow-y-auto">
+              {currentConfigurator.options.map((option) => (
+                <div
+                  className="flex items-center gap-2 rounded-md px-1 py-1 text-xs"
+                  key={option.id}
+                >
+                  <button
+                    aria-label="Set default option"
+                    className={`grid h-6 w-6 place-items-center rounded-full border ${currentConfigurator.defaultOptionId === option.id ? 'border-[#7567ff] bg-[#7567ff]' : 'border-white/15 text-transparent'}`}
+                    onClick={() =>
+                      updateConfigurator((group) => ({ ...group, defaultOptionId: option.id }))
+                    }
+                    type="button"
+                  >
+                    <Check className="h-3 w-3" />
+                  </button>
+                  <input
+                    aria-label="Configurator option name"
+                    className="h-7 min-w-0 flex-1 bg-transparent outline-none focus:text-white"
+                    onChange={(event) =>
+                      updateConfigurator((group) => ({
+                        ...group,
+                        options: group.options.map((entry) =>
+                          entry.id === option.id ? { ...entry, label: event.target.value } : entry,
+                        ),
+                      }))
+                    }
+                    value={option.label}
+                  />
+                  <button
+                    aria-label="Delete option"
+                    className="p-1 text-white/35 hover:text-red-300"
+                    onClick={() =>
+                      updateConfigurator((group) => {
+                        const options = group.options.filter((entry) => entry.id !== option.id)
+                        if (options.length === 0) return null
+                        return {
+                          ...group,
+                          options,
+                          defaultOptionId:
+                            group.defaultOptionId === option.id
+                              ? options[0]!.id
+                              : group.defaultOptionId,
+                        }
+                      })
+                    }
+                    type="button"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <button
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#7567ff] font-medium text-sm text-white transition hover:bg-[#8479ff] disabled:opacity-40"
+          disabled={!materialRef}
+          onClick={addConfiguratorOption}
+          type="button"
+        >
+          <Plus className="h-4 w-4" />
+          Configurator 옵션에 추가
+        </button>
+      </footer>
     </aside>,
     document.body,
   )

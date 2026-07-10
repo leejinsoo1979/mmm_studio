@@ -23,11 +23,22 @@ import {
  * but uses the registry's resolve callback instead of a node map. Logic
  * is identical so visual output matches the legacy.
  *
- * Returns a rotated rectangle of width × depth at the resolved position.
- * Phase 5 follow-up may render `asset.floorPlanUrl` as a custom image
- * overlay when present.
+ * Returns a neutral architectural plan symbol at the resolved position.
  */
 type Transform = { x: number; y: number; rotation: number }
+
+const ITEM_PLAN_FILL = 'transparent'
+const LOCAL_GLB_PLACEHOLDER_PLAN_IMAGES = new Set([
+  '/icons/mesh.webp',
+  '/icons/item.webp',
+  'https://editor.pascal.app/icons/mesh.webp',
+  'https://editor.pascal.app/icons/item.webp',
+])
+const LOCAL_GLB_FLOORPLAN_MARKER = 'mmm-topview-edge-v2'
+
+function isLocalGlbSource(src: string): boolean {
+  return src.startsWith('asset://') || src.startsWith('data:model/gltf-binary')
+}
 
 // Plan-space rotation convention used by the legacy `rotatePlanVector`
 // in `editor/src/lib/floorplan/geometry.ts`. This is a CLOCKWISE rotation
@@ -153,6 +164,23 @@ function resolveItemTransform(
   return result
 }
 
+function getItemPlanImageUrl(node: ItemNode): string | null {
+  if (isLocalGlbSource(node.asset.src)) {
+    if (
+      node.asset.floorPlanUrl &&
+      !LOCAL_GLB_PLACEHOLDER_PLAN_IMAGES.has(node.asset.floorPlanUrl) &&
+      !node.asset.floorPlanUrl.startsWith('data:image/png') &&
+      (!node.asset.floorPlanUrl.startsWith('data:image/svg+xml') ||
+        node.asset.floorPlanUrl.includes(LOCAL_GLB_FLOORPLAN_MARKER))
+    ) {
+      return node.asset.floorPlanUrl
+    }
+    return null
+  }
+  if (node.asset.floorPlanUrl) return node.asset.floorPlanUrl
+  return node.asset.thumbnail || null
+}
+
 export function buildItemFloorplan(node: ItemNode, ctx: GeometryContext): FloorplanGeometry | null {
   const transform = resolveItemTransform(node, ctx)
   if (!transform) return null
@@ -186,45 +214,33 @@ export function buildItemFloorplan(node: ItemNode, ctx: GeometryContext): Floorp
 
   const isSelected = ctx.viewState?.selected ?? false
   const isMoving = ctx.viewState?.moving ?? false
-  const floorPlanUrl = node.asset.floorPlanUrl
+  const planImageUrl = getItemPlanImageUrl(node)
+  const fallbackFootprint = !planImageUrl && !isLocalGlbSource(node.asset.src)
   const children: FloorplanGeometry[] = [
     {
       kind: 'polygon',
       points,
-      // When an asset thumbnail is present, the polygon is a transparent
-      // hit-target — the image carries the visual weight. Without a
-      // thumbnail the polygon needs a light fill to read at all.
-      //
-      // `transparent` (not `none`) so the interior remains hit-testable —
-      // the registry layer's wrapping `<g>` only fires onPointerDown when
-      // the child renders a paintable surface. `fill="none"` would make
-      // clicks pass through to whatever's beneath, breaking selection.
-      fill: floorPlanUrl ? 'transparent' : '#e2e8f0',
-      fillOpacity: floorPlanUrl ? undefined : 0.14,
-      stroke: floorPlanUrl ? '#92400e' : '#475569',
-      strokeWidth: floorPlanUrl ? 0.012 : 1.2,
-      vectorEffect: floorPlanUrl ? undefined : 'non-scaling-stroke',
-      strokeOpacity: floorPlanUrl ? undefined : 0.72,
-      opacity: floorPlanUrl ? 0.85 : 1,
+      fill: fallbackFootprint ? '#ffffff' : ITEM_PLAN_FILL,
+      stroke: fallbackFootprint ? '#111111' : 'none',
+      strokeOpacity: fallbackFootprint ? 0.75 : undefined,
+      strokeWidth: fallbackFootprint ? 1 : 0,
+      vectorEffect: fallbackFootprint ? 'non-scaling-stroke' : undefined,
+      pointerEvents: 'all',
     },
   ]
-  // Asset thumbnail — top-down PNG capture from the asset modal. Drawn
-  // inside the footprint with the item's rotation applied. Matches the
-  // legacy `FloorplanItemImage` overlay.
-  if (floorPlanUrl) {
+
+  if (planImageUrl) {
     children.push({
       kind: 'image',
-      url: floorPlanUrl,
+      url: planImageUrl,
       center: [cx, cy],
       width,
       height: depth,
-      // `rotateVec` (the footprint polygon) applies R(-angle), but the renderer
-      // draws the image with SVG `rotate(+deg)` = R(+angle). Negate so the
-      // sprite rotates the same way as its footprint box (and 3D); otherwise the
-      // two counter-rotate and diverge by 2x the item's rotation.
       rotation: -transform.rotation,
+      cssFilter: 'grayscale(1)',
     })
   }
+
   // Move handle — orange dot at the item center. Only when selected and not
   // already moving: during a move the dot sits under the cursor, so a release
   // over it would re-arm the move (and re-enter edit) instead of committing.

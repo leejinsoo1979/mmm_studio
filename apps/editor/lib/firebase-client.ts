@@ -10,6 +10,8 @@ import {
   signOut,
   type User,
 } from 'firebase/auth'
+import { type Firestore, getFirestore } from 'firebase/firestore'
+import { type FirebaseStorage, getStorage } from 'firebase/storage'
 
 const defaultFirebaseConfig = {
   apiKey: 'AIzaSyA-lpDfDYDUbjKHnmabVwjICN33eMB-PNI',
@@ -49,6 +51,16 @@ export function getFirebaseApp(): FirebaseApp | null {
 export function getFirebaseAuth(): Auth | null {
   const app = getFirebaseApp()
   return app ? getAuth(app) : null
+}
+
+export function getFirebaseFirestore(): Firestore | null {
+  const app = getFirebaseApp()
+  return app ? getFirestore(app) : null
+}
+
+export function getFirebaseStorage(): FirebaseStorage | null {
+  const app = getFirebaseApp()
+  return app ? getStorage(app) : null
 }
 
 function providerForFirebase(provider: 'google' | 'github' | 'kakao' | 'apple') {

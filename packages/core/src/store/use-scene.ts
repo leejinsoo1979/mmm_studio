@@ -32,6 +32,10 @@ import {
   type SceneMaterialId,
 } from '../schema/scene-material'
 import type { AnyNode, AnyNodeId } from '../schema/types'
+import {
+  DEFAULT_RUNTIME_EXPERIENCE,
+  type RuntimeExperience,
+} from '../schema/runtime-experience'
 import { healSceneNodes } from '../utils/heal-scene-graph'
 import * as nodeActions from './actions/node-actions'
 import { resetSceneHistoryPauseDepth } from './history-control'
@@ -925,6 +929,8 @@ export type SceneState = {
   // 4. Relational metadata — not nodes
   collections: Record<CollectionId, Collection>
   materials: Record<SceneMaterialId, SceneMaterial>
+  experience: RuntimeExperience
+  setExperience: (experience: RuntimeExperience) => void
 
   // 5. Read-only lock — when true all create/update/delete operations are no-ops
   readOnly: boolean
@@ -940,6 +946,7 @@ export type SceneState = {
     extra?: {
       collections?: Record<CollectionId, Collection>
       materials?: Record<SceneMaterialId, SceneMaterial>
+      experience?: RuntimeExperience
     },
   ) => void
 
@@ -977,7 +984,9 @@ export type SceneState = {
 
 type UseSceneStore = UseBoundStore<StoreApi<SceneState>> & {
   temporal: StoreApi<
-    TemporalState<Pick<SceneState, 'nodes' | 'rootNodeIds' | 'collections' | 'materials'>>
+    TemporalState<
+      Pick<SceneState, 'nodes' | 'rootNodeIds' | 'collections' | 'materials' | 'experience'>
+    >
   >
 }
 
@@ -996,6 +1005,8 @@ const useScene: UseSceneStore = create<SceneState>()(
       // 4. Collections
       collections: {} as Record<CollectionId, Collection>,
       materials: {} as Record<SceneMaterialId, SceneMaterial>,
+      experience: structuredClone(DEFAULT_RUNTIME_EXPERIENCE),
+      setExperience: (experience) => set({ experience }),
 
       // 5. Read-only lock
       readOnly: false,
@@ -1008,6 +1019,7 @@ const useScene: UseSceneStore = create<SceneState>()(
           dirtyNodes: new Set<AnyNodeId>(),
           collections: {},
           materials: {},
+          experience: structuredClone(DEFAULT_RUNTIME_EXPERIENCE),
         })
       },
 
@@ -1045,6 +1057,7 @@ const useScene: UseSceneStore = create<SceneState>()(
           dirtyNodes: new Set<AnyNodeId>(),
           collections: extra?.collections ?? {},
           materials,
+          experience: extra?.experience ?? structuredClone(DEFAULT_RUNTIME_EXPERIENCE),
         })
 
         const normalizedRootNodeIds = normalizeRootNodeIds(cleanedNodes, rootNodeIds)
@@ -1063,6 +1076,7 @@ const useScene: UseSceneStore = create<SceneState>()(
           dirtyNodes: new Set<AnyNodeId>(),
           collections: extra?.collections ?? {},
           materials,
+          experience: extra?.experience ?? structuredClone(DEFAULT_RUNTIME_EXPERIENCE),
         })
         // Mark all nodes as dirty to trigger re-validation
         Object.values(cleanedNodes).forEach((node) => {
@@ -1252,8 +1266,8 @@ const useScene: UseSceneStore = create<SceneState>()(
     }),
     {
       partialize: (state) => {
-        const { nodes, rootNodeIds, collections, materials } = state
-        return { nodes, rootNodeIds, collections, materials }
+        const { nodes, rootNodeIds, collections, materials, experience } = state
+        return { nodes, rootNodeIds, collections, materials, experience }
       },
       limit: 50, // Limit to last 50 actions
     },

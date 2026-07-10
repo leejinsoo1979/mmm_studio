@@ -23,6 +23,7 @@ describe('AssetUrl', () => {
       ['data:image/jpeg;base64,/9j/', 'inline JPEG data URL'],
       ['data:image/webp;base64,UklGR', 'inline WebP data URL'],
       ['data:image/svg+xml,%3Csvg%3E', 'inline SVG data URL'],
+      ['data:model/gltf-binary;base64,AAAA', 'inline GLB data URL'],
     ]
     for (const [url, label] of cases) {
       test(`accepts ${label}: ${url}`, () => {

@@ -37,8 +37,8 @@ import { Clone } from '@react-three/drei/core/Clone'
 import { useGLTF } from '@react-three/drei/core/Gltf'
 import { useFrame } from '@react-three/fiber'
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import type { AnimationAction, Group, Material, Mesh } from 'three'
-import { MathUtils } from 'three'
+import type { AnimationAction, Group, Material, Mesh, Object3D } from 'three'
+import { Box3, EdgesGeometry, MathUtils, Vector3 } from 'three'
 import { positionLocal, smoothstep, time } from 'three/tsl'
 import { RoofFaceHostFrame } from '../shared/roof-face-host'
 
@@ -78,6 +78,90 @@ type ItemMeshUserData = Mesh['userData'] & {
 }
 
 type SceneMaterials = ReturnType<typeof useScene.getState>['materials']
+
+const LOCAL_GLB_FLOORPLAN_MAX_PIXELS = 512
+const LOCAL_GLB_MAX_FLOORPLAN_SEGMENTS = 2800
+const LOCAL_GLB_PLACEHOLDER_PLAN_IMAGES = new Set([
+  '/icons/mesh.webp',
+  '/icons/item.webp',
+  'https://editor.pascal.app/icons/mesh.webp',
+  'https://editor.pascal.app/icons/item.webp',
+])
+const LOCAL_GLB_FLOORPLAN_MARKER = 'mmm-topview-edge-v2'
+
+function isLocalGlbSource(src: string): boolean {
+  return src.startsWith('asset://') || src.startsWith('data:model/gltf-binary')
+}
+
+function isMissingOrPlaceholderFloorPlan(url: string | undefined): boolean {
+  return (
+    !url ||
+    LOCAL_GLB_PLACEHOLDER_PLAN_IMAGES.has(url) ||
+    url.startsWith('data:image/png') ||
+    (url.startsWith('data:image/svg+xml') && !url.includes(LOCAL_GLB_FLOORPLAN_MARKER))
+  )
+}
+
+function renderItemSceneTopViewSvg(source: Object3D): string | null {
+  const root = source.clone(true)
+  root.updateWorldMatrix(true, true)
+
+  const sourceBox = new Box3().setFromObject(root)
+  if (sourceBox.isEmpty()) return null
+
+  const sourceCenter = sourceBox.getCenter(new Vector3())
+  root.position.sub(sourceCenter)
+  root.updateWorldMatrix(true, true)
+
+  const bounds = new Box3().setFromObject(root)
+  if (bounds.isEmpty()) return null
+
+  const size = bounds.getSize(new Vector3())
+  const spanX = Math.max(size.x, 0.001)
+  const spanZ = Math.max(size.z, 0.001)
+  const scale = LOCAL_GLB_FLOORPLAN_MAX_PIXELS / Math.max(spanX, spanZ)
+  const width = Math.max(1, Math.ceil(spanX * scale))
+  const height = Math.max(1, Math.ceil(spanZ * scale))
+  const minX = bounds.min.x
+  const minZ = bounds.min.z
+
+  const toSvgPoint = (point: Vector3): string => {
+    const x = (point.x - minX) * scale
+    const y = height - (point.z - minZ) * scale
+    return `${x.toFixed(2)} ${y.toFixed(2)}`
+  }
+
+  const segments: string[] = []
+  const a = new Vector3()
+  const b = new Vector3()
+
+  root.traverse((child) => {
+    const mesh = child as Mesh
+    if (!mesh.isMesh || !mesh.geometry?.attributes.position || mesh.name === 'cutout') return
+
+    const edges = new EdgesGeometry(mesh.geometry, 35)
+    const position = edges.attributes.position
+    if (!position) {
+      edges.dispose()
+      return
+    }
+    const segmentCount = Math.floor(position.count / 2)
+    const stride = Math.max(1, Math.ceil(segmentCount / LOCAL_GLB_MAX_FLOORPLAN_SEGMENTS))
+
+    for (let segment = 0; segment < segmentCount; segment += stride) {
+      a.fromBufferAttribute(position, segment * 2).applyMatrix4(mesh.matrixWorld)
+      b.fromBufferAttribute(position, segment * 2 + 1).applyMatrix4(mesh.matrixWorld)
+      segments.push(`M${toSvgPoint(a)}L${toSvgPoint(b)}`)
+    }
+
+    edges.dispose()
+  })
+
+  if (segments.length === 0) return null
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" data-mmm-topview="${LOCAL_GLB_FLOORPLAN_MARKER}" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><path d="${segments.join('')}" fill="none" stroke="#111111" stroke-width="0.75" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
 
 const getAuthoredSlotId = (material: Material): string | null =>
   isSlotMaterialName(material.name) ? deriveSlotId(material.name) : null
@@ -354,6 +438,27 @@ const ResolvedModelRenderer = ({ node, url }: { node: ItemNode; url: string }) =
     if (!node.parentId) return
     useScene.getState().markDirty(node.parentId as AnyNodeId)
   }, [node.parentId])
+
+  useEffect(() => {
+    if (!isLocalGlbSource(node.asset.src)) return
+    if (!isMissingOrPlaceholderFloorPlan(node.asset.floorPlanUrl)) return
+
+    const floorPlanUrl = renderItemSceneTopViewSvg(scene)
+    if (!floorPlanUrl) return
+
+    const store = useScene.getState()
+    const current = store.nodes[node.id as AnyNodeId]
+    if (current?.type !== 'item') return
+    if ((current as ItemNode).asset.src !== node.asset.src) return
+    if (!isMissingOrPlaceholderFloorPlan((current as ItemNode).asset.floorPlanUrl)) return
+
+    store.updateNode(node.id as AnyNodeId, {
+      asset: {
+        ...(current as ItemNode).asset,
+        floorPlanUrl,
+      },
+    } as Partial<ItemNode>)
+  }, [node.id, node.asset.src, node.asset.floorPlanUrl, scene])
 
   useEffect(() => {
     const interactive = interactiveRef.current

@@ -10,7 +10,7 @@ import { z } from 'zod'
  *
  * This validator rejects URLs that don't match the scheme allowlist below.
  */
-const ALLOWED_SCHEMES = ['asset:', 'blob:', 'https:', 'data:image/'] as const
+const ALLOWED_SCHEMES = ['asset:', 'blob:', 'https:', 'data:image/', 'data:model/gltf-binary'] as const
 
 /**
  * Optional environment variable that narrows which `https:` origins are
@@ -37,6 +37,7 @@ function isAllowedAssetUrl(url: string): boolean {
   if (url.startsWith('asset://')) return true // internal handle
   if (url.startsWith('blob:')) return true // in-memory reference
   if (url.startsWith('data:image/')) return true // inline image only (never data:text/html)
+  if (url.startsWith('data:model/gltf-binary')) return true // inline GLB from local upload
   if (url.startsWith('/')) return true // app-relative path
   try {
     const parsed = new URL(url)
@@ -61,6 +62,7 @@ function isAllowedAssetUrl(url: string): boolean {
  * - `asset://…` internal handles
  * - `blob:…` in-memory references
  * - `data:image/…` inline images (not `data:text/html` or other types)
+ * - `data:model/gltf-binary…` inline GLB from local upload
  * - `/…` app-relative paths
  * - `https://…` public URLs (optionally narrowed to an env allowlist)
  * - `http://localhost[:port]/…` or `http://127.0.0.1/…` for local dev
@@ -70,7 +72,7 @@ function isAllowedAssetUrl(url: string): boolean {
  */
 export const AssetUrl = z.string().refine(isAllowedAssetUrl, {
   message:
-    'URL must be asset://, blob:, data:image/, /path, or https://. http://localhost allowed for dev.',
+    'URL must be asset://, blob:, data:image/, data:model/gltf-binary, /path, or https://. http://localhost allowed for dev.',
 })
 
 export type AssetUrl = z.infer<typeof AssetUrl>

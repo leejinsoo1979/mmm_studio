@@ -184,6 +184,7 @@ function renderNode(
           opacity={g.opacity}
           preserveAspectRatio={g.preserveAspectRatio ?? 'xMidYMid meet'}
           rotation={g.rotation ?? 0}
+          cssFilter={g.cssFilter}
           url={g.url}
           width={g.width}
         />
@@ -300,6 +301,7 @@ function FloorplanImage({
   rotation,
   preserveAspectRatio,
   opacity,
+  cssFilter,
 }: {
   url: string
   center: readonly [number, number]
@@ -308,6 +310,7 @@ function FloorplanImage({
   rotation: number
   preserveAspectRatio: string
   opacity?: number
+  cssFilter?: string
 }) {
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null)
   useEffect(() => {
@@ -336,6 +339,7 @@ function FloorplanImage({
         href={resolvedUrl}
         opacity={opacity}
         preserveAspectRatio={preserveAspectRatio}
+        style={cssFilter ? { filter: cssFilter } : undefined}
         width={width}
         x={-width / 2}
         y={-height / 2}

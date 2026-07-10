@@ -147,6 +147,7 @@ export async function getStudioAuthHeaders(): Promise<Record<string, string>> {
   const firebaseUser = getFirebaseAuth()?.currentUser
   if (firebaseUser) {
     return {
+      authorization: `Bearer ${await firebaseUser.getIdToken()}`,
       'x-mmm-auth-source': 'firebase',
       'x-mmm-user-id': firebaseUser.uid,
     }

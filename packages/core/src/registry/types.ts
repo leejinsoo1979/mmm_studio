@@ -319,6 +319,7 @@ export type FloorplanGeometry =
       rotation?: number
       preserveAspectRatio?: string
       opacity?: number
+      cssFilter?: string
     }
   | {
       kind: 'texture-path'

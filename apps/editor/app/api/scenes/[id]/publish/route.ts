@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { guardSceneApiRequest, sceneApiJson } from '@/lib/scene-api-security'
 import { getSceneOperations } from '@/lib/scene-store-server'
+import { canAccessOwnedResource, getVerifiedRequestStudioUserId } from '@/lib/studio-request-auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +15,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   const operations = await getSceneOperations()
   const scene = await operations.loadStoredScene(id)
   if (!scene) return sceneApiJson(request, { error: 'not_found' }, { status: 404 })
+  if (!canAccessOwnedResource(scene.ownerId, await getVerifiedRequestStudioUserId(request))) {
+    return sceneApiJson(request, { error: 'forbidden' }, { status: 403 })
+  }
 
   try {
     const published = await operations.saveScene({

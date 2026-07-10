@@ -1,20 +1,55 @@
 'use client'
 
-import { Copy, ExternalLink, Globe2, Loader2, MonitorUp, X } from 'lucide-react'
+import { Copy, ExternalLink, Globe2, Laptop, Loader2, MonitorUp, X } from 'lucide-react'
 import { useState } from 'react'
+import { getStudioAuthHeaders } from '@/lib/auth-client'
 
 type PublishResult = { playUrl: string; version: number }
 
 export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneName: string }) {
   const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState<'web' | 'mac' | null>(null)
+  const [busy, setBusy] = useState<'web' | 'mac' | 'windows' | null>(null)
   const [published, setPublished] = useState<PublishResult | null>(null)
   const [buildMessage, setBuildMessage] = useState<string | null>(null)
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
+
+  const waitForBuild = async (platform: 'macos' | 'windows', jobId: string) => {
+    for (let attempt = 0; attempt < 180; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 5000))
+      const response = await fetch(
+        `/api/scenes/${sceneId}/runtime-build?platform=${platform}&jobId=${encodeURIComponent(jobId)}`,
+        { cache: 'no-store', headers: await getStudioAuthHeaders() },
+      )
+      const result = (await response.json()) as {
+        status?: string
+        downloadUrl?: string
+        error?: string
+      }
+      if (result.status === 'complete' && result.downloadUrl) {
+        setDownloadUrl(result.downloadUrl)
+        setBuildMessage(`${platform === 'macos' ? 'macOS' : 'Windows'} build complete`)
+        return
+      }
+      if (result.status === 'failed') {
+        setBuildMessage(result.error ?? 'Runtime build failed.')
+        return
+      }
+      setBuildMessage(
+        `${platform === 'macos' ? 'macOS' : 'Windows'} build ${result.status ?? 'queued'}…`,
+      )
+    }
+    setBuildMessage(
+      'Build is still running. You can keep this window open to continue tracking it.',
+    )
+  }
 
   const publishWeb = async () => {
     setBusy('web')
     try {
-      const response = await fetch(`/api/scenes/${sceneId}/publish`, { method: 'POST' })
+      const response = await fetch(`/api/scenes/${sceneId}/publish`, {
+        method: 'POST',
+        headers: await getStudioAuthHeaders(),
+      })
       if (!response.ok) throw new Error('Web publishing failed')
       setPublished((await response.json()) as PublishResult)
     } finally {
@@ -22,21 +57,30 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
     }
   }
 
-  const buildMac = async () => {
-    setBusy('mac')
+  const buildRuntime = async (platform: 'macos' | 'windows') => {
+    setBusy(platform === 'macos' ? 'mac' : 'windows')
     setBuildMessage(null)
+    setDownloadUrl(null)
     try {
       const response = await fetch(`/api/scenes/${sceneId}/runtime-build`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform: 'macos', quality: 'high' }),
+        headers: { 'Content-Type': 'application/json', ...(await getStudioAuthHeaders()) },
+        body: JSON.stringify({ platform, quality: 'ultra' }),
       })
-      const result = (await response.json()) as { message?: string; jobId?: string }
+      const result = (await response.json()) as {
+        message?: string
+        jobId?: string
+        downloadUrl?: string
+      }
+      setDownloadUrl(result.downloadUrl ?? null)
       setBuildMessage(
         response.ok
-          ? `Build queued${result.jobId ? ` · ${result.jobId}` : ''}`
-          : (result.message ?? 'macOS build service is not configured.'),
+          ? `${platform === 'macos' ? 'macOS' : 'Windows'} build queued${result.jobId ? ` · ${result.jobId}` : ''}`
+          : (result.message ?? `${platform} build service is not configured.`),
       )
+      if (response.ok && result.jobId && !result.downloadUrl) {
+        await waitForBuild(platform, result.jobId)
+      }
     } finally {
       setBusy(null)
     }
@@ -70,7 +114,7 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
                 <X className="h-4 w-4" />
               </button>
             </header>
-            <div className="grid gap-4 p-6 md:grid-cols-2">
+            <div className="grid gap-4 p-6 md:grid-cols-3">
               <section className="rounded-2xl border border-white/9 bg-white/[0.035] p-5">
                 <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-400/12 text-emerald-300">
                   <Globe2 className="h-5 w-5" />
@@ -127,7 +171,7 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
                 <button
                   className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-400 font-semibold text-[#101820] text-sm disabled:opacity-60"
                   disabled={busy !== null}
-                  onClick={buildMac}
+                  onClick={() => buildRuntime('macos')}
                   type="button"
                 >
                   {busy === 'mac' ? (
@@ -141,7 +185,42 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
                   <p className="mt-3 text-amber-200/80 text-xs leading-5">{buildMessage}</p>
                 )}
               </section>
+              <section className="rounded-2xl border border-white/9 bg-white/[0.035] p-5">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-400/12 text-violet-300">
+                  <Laptop className="h-5 w-5" />
+                </span>
+                <h3 className="mt-5 font-semibold text-lg">Windows Runtime</h3>
+                <p className="mt-2 min-h-12 text-white/55 text-sm leading-6">
+                  Build a standalone Windows Play executable with the same configurator runtime.
+                </p>
+                <button
+                  className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-violet-400 font-semibold text-[#171020] text-sm disabled:opacity-60"
+                  disabled={busy !== null}
+                  onClick={() => buildRuntime('windows')}
+                  type="button"
+                >
+                  {busy === 'windows' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Laptop className="h-4 w-4" />
+                  )}
+                  Build Windows app
+                </button>
+              </section>
             </div>
+            {downloadUrl ? (
+              <div className="px-6 pb-6">
+                <a
+                  className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white font-semibold text-black text-sm"
+                  href={downloadUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Download runtime
+                </a>
+              </div>
+            ) : null}
           </div>
         </div>
       )}

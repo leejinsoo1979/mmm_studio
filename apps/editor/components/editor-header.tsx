@@ -1,3 +1,5 @@
+import { useScene } from '@pascal-app/core'
+import { Camera } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
@@ -13,6 +15,8 @@ export function EditorHeader({ sceneId, sceneName, onRename }: EditorHeaderProps
   const [draftName, setDraftName] = useState(sceneName)
   const [isSaving, setIsSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const experience = useScene((state) => state.experience)
+  const setExperience = useScene((state) => state.setExperience)
 
   useEffect(() => setDraftName(sceneName), [sceneName])
 
@@ -30,6 +34,27 @@ export function EditorHeader({ sceneId, sceneName, onRename }: EditorHeaderProps
     } finally {
       setIsSaving(false)
     }
+  }
+
+  const saveCamera = () => {
+    window.dispatchEvent(
+      new CustomEvent('mmm-camera-capture', {
+        detail: (snapshot: {
+          position: [number, number, number]
+          target: [number, number, number]
+          fov?: number
+        }) => {
+          const nextIndex = experience.cameras.length + 1
+          setExperience({
+            ...experience,
+            cameras: [
+              ...experience.cameras,
+              { id: crypto.randomUUID(), label: `Camera ${nextIndex}`, ...snapshot },
+            ],
+          })
+        },
+      }),
+    )
   }
 
   return (
@@ -69,6 +94,15 @@ export function EditorHeader({ sceneId, sceneName, onRename }: EditorHeaderProps
         />
       </div>
       <div className="flex items-center gap-2">
+        <button
+          className="flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-3 py-1.5 font-medium text-xs hover:bg-accent/40"
+          onClick={saveCamera}
+          title={`${experience.cameras.length} saved cameras`}
+          type="button"
+        >
+          <Camera className="h-3.5 w-3.5" />
+          Save view
+        </button>
         <ExportCenter sceneId={sceneId} sceneName={sceneName} />
         <Link
           className="rounded-md border border-border bg-background/60 px-3 py-1.5 font-medium text-xs hover:bg-accent/40"
