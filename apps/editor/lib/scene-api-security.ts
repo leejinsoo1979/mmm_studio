@@ -4,7 +4,8 @@ import { NextResponse } from 'next/server'
 const DEFAULT_RATE_LIMIT_PER_MINUTE = 120
 const WINDOW_MS = 60_000
 const ALLOWED_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
-const ALLOWED_HEADERS = 'authorization, content-type, if-match, last-event-id, x-pascal-scene-token'
+const ALLOWED_HEADERS =
+  'authorization, content-type, if-match, last-event-id, x-mmm-auth-source, x-mmm-user-id, x-pascal-scene-token'
 
 type RateBucket = {
   resetAt: number

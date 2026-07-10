@@ -11,11 +11,8 @@ const VIDEO_URL =
 
 export function Hero() {
   return (
-    <div
-      className="flex h-screen w-full items-center justify-center bg-black p-3 md:p-5"
-      style={{ fontFamily: 'var(--font-helvetica)' }}
-    >
-      <section className="group relative flex h-full w-full max-w-[1536px] flex-col items-center overflow-hidden rounded-[1.5rem] bg-white/10 shadow-none md:rounded-[3rem]">
+    <div className="h-screen w-full bg-black" style={{ fontFamily: 'var(--font-helvetica)' }}>
+      <section className="group relative flex h-full w-full flex-col items-center overflow-hidden bg-black">
         <video
           autoPlay
           className="absolute inset-0 z-0 h-full w-full object-cover object-[65%] lg:object-center"

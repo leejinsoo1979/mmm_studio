@@ -3,6 +3,7 @@
 import type { SceneGraph } from '@pascal-app/editor'
 import { useRouter } from 'next/navigation'
 import { useCallback, useState } from 'react'
+import { getStudioAuthHeaders } from '@/lib/auth-client'
 
 const EMPTY_GRAPH: SceneGraph = {
   nodes: {},
@@ -36,7 +37,7 @@ export function CreateSceneButton({
     try {
       const response = await fetch('/api/scenes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getStudioAuthHeaders()) },
         body: JSON.stringify({ name: 'Untitled scene', graph: EMPTY_GRAPH }),
       })
       if (!response.ok) {
@@ -94,6 +95,7 @@ export function SaveButton({ sceneId, name, version, getGraph }: SaveButtonProps
         headers: {
           'Content-Type': 'application/json',
           'If-Match': String(version),
+          ...(await getStudioAuthHeaders()),
         },
         body: JSON.stringify({ name, graph }),
       })
@@ -126,7 +128,7 @@ export function SaveButton({ sceneId, name, version, getGraph }: SaveButtonProps
     try {
       const response = await fetch('/api/scenes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getStudioAuthHeaders()) },
         body: JSON.stringify({ name: newName, graph }),
       })
       if (!response.ok) {

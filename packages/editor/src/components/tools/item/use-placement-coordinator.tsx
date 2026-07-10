@@ -20,15 +20,18 @@ import {
   type WallEvent,
   type WallNode,
 } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { useAssetUrl, useViewer } from '@pascal-app/viewer'
 import { Html } from '@react-three/drei'
+import { Clone } from '@react-three/drei/core/Clone'
+import { useGLTF } from '@react-three/drei/core/Gltf'
 import { useFrame, useThree } from '@react-three/fiber'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box3,
   Euler,
   type Group,
   type LineSegments,
+  type Material,
   Matrix4,
   type Mesh,
   type Object3D,
@@ -202,6 +205,102 @@ const center = vec2(0.5, 0.5)
 const dist = distance(uv(), center)
 const radialOpacity = smoothstep(0, 0.7, dist).mul(0.6)
 basePlaneMaterial.opacityNode = radialOpacity
+
+const multiplyScales = (
+  a: [number, number, number],
+  b: [number, number, number],
+): [number, number, number] => [a[0] * b[0], a[1] * b[1], a[2] * b[2]]
+
+type MutableGhostMaterial = Material & {
+  depthWrite?: boolean
+  opacity?: number
+  transparent?: boolean
+}
+
+function makeGhostMaterial(material: Material): Material {
+  const next = material.clone() as MutableGhostMaterial
+  next.transparent = true
+  next.opacity = Math.max(next.opacity ?? 1, 0.9)
+  next.depthWrite = false
+  next.needsUpdate = true
+  return next
+}
+
+function disablePreviewRaycast(object: Object3D) {
+  object.raycast = () => {}
+  object.layers.set(EDITOR_LAYER)
+}
+
+function PlacementModelGhost({
+  asset,
+  nodeScale,
+}: {
+  asset: AssetInput
+  nodeScale: [number, number, number]
+}) {
+  const modelUrl = useAssetUrl(asset.src)
+  if (!modelUrl) return null
+
+  return (
+    <Suspense fallback={null}>
+      <ResolvedPlacementModelGhost asset={asset} nodeScale={nodeScale} url={modelUrl} />
+    </Suspense>
+  )
+}
+
+function ResolvedPlacementModelGhost({
+  asset,
+  nodeScale,
+  url,
+}: {
+  asset: AssetInput
+  nodeScale: [number, number, number]
+  url: string
+}) {
+  const { scene } = useGLTF(url)
+  const scale = multiplyScales(asset.scale ?? [1, 1, 1], nodeScale)
+
+  const ghost = useMemo(() => {
+    const cloned = scene.clone(true)
+    cloned.traverse((child) => {
+      disablePreviewRaycast(child)
+      const mesh = child as Mesh
+      if (!mesh.isMesh) return
+
+      mesh.castShadow = false
+      mesh.receiveShadow = false
+      if (Array.isArray(mesh.material)) {
+        mesh.material = mesh.material.map(makeGhostMaterial)
+      } else if (mesh.material) {
+        mesh.material = makeGhostMaterial(mesh.material)
+      }
+    })
+    return cloned
+  }, [scene])
+
+  useEffect(
+    () => () => {
+      ghost.traverse((child) => {
+        const mesh = child as Mesh
+        if (!mesh.isMesh) return
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+        for (const material of materials) material?.dispose()
+      })
+    },
+    [ghost],
+  )
+
+  return (
+    <Clone
+      dispose={null}
+      object={ghost}
+      position={asset.offset ?? [0, 0, 0]}
+      renderOrder={997}
+      rotation={asset.rotation ?? [0, 0, 0]}
+      scale={scale}
+    />
+  )
+}
 
 export interface PlacementCoordinatorConfig {
   asset: AssetInput | null
@@ -2503,6 +2602,8 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
   const initialWidthGuideGeometry = useMemo(() => createLineGeometry(), [])
   const initialDepthGuideGeometry = useMemo(() => createLineGeometry(), [])
   const initialHeightGuideGeometry = useMemo(() => createLineGeometry(), [])
+  const placementGhostScale =
+    initialDraft?.scale ?? config.defaultScale ?? ([1, 1, 1] as [number, number, number])
   const currentDimensionBounds = dimensionBounds ?? initialDimensionBounds
   // Feed the footprint shape to the per-frame surface publisher, which orients
   // and positions the forward-facing triangle via `useFacingPose`.
@@ -2613,6 +2714,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
 
   return (
     <group ref={cursorGroupRef}>
+      {config.asset && <PlacementModelGhost asset={config.asset} nodeScale={placementGhostScale} />}
       <lineSegments
         geometry={initialEdgeGeometry}
         layers={EDITOR_LAYER}

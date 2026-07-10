@@ -8,6 +8,7 @@ import {
   withSceneApiHeaders,
 } from '@/lib/scene-api-security'
 import { getSceneOperations } from '@/lib/scene-store-server'
+import { canAccessOwnedResource, getRequestStudioUserId } from '@/lib/studio-request-auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,10 +36,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
   const { id } = await params
   const operations = await getSceneOperations()
+  const userId = getRequestStudioUserId(request)
   try {
     const scene = await operations.loadStoredScene(id)
     if (!scene) {
       return sceneApiJson(request, { error: 'not_found' }, { status: 404 })
+    }
+    if (userId && !canAccessOwnedResource(scene.ownerId, userId)) {
+      return sceneApiJson(request, { error: 'forbidden' }, { status: 403 })
     }
     return sceneApiJson(request, scene, {
       headers: { ETag: `"${scene.version}"` },
@@ -78,16 +83,20 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   const expectedVersion = ifMatch ?? parsed.data.expectedVersion
 
   const operations = await getSceneOperations()
+  const userId = getRequestStudioUserId(request)
   try {
     const existing = await operations.loadStoredScene(id)
     if (!existing) {
       return sceneApiJson(request, { error: 'not_found' }, { status: 404 })
     }
+    if (!canAccessOwnedResource(existing.ownerId, userId)) {
+      return sceneApiJson(request, { error: 'forbidden' }, { status: 403 })
+    }
     const meta = await operations.saveScene({
       id,
       name: parsed.data.name ?? existing.name,
       projectId: existing.projectId,
-      ownerId: existing.ownerId,
+      ownerId: existing.ownerId ?? userId,
       graph: parsed.data.graph as never,
       thumbnailUrl:
         parsed.data.thumbnailUrl === undefined ? existing.thumbnailUrl : parsed.data.thumbnailUrl,
@@ -109,7 +118,15 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
   const ifMatch = parseIfMatch(request.headers.get('If-Match'))
 
   const operations = await getSceneOperations()
+  const userId = getRequestStudioUserId(request)
   try {
+    const existing = await operations.loadStoredScene(id)
+    if (!existing) {
+      return sceneApiJson(request, { error: 'not_found' }, { status: 404 })
+    }
+    if (!canAccessOwnedResource(existing.ownerId, userId)) {
+      return sceneApiJson(request, { error: 'forbidden' }, { status: 403 })
+    }
     const removed = await operations.deleteStoredScene(id, { expectedVersion: ifMatch })
     if (!removed) {
       return sceneApiJson(request, { error: 'not_found' }, { status: 404 })
@@ -150,7 +167,15 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   const expectedVersion = ifMatch ?? parsed.data.expectedVersion
 
   const operations = await getSceneOperations()
+  const userId = getRequestStudioUserId(request)
   try {
+    const existing = await operations.loadStoredScene(id)
+    if (!existing) {
+      return sceneApiJson(request, { error: 'not_found' }, { status: 404 })
+    }
+    if (!canAccessOwnedResource(existing.ownerId, userId)) {
+      return sceneApiJson(request, { error: 'forbidden' }, { status: 403 })
+    }
     const meta = await operations.renameStoredScene(id, parsed.data.name, { expectedVersion })
     return sceneApiJson(request, meta, {
       headers: { ETag: `"${meta.version}"` },

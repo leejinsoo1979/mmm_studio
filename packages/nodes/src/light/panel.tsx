@@ -72,11 +72,11 @@ export default function LightPanel() {
         </label>
         <SliderControl
           label="Intensity"
-          max={30}
+          max={500}
           min={0}
           onChange={(value) => update({ intensity: value })}
-          precision={1}
-          step={0.1}
+          precision={0}
+          step={5}
           value={node.intensity}
         />
         {node.kind !== 'area' && (

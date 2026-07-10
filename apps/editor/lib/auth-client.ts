@@ -1,5 +1,6 @@
 import type { User as FirebaseUser } from 'firebase/auth'
 import {
+  getFirebaseAuth,
   isFirebaseConfigured,
   observeFirebaseUser,
   signInWithFirebaseProvider,
@@ -140,6 +141,23 @@ export function saveStudioUser(user: StudioUser): void {
 export function clearStudioUser(): void {
   if (typeof window === 'undefined') return
   window.localStorage.removeItem(AUTH_KEY)
+}
+
+export async function getStudioAuthHeaders(): Promise<Record<string, string>> {
+  const firebaseUser = getFirebaseAuth()?.currentUser
+  if (firebaseUser) {
+    return {
+      'x-mmm-auth-source': 'firebase',
+      'x-mmm-user-id': firebaseUser.uid,
+    }
+  }
+
+  const localUser = getStudioUser()
+  if (!localUser) return {}
+  return {
+    'x-mmm-auth-source': localUser.source,
+    'x-mmm-user-id': localUser.id,
+  }
 }
 
 export function hasFirebaseAuthConfig(): boolean {

@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { apiGraphSchema } from '@/lib/graph-schema'
 import { guardSceneApiRequest, sceneApiJson, sceneApiPreflight } from '@/lib/scene-api-security'
 import { getSceneOperations } from '@/lib/scene-store-server'
+import { getRequestStudioUserId } from '@/lib/studio-request-auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,8 +42,10 @@ export async function GET(request: NextRequest) {
   }
 
   const operations = await getSceneOperations()
+  const ownerId = getRequestStudioUserId(request)
   const scenes = await operations.listScenes({
     projectId: parsed.data.projectId,
+    ownerId: ownerId ?? undefined,
     limit: parsed.data.limit,
   })
   return sceneApiJson(request, { scenes })
@@ -73,11 +76,13 @@ export async function POST(request: NextRequest) {
   }
 
   const operations = await getSceneOperations()
+  const ownerId = getRequestStudioUserId(request)
   try {
     const meta = await operations.saveScene({
       id: parsed.data.id,
       name: parsed.data.name,
       projectId: parsed.data.projectId ?? null,
+      ownerId,
       graph: parsed.data.graph as never,
       thumbnailUrl: parsed.data.thumbnailUrl ?? null,
     })

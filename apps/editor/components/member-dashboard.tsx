@@ -10,12 +10,18 @@ import {
   Search,
   Sparkles,
 } from 'lucide-react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { CreateSceneButton } from '@/components/save-button'
 import type { SceneMeta } from '@/components/scene-loader'
-import { getStudioUser, type StudioUser, signOutStudio } from '@/lib/auth-client'
+import {
+  getStudioAuthHeaders,
+  getStudioUser,
+  type StudioUser,
+  signOutStudio,
+} from '@/lib/auth-client'
 
 function formatDate(iso: string): string {
   try {
@@ -77,7 +83,10 @@ export function MemberDashboard() {
     let cancelled = false
     async function loadScenes() {
       try {
-        const response = await fetch('/api/scenes?limit=50', { cache: 'no-store' })
+        const response = await fetch('/api/scenes?limit=50', {
+          cache: 'no-store',
+          headers: await getStudioAuthHeaders(),
+        })
         if (!response.ok) return
         const payload = (await response.json()) as { scenes?: SceneMeta[] } | SceneMeta[]
         const nextScenes = Array.isArray(payload) ? payload : (payload.scenes ?? [])
@@ -111,15 +120,18 @@ export function MemberDashboard() {
     <main className="min-h-screen bg-[#eef1ec] text-[#202723]">
       <header className="sticky top-0 z-30 border-black/8 border-b bg-[#f8faf7]/88 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-4 px-5 py-4 sm:px-8">
-          <Link className="flex items-center gap-3" href="/">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#202723] text-white">
-              <Box className="h-5 w-5" />
-            </span>
-            <span>
-              <span className="block font-semibold leading-none">MMM Studio</span>
-              <span className="mt-1 block text-[#7a837d] text-[10px] uppercase tracking-[0.18em]">
-                Member dashboard
-              </span>
+          <Link className="flex items-center gap-3.5" href="/">
+            <Image
+              alt=""
+              aria-hidden="true"
+              className="h-[13px] w-auto"
+              height={23}
+              priority
+              src="/mmmlogo.svg"
+              width={71}
+            />
+            <span className="font-[family-name:var(--font-barlow)] text-[21px] tracking-[0.09em]">
+              mmm studio
             </span>
           </Link>
           <div className="flex items-center gap-2">

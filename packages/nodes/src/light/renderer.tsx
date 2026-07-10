@@ -28,7 +28,7 @@ const LightRenderer = ({ node }: { node: LightNode }) => {
   const castShadow = active && shadows && node.castShadow && node.kind !== 'area'
   const glowScale = useMemo(() => {
     const intensity = active ? node.intensity : 0
-    return Math.min(1.2, 0.42 + Math.sqrt(intensity) * 0.12)
+    return Math.min(2.2, 0.54 + Math.sqrt(intensity) * 0.12)
   }, [active, node.intensity])
   const displayColor = active ? node.color : '#777777'
 
@@ -63,12 +63,21 @@ const LightRenderer = ({ node }: { node: LightNode }) => {
         />
       )}
       {node.kind === 'area' && (
-        <rectAreaLight
-          color={node.color}
-          height={node.height}
-          intensity={active ? node.intensity : 0}
-          width={node.width}
-        />
+        <>
+          <rectAreaLight
+            color={node.color}
+            height={node.height}
+            intensity={active ? node.intensity : 0}
+            width={node.width}
+          />
+          <pointLight
+            color={node.color}
+            decay={1.35}
+            distance={Math.max(node.width, node.height, 3) * 2.8}
+            intensity={active ? node.intensity * 0.28 : 0}
+            position={[0, -0.08, 0]}
+          />
+        </>
       )}
 
       {!walkthroughMode && (
@@ -89,7 +98,7 @@ const LightRenderer = ({ node }: { node: LightNode }) => {
                 color={node.color}
                 depthTest={false}
                 depthWrite={false}
-                opacity={0.16}
+                opacity={0.24}
                 toneMapped={false}
                 transparent
               />
@@ -102,7 +111,7 @@ const LightRenderer = ({ node }: { node: LightNode }) => {
                 color={node.color}
                 depthTest={false}
                 depthWrite={false}
-                opacity={0.055}
+                opacity={0.1}
                 toneMapped={false}
                 transparent
               />
@@ -110,10 +119,10 @@ const LightRenderer = ({ node }: { node: LightNode }) => {
           )}
           {node.kind === 'spot' && (
             <mesh position={[0, -0.22, 0]} rotation={[0, 0, Math.PI]}>
-              <coneGeometry args={[0.2, 0.4, 20, 1, true]} />
+              <coneGeometry args={[0.32, 0.78, 28, 1, true]} />
               <meshBasicMaterial
                 color={displayColor}
-                opacity={active ? 0.34 : 0.16}
+                opacity={active ? 0.42 : 0.16}
                 toneMapped={false}
                 transparent
                 wireframe

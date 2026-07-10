@@ -28,13 +28,15 @@ import {
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Box3, Vector3 } from 'three'
+import { Box3, Matrix4, Quaternion, Vector3 } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { BuildTab } from './build-tab'
 import { EditorHeader } from './editor-header'
 import { LightingTab } from './lighting-tab'
 import { MaterialTab } from './material-tab'
+import { MaterialSurfaceInspector } from './material-surface-inspector'
 import { CommunityViewerToolbarLeft, CommunityViewerToolbarRight } from './viewer-toolbar'
+import { getStudioAuthHeaders } from '@/lib/auth-client'
 
 export interface SceneMeta {
   id: string
@@ -127,6 +129,47 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
 const LOCAL_GLB_ITEMS_KEY = 'mmm-studio.local-glb-items.v1'
 const LOCAL_GLB_THUMBNAIL = 'https://editor.pascal.app/icons/mesh.webp'
 const FALLBACK_GLB_DIMENSIONS: [number, number, number] = [1, 1, 1]
+const CENTIMETER_MODEL_THRESHOLD = 20
+const MILLIMETER_MODEL_THRESHOLD = 1000
+
+type GlbInspection = {
+  dimensions: [number, number, number]
+  offset: [number, number, number]
+  scale: [number, number, number]
+}
+
+type GltfAccessor = {
+  max?: number[]
+  min?: number[]
+  type?: string
+}
+
+type GltfMeshPrimitive = {
+  attributes?: {
+    POSITION?: number
+  }
+}
+
+type GltfMesh = {
+  primitives?: GltfMeshPrimitive[]
+}
+
+type GltfNode = {
+  children?: number[]
+  matrix?: number[]
+  mesh?: number
+  rotation?: number[]
+  scale?: number[]
+  translation?: number[]
+}
+
+type GltfJson = {
+  accessors?: GltfAccessor[]
+  meshes?: GltfMesh[]
+  nodes?: GltfNode[]
+  scene?: number
+  scenes?: Array<{ nodes?: number[] }>
+}
 
 function loadLocalGlbItems(): AssetInput[] {
   if (typeof window === 'undefined') return []
@@ -171,31 +214,143 @@ function normalizeDimension(value: number): number {
   return Math.max(value, 0.01)
 }
 
-async function inspectGlb(file: File): Promise<{
-  dimensions: [number, number, number]
-  offset: [number, number, number]
-}> {
-  const buffer = await file.arrayBuffer()
-  const gltf = await new Promise<Awaited<ReturnType<GLTFLoader['parseAsync']>>>(
-    (resolve, reject) => {
-      new GLTFLoader().parse(buffer, '', resolve, reject)
-    },
-  )
-  const box = new Box3().setFromObject(gltf.scene)
+function inferLocalGlbUnitScale(size: Vector3): number {
+  const longestSide = Math.max(size.x, size.y, size.z)
+  if (!Number.isFinite(longestSide) || longestSide <= 0) return 1
+  if (longestSide >= MILLIMETER_MODEL_THRESHOLD) return 0.001
+  if (longestSide >= CENTIMETER_MODEL_THRESHOLD) return 0.01
+  return 1
+}
 
+function inspectionFromBox(box: Box3): GlbInspection {
   if (box.isEmpty()) {
-    return { dimensions: FALLBACK_GLB_DIMENSIONS, offset: [0, 0, 0] }
+    return { dimensions: FALLBACK_GLB_DIMENSIONS, offset: [0, 0, 0], scale: [1, 1, 1] }
   }
 
   const size = box.getSize(new Vector3())
   const center = box.getCenter(new Vector3())
+  const unitScale = inferLocalGlbUnitScale(size)
+
   return {
     dimensions: [
-      normalizeDimension(size.x),
-      normalizeDimension(size.y),
-      normalizeDimension(size.z),
+      normalizeDimension(size.x * unitScale),
+      normalizeDimension(size.y * unitScale),
+      normalizeDimension(size.z * unitScale),
     ],
-    offset: [-center.x, -box.min.y, -center.z],
+    offset: [-center.x * unitScale, -box.min.y * unitScale, -center.z * unitScale],
+    scale: [unitScale, unitScale, unitScale],
+  }
+}
+
+function parseGlbJson(buffer: ArrayBuffer): GltfJson | null {
+  const view = new DataView(buffer)
+  if (view.byteLength < 20 || view.getUint32(0, true) !== 0x46546c67) return null
+
+  let offset = 12
+  while (offset + 8 <= view.byteLength) {
+    const chunkLength = view.getUint32(offset, true)
+    const chunkType = view.getUint32(offset + 4, true)
+    offset += 8
+    if (offset + chunkLength > view.byteLength) return null
+
+    if (chunkType === 0x4e4f534a) {
+      const jsonText = new TextDecoder().decode(buffer.slice(offset, offset + chunkLength))
+      return JSON.parse(jsonText.replace(/\0+$/g, '')) as GltfJson
+    }
+    offset += chunkLength
+  }
+
+  return null
+}
+
+function matrixFromGltfNode(node: GltfNode): Matrix4 {
+  if (node.matrix?.length === 16) return new Matrix4().fromArray(node.matrix)
+
+  const translation = new Vector3(
+    node.translation?.[0] ?? 0,
+    node.translation?.[1] ?? 0,
+    node.translation?.[2] ?? 0,
+  )
+  const rotation = new Quaternion(
+    node.rotation?.[0] ?? 0,
+    node.rotation?.[1] ?? 0,
+    node.rotation?.[2] ?? 0,
+    node.rotation?.[3] ?? 1,
+  )
+  const scale = new Vector3(node.scale?.[0] ?? 1, node.scale?.[1] ?? 1, node.scale?.[2] ?? 1)
+  return new Matrix4().compose(translation, rotation, scale)
+}
+
+function expandBoxByAccessor(box: Box3, accessor: GltfAccessor, matrix: Matrix4): boolean {
+  if (accessor.type !== 'VEC3' || accessor.min?.length !== 3 || accessor.max?.length !== 3) {
+    return false
+  }
+
+  const [minX, minY, minZ] = accessor.min
+  const [maxX, maxY, maxZ] = accessor.max
+  if (![minX, minY, minZ, maxX, maxY, maxZ].every(Number.isFinite)) return false
+
+  const corners = [
+    new Vector3(minX, minY, minZ),
+    new Vector3(minX, minY, maxZ),
+    new Vector3(minX, maxY, minZ),
+    new Vector3(minX, maxY, maxZ),
+    new Vector3(maxX, minY, minZ),
+    new Vector3(maxX, minY, maxZ),
+    new Vector3(maxX, maxY, minZ),
+    new Vector3(maxX, maxY, maxZ),
+  ]
+
+  for (const corner of corners) box.expandByPoint(corner.applyMatrix4(matrix))
+  return true
+}
+
+function inspectGlbJsonBounds(buffer: ArrayBuffer): Box3 | null {
+  const json = parseGlbJson(buffer)
+  if (!json?.nodes?.length || !json.meshes?.length || !json.accessors?.length) return null
+
+  const box = new Box3()
+  let hasBounds = false
+  const sceneIndex = json.scene ?? 0
+  const rootNodeIds =
+    json.scenes?.[sceneIndex]?.nodes ??
+    json.nodes.map((_node, index) => index)
+
+  const visitNode = (nodeIndex: number, parentMatrix: Matrix4) => {
+    const node = json.nodes?.[nodeIndex]
+    if (!node) return
+
+    const worldMatrix = parentMatrix.clone().multiply(matrixFromGltfNode(node))
+    const mesh = node.mesh === undefined ? undefined : json.meshes?.[node.mesh]
+    for (const primitive of mesh?.primitives ?? []) {
+      const positionAccessorIndex = primitive.attributes?.POSITION
+      const accessor =
+        positionAccessorIndex === undefined ? undefined : json.accessors?.[positionAccessorIndex]
+      if (accessor && expandBoxByAccessor(box, accessor, worldMatrix)) {
+        hasBounds = true
+      }
+    }
+
+    for (const childIndex of node.children ?? []) visitNode(childIndex, worldMatrix)
+  }
+
+  for (const rootNodeId of rootNodeIds) visitNode(rootNodeId, new Matrix4())
+  return hasBounds ? box : null
+}
+
+async function inspectGlb(file: File): Promise<GlbInspection> {
+  const buffer = await file.arrayBuffer()
+  try {
+    const gltf = await new Promise<Awaited<ReturnType<GLTFLoader['parseAsync']>>>(
+      (resolve, reject) => {
+        new GLTFLoader().parse(buffer, '', resolve, reject)
+      },
+    )
+    return inspectionFromBox(new Box3().setFromObject(gltf.scene))
+  } catch (error) {
+    const jsonBox = inspectGlbJsonBounds(buffer)
+    if (jsonBox) return inspectionFromBox(jsonBox)
+    throw error
   }
 }
 
@@ -209,10 +364,11 @@ async function createLocalGlbItem(file: File): Promise<AssetInput> {
     inspectGlb(file).catch(() => ({
       dimensions: FALLBACK_GLB_DIMENSIONS,
       offset: [0, 0, 0] as [number, number, number],
+      scale: [1, 1, 1] as [number, number, number],
     })),
     saveAsset(file),
   ])
-  const { dimensions, offset } = inspection
+  const { dimensions, offset, scale } = inspection
   const id = crypto.randomUUID()
 
   return {
@@ -224,7 +380,7 @@ async function createLocalGlbItem(file: File): Promise<AssetInput> {
     dimensions,
     offset,
     rotation: [0, 0, 0],
-    scale: [1, 1, 1],
+    scale,
     source: 'mine',
     isDraft: true,
     tags: ['floor', 'local', 'glb'],
@@ -405,6 +561,7 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
   const versionRef = useRef(meta.version)
   const lastRemoteGraphJsonRef = useRef<string | null>(null)
   const suppressRemoteSaveUntilRef = useRef(0)
+  const thumbnailTimerRef = useRef<number | null>(null)
   const [conflict, setConflict] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [sceneName, setSceneName] = useState(meta.name)
@@ -432,6 +589,29 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
 
   const handleLoad = useCallback(async () => initialScene, [initialScene])
 
+  const requestThumbnail = useCallback(
+    (delayMs = 1200) => {
+      if (thumbnailTimerRef.current !== null) window.clearTimeout(thumbnailTimerRef.current)
+      thumbnailTimerRef.current = window.setTimeout(() => {
+        thumbnailTimerRef.current = null
+        if (document.visibilityState !== 'visible') return
+        emitter.emit('camera-controls:generate-thumbnail', {
+          projectId: meta.id,
+          snapLevels: true,
+          standardSize: { w: 960, h: 540 },
+        })
+      }, delayMs)
+    },
+    [meta.id],
+  )
+
+  useEffect(() => {
+    requestThumbnail(meta.thumbnailUrl ? 4000 : 2200)
+    return () => {
+      if (thumbnailTimerRef.current !== null) window.clearTimeout(thumbnailTimerRef.current)
+    }
+  }, [meta.thumbnailUrl, requestThumbnail])
+
   const handleSave = useCallback(
     async (graph: SceneGraph, options?: { keepalive?: boolean }) => {
       const graphJson = sceneGraphSignature(graph)
@@ -449,6 +629,7 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
           headers: {
             'Content-Type': 'application/json',
             'If-Match': String(versionRef.current),
+            ...(await getStudioAuthHeaders()),
           },
           body: JSON.stringify({ name: sceneName, graph }),
           // `keepalive` lets the request outlive a page unload (the autosave
@@ -471,11 +652,12 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
         const next = (await response.json()) as SceneMeta
         versionRef.current = next.version
         setSaveError(null)
+        requestThumbnail()
       } catch (error) {
         setSaveError(error instanceof Error ? error.message : 'Save failed')
       }
     },
-    [meta.id, sceneName],
+    [meta.id, requestThumbnail, sceneName],
   )
 
   const handleRename = useCallback(
@@ -485,6 +667,7 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
         headers: {
           'Content-Type': 'application/json',
           'If-Match': String(versionRef.current),
+          ...(await getStudioAuthHeaders()),
         },
         body: JSON.stringify({ name }),
       })
@@ -536,15 +719,15 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
   }, [meta.id])
 
   const handleThumb = useCallback(
-    async (_blob: Blob) => {
-      // TODO(phase7): upload thumbnail via POST /api/scenes/[id]/thumbnail.
-      // Stub endpoint is not yet implemented in v0.1 — skip upload for now.
-      await fetch(`/api/scenes/${meta.id}/thumbnail`, {
+    async (blob: Blob) => {
+      const response = await fetch(`/api/scenes/${meta.id}/thumbnail`, {
         method: 'POST',
-        // Intentionally no body — endpoint is a stub.
-      }).catch(() => {
-        // Swallow errors silently; thumbnail upload is best-effort.
+        headers: { 'Content-Type': blob.type || 'image/png', ...(await getStudioAuthHeaders()) },
+        body: blob,
       })
+      if (!response.ok) return
+      const next = (await response.json()) as SceneMeta
+      versionRef.current = next.version
     },
     [meta.id],
   )
@@ -580,6 +763,7 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
           <p className="font-medium text-destructive text-xs">{saveError}</p>
         </div>
       )}
+      <MaterialSurfaceInspector />
       <Editor
         layoutVersion="v2"
         navbarSlot={

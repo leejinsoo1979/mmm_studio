@@ -1020,10 +1020,12 @@ export const SelectionManager = () => {
       }
 
       clearActivePreview()
-      useViewer.setState({ hoveredId: interaction.hoveredId })
+      useViewer.setState({
+        hoveredId: interaction.hoverMode === 'paint-ready' ? null : interaction.hoveredId,
+      })
       setHoverHighlightMode(interaction.hoverMode)
 
-      const restore = interaction.preview?.()
+      const restore = interaction.hoverMode === 'paint-disabled' ? interaction.preview?.() : null
       if (restore) {
         activePreview = { key: interaction.key, restore }
       }
@@ -1057,20 +1059,16 @@ export const SelectionManager = () => {
       event.stopPropagation()
 
       if (interaction.role) {
-        useViewer.getState().setSelection({ selectedIds: [interaction.hoveredId] })
+        useViewer.getState().setSelection({ selectedIds: [] })
         setSelectedMaterialTargetForNode(event.node, interaction.role)
-        useEditor.getState().primeMaterialPaintFromSelection()
       }
       if (!interaction.apply) return
 
+      clearActivePreview()
       interaction.apply()
       sfxEmitter.emit('sfx:paint-apply')
-      if (activePreview?.key === interaction.key) {
-        activePreview = null
-      } else {
-        clearActivePreview()
-      }
-      setHoverHighlightMode(interaction.hoverMode)
+      useViewer.setState({ hoveredId: null })
+      setHoverHighlightMode('default')
     }
 
     const allTypes = [

@@ -14,6 +14,15 @@ import {
 
 type LightToolDefaults = { kind?: LightNode['kind']; height?: number }
 
+const DEFAULT_LIGHT_PROPS: Record<
+  LightNode['kind'],
+  Pick<LightNode, 'decay' | 'distance' | 'intensity'>
+> = {
+  point: { decay: 1.25, distance: 18, intensity: 90 },
+  spot: { decay: 1.15, distance: 22, intensity: 140 },
+  area: { decay: 1, distance: 0, intensity: 180 },
+}
+
 const LightTool = () => {
   const levelId = useViewer((state) => state.selection.levelId)
   const cursorRef = useRef<Group>(null)
@@ -46,13 +55,15 @@ const LightTool = () => {
         !isGridSnapActive(),
       )
       const position = lastPosition ?? [fallback[0], placementHeight, fallback[2]]
+      const lightProps = DEFAULT_LIGHT_PROPS[kind]
       const light = LightNode.parse({
         name: `${kind[0]?.toUpperCase()}${kind.slice(1)} Light`,
         kind,
         position,
         rotation: kind === 'area' ? [-Math.PI / 2, 0, 0] : [0, 0, 0],
-        intensity: kind === 'area' ? 12 : 10,
-        distance: kind === 'area' ? 0 : 12,
+        intensity: lightProps.intensity,
+        distance: lightProps.distance,
+        decay: lightProps.decay,
         castShadow: kind !== 'area',
       })
       useScene.getState().createNode(light, levelId)

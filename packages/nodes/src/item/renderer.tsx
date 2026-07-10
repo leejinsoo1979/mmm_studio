@@ -199,6 +199,9 @@ const BrokenItemFallback = ({ node }: { node: ItemNode }) => {
   )
 }
 
+const isTransientItem = (node: ItemNode): boolean =>
+  !!(node.metadata as Record<string, unknown> | null)?.isTransient
+
 export const ItemRenderer = ({ node: storeNode }: { node: ItemNode }) => {
   const ref = useRef<Group>(null!)
 
@@ -216,6 +219,7 @@ export const ItemRenderer = ({ node: storeNode }: { node: ItemNode }) => {
   )
   const roomClearPreview =
     (node as ItemNode & { roomClearPreview?: unknown }).roomClearPreview === true
+  const previewFallback = isTransientItem(node) ? null : <PreviewModel node={node} />
 
   const content = (
     <group position={node.position} ref={ref} rotation={node.rotation} visible={node.visible}>
@@ -224,7 +228,7 @@ export const ItemRenderer = ({ node: storeNode }: { node: ItemNode }) => {
       ) : (
         <>
           <ErrorBoundary fallback={<BrokenItemFallback node={node} />}>
-            <Suspense fallback={<PreviewModel node={node} />}>
+            <Suspense fallback={previewFallback}>
               <ModelRenderer node={node} />
             </Suspense>
           </ErrorBoundary>
@@ -298,7 +302,7 @@ const multiplyScales = (
 
 const ModelRenderer = ({ node }: { node: ItemNode }) => {
   const modelUrl = useAssetUrl(node.asset.src)
-  if (!modelUrl) return <PreviewModel node={node} />
+  if (!modelUrl) return isTransientItem(node) ? null : <PreviewModel node={node} />
   return <ResolvedModelRenderer node={node} url={modelUrl} />
 }
 
