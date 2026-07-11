@@ -13,6 +13,7 @@ import {
   FolderPlus,
   LayoutTemplate,
   LogOut,
+  Moon,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -20,6 +21,7 @@ import {
   PlayCircle,
   Plus,
   Search,
+  Sun,
   Trash2,
   Upload,
   X,
@@ -38,6 +40,7 @@ const ACCENT = '#fa4b0f'
 const PINNED_KEY = 'mmm:pinned-scenes'
 const ARCHIVED_KEY = 'mmm:archived-scenes'
 const PRO_CARD_KEY = 'mmm:pro-card-dismissed'
+const THEME_KEY = 'mmm:dashboard-theme'
 
 type Section = 'models' | 'pinned' | 'archive'
 type SortMode = 'edited' | 'created' | 'name'
@@ -97,11 +100,11 @@ function writeIdSet(key: string, ids: Set<string>) {
 
 function ThumbnailPlaceholder() {
   return (
-    <div className="relative h-full w-full bg-white">
-      <div className="absolute top-[24%] left-[22%] h-[50%] w-[56%] border border-[#dcdcdc]" />
-      <div className="absolute top-[24%] left-[50%] h-[50%] border-[#dcdcdc] border-l" />
-      <div className="absolute top-[52%] left-[22%] w-[28%] border-[#dcdcdc] border-t" />
-      <div className="absolute top-[36%] left-[64%] h-[14%] border-[#dcdcdc] border-l" />
+    <div className="relative h-full w-full bg-white dark:bg-[#1e1e1e]">
+      <div className="absolute top-[24%] left-[22%] h-[50%] w-[56%] border border-[#dcdcdc] dark:border-[#383838]" />
+      <div className="absolute top-[24%] left-[50%] h-[50%] border-[#dcdcdc] dark:border-[#383838] border-l" />
+      <div className="absolute top-[52%] left-[22%] w-[28%] border-[#dcdcdc] dark:border-[#383838] border-t" />
+      <div className="absolute top-[36%] left-[64%] h-[14%] border-[#dcdcdc] dark:border-[#383838] border-l" />
     </div>
   )
 }
@@ -129,6 +132,7 @@ export function MemberDashboard() {
   const [deleteTarget, setDeleteTarget] = useState<SceneMeta | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [proDismissed, setProDismissed] = useState(true)
+  const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const importInputRef = useRef<HTMLInputElement | null>(null)
@@ -149,6 +153,7 @@ export function MemberDashboard() {
     setPinnedIds(readIdSet(PINNED_KEY))
     setArchivedIds(readIdSet(ARCHIVED_KEY))
     setProDismissed(window.localStorage.getItem(PRO_CARD_KEY) === '1')
+    if (window.localStorage.getItem(THEME_KEY) === 'dark') setTheme('dark')
   }, [router])
 
   useEffect(() => {
@@ -365,6 +370,18 @@ export function MemberDashboard() {
     [showToast],
   )
 
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark'
+      try {
+        window.localStorage.setItem(THEME_KEY, next)
+      } catch {
+        // Best-effort persistence only.
+      }
+      return next
+    })
+  }, [])
+
   const openCardMenu = useCallback((scene: SceneMeta, x: number, y: number) => {
     setPopover(null)
     setMenu({
@@ -382,12 +399,16 @@ export function MemberDashboard() {
   const isArchiveView = section === 'archive'
 
   return (
-    <div className="flex h-screen bg-white font-sans text-[#1a1a1a] antialiased">
+    <div
+      className={`flex h-screen font-sans antialiased ${
+        theme === 'dark' ? 'dark bg-[#161616] text-[#ededed]' : 'bg-white text-[#1a1a1a]'
+      }`}
+    >
       {/* ── Sidebar ─────────────────────────────────────── */}
-      <aside className="hidden w-[248px] shrink-0 flex-col border-[#ececec] border-r px-3 pt-3 pb-4 md:flex">
+      <aside className="hidden w-[248px] shrink-0 flex-col border-[#ececec] dark:border-[#262626] border-r px-3 pt-3 pb-4 md:flex">
         <div className="relative">
           <button
-            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-black/[0.04]"
+            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
             onClick={() => setPopover((prev) => (prev === 'workspace' ? null : 'workspace'))}
             type="button"
           >
@@ -403,20 +424,20 @@ export function MemberDashboard() {
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[#9b9b9b]" />
           </button>
           {popover === 'workspace' && (
-            <div className="absolute top-full right-0 left-0 z-50 mt-1 rounded-[10px] border border-black/8 bg-white p-1 shadow-[0_8px_30px_rgba(0,0,0,0.12)]">
+            <div className="absolute top-full right-0 left-0 z-50 mt-1 rounded-[10px] border border-black/8 dark:border-white/10 bg-white p-1 shadow-[0_8px_30px_rgba(0,0,0,0.12)] dark:bg-[#202020] dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)]">
               <div className="px-2.5 py-2">
                 <p className="truncate font-medium text-[13px]">{user.name}</p>
                 <p className="truncate text-[#9b9b9b] text-[12px]">{user.email}</p>
               </div>
-              <div className="my-1 h-px bg-black/6" />
+              <div className="my-1 h-px bg-black/6 dark:bg-white/10" />
               <button
-                className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] transition hover:bg-black/[0.05]"
+                className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                 onClick={() => {
                   signOutStudio().finally(() => router.push('/'))
                 }}
                 type="button"
               >
-                <LogOut className="h-3.5 w-3.5 text-[#6b6b6b]" />
+                <LogOut className="h-3.5 w-3.5 text-[#6b6b6b] dark:text-[#8f8f8f]" />
                 Sign out
               </button>
             </div>
@@ -434,14 +455,14 @@ export function MemberDashboard() {
             <button
               className={`flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[14px] transition ${
                 section === item.key
-                  ? 'bg-[#f1f1f0] font-medium'
-                  : 'text-[#4a4a4a] hover:bg-black/[0.03]'
+                  ? 'bg-[#f1f1f0] font-medium dark:bg-[#262626]'
+                  : 'text-[#4a4a4a] hover:bg-black/[0.03] dark:text-[#b3b3b3] dark:hover:bg-white/[0.05]'
               }`}
               key={item.key}
               onClick={() => setSection(item.key)}
               type="button"
             >
-              <item.icon className="h-4 w-4 text-[#6b6b6b]" />
+              <item.icon className="h-4 w-4 text-[#6b6b6b] dark:text-[#8f8f8f]" />
               {item.label}
             </button>
           ))}
@@ -455,12 +476,12 @@ export function MemberDashboard() {
             { label: 'Documentation', icon: BookOpen },
           ].map((item) => (
             <button
-              className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[#4a4a4a] text-[14px] transition hover:bg-black/[0.03]"
+              className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[#4a4a4a] dark:text-[#b3b3b3] text-[14px] transition hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
               key={item.label}
               onClick={() => showToast(`${item.label} is coming soon`)}
               type="button"
             >
-              <item.icon className="h-4 w-4 text-[#6b6b6b]" />
+              <item.icon className="h-4 w-4 text-[#6b6b6b] dark:text-[#8f8f8f]" />
               {item.label}
             </button>
           ))}
@@ -473,14 +494,22 @@ export function MemberDashboard() {
           <h1 className="font-semibold text-[15px]">{SECTION_TITLES[section]}</h1>
           <div className="flex items-center gap-2">
             <button
-              className="hidden h-8 w-8 place-items-center rounded-lg text-[#5c5c5c] transition hover:bg-black/[0.05] sm:grid"
+              className="grid h-8 w-8 place-items-center rounded-lg text-[#5c5c5c] dark:text-[#a3a3a3] transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              type="button"
+            >
+              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+            <button
+              className="hidden h-8 w-8 place-items-center rounded-lg text-[#5c5c5c] dark:text-[#a3a3a3] transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08] sm:grid"
               onClick={() => showToast('Folders are coming soon')}
               title="New folder"
               type="button"
             >
               <FolderPlus className="h-4 w-4" />
             </button>
-            <label className="hidden h-8 w-[220px] items-center gap-2 rounded-lg border border-[#e5e5e5] px-2.5 transition focus-within:border-[#c9c9c9] lg:flex">
+            <label className="hidden h-8 w-[220px] items-center gap-2 rounded-lg border border-[#e5e5e5] px-2.5 transition focus-within:border-[#c9c9c9] dark:border-[#333333] dark:focus-within:border-[#4d4d4d] lg:flex">
               <Search className="h-3.5 w-3.5 shrink-0 text-[#9b9b9b]" />
               <input
                 className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-[#9b9b9b]"
@@ -492,7 +521,7 @@ export function MemberDashboard() {
             </label>
             <div className="relative">
               <button
-                className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[#4a4a4a] text-[13px] transition hover:bg-black/[0.05]"
+                className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[#4a4a4a] dark:text-[#b3b3b3] text-[13px] transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                 onClick={() => setPopover((prev) => (prev === 'sort' ? null : 'sort'))}
                 type="button"
               >
@@ -500,10 +529,10 @@ export function MemberDashboard() {
                 <ChevronDown className="h-3.5 w-3.5 text-[#9b9b9b]" />
               </button>
               {popover === 'sort' && (
-                <div className="absolute top-full right-0 z-50 mt-1 w-[160px] rounded-[10px] border border-black/8 bg-white p-1 shadow-[0_8px_30px_rgba(0,0,0,0.12)]">
+                <div className="absolute top-full right-0 z-50 mt-1 w-[160px] rounded-[10px] border border-black/8 dark:border-white/10 bg-white p-1 shadow-[0_8px_30px_rgba(0,0,0,0.12)] dark:bg-[#202020] dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)]">
                   {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
                     <button
-                      className="flex h-8 w-full items-center justify-between rounded-md px-2.5 text-[13px] transition hover:bg-black/[0.05]"
+                      className="flex h-8 w-full items-center justify-between rounded-md px-2.5 text-[13px] transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                       key={mode}
                       onClick={() => {
                         setSort(mode)
@@ -519,7 +548,7 @@ export function MemberDashboard() {
               )}
             </div>
             <button
-              className="h-8 rounded-lg border border-[#e2e2e2] px-3.5 font-medium text-[13px] transition hover:bg-black/[0.03]"
+              className="h-8 rounded-lg border border-[#e2e2e2] dark:border-[#333333] px-3.5 font-medium text-[13px] transition hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
               onClick={() => importInputRef.current?.click()}
               type="button"
             >
@@ -545,27 +574,27 @@ export function MemberDashboard() {
                 </button>
               </div>
               {popover === 'new' && (
-                <div className="absolute top-full right-0 z-50 mt-1 w-[180px] rounded-[10px] border border-black/8 bg-white p-1 shadow-[0_8px_30px_rgba(0,0,0,0.12)]">
+                <div className="absolute top-full right-0 z-50 mt-1 w-[180px] rounded-[10px] border border-black/8 dark:border-white/10 bg-white p-1 shadow-[0_8px_30px_rgba(0,0,0,0.12)] dark:bg-[#202020] dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)]">
                   <button
-                    className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] transition hover:bg-black/[0.05]"
+                    className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                     onClick={() => {
                       setPopover(null)
                       createScene()
                     }}
                     type="button"
                   >
-                    <Plus className="h-3.5 w-3.5 text-[#6b6b6b]" />
+                    <Plus className="h-3.5 w-3.5 text-[#6b6b6b] dark:text-[#8f8f8f]" />
                     New model
                   </button>
                   <button
-                    className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] transition hover:bg-black/[0.05]"
+                    className="flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                     onClick={() => {
                       setPopover(null)
                       importInputRef.current?.click()
                     }}
                     type="button"
                   >
-                    <Upload className="h-3.5 w-3.5 text-[#6b6b6b]" />
+                    <Upload className="h-3.5 w-3.5 text-[#6b6b6b] dark:text-[#8f8f8f]" />
                     Import file
                   </button>
                 </div>
@@ -580,9 +609,9 @@ export function MemberDashboard() {
               <div className="grid grid-cols-1 gap-x-5 gap-y-8 pt-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                 {Array.from({ length: 8 }, (_, i) => `skeleton-${i}`).map((key) => (
                   <div key={key}>
-                    <div className="aspect-[3/2] animate-pulse rounded-[10px] border border-[#efefef] bg-[#f7f7f6]" />
-                    <div className="mt-2.5 h-3.5 w-1/2 animate-pulse rounded bg-[#f0f0ef]" />
-                    <div className="mt-1.5 h-3 w-1/3 animate-pulse rounded bg-[#f5f5f4]" />
+                    <div className="aspect-[3/2] animate-pulse rounded-[10px] border border-[#efefef] bg-[#f7f7f6] dark:border-[#262626] dark:bg-[#1e1e1e]" />
+                    <div className="mt-2.5 h-3.5 w-1/2 animate-pulse rounded bg-[#f0f0ef] dark:bg-[#262626]" />
+                    <div className="mt-1.5 h-3 w-1/3 animate-pulse rounded bg-[#f5f5f4] dark:bg-[#222222]" />
                   </div>
                 ))}
               </div>
@@ -590,11 +619,11 @@ export function MemberDashboard() {
               <div className="grid h-full min-h-[320px] place-items-center">
                 <div className="text-center">
                   {isArchiveView ? (
-                    <Archive className="mx-auto h-6 w-6 text-[#c4c4c4]" />
+                    <Archive className="mx-auto h-6 w-6 text-[#c4c4c4] dark:text-[#4a4a4a]" />
                   ) : section === 'pinned' ? (
-                    <Pin className="mx-auto h-6 w-6 text-[#c4c4c4]" />
+                    <Pin className="mx-auto h-6 w-6 text-[#c4c4c4] dark:text-[#4a4a4a]" />
                   ) : (
-                    <File className="mx-auto h-6 w-6 text-[#c4c4c4]" />
+                    <File className="mx-auto h-6 w-6 text-[#c4c4c4] dark:text-[#4a4a4a]" />
                   )}
                   <h2 className="mt-3 font-medium text-[14px]">
                     {query
@@ -631,10 +660,10 @@ export function MemberDashboard() {
                 {visibleScenes.map((scene) => (
                   <div className="group" key={scene.id}>
                     <button
-                      className={`relative block aspect-[3/2] w-full cursor-pointer overflow-hidden rounded-[10px] border bg-white text-left transition ${
+                      className={`relative block aspect-[3/2] w-full cursor-pointer overflow-hidden rounded-[10px] border bg-white text-left transition dark:bg-[#1e1e1e] ${
                         menu?.scene.id === scene.id
-                          ? 'border-[#c9c9c9]'
-                          : 'border-[#e8e8e8] hover:border-[#cfcfcf]'
+                          ? 'border-[#c9c9c9] dark:border-[#4d4d4d]'
+                          : 'border-[#e8e8e8] hover:border-[#cfcfcf] dark:border-[#2c2c2c] dark:hover:border-[#3d3d3d]'
                       }`}
                       onClick={() => router.push(`/scene/${scene.id}`)}
                       onContextMenu={(event) => {
@@ -667,9 +696,9 @@ export function MemberDashboard() {
                         </p>
                       </div>
                       <button
-                        className={`grid h-7 w-7 shrink-0 place-items-center rounded-md text-[#5c5c5c] transition hover:bg-black/[0.05] ${
+                        className={`grid h-7 w-7 shrink-0 place-items-center rounded-md text-[#5c5c5c] dark:text-[#a3a3a3] transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08] ${
                           menu?.scene.id === scene.id
-                            ? 'bg-black/[0.05] opacity-100'
+                            ? 'bg-black/[0.05] opacity-100 dark:bg-white/[0.08]'
                             : 'opacity-0 focus-visible:opacity-100 group-hover:opacity-100'
                         }`}
                         onClick={(event) => {
@@ -688,9 +717,9 @@ export function MemberDashboard() {
           </section>
 
           {/* ── Info panel ─────────────────────────────── */}
-          <aside className="hidden w-[300px] shrink-0 border-[#ececec] border-l px-6 pt-5 xl:block">
+          <aside className="hidden w-[300px] shrink-0 border-[#ececec] dark:border-[#262626] border-l px-6 pt-5 xl:block">
             <div className="flex items-center gap-2.5">
-              <File className="h-4 w-4 text-[#6b6b6b]" />
+              <File className="h-4 w-4 text-[#6b6b6b] dark:text-[#8f8f8f]" />
               <p className="font-medium text-[14px]">{SECTION_TITLES[section]}</p>
             </div>
             <p className="mt-3 text-[#8a8a8a] text-[13px] leading-5">
@@ -699,7 +728,7 @@ export function MemberDashboard() {
                 : section === 'pinned'
                   ? 'Pinned models stay at hand. Pin the projects you keep coming back to.'
                   : 'This space is just for you. You can invite others to individual models. For shared workspaces, upgrade to the team plan.'}{' '}
-              <span className="cursor-pointer underline decoration-[#c9c9c9] underline-offset-2 hover:text-[#4a4a4a]">
+              <span className="cursor-pointer underline decoration-[#c9c9c9] underline-offset-2 hover:text-[#4a4a4a] dark:hover:text-[#d4d4d4]">
                 Learn more
               </span>
             </p>
@@ -720,11 +749,11 @@ export function MemberDashboard() {
             }}
           />
           <div
-            className="fixed z-50 w-[200px] rounded-[10px] border border-black/8 bg-white p-1 text-[13px] shadow-[0_8px_30px_rgba(0,0,0,0.12)]"
+            className="fixed z-50 w-[200px] rounded-[10px] border border-black/8 dark:border-white/10 bg-white p-1 text-[13px] shadow-[0_8px_30px_rgba(0,0,0,0.12)] dark:bg-[#202020] dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
             style={{ left: menu.x, top: menu.y }}
           >
             <button
-              className="flex h-8 w-full items-center rounded-md px-2.5 transition hover:bg-black/[0.05]"
+              className="flex h-8 w-full items-center rounded-md px-2.5 transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
               onClick={() => router.push(`/scene/${menu.scene.id}`)}
               type="button"
             >
@@ -732,16 +761,16 @@ export function MemberDashboard() {
             </button>
             {isArchiveView ? (
               <>
-                <div className="my-1 h-px bg-black/6" />
+                <div className="my-1 h-px bg-black/6 dark:bg-white/10" />
                 <button
-                  className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 transition hover:bg-black/[0.05]"
+                  className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                   onClick={() => {
                     setArchived(menu.scene.id, false)
                     setMenu(null)
                   }}
                   type="button"
                 >
-                  <ArchiveRestore className="h-3.5 w-3.5 text-[#6b6b6b]" />
+                  <ArchiveRestore className="h-3.5 w-3.5 text-[#6b6b6b] dark:text-[#8f8f8f]" />
                   Restore
                 </button>
                 <button
@@ -758,30 +787,30 @@ export function MemberDashboard() {
               </>
             ) : (
               <>
-                <div className="my-1 h-px bg-black/6" />
+                <div className="my-1 h-px bg-black/6 dark:bg-white/10" />
                 <div className="group/move relative">
                   <button
-                    className="flex h-8 w-full items-center justify-between rounded-md px-2.5 transition hover:bg-black/[0.05]"
+                    className="flex h-8 w-full items-center justify-between rounded-md px-2.5 transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                     type="button"
                   >
                     Move to
                     <ChevronRight className="h-3.5 w-3.5 text-[#9b9b9b]" />
                   </button>
-                  <div className="invisible absolute top-0 left-full z-50 ml-1 w-[176px] rounded-[10px] border border-black/8 bg-white p-1 opacity-0 shadow-[0_8px_30px_rgba(0,0,0,0.12)] transition group-hover/move:visible group-hover/move:opacity-100">
+                  <div className="invisible absolute top-0 left-full z-50 ml-1 w-[176px] rounded-[10px] border border-black/8 dark:border-white/10 bg-white p-1 opacity-0 shadow-[0_8px_30px_rgba(0,0,0,0.12)] dark:bg-[#202020] dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)] transition group-hover/move:visible group-hover/move:opacity-100">
                     <p className="px-2.5 py-1.5 text-[#9b9b9b] text-[12px]">Move to</p>
                     <button
-                      className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 transition hover:bg-black/[0.05]"
+                      className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                       onClick={() => setMenu(null)}
                       type="button"
                     >
-                      <Folder className="h-3.5 w-3.5 text-[#6b6b6b]" />
+                      <Folder className="h-3.5 w-3.5 text-[#6b6b6b] dark:text-[#8f8f8f]" />
                       My models
                     </button>
                   </div>
                 </div>
-                <div className="my-1 h-px bg-black/6" />
+                <div className="my-1 h-px bg-black/6 dark:bg-white/10" />
                 <button
-                  className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 transition hover:bg-black/[0.05]"
+                  className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                   onClick={() => {
                     setRenameValue(menu.scene.name)
                     setRenameTarget(menu.scene)
@@ -789,11 +818,11 @@ export function MemberDashboard() {
                   }}
                   type="button"
                 >
-                  <Pencil className="h-3.5 w-3.5 text-[#6b6b6b]" />
+                  <Pencil className="h-3.5 w-3.5 text-[#6b6b6b] dark:text-[#8f8f8f]" />
                   Rename
                 </button>
                 <button
-                  className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 transition hover:bg-black/[0.05]"
+                  className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                   onClick={() => {
                     togglePinned(menu.scene.id)
                     setMenu(null)
@@ -802,37 +831,37 @@ export function MemberDashboard() {
                 >
                   {pinnedIds.has(menu.scene.id) ? (
                     <>
-                      <PinOff className="h-3.5 w-3.5 text-[#6b6b6b]" />
+                      <PinOff className="h-3.5 w-3.5 text-[#6b6b6b] dark:text-[#8f8f8f]" />
                       Unpin model
                     </>
                   ) : (
                     <>
-                      <Pin className="h-3.5 w-3.5 text-[#6b6b6b]" />
+                      <Pin className="h-3.5 w-3.5 text-[#6b6b6b] dark:text-[#8f8f8f]" />
                       Pin model
                     </>
                   )}
                 </button>
-                <div className="my-1 h-px bg-black/6" />
+                <div className="my-1 h-px bg-black/6 dark:bg-white/10" />
                 <button
-                  className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 transition hover:bg-black/[0.05]"
+                  className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                   onClick={() => {
                     duplicateScene(menu.scene)
                     setMenu(null)
                   }}
                   type="button"
                 >
-                  <Copy className="h-3.5 w-3.5 text-[#6b6b6b]" />
+                  <Copy className="h-3.5 w-3.5 text-[#6b6b6b] dark:text-[#8f8f8f]" />
                   Duplicate
                 </button>
                 <button
-                  className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 transition hover:bg-black/[0.05]"
+                  className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                   onClick={() => {
                     setArchived(menu.scene.id, true)
                     setMenu(null)
                   }}
                   type="button"
                 >
-                  <Archive className="h-3.5 w-3.5 text-[#6b6b6b]" />
+                  <Archive className="h-3.5 w-3.5 text-[#6b6b6b] dark:text-[#8f8f8f]" />
                   Archive
                 </button>
               </>
@@ -848,11 +877,11 @@ export function MemberDashboard() {
 
       {/* ── Rename dialog ───────────────────────────────── */}
       {renameTarget && (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/25 p-4">
-          <div className="w-full max-w-[360px] rounded-xl border border-black/8 bg-white p-5 shadow-[0_16px_60px_rgba(0,0,0,0.18)]">
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/25 dark:bg-black/60 p-4">
+          <div className="w-full max-w-[360px] rounded-xl border border-black/8 dark:border-white/10 bg-white p-5 shadow-[0_16px_60px_rgba(0,0,0,0.18)] dark:bg-[#202020]">
             <h2 className="font-semibold text-[14px]">Rename model</h2>
             <input
-              className="mt-3 h-9 w-full rounded-lg border border-[#e2e2e2] px-3 text-[13px] outline-none transition focus:border-[#b8b8b8]"
+              className="mt-3 h-9 w-full rounded-lg border border-[#e2e2e2] dark:border-[#333333] px-3 text-[13px] outline-none transition focus:border-[#b8b8b8] dark:focus:border-[#555555]"
               onChange={(event) => setRenameValue(event.target.value)}
               ref={(element) => {
                 element?.focus()
@@ -864,7 +893,7 @@ export function MemberDashboard() {
             />
             <div className="mt-4 flex justify-end gap-2">
               <button
-                className="h-8 rounded-lg border border-[#e2e2e2] px-3.5 font-medium text-[13px] transition hover:bg-black/[0.03]"
+                className="h-8 rounded-lg border border-[#e2e2e2] dark:border-[#333333] px-3.5 font-medium text-[13px] transition hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
                 onClick={() => setRenameTarget(null)}
                 type="button"
               >
@@ -886,15 +915,15 @@ export function MemberDashboard() {
 
       {/* ── Delete confirm dialog ───────────────────────── */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/25 p-4">
-          <div className="w-full max-w-[360px] rounded-xl border border-black/8 bg-white p-5 shadow-[0_16px_60px_rgba(0,0,0,0.18)]">
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/25 dark:bg-black/60 p-4">
+          <div className="w-full max-w-[360px] rounded-xl border border-black/8 dark:border-white/10 bg-white p-5 shadow-[0_16px_60px_rgba(0,0,0,0.18)] dark:bg-[#202020]">
             <h2 className="font-semibold text-[14px]">Delete model permanently?</h2>
             <p className="mt-2 text-[#8a8a8a] text-[13px] leading-5">
               "{deleteTarget.name}" will be permanently deleted. This action cannot be undone.
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
-                className="h-8 rounded-lg border border-[#e2e2e2] px-3.5 font-medium text-[13px] transition hover:bg-black/[0.03]"
+                className="h-8 rounded-lg border border-[#e2e2e2] dark:border-[#333333] px-3.5 font-medium text-[13px] transition hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
                 onClick={() => setDeleteTarget(null)}
                 type="button"
               >
@@ -914,9 +943,9 @@ export function MemberDashboard() {
 
       {/* ── Pro card ────────────────────────────────────── */}
       {!proDismissed && (
-        <div className="fixed right-5 bottom-5 z-20 w-[300px] rounded-xl border border-[#e8e8e8] bg-white p-4 shadow-[0_12px_40px_rgba(0,0,0,0.12)]">
+        <div className="fixed right-5 bottom-5 z-20 w-[300px] rounded-xl border border-[#e8e8e8] bg-white p-4 shadow-[0_12px_40px_rgba(0,0,0,0.12)] dark:border-[#2c2c2c] dark:bg-[#202020]">
           <button
-            className="absolute top-3 right-3 grid h-6 w-6 place-items-center rounded-md text-[#9b9b9b] transition hover:bg-black/[0.05] hover:text-[#4a4a4a]"
+            className="absolute top-3 right-3 grid h-6 w-6 place-items-center rounded-md text-[#9b9b9b] transition hover:bg-black/[0.05] dark:hover:bg-white/[0.08] hover:text-[#4a4a4a] dark:hover:text-[#d4d4d4]"
             onClick={() => {
               setProDismissed(true)
               try {
@@ -941,7 +970,7 @@ export function MemberDashboard() {
             libraries.
           </p>
           <button
-            className="mt-3 h-8 w-full rounded-lg bg-[#1a1a1a] font-medium text-[13px] text-white transition hover:bg-black"
+            className="mt-3 h-8 w-full rounded-lg bg-[#1a1a1a] font-medium text-[13px] text-white transition hover:bg-black dark:bg-white dark:text-[#161616] dark:hover:bg-[#e5e5e5]"
             onClick={() => showToast('Plans are coming soon')}
             type="button"
           >
@@ -952,7 +981,7 @@ export function MemberDashboard() {
 
       {/* ── Toast ───────────────────────────────────────── */}
       {toast && (
-        <div className="-translate-x-1/2 fixed bottom-5 left-1/2 z-[70] rounded-lg bg-[#1a1a1a] px-4 py-2.5 text-[13px] text-white shadow-lg">
+        <div className="-translate-x-1/2 fixed bottom-5 left-1/2 z-[70] rounded-lg bg-[#1a1a1a] px-4 py-2.5 text-[13px] text-white shadow-lg dark:bg-white dark:text-[#1a1a1a]">
           {toast}
         </div>
       )}
