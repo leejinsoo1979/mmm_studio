@@ -658,7 +658,6 @@ async function createLocalGlbItem(file: File): Promise<AssetInput> {
 }
 
 function AssetTab() {
-  const [section, setSection] = useState<'assets' | 'nature'>('assets')
   const [localItems, setLocalItems] = useState<AssetInput[]>([])
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -691,67 +690,46 @@ function AssetTab() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-[#1b1b1b] text-[#efefef]">
-      <div className="flex shrink-0 gap-1 border-[#343434] border-b p-2">
-        {(
-          [
-            ['assets', 'Assets'],
-            ['nature', 'Nature'],
-          ] as const
-        ).map(([id, label]) => (
+    <div className="h-full bg-[#1b1b1b] text-[#efefef]">
+      <ItemsPanel
+        customCategories={[
+          {
+            id: 'nature',
+            label: 'Nature',
+            iconSrc: '/icons/tree.webp',
+            content: <TreesPanel />,
+          },
+        ]}
+        extraItems={localItems}
+        leadingTile={
           <button
-            className={`rounded-lg px-3 py-1.5 font-medium text-xs transition-colors ${
-              section === id
-                ? 'bg-[#7779ff] text-white'
-                : 'text-[#a8a8a8] hover:bg-[#2b2b32] hover:text-white'
-            }`}
-            key={id}
-            onClick={() => setSection(id)}
+            className="group relative flex min-h-[122px] flex-col gap-1.5 rounded-xl border border-dashed border-[#555] bg-[#242424] p-1.5 text-left transition-colors hover:border-[#7779ff] hover:bg-[#2b2b32]"
+            disabled={uploading}
+            onClick={() => inputRef.current?.click()}
             type="button"
           >
-            {label}
+            <div className="flex aspect-square w-full items-center justify-center rounded-lg bg-[#202035] text-[#9a9cff]">
+              {uploading ? (
+                <Loader2 className="h-7 w-7 animate-spin" />
+              ) : (
+                <Upload className="h-7 w-7" />
+              )}
+            </div>
+            <span className="truncate px-0.5 font-medium text-[11px] text-[#d8d8d8]">
+              {uploading ? 'Importing...' : 'Import GLB'}
+            </span>
+            <input
+              accept=".glb,model/gltf-binary"
+              className="hidden"
+              onChange={handleFileChange}
+              ref={inputRef}
+              type="file"
+            />
           </button>
-        ))}
-      </div>
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {section === 'assets' ? (
-          <ItemsPanel
-            extraItems={localItems}
-            leadingTile={
-              <button
-                className="group relative flex min-h-[122px] flex-col gap-1.5 rounded-xl border border-dashed border-[#555] bg-[#242424] p-1.5 text-left transition-colors hover:border-[#7779ff] hover:bg-[#2b2b32]"
-                disabled={uploading}
-                onClick={() => inputRef.current?.click()}
-                type="button"
-              >
-                <div className="flex aspect-square w-full items-center justify-center rounded-lg bg-[#202035] text-[#9a9cff]">
-                  {uploading ? (
-                    <Loader2 className="h-7 w-7 animate-spin" />
-                  ) : (
-                    <Upload className="h-7 w-7" />
-                  )}
-                </div>
-                <span className="truncate px-0.5 font-medium text-[11px] text-[#d8d8d8]">
-                  {uploading ? 'Importing...' : 'Import GLB'}
-                </span>
-                <input
-                  accept=".glb,model/gltf-binary"
-                  className="hidden"
-                  onChange={handleFileChange}
-                  ref={inputRef}
-                  type="file"
-                />
-              </button>
-            }
-            showSourceFilter={false}
-            showTagFilters={false}
-          />
-        ) : (
-          <div className="h-full overflow-y-auto">
-            <TreesPanel />
-          </div>
-        )}
-      </div>
+        }
+        showSourceFilter={false}
+        showTagFilters={false}
+      />
       {uploadError && (
         <div className="border-[#343434] border-t bg-[#251b1b] px-3 py-2 text-[#ff9a9a] text-xs">
           {uploadError}

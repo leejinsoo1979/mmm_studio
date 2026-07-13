@@ -14,6 +14,13 @@ import { type FunctionTreeNode, FunctionTreePanel } from './function-tree-panel'
 
 const PLACEMENT_TAGS = new Set(['floor', 'wall', 'ceiling', 'countertop'])
 
+export type ItemsPanelCustomCategory = {
+  id: string
+  label: string
+  iconSrc: string
+  content: React.ReactNode
+}
+
 export function ItemsPanel({
   items,
   extraItems = [],
@@ -22,6 +29,7 @@ export function ItemsPanel({
   leadingTile,
   emptyState,
   functionTree,
+  customCategories = [],
   showSourceFilter = true,
   showTagFilters = true,
 }: {
@@ -46,6 +54,8 @@ export function ItemsPanel({
    * hierarchical tree browse instead of the legacy hardcoded category tabs.
    */
   functionTree?: FunctionTreeNode[]
+  /** Host-owned categories rendered in the standard asset category row. */
+  customCategories?: ItemsPanelCustomCategory[]
   /**
    * Library/Community/Mine source chips. The open-source editor has no
    * uploaded items (only the built-in catalog), so it hides these.
@@ -72,16 +82,19 @@ export function ItemsPanel({
     )
   }
 
-  return <LegacyItemsPanel
-    emptyState={emptyState}
-    extraItems={extraItems}
-    items={items}
-    leadingTile={leadingTile}
-    onSearchChange={onSearchChange}
-    searchResults={searchResults}
-    showSourceFilter={showSourceFilter}
-    showTagFilters={showTagFilters}
-  />
+  return (
+    <LegacyItemsPanel
+      customCategories={customCategories}
+      emptyState={emptyState}
+      extraItems={extraItems}
+      items={items}
+      leadingTile={leadingTile}
+      onSearchChange={onSearchChange}
+      searchResults={searchResults}
+      showSourceFilter={showSourceFilter}
+      showTagFilters={showTagFilters}
+    />
+  )
 }
 
 function LegacyItemsPanel({
@@ -91,6 +104,7 @@ function LegacyItemsPanel({
   searchResults,
   leadingTile,
   emptyState,
+  customCategories = [],
   showSourceFilter = true,
   showTagFilters = true,
 }: {
@@ -100,6 +114,7 @@ function LegacyItemsPanel({
   searchResults?: AssetInput[] | null
   leadingTile?: React.ReactNode
   emptyState?: React.ReactNode
+  customCategories?: ItemsPanelCustomCategory[]
   showSourceFilter?: boolean
   showTagFilters?: boolean
 }) {
@@ -111,6 +126,7 @@ function LegacyItemsPanel({
 
   const [activePlacementTag, setActivePlacementTag] = useState<string | null>(null)
   const [activeFunctionalTag, setActiveFunctionalTag] = useState<string | null>(null)
+  const [activeCustomCategoryId, setActiveCustomCategoryId] = useState<string | null>(null)
   // Library / Community / Mine. Default to Library so first-time users see
   // the curated catalog rather than every uploaded item; clicking the chip
   // again clears the filter (`null` = show everything). With the chips hidden
@@ -132,8 +148,11 @@ function LegacyItemsPanel({
 
   const activeCategory =
     furnishTools.find((c) => c.catalogCategory === catalogCategory) ?? furnishTools[0]!
+  const activeCustomCategory =
+    customCategories.find((category) => category.id === activeCustomCategoryId) ?? null
 
   function selectCategory(categoryId: CatalogCategory) {
+    setActiveCustomCategoryId(null)
     setCatalogCategory(categoryId)
     setTool('item')
     setActivePlacementTag(null)
@@ -142,8 +161,17 @@ function LegacyItemsPanel({
     if (mode !== 'build') setMode('build')
   }
 
+  function selectCustomCategory(categoryId: string) {
+    setActiveCustomCategoryId(categoryId)
+    setActivePlacementTag(null)
+    setActiveFunctionalTag(null)
+    setSearch('')
+    setMode('select')
+  }
+
   // Compute tags for the current category (for filter chips)
-  const baseItems = extraItems.length > 0 ? [...extraItems, ...(items ?? CATALOG_ITEMS)] : (items ?? CATALOG_ITEMS)
+  const baseItems =
+    extraItems.length > 0 ? [...extraItems, ...(items ?? CATALOG_ITEMS)] : (items ?? CATALOG_ITEMS)
   // Apply the Library/Community/Mine filter before any category/tag work.
   // Items that don't carry a source field (e.g. seeded built-in catalog
   // entries from `CATALOG_ITEMS`) fall under "library".
@@ -202,7 +230,8 @@ function LegacyItemsPanel({
       {/* Category tabs */}
       <div className="flex shrink-0 flex-wrap gap-1 border-border/70 border-b p-2">
         {furnishTools.map((cat) => {
-          const isActive = activeCategory.catalogCategory === cat.catalogCategory
+          const isActive =
+            !activeCustomCategory && activeCategory.catalogCategory === cat.catalogCategory
           return (
             <button
               className={cn(
@@ -230,10 +259,48 @@ function LegacyItemsPanel({
             </button>
           )
         })}
+        {customCategories.map((category) => {
+          const isActive = activeCustomCategory?.id === category.id
+          return (
+            <button
+              className={cn(
+                'flex shrink-0 flex-col items-center gap-1 rounded-xl px-3 py-2 transition-colors',
+                isActive
+                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                  : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground',
+              )}
+              key={category.id}
+              onClick={() => {
+                triggerSFX('sfx:menu-click')
+                selectCustomCategory(category.id)
+              }}
+              onMouseEnter={() => triggerSFX('sfx:menu-hover')}
+              type="button"
+            >
+              <NextImage
+                alt={category.label}
+                className={cn('size-7 object-contain', !isActive && 'opacity-60 grayscale')}
+                height={28}
+                src={category.iconSrc}
+                width={28}
+              />
+              <span className="font-medium text-[10px] leading-none">{category.label}</span>
+            </button>
+          )
+        })}
       </div>
 
+      {activeCustomCategory && (
+        <div className="min-h-0 flex-1 overflow-y-auto">{activeCustomCategory.content}</div>
+      )}
+
       {/* Search + filters (non-scrollable) */}
-      <div className="flex shrink-0 flex-col gap-2 border-border/70 border-b p-2">
+      <div
+        className={cn(
+          'shrink-0 flex-col gap-2 border-border/70 border-b p-2',
+          activeCustomCategory ? 'hidden' : 'flex',
+        )}
+      >
         <div className="flex items-center gap-1.5">
           {/* Search and source filter take 50/50 of the row. `min-w-0` on
               both sides lets each half shrink to fit when the panel narrows.
@@ -373,7 +440,7 @@ function LegacyItemsPanel({
       </div>
 
       {/* Item grid */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className={cn('min-h-0 flex-1 overflow-y-auto p-3', activeCustomCategory && 'hidden')}>
         {isSearchPending ? (
           <div className="flex h-full items-center justify-center">
             <div className="size-5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground" />
