@@ -32,6 +32,13 @@ export const treesPlugin: Plugin = {
   ],
 }
 
+/** Node-only bundle for hosts that mount the Nature catalog inside their own
+ * asset browser instead of giving it a dedicated icon-rail entry. */
+export const treesNodesPlugin: Plugin = {
+  ...treesPlugin,
+  panels: [],
+}
+
 // NOTE: no re-export from './geometry' — it imports ez-tree, which touches
 // `document` at module scope and would crash SSR (this barrel is eagerly
 // imported by host bootstraps). Lazy client modules import it directly.

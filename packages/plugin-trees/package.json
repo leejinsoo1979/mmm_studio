@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./panel": {
+      "types": "./src/presets-panel.tsx",
+      "default": "./src/presets-panel.tsx"
     }
   },
   "files": [

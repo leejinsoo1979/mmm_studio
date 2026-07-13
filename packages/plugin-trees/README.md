@@ -73,6 +73,10 @@ setPluginDiscovery(async () => [treesPlugin])
 `trees:grass`) and one panel (`Trees`), loaded through the same `loadPlugin`
 path as the built-ins.
 
+Hosts that place the Nature browser inside an existing asset catalog can load
+`treesNodesPlugin` instead and mount `@pascal-app/plugin-trees/panel` in that
+catalog. This registers the same node kinds without adding a second rail icon.
+
 ## Notes / known gaps
 
 - `createNode` and the `floorPlaced.footprint` callback are typed against the

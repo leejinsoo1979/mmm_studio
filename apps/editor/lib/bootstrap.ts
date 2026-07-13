@@ -7,7 +7,7 @@ import {
   setPluginDiscovery,
 } from '@pascal-app/core'
 import { builtinPlugin } from '@pascal-app/nodes'
-import { treesPlugin } from '@pascal-app/plugin-trees'
+import { treesNodesPlugin } from '@pascal-app/plugin-trees'
 
 // Idempotency guards: HMR can reload this module, but `registerNode`
 // throws on duplicate kinds. Flags live in the module closure so they
@@ -79,10 +79,9 @@ export async function loadExternalPlugins(): Promise<void> {
   }
 }
 
-// Register the first-party example plugin (trees node + presets rail panel)
-// through the same discovery hook a third-party pack would use. Must be set
-// before `loadExternalPlugins()` reads it below.
-setPluginDiscovery(async () => [treesPlugin])
+// This host mounts the Nature catalog inside its Asset tab, so it loads the
+// tree node kinds without the plugin's optional standalone rail panel.
+setPluginDiscovery(async () => [treesNodesPlugin])
 
 loadBuiltinsSync()
 void loadExternalPlugins()
