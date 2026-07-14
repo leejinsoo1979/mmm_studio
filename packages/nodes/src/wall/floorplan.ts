@@ -5,6 +5,7 @@ import {
   type FloorplanPoint,
   type GeometryContext,
   getWallCurveLength,
+  getWallInnerFaceLine,
   getWallMidpointHandlePoint,
   getWallPlanFootprint,
   isCurvedWall,
@@ -107,15 +108,15 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
 
   const points = polygon.map((p) => [p.x, p.y] as FloorplanPoint)
 
-  const fill = '#111111'
+  const fill = isHovered && !isSelected ? '#6557e8' : '#111111'
 
   const children: FloorplanGeometry[] = [
     {
       kind: 'polygon',
       points,
       fill,
-      stroke: 'transparent',
-      strokeWidth: 0,
+      stroke: isHovered && !isSelected ? '#8b82ff' : 'transparent',
+      strokeWidth: isHovered && !isSelected ? 0.035 : 0,
       opacity: 1,
       // Once the wall is selected, the body keeps catching the pointer
       // so the cursor stays neutral (no drag/pointer affordance from
@@ -235,14 +236,28 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
         const cx = midX - centroid[0]
         const cz = midZ - centroid[1]
         const facingAway = cx * nx + cz * nz >= 0 ? 1 : -1
+        // The measured span is the wall's INNER face (내경, real thickness —
+        // not the exaggerated plan outline), matching the rectangle-room
+        // tool's dragged rect and the 3D measurement label.
+        const levelWalls = [node, ...wallSiblings.filter((s) => s.id !== node.id)]
+        const innerFace = getWallInnerFaceLine(node, calculateLevelMiters(levelWalls), levelWalls)
+        const dimensionStart: [number, number] = innerFace
+          ? [innerFace.start.x, innerFace.start.y]
+          : [node.start[0], node.start[1]]
+        const dimensionEnd: [number, number] = innerFace
+          ? [innerFace.end.x, innerFace.end.y]
+          : [node.end[0], node.end[1]]
+        const dimensionLength = innerFace
+          ? Math.hypot(dimensionEnd[0] - dimensionStart[0], dimensionEnd[1] - dimensionStart[1])
+          : length
         children.push({
           kind: 'dimension',
-          start: [node.start[0], node.start[1]],
-          end: [node.end[0], node.end[1]],
+          start: dimensionStart,
+          end: dimensionEnd,
           offsetNormal: [nx * facingAway, nz * facingAway],
           offsetDistance: 0.75,
           extensionOvershoot: 0.12,
-          text: formatLengthMetric(length, unit),
+          text: formatLengthMetric(dimensionLength, unit),
         })
       }
     }

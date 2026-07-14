@@ -4,7 +4,10 @@ import {
   type AnyNodeId,
   calculateLevelMiters,
   DEFAULT_WALL_HEIGHT,
+  detectSpacesForLevel,
+  getLevelWallsPlanCenter,
   getWallCurveLength,
+  getWallInnerFaceLine,
   getWallMiterBoundaryPoints,
   getWallPlanFootprint,
   getWallSurfacePolygon,
@@ -23,6 +26,7 @@ import { createPortal, useFrame } from '@react-three/fiber'
 import { useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { formatLinearMeasurement } from '../../lib/measurements'
+import useEditor from '../../store/use-editor'
 
 const GUIDE_Y_OFFSET = 0.08
 const LABEL_LIFT = 0.08
@@ -57,25 +61,48 @@ type MeasurementGuide = {
   heightLabelPosition: Vec3
 }
 
-type WallFaceLine = {
-  start: Point2D
-  end: Point2D
-}
-
 export function WallMeasurementLabel() {
   const selectedIds = useViewer((state) => state.selection.selectedIds)
+  const levelId = useViewer((state) => state.selection.levelId)
   const nodes = useScene((state) => state.nodes)
+  const showDimensions = useEditor((state) => state.showDimensions)
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
   const selectedNode = selectedId ? nodes[selectedId as AnyNodeId] : null
   const selectedWall = selectedNode?.type === 'wall' ? selectedNode : null
+  const roomWalls = useMemo(() => {
+    if (!(showDimensions && levelId)) return []
+    const levelWalls = Object.values(nodes).filter(
+      (node): node is WallNode => node?.type === 'wall' && node.parentId === levelId,
+    )
+    if (levelWalls.length < 3) return []
+    const { roomPolygons } = detectSpacesForLevel(levelId, levelWalls)
+    return roomPolygons.length > 0 ? levelWalls : []
+  }, [levelId, nodes, showDimensions])
 
-  if (!selectedWall) return null
+  const walls = useMemo(() => {
+    const byId = new Map<AnyNodeId, WallNode>()
+    for (const wall of roomWalls) byId.set(wall.id, wall)
+    if (selectedWall) byId.set(selectedWall.id, selectedWall)
+    return [...byId.values()]
+  }, [roomWalls, selectedWall])
 
-  return <WallMeasurementPortal wall={selectedWall} />
+  if (walls.length === 0) return null
+
+  return (
+    <>
+      {walls.map((wall) => (
+        <WallMeasurementPortal
+          key={wall.id}
+          showHeight={wall.id === selectedWall?.id}
+          wall={wall}
+        />
+      ))}
+    </>
+  )
 }
 
-function WallMeasurementPortal({ wall }: { wall: WallNode }) {
+function WallMeasurementPortal({ wall, showHeight }: { wall: WallNode; showHeight: boolean }) {
   const [objectState, setObjectState] = useState<{
     id: AnyNodeId
     object: THREE.Object3D
@@ -93,7 +120,7 @@ function WallMeasurementPortal({ wall }: { wall: WallNode }) {
 
   if (!wallObject) return null
 
-  return createPortal(<WallMeasurementAnnotation wall={wall} />, wallObject)
+  return createPortal(<WallMeasurementAnnotation showHeight={showHeight} wall={wall} />, wallObject)
 }
 
 function getLevelWalls(
@@ -110,114 +137,6 @@ function getLevelWalls(
   return levelNode.children
     .map((childId) => nodes[childId as AnyNodeId])
     .filter((node): node is WallNode => Boolean(node && node.type === 'wall'))
-}
-
-function pointMatchesWallPlanPoint(point: Point2D | undefined, planPoint: [number, number]) {
-  if (!point) return false
-
-  return Math.abs(point.x - planPoint[0]) < 1e-6 && Math.abs(point.y - planPoint[1]) < 1e-6
-}
-
-function getWallFaceLines(
-  wall: WallNode,
-  miterData: WallMiterData,
-): { left: WallFaceLine; right: WallFaceLine } | null {
-  if (isCurvedWall(wall)) return null
-
-  const footprint = getWallPlanFootprint(wall, miterData)
-  if (footprint.length < 4) return null
-
-  const startRight = footprint[0]
-  const endRight = footprint[1]
-  const hasEndCenterPoint = pointMatchesWallPlanPoint(footprint[2], wall.end)
-  const endLeft = footprint[hasEndCenterPoint ? 3 : 2]
-  const lastPoint = footprint[footprint.length - 1]
-  const hasStartCenterPoint = pointMatchesWallPlanPoint(lastPoint, wall.start)
-  const startLeft = footprint[hasStartCenterPoint ? footprint.length - 2 : footprint.length - 1]
-
-  if (!(startRight && endRight && endLeft && startLeft)) return null
-
-  return {
-    left: {
-      start: startLeft,
-      end: endLeft,
-    },
-    right: {
-      start: startRight,
-      end: endRight,
-    },
-  }
-}
-
-function getLineMidpoint(line: WallFaceLine): Point2D {
-  return {
-    x: (line.start.x + line.end.x) / 2,
-    y: (line.start.y + line.end.y) / 2,
-  }
-}
-
-function getLevelWallsCenter(levelWalls: WallNode[]): Point2D {
-  let minX = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  let minY = Number.POSITIVE_INFINITY
-  let maxY = Number.NEGATIVE_INFINITY
-
-  for (const candidateWall of levelWalls) {
-    minX = Math.min(minX, candidateWall.start[0], candidateWall.end[0])
-    maxX = Math.max(maxX, candidateWall.start[0], candidateWall.end[0])
-    minY = Math.min(minY, candidateWall.start[1], candidateWall.end[1])
-    maxY = Math.max(maxY, candidateWall.start[1], candidateWall.end[1])
-  }
-
-  return {
-    x: minX === Number.POSITIVE_INFINITY ? 0 : (minX + maxX) / 2,
-    y: minY === Number.POSITIVE_INFINITY ? 0 : (minY + maxY) / 2,
-  }
-}
-
-function getWallOuterFaceLine(
-  wall: WallNode,
-  miterData: WallMiterData,
-  levelWalls: WallNode[],
-): WallFaceLine | null {
-  const faceLines = getWallFaceLines(wall, miterData)
-  if (!faceLines) return null
-
-  if (wall.frontSide === 'exterior' && wall.backSide !== 'exterior') {
-    return faceLines.left
-  }
-
-  if (wall.backSide === 'exterior' && wall.frontSide !== 'exterior') {
-    return faceLines.right
-  }
-
-  const dx = wall.end[0] - wall.start[0]
-  const dy = wall.end[1] - wall.start[1]
-  const length = Math.hypot(dx, dy)
-  if (length < 1e-6) return null
-
-  const wallMidpoint = {
-    x: (wall.start[0] + wall.end[0]) / 2,
-    y: (wall.start[1] + wall.end[1]) / 2,
-  }
-  const levelCenter = getLevelWallsCenter(levelWalls)
-  const normal = { x: -dy / length, y: dx / length }
-  const fromCenter = {
-    x: wallMidpoint.x - levelCenter.x,
-    y: wallMidpoint.y - levelCenter.y,
-  }
-  const outwardNormal =
-    fromCenter.x * normal.x + fromCenter.y * normal.y >= 0 ? normal : { x: -normal.x, y: -normal.y }
-  const rightMidpoint = getLineMidpoint(faceLines.right)
-  const leftMidpoint = getLineMidpoint(faceLines.left)
-  const rightScore =
-    (rightMidpoint.x - wallMidpoint.x) * outwardNormal.x +
-    (rightMidpoint.y - wallMidpoint.y) * outwardNormal.y
-  const leftScore =
-    (leftMidpoint.x - wallMidpoint.x) * outwardNormal.x +
-    (leftMidpoint.y - wallMidpoint.y) * outwardNormal.y
-
-  return rightScore >= leftScore ? faceLines.right : faceLines.left
 }
 
 function getWallMiddlePoints(
@@ -281,7 +200,7 @@ function getWallExteriorOffsetSign(
     x: (wall.start[0] + wall.end[0]) / 2,
     y: (wall.start[1] + wall.end[1]) / 2,
   }
-  const levelCenter = getLevelWallsCenter(levelWalls)
+  const levelCenter = getLevelWallsPlanCenter(levelWalls)
   const normal = { x: -dy / length, y: dx / length }
   const fromCenter = {
     x: wallMidpoint.x - levelCenter.x,
@@ -291,6 +210,8 @@ function getWallExteriorOffsetSign(
   return fromCenter.x * normal.x + fromCenter.y * normal.y >= 0 ? 1 : -1
 }
 
+// Measures on the INNER arc (내경) — the side facing the room, i.e. the
+// opposite of the exterior offset sign.
 function getCurvedWallMeasurementPath(
   wall: WallNode,
   miterData: WallMiterData,
@@ -305,10 +226,10 @@ function getCurvedWallMeasurementPath(
 
   const offsetSign = getWallExteriorOffsetSign(wall, levelWalls)
   if (offsetSign >= 0) {
-    return surface.slice(sidePointCount).reverse()
+    return surface.slice(0, sidePointCount)
   }
 
-  return surface.slice(0, sidePointCount)
+  return surface.slice(sidePointCount).reverse()
 }
 
 function buildMeasurementGuide(
@@ -317,7 +238,9 @@ function buildMeasurementGuide(
 ): MeasurementGuide | null {
   const levelWalls = getLevelWalls(wall, nodes)
   const miterData = calculateLevelMiters(levelWalls)
-  const measurementLine = getWallOuterFaceLine(wall, miterData, levelWalls)
+  // Room dimensions read on the INNER face (내경) — matches the rectangle
+  // room tool, whose dragged rect (and draft labels) are the clear span.
+  const measurementLine = getWallInnerFaceLine(wall, miterData, levelWalls)
   const fallbackMiddlePoints = measurementLine ? null : getWallMiddlePoints(wall, miterData)
   const measurementPoints = measurementLine ?? fallbackMiddlePoints
   if (!measurementPoints) return null
@@ -506,7 +429,7 @@ function MeasurementLabel({
   )
 }
 
-function WallMeasurementAnnotation({ wall }: { wall: WallNode }) {
+function WallMeasurementAnnotation({ wall, showHeight }: { wall: WallNode; showHeight: boolean }) {
   const nodes = useScene((state) => state.nodes)
   const unit = useViewer((state) => state.unit)
   const isNight = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
@@ -544,13 +467,21 @@ function WallMeasurementAnnotation({ wall }: { wall: WallNode }) {
       <MeasurementPath color={color} path={guide.guidePath} />
       <MeasurementBar color={color} end={guide.extStartEnd} start={guide.extStartStart} />
       <MeasurementBar color={color} end={guide.extEndEnd} start={guide.extEndStart} />
-      <MeasurementBar color={color} end={guide.heightEnd} start={guide.heightStart} />
-      <MeasurementBar
-        color={color}
-        end={guide.heightBottomTickEnd}
-        start={guide.heightBottomTickStart}
-      />
-      <MeasurementBar color={color} end={guide.heightTopTickEnd} start={guide.heightTopTickStart} />
+      {showHeight && (
+        <>
+          <MeasurementBar color={color} end={guide.heightEnd} start={guide.heightStart} />
+          <MeasurementBar
+            color={color}
+            end={guide.heightBottomTickEnd}
+            start={guide.heightBottomTickStart}
+          />
+          <MeasurementBar
+            color={color}
+            end={guide.heightTopTickEnd}
+            start={guide.heightTopTickStart}
+          />
+        </>
+      )}
 
       <MeasurementLabel
         color={color}
@@ -558,12 +489,14 @@ function WallMeasurementAnnotation({ wall }: { wall: WallNode }) {
         position={guide.labelPosition}
         shadowColor={shadowColor}
       />
-      <MeasurementLabel
-        color={color}
-        label={heightLabel}
-        position={guide.heightLabelPosition}
-        shadowColor={shadowColor}
-      />
+      {showHeight && (
+        <MeasurementLabel
+          color={color}
+          label={heightLabel}
+          position={guide.heightLabelPosition}
+          shadowColor={shadowColor}
+        />
+      )}
     </group>
   )
 }

@@ -33,12 +33,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  * than the depth-counted `pauseSceneHistory` helpers — matches legacy.
  */
 export const CurveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
+  const initialNodeRef = useRef(node)
+  const initialNode = initialNodeRef.current
   const activatedAtRef = useRef<number>(Date.now())
-  const originalCurveOffsetRef = useRef(getClampedWallCurveOffset(node))
+  const originalCurveOffsetRef = useRef(getClampedWallCurveOffset(initialNode))
   const previousCurveOffsetRef = useRef<number | null>(null)
   const previewOffsetRef = useRef<number>(originalCurveOffsetRef.current)
 
-  const initialHandle = getWallMidpointHandlePoint(node)
+  const initialHandle = getWallMidpointHandlePoint(initialNode)
   const [cursorLocalPos, setCursorLocalPos] = useState<[number, number, number]>([
     initialHandle.x,
     0,
@@ -52,10 +54,10 @@ export const CurveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
   }, [])
 
   useEffect(() => {
-    const nodeId = node.id
+    const nodeId = initialNode.id
     const originalCurveOffset = originalCurveOffsetRef.current
-    const chord = getWallChordFrame(node)
-    const maxCurveOffset = getMaxWallCurveOffset(node)
+    const chord = getWallChordFrame(initialNode)
+    const maxCurveOffset = getMaxWallCurveOffset(initialNode)
 
     useScene.temporal.getState().pause()
     let wasCommitted = false
@@ -67,7 +69,7 @@ export const CurveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
       previewOffsetRef.current = curveOffset
 
       const nextNode = {
-        ...node,
+        ...initialNode,
         curveOffset,
       }
       const handlePoint = getWallMidpointHandlePoint(nextNode)
@@ -103,7 +105,7 @@ export const CurveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
       )
       const snappedOffset = snapScalarToGrid(offsetFromMidpoint, snapStep)
       const nextCurveOffset = normalizeWallCurveOffset(
-        node,
+        initialNode,
         Math.max(-maxCurveOffset, Math.min(maxCurveOffset, snappedOffset)),
       )
 
@@ -166,7 +168,7 @@ export const CurveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
       emitter.off('grid:click', onGridClick)
       emitter.off('tool:cancel', onCancel)
     }
-  }, [exitCurveMode, node])
+  }, [exitCurveMode, initialNode])
 
   return (
     <group>

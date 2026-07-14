@@ -89,7 +89,12 @@ const BUILD_SECTIONS: BuildSection[] = [
     items: [
       { id: 'wall', label: 'Draw Straight Walls', iconSrc: '/icons/wall.webp', kind: 'wall' },
       { id: 'wall-arc', label: 'Draw Arc Walls', iconSrc: '/icons/wallcut.webp', kind: 'wall' },
-      { id: 'custom-room', label: 'Draw Rooms', iconSrc: '/icons/custom-room.webp', kind: 'wall' },
+      {
+        id: 'custom-room',
+        label: 'Rectangle Room',
+        iconSrc: '/icons/custom-room.webp',
+        kind: 'custom-room',
+      },
     ],
   },
   {
@@ -179,8 +184,31 @@ function activateBuildTool(kind: BuildToolKind | MepToolKind): void {
   ed.setStructureLayer('elements')
   ed.setCatalogCategory(null)
   ed.setToolDefaults(kind, null)
+  if (kind === 'wall') ed.setSnappingMode('wall', 'lines')
   ed.setMode('build')
   ed.setTool(kind)
+}
+
+function activateRectangleRoomTool(): void {
+  const ed = useEditor.getState()
+  ed.setPhase('structure')
+  ed.setStructureLayer('elements')
+  ed.setCatalogCategory(null)
+  ed.setToolDefaults('wall', { placementMode: 'rectangle-room', thickness: 0.1 })
+  ed.setSnappingMode('wall', 'lines')
+  ed.setMode('build')
+  ed.setTool('rectangle-room')
+}
+
+function activateArcWallTool(): void {
+  const ed = useEditor.getState()
+  ed.setPhase('structure')
+  ed.setStructureLayer('elements')
+  ed.setCatalogCategory(null)
+  ed.setToolDefaults('wall', { placementMode: 'arc-wall', thickness: 0.1 })
+  ed.setSnappingMode('wall', 'lines')
+  ed.setMode('build')
+  ed.setTool('wall-arc')
 }
 
 function activateItemAssetTool(asset: AssetInput): void {
@@ -264,6 +292,7 @@ function Section({ children, title }: { children: React.ReactNode; title: string
 
 export function BuildTab() {
   const activeTool = useEditor((s) => s.tool)
+  const wallPlacementMode = useEditor((s) => s.toolDefaults.wall?.placementMode)
   const mode = useEditor((s) => s.mode)
   const selectedItem = useEditor((s) => s.selectedItem)
   const follow = useLiquidLineToolOptions((s) => s.follow)
@@ -301,6 +330,10 @@ export function BuildTab() {
     if (type.id === 'mep') return isMepActive
     if (type.id === 'roof')
       return mode === 'build' && (activeTool === 'roof' || isRoofFeatureActive)
+    if (type.id === 'custom-room') return mode === 'build' && activeTool === 'rectangle-room'
+    if (type.id === 'wall-arc') return mode === 'build' && activeTool === 'wall-arc'
+    if (type.id === 'wall')
+      return mode === 'build' && activeTool === 'wall' && wallPlacementMode !== 'rectangle-room'
     return mode === 'build' && activeTool === type.kind && type.id === type.kind
   }
 
@@ -320,6 +353,14 @@ export function BuildTab() {
     }
     if (type.id === 'mep') {
       activateBuildTool('duct-segment')
+      return
+    }
+    if (type.id === 'custom-room') {
+      activateRectangleRoomTool()
+      return
+    }
+    if (type.id === 'wall-arc') {
+      activateArcWallTool()
       return
     }
     if (type.kind) activateBuildTool(type.kind)

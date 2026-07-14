@@ -25,6 +25,14 @@
         "lightningcss-linux-x64-gnu": "1.32.0",
       },
     },
+    "apps/desktop": {
+      "name": "@mmm-studio/desktop",
+      "version": "0.1.0",
+      "devDependencies": {
+        "electron": "39.8.10",
+        "electron-builder": "26.15.3",
+      },
+    },
     "apps/editor": {
       "name": "editor",
       "version": "0.1.0",
@@ -681,6 +689,8 @@
     "@malept/flatpak-bundler": ["@malept/flatpak-bundler@0.4.0", "", { "dependencies": { "debug": "^4.1.1", "fs-extra": "^9.0.0", "lodash": "^4.17.15", "tmp-promise": "^3.0.2" } }, "sha512-9QOtNffcOF/c1seMCDnjckb3R9WHcG34tky+FHpNKKCW0wc/scYLwMtO+ptyGUfMW0/b/n4qRiALlaFHc9Oj7Q=="],
 
     "@mediapipe/tasks-vision": ["@mediapipe/tasks-vision@0.10.17", "", {}, "sha512-CZWV/q6TTe8ta61cZXjfnnHsfWIdFhms03M9T7Cnd5y2mdpylJM0rF1qRq+wsQVRMLz1OYPVEBU9ph2Bx8cxrg=="],
+
+    "@mmm-studio/desktop": ["@mmm-studio/desktop@workspace:apps/desktop"],
 
     "@mmm-studio/runtime": ["@mmm-studio/runtime@workspace:apps/runtime"],
 

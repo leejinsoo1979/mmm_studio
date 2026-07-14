@@ -3,8 +3,13 @@ import {
   type AnyNodeId,
   DEFAULT_ANGLE_STEP,
   type DoorNode,
+  detectSpacesForLevel,
   getScaledDimensions,
   type ItemNode,
+  pauseSceneHistory,
+  planAutoSlabsForLevel,
+  resumeSceneHistory,
+  type SlabNode,
   snapPointAlongAngleRay,
   useScene,
   type WallNode,
@@ -78,6 +83,48 @@ export function snapScalarToGrid(value: number, step = WALL_GRID_STEP): number {
 
 export function snapPointToGrid(point: WallPlanPoint, step = WALL_GRID_STEP): WallPlanPoint {
   return [snapScalarToGrid(point[0], step), snapScalarToGrid(point[1], step)]
+}
+
+/**
+ * Architectural orthogonal inference: when the pointer is close to a world
+ * horizontal/vertical ray, lock it exactly onto that ray. Holding Shift makes
+ * the lock unconditional; otherwise the nearest axis must be within 22.5°.
+ */
+export function inferOrthogonalWallPoint(
+  start: WallPlanPoint,
+  point: WallPlanPoint,
+  force = false,
+): WallPlanPoint {
+  const dx = point[0] - start[0]
+  const dz = point[1] - start[1]
+  if (Math.abs(dx) < 1e-9 && Math.abs(dz) < 1e-9) return point
+  const horizontal = Math.abs(dx) >= Math.abs(dz)
+  const offAxisAngle = Math.atan2(
+    Math.min(Math.abs(dx), Math.abs(dz)),
+    Math.max(Math.abs(dx), Math.abs(dz)),
+  )
+  if (!(force || offAxisAngle <= Math.PI / 8)) return point
+  return horizontal ? [point[0], start[1]] : [start[0], point[1]]
+}
+
+export function getRectangleRoomCenterlineCorners(
+  innerStart: WallPlanPoint,
+  innerEnd: WallPlanPoint,
+  thickness: number,
+): WallPlanPoint[] {
+  const half = Math.max(thickness, 0.01) / 2
+  const sx = Math.sign(innerEnd[0] - innerStart[0]) || 1
+  const sz = Math.sign(innerEnd[1] - innerStart[1]) || 1
+  const left = innerStart[0] - sx * half
+  const right = innerEnd[0] + sx * half
+  const top = innerStart[1] - sz * half
+  const bottom = innerEnd[1] + sz * half
+  return [
+    [left, top],
+    [right, top],
+    [right, bottom],
+    [left, bottom],
+  ]
 }
 
 function splitWallAtPoint(wall: WallNode, splitPoint: WallPlanPoint): [WallNode, WallNode] {
@@ -426,6 +473,7 @@ export function isSegmentLongEnough(start: WallPlanPoint, end: WallPlanPoint): b
 export function createWallOnCurrentLevel(
   start: WallPlanPoint,
   end: WallPlanPoint,
+  options?: { preserveExactEndpoints?: boolean },
 ): WallNode | null {
   const currentLevelId = useViewer.getState().selection.levelId
   const { createNode, createNodes, deleteNode, nodes } = useScene.getState()
@@ -446,7 +494,7 @@ export function createWallOnCurrentLevel(
   // it must be gated by the snapping mode like the draft preview is. Without
   // this gate `'off'` (and `'angles'`) still snapped the committed endpoint to
   // existing wall geometry — the residual snap the draft path no longer does.
-  if (isMagneticSnapActive()) {
+  if (isMagneticSnapActive() && !options?.preserveExactEndpoints) {
     const endIntersection = findWallIntersection(resolvedEnd, workingWalls)
     const splitEnd = splitWallIfNeeded(
       endIntersection,
@@ -505,4 +553,29 @@ export function createWallOnCurrentLevel(
   sfxEmitter.emit('sfx:structure-build')
 
   return wall
+}
+
+export function flushAutoFloorForCurrentLevel(): void {
+  const levelId = useViewer.getState().selection.levelId
+  if (!levelId) return
+  const scene = useScene.getState()
+  const walls = Object.values(scene.nodes).filter(
+    (node): node is WallNode => node?.type === 'wall' && node.parentId === levelId,
+  )
+  const slabs = Object.values(scene.nodes).filter(
+    (node): node is SlabNode => node?.type === 'slab' && node.parentId === levelId,
+  )
+  const { roomPolygons } = detectSpacesForLevel(levelId, walls)
+  const plan = planAutoSlabsForLevel(roomPolygons, slabs)
+  if (plan.create.length === 0 && plan.update.length === 0 && plan.delete.length === 0) return
+  pauseSceneHistory(useScene)
+  try {
+    scene.applyNodeChanges({
+      create: plan.create.map((node) => ({ node, parentId: levelId as AnyNodeId })),
+      update: plan.update.map((entry) => ({ id: entry.id as AnyNodeId, data: entry.data })),
+      delete: plan.delete.map((id) => id as AnyNodeId),
+    })
+  } finally {
+    resumeSceneHistory(useScene)
+  }
 }

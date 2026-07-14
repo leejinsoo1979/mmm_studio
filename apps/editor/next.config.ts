@@ -1,6 +1,11 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  // Self-contained server bundle (`.next/standalone`) — the desktop app
+  // (apps/desktop) embeds it and runs the editor locally inside Electron.
+  // Harmless on Vercel, which uses its own output handling.
+  output: 'standalone',
+  outputFileTracingRoot: new URL('../..', import.meta.url).pathname,
   logging: {
     browserToTerminal: true,
   },

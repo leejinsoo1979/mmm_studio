@@ -53,6 +53,7 @@ import {
 } from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { ArchipleFloorplanBridge } from './archiple-floorplan-bridge'
 import { BuildTab } from './build-tab'
 import { EditorHeader } from './editor-header'
 import { LightingTab } from './lighting-tab'
@@ -1117,6 +1118,7 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
         onThumbnailCapture={handleThumb}
         projectId={meta.projectId ?? 'default'}
         sidebarTabs={SIDEBAR_TABS}
+        viewerBanner={<ArchipleFloorplanBridge />}
         viewerToolbarLeft={<CommunityViewerToolbarLeft />}
         viewerToolbarRight={<CommunityViewerToolbarRight />}
       />

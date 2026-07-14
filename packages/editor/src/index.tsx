@@ -149,8 +149,10 @@ export {
 export { ToolManager } from './components/tools/tool-manager'
 export {
   createWallOnCurrentLevel,
+  getRectangleRoomCenterlineCorners,
   getSegmentGridStep,
   getWallResizeGridStep,
+  inferOrthogonalWallPoint,
   isSegmentLongEnough,
   snapPointToGrid,
   snapScalarToGrid,

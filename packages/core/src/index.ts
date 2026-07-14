@@ -227,6 +227,12 @@ export {
   sampleWallCenterline,
 } from './systems/wall/wall-curve'
 export {
+  getLevelWallsPlanCenter,
+  getWallFaceLines,
+  getWallInnerFaceLine,
+  type WallFaceLine,
+} from './systems/wall/wall-face-measurement'
+export {
   DEFAULT_WALL_HEIGHT,
   DEFAULT_WALL_THICKNESS,
   getWallPlanFootprint,

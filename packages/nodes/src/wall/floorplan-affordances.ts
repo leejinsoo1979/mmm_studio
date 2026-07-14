@@ -154,6 +154,18 @@ export const wallCurveAffordance: FloorplanAffordance<WallNode> = {
         // truth again.
         useScene.getState().updateNodes([{ id: wallId, data: { curveOffset: lastCurveOffset } }])
         useLiveNodeOverrides.getState().clear(wallId)
+        useScene.getState().markDirty(wallId)
+
+        // The shared 3D curve affordance unmounts when the 2D reshape scope
+        // closes. Its cleanup runs later in the same event turn; finalize the
+        // committed sagitta after those cleanups so they cannot restore the
+        // pre-drag straight value over the 2D commit.
+        queueMicrotask(() => {
+          const committed = useScene.getState().nodes[wallId]
+          if (committed?.type !== 'wall' || committed.curveOffset === lastCurveOffset) return
+          useScene.getState().updateNodes([{ id: wallId, data: { curveOffset: lastCurveOffset } }])
+          useScene.getState().markDirty(wallId)
+        })
       },
     }
   },

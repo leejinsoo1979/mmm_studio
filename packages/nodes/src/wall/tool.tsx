@@ -9,10 +9,10 @@ import {
   type GridEvent,
   getWallMiterBoundaryPoints,
   type LevelNode,
+  type Point2D,
   pauseSceneHistory,
   planAutoCeilingsForLevel,
   planAutoSlabsForLevel,
-  type Point2D,
   projectAutoSlabsForPlan,
   resolveAlignment,
   resolveBuildingForLevel,
@@ -31,7 +31,9 @@ import {
   formatLinearMeasurement,
   getAngleArcToSegmentReference,
   getAngleToSegmentReference,
+  getRectangleRoomCenterlineCorners,
   getSegmentAngleReferenceAtPoint,
+  inferOrthogonalWallPoint,
   isAlignmentGuideActive,
   isAngleSnapActive,
   isMagneticSnapActive,
@@ -73,6 +75,8 @@ const ALIGNMENT_THRESHOLD_M = 0.08
 // HUD label heights are measured from the top of the preview bar, so they
 // track whatever height a seeded preset draws at (`previewHeight`).
 const DRAFT_LABEL_Y_OFFSET = 0.22
+const DRAFT_DIMENSION_OFFSET = 0.36
+const DRAFT_DIMENSION_TICK_SIZE = 0.09
 const DRAFT_ANGLE_LABEL_Y_OFFSET = 0.08
 const DRAFT_ANGLE_ARC_Y_OFFSET = 0.012
 const DRAFT_ANGLE_ARC_MIN_RADIUS = 0.32
@@ -105,6 +109,9 @@ type DraftAngleLabel = {
 }
 
 type DraftMeasurementState = {
+  start: WallPlanPoint
+  end: WallPlanPoint
+  guideY: number
   lengthLabel: string
   lengthPosition: [number, number, number]
   angleLabels: DraftAngleLabel[]
@@ -113,6 +120,7 @@ type DraftMeasurementState = {
 type DraftAxisGuideState = {
   origin: WallPlanPoint
   y: number
+  lockedAxis: 'x' | 'z' | null
   angleLabel: DraftAngleLabel | null
 } | null
 
@@ -156,6 +164,15 @@ function distanceSquared(a: WallPlanPoint, b: WallPlanPoint) {
 
 function pointMatches(a: WallPlanPoint, b: WallPlanPoint, tolerance = 1e-5) {
   return distanceSquared(a, b) <= tolerance * tolerance
+}
+
+function getLockedOrthogonalAxis(start: WallPlanPoint, end: WallPlanPoint): 'x' | 'z' | null {
+  const dx = Math.abs(end[0] - start[0])
+  const dz = Math.abs(end[1] - start[1])
+  if (dx < 0.01 && dz < 0.01) return null
+  if (dz < 1e-6) return 'x'
+  if (dx < 1e-6) return 'z'
+  return null
 }
 
 function isWithinWallJoinSnapRadius(point: WallPlanPoint, vertex: Vector3) {
@@ -440,12 +457,18 @@ function getDraftMeasurementState(
   const dz = end[1] - start[1]
   const length = Math.hypot(dx, dz)
   if (length < 0.01) return null
+  const normalX = -dz / length
+  const normalZ = dx / length
+  const guideY = baseY + previewHeight + DRAFT_ANGLE_ARC_Y_OFFSET
   return {
+    start,
+    end,
+    guideY,
     lengthLabel: formatLinearMeasurement(length, unit),
     lengthPosition: [
-      (start[0] + end[0]) / 2,
+      (start[0] + end[0]) / 2 + normalX * DRAFT_DIMENSION_OFFSET,
       baseY + previewHeight + DRAFT_LABEL_Y_OFFSET,
-      (start[1] + end[1]) / 2,
+      (start[1] + end[1]) / 2 + normalZ * DRAFT_DIMENSION_OFFSET,
     ],
     angleLabels: getDraftAngleLabels(start, end, walls, baseY, previewHeight),
   }
@@ -612,12 +635,28 @@ export const WallTool: React.FC = () => {
   const buildingState = useRef(0)
   const [draftMeasurement, setDraftMeasurement] = useState<DraftMeasurementState>(null)
   const [axisGuide, setAxisGuide] = useState<DraftAxisGuideState>(null)
+  // CAD-style numeric entry: with the start point placed and a direction
+  // aimed, typed digits accumulate here and Enter commits a segment of
+  // exactly that length along the aim. Shown as an accent label at the
+  // cursor while typing.
+  const [typedLength, setTypedLength] = useState('')
   const measurementColor = isDark ? '#ffffff' : '#111111'
   const measurementShadowColor = isDark ? '#111111' : '#ffffff'
+  const typedUnitSuffix = unit === 'imperial' ? 'ft' : unit === 'centimeter' ? 'cm' : 'mm'
 
   // Clear preset-seeded defaults on deactivation so a later manual wall draw
   // isn't built with a stale preset's parameters. Unmount-only.
-  useEffect(() => () => useEditor.getState().setToolDefaults('wall', null), [])
+  useEffect(
+    () => () => {
+      // Switching from the straight-wall renderer to RectangleRoomTool
+      // unmounts this component while `tool` itself remains `wall`. Preserve
+      // the newly selected mode instead of immediately deleting it here.
+      if (useEditor.getState().toolDefaults.wall?.placementMode !== 'rectangle-room') {
+        useEditor.getState().setToolDefaults('wall', null)
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     let gridPosition: WallPlanPoint = [0, 0]
@@ -665,6 +704,12 @@ export const WallTool: React.FC = () => {
         : point
     }
 
+    let typedBuffer = ''
+    const clearTypedLength = () => {
+      typedBuffer = ''
+      setTypedLength('')
+    }
+
     const stopDrafting = () => {
       buildingState.current = 0
       chainFirstVertex.current = null
@@ -673,6 +718,7 @@ export const WallTool: React.FC = () => {
       }
       setDraftMeasurement(null)
       setAxisGuide(null)
+      clearTypedLength()
       useAlignmentGuides.getState().clear()
       useWallSnapIndicator.getState().clear()
       useSegmentDraftChain.getState().clear('wall')
@@ -690,14 +736,28 @@ export const WallTool: React.FC = () => {
       // Snapping is governed entirely by the snapping mode (grid / lines /
       // angles / off). `'off'` is the bypass — there is no Shift hold-to-bypass.
       const angleLocked = buildingState.current === 1 && isAngleSnapActive()
+      const draftStart: WallPlanPoint = [startingPoint.current.x, startingPoint.current.z]
+      const orthogonalInput =
+        buildingState.current === 1
+          ? inferOrthogonalWallPoint(draftStart, localPoint, event.nativeEvent.shiftKey)
+          : localPoint
       const snapResult = snapWallDraftPointDetailed({
-        point: localPoint,
+        point: orthogonalInput,
         walls: snapWalls,
-        start: angleLocked ? [startingPoint.current.x, startingPoint.current.z] : undefined,
+        start: angleLocked ? draftStart : undefined,
         angleSnap: angleLocked,
         magnetic: isMagneticSnapActive(),
       })
       gridPosition = alignPoint(snapResult.point, { applySnap: !angleLocked })
+      const orthogonalInferred =
+        orthogonalInput[0] !== localPoint[0] || orthogonalInput[1] !== localPoint[1]
+      // Magnetic attachment to real wall geometry wins. Otherwise preserve
+      // the architectural horizontal/vertical inference after grid/alignment
+      // processing so the preview and the committed endpoint are exactly 90°.
+      if (buildingState.current === 1 && !snapResult.snap && orthogonalInferred) {
+        gridPosition = inferOrthogonalWallPoint(draftStart, gridPosition, true)
+        useAlignmentGuides.getState().clear()
+      }
       // Stand the magnetic beacon at the endpoint when it locked onto an
       // existing wall corner / wall point; clear it for plain grid/angle moves.
       useWallSnapIndicator
@@ -715,6 +775,10 @@ export const WallTool: React.FC = () => {
         setAxisGuide({
           origin: [startingPoint.current.x, startingPoint.current.z],
           y: startingPoint.current.y,
+          lockedAxis: getLockedOrthogonalAxis(
+            [startingPoint.current.x, startingPoint.current.z],
+            snappedLocal,
+          ),
           angleLabel: getNearestAxisAngleLabel(
             [startingPoint.current.x, startingPoint.current.z],
             snappedLocal,
@@ -783,6 +847,7 @@ export const WallTool: React.FC = () => {
         setAxisGuide({
           origin: snappedStart,
           y: event.localPosition[1],
+          lockedAxis: null,
           angleLabel: null,
         })
         triggerSFX('sfx:structure-build-start')
@@ -796,75 +861,150 @@ export const WallTool: React.FC = () => {
         setDraftMeasurement(null)
       } else if (buildingState.current === 1) {
         const angleLocked = isAngleSnapActive()
-        const snappedEnd = alignPoint(
-          snapWallDraftPointDetailed({
-            point: localClick,
-            walls: snapWalls,
-            start: angleLocked ? [startingPoint.current.x, startingPoint.current.z] : undefined,
-            angleSnap: angleLocked,
-            magnetic: isMagneticSnapActive(),
-          }).point,
-          { applySnap: !angleLocked },
+        const draftStart: WallPlanPoint = [startingPoint.current.x, startingPoint.current.z]
+        const orthogonalInput = inferOrthogonalWallPoint(
+          draftStart,
+          localClick,
+          event.nativeEvent.shiftKey,
         )
-        const dx = snappedEnd[0] - startingPoint.current.x
-        const dz = snappedEnd[1] - startingPoint.current.z
-        if (dx * dx + dz * dz < 0.01 * 0.01) return
-        // Both start and end are building-local ✓
-        const createdWall = createWallOnCurrentLevel(
-          [startingPoint.current.x, startingPoint.current.z],
-          snappedEnd,
-        )
-        if (!createdWall) return
-        flushAutoSurfacesForCurrentLevel()
-
-        // The new segment is now a real node — make it an alignment target
-        // for the next segment, and drop the just-shown guide.
-        refreshAlignmentCandidates()
-        useAlignmentGuides.getState().clear()
-        useWallSnapIndicator.getState().clear()
-
-        if (useEditor.getState().getContinuation('wall') === 'single') {
-          stopDrafting()
-          return
-        }
-
-        const closedToChainStart =
-          chainFirstVertex.current &&
-          isWithinWallJoinSnapRadius(createdWall.end, chainFirstVertex.current)
-
-        // Auto-close also fires when the segment seals a room against the
-        // existing wall network (e.g. a bay closed onto the middle of another
-        // wall), not just when the chain loops back to its own start. Shares the
-        // room graph with auto slab/ceiling detection so the two never disagree.
-        if (closedToChainStart || wallClosesRoom(getCurrentLevelWalls(), createdWall)) {
-          stopDrafting()
-          return
-        }
-
-        const nextStart = createdWall.end
-        // Publish the resolved chain start so the 2D floor-plan draft
-        // chains its next segment from the same point (its own snap
-        // pipeline can resolve a slightly different endpoint).
-        useSegmentDraftChain.getState().setChainStart('wall', [nextStart[0], nextStart[1]])
-        startingPoint.current.set(nextStart[0], event.localPosition[1], nextStart[1])
-        endingPoint.current.copy(startingPoint.current)
-        cursorRef.current?.position.copy(startingPoint.current)
-        buildingState.current = 1
-        setAxisGuide({
-          origin: nextStart,
-          y: event.localPosition[1],
-          angleLabel: null,
+        const snapResult = snapWallDraftPointDetailed({
+          point: orthogonalInput,
+          walls: snapWalls,
+          start: angleLocked ? draftStart : undefined,
+          angleSnap: angleLocked,
+          magnetic: isMagneticSnapActive(),
         })
-        // Hide the preview until the next `onGridMove` writes the
-        // new segment's geometry. Without this the prior segment's
-        // BoxGeometry stays visible for a frame on top of the
-        // freshly-committed real wall, producing a brief
-        // double-paint at the new wall's position.
-        if (wallPreviewRef.current) {
-          wallPreviewRef.current.visible = false
+        let snappedEnd = alignPoint(snapResult.point, { applySnap: !angleLocked })
+        const orthogonalInferred =
+          orthogonalInput[0] !== localClick[0] || orthogonalInput[1] !== localClick[1]
+        if (!snapResult.snap && orthogonalInferred) {
+          snappedEnd = inferOrthogonalWallPoint(draftStart, snappedEnd, true)
+          useAlignmentGuides.getState().clear()
         }
-        setDraftMeasurement(null)
+        commitSegmentTo(snappedEnd, event.localPosition[1])
       }
+    }
+
+    // Commits a segment from the current start to `end`, then either stops
+    // (single mode / room closed) or chains the next segment from the new
+    // endpoint. Shared by the click commit and the typed-length commit.
+    function commitSegmentTo(snappedEnd: WallPlanPoint, baseY: number) {
+      const dx = snappedEnd[0] - startingPoint.current.x
+      const dz = snappedEnd[1] - startingPoint.current.z
+      if (dx * dx + dz * dz < 0.01 * 0.01) return
+      // Both start and end are building-local ✓
+      const createdWall = createWallOnCurrentLevel(
+        [startingPoint.current.x, startingPoint.current.z],
+        snappedEnd,
+      )
+      if (!createdWall) return
+      flushAutoSurfacesForCurrentLevel()
+      clearTypedLength()
+
+      // The new segment is now a real node — make it an alignment target
+      // for the next segment, and drop the just-shown guide.
+      refreshAlignmentCandidates()
+      useAlignmentGuides.getState().clear()
+      useWallSnapIndicator.getState().clear()
+
+      if (useEditor.getState().getContinuation('wall') === 'single') {
+        stopDrafting()
+        return
+      }
+
+      const closedToChainStart =
+        chainFirstVertex.current &&
+        isWithinWallJoinSnapRadius(createdWall.end, chainFirstVertex.current)
+
+      // Auto-close also fires when the segment seals a room against the
+      // existing wall network (e.g. a bay closed onto the middle of another
+      // wall), not just when the chain loops back to its own start. Shares the
+      // room graph with auto slab/ceiling detection so the two never disagree.
+      if (closedToChainStart || wallClosesRoom(getCurrentLevelWalls(), createdWall)) {
+        stopDrafting()
+        return
+      }
+
+      const nextStart = createdWall.end
+      // Publish the resolved chain start so the 2D floor-plan draft
+      // chains its next segment from the same point (its own snap
+      // pipeline can resolve a slightly different endpoint).
+      useSegmentDraftChain.getState().setChainStart('wall', [nextStart[0], nextStart[1]])
+      startingPoint.current.set(nextStart[0], baseY, nextStart[1])
+      endingPoint.current.copy(startingPoint.current)
+      cursorRef.current?.position.copy(startingPoint.current)
+      buildingState.current = 1
+      setAxisGuide({
+        origin: nextStart,
+        y: baseY,
+        lockedAxis: null,
+        angleLabel: null,
+      })
+      // Hide the preview until the next `onGridMove` writes the
+      // new segment's geometry. Without this the prior segment's
+      // BoxGeometry stays visible for a frame on top of the
+      // freshly-committed real wall, producing a brief
+      // double-paint at the new wall's position.
+      if (wallPreviewRef.current) {
+        wallPreviewRef.current.visible = false
+      }
+      setDraftMeasurement(null)
+    }
+
+    // ── CAD-style numeric length entry ─────────────────────────────────
+    // With a start point placed, typed digits accumulate; Enter commits a
+    // segment of that length along the currently aimed direction. Uses the
+    // capture phase so global single-key shortcuts don't swallow digits.
+    const parseTypedMeters = (): number | null => {
+      const value = Number.parseFloat(typedBuffer)
+      if (!Number.isFinite(value) || value <= 0) return null
+      if (unit === 'imperial') return value * 0.3048
+      if (unit === 'centimeter') return value / 100
+      return value / 1000 // millimeter (default)
+    }
+
+    const commitTypedLength = () => {
+      const meters = parseTypedMeters()
+      if (!meters) return
+      const dirX = endingPoint.current.x - startingPoint.current.x
+      const dirZ = endingPoint.current.z - startingPoint.current.z
+      const dirLength = Math.hypot(dirX, dirZ)
+      // No aim yet (cursor still on the start point) — nothing to commit.
+      if (dirLength < 1e-6) return
+      const end: WallPlanPoint = [
+        startingPoint.current.x + (dirX / dirLength) * meters,
+        startingPoint.current.z + (dirZ / dirLength) * meters,
+      ]
+      commitSegmentTo(end, startingPoint.current.y)
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (buildingState.current !== 1) return
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return
+      }
+
+      if (/^[0-9]$/.test(event.key) || (event.key === '.' && !typedBuffer.includes('.'))) {
+        typedBuffer += event.key
+      } else if (event.key === 'Backspace' && typedBuffer) {
+        typedBuffer = typedBuffer.slice(0, -1)
+      } else if (event.key === 'Enter' && typedBuffer) {
+        commitTypedLength()
+        typedBuffer = ''
+      } else if (event.key === 'Escape' && typedBuffer) {
+        // First Escape clears the typed value; a second one cancels the
+        // draft via the regular tool:cancel flow.
+        typedBuffer = ''
+      } else {
+        return
+      }
+      setTypedLength(typedBuffer)
+      event.preventDefault()
+      event.stopPropagation()
     }
 
     const onCancel = () => {
@@ -877,11 +1017,13 @@ export const WallTool: React.FC = () => {
     emitter.on('grid:move', onGridMove)
     emitter.on('grid:click', onGridClick)
     emitter.on('tool:cancel', onCancel)
+    window.addEventListener('keydown', onKeyDown, { capture: true })
 
     return () => {
       emitter.off('grid:move', onGridMove)
       emitter.off('grid:click', onGridClick)
       emitter.off('tool:cancel', onCancel)
+      window.removeEventListener('keydown', onKeyDown, { capture: true })
       useAlignmentGuides.getState().clear()
       useWallSnapIndicator.getState().clear()
       useSegmentDraftChain.getState().clear('wall')
@@ -909,9 +1051,12 @@ export const WallTool: React.FC = () => {
       </mesh>
       {draftMeasurement && (
         <>
+          <DraftLinearDimensionGuide color={measurementColor} measurement={draftMeasurement} />
           <DraftMeasurementLabel
-            color={measurementColor}
-            label={draftMeasurement.lengthLabel}
+            color={typedLength ? '#8b82ff' : measurementColor}
+            label={
+              typedLength ? `${typedLength}${typedUnitSuffix} ⏎` : draftMeasurement.lengthLabel
+            }
             position={draftMeasurement.lengthPosition}
             shadowColor={measurementShadowColor}
           />
@@ -932,6 +1077,240 @@ export const WallTool: React.FC = () => {
   )
 }
 
+function DraftLinearDimensionGuide({
+  color,
+  measurement,
+}: {
+  color: string
+  measurement: NonNullable<DraftMeasurementState>
+}) {
+  const geometry = useMemo(() => {
+    const { start, end, guideY } = measurement
+    const dx = end[0] - start[0]
+    const dz = end[1] - start[1]
+    const length = Math.hypot(dx, dz)
+    if (length < 0.01) return new BufferGeometry()
+
+    const nx = -dz / length
+    const nz = dx / length
+    const tx = (dx / length) * DRAFT_DIMENSION_TICK_SIZE
+    const tz = (dz / length) * DRAFT_DIMENSION_TICK_SIZE
+    const sx = start[0] + nx * DRAFT_DIMENSION_OFFSET
+    const sz = start[1] + nz * DRAFT_DIMENSION_OFFSET
+    const ex = end[0] + nx * DRAFT_DIMENSION_OFFSET
+    const ez = end[1] + nz * DRAFT_DIMENSION_OFFSET
+    const extension = DRAFT_DIMENSION_TICK_SIZE * 0.45
+
+    return new BufferGeometry().setFromPoints([
+      // Start/end witness lines.
+      new Vector3(start[0], guideY, start[1]),
+      new Vector3(sx + nx * extension, guideY, sz + nz * extension),
+      new Vector3(end[0], guideY, end[1]),
+      new Vector3(ex + nx * extension, guideY, ez + nz * extension),
+      // Dimension line.
+      new Vector3(sx, guideY, sz),
+      new Vector3(ex, guideY, ez),
+      // Perpendicular end ticks.
+      new Vector3(sx - tx, guideY, sz - tz),
+      new Vector3(sx + tx, guideY, sz + tz),
+      new Vector3(ex - tx, guideY, ez - tz),
+      new Vector3(ex + tx, guideY, ez + tz),
+    ])
+  }, [measurement])
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+
+  return (
+    <lineSegments frustumCulled={false} geometry={geometry} layers={EDITOR_LAYER} renderOrder={3}>
+      <lineBasicNodeMaterial
+        color={color}
+        depthTest={false}
+        depthWrite={false}
+        opacity={0.96}
+        transparent
+      />
+    </lineSegments>
+  )
+}
+
+function RectanglePreviewWall({
+  end,
+  height,
+  start,
+  thickness,
+}: {
+  end: WallPlanPoint
+  height: number
+  start: WallPlanPoint
+  thickness: number
+}) {
+  const dx = end[0] - start[0]
+  const dz = end[1] - start[1]
+  const length = Math.hypot(dx, dz)
+  if (length < 0.01) return null
+  return (
+    <mesh
+      layers={EDITOR_LAYER}
+      position={[(start[0] + end[0]) / 2, height / 2, (start[1] + end[1]) / 2]}
+      renderOrder={1}
+      rotation={[0, -Math.atan2(dz, dx), 0]}
+    >
+      <boxGeometry args={[length, height, thickness]} />
+      <meshBasicMaterial
+        color="#818cf8"
+        depthTest={false}
+        depthWrite={false}
+        opacity={0.5}
+        transparent
+      />
+    </mesh>
+  )
+}
+
+const RectangleRoomTool: React.FC = () => {
+  const unit = useViewer((state) => state.unit)
+  const isDark = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
+  const defaults = useEditor((state) => state.toolDefaults.wall)
+  const height = typeof defaults?.height === 'number' ? defaults.height : WALL_HEIGHT
+  const thickness =
+    typeof defaults?.thickness === 'number' ? defaults.thickness : DRAFT_WALL_THICKNESS
+  const [start, setStart] = useState<WallPlanPoint | null>(null)
+  const [end, setEnd] = useState<WallPlanPoint | null>(null)
+  const cursorRef = useRef<Group>(null)
+  const startRef = useRef<WallPlanPoint | null>(null)
+  const endRef = useRef<WallPlanPoint | null>(null)
+  const color = isDark ? '#ffffff' : '#111111'
+  const shadowColor = isDark ? '#111111' : '#ffffff'
+
+  useEffect(() => () => useEditor.getState().setToolDefaults('wall', null), [])
+
+  useEffect(() => {
+    const snap = (event: GridEvent): WallPlanPoint => {
+      const point: WallPlanPoint = [event.localPosition[0], event.localPosition[2]]
+      return snapWallDraftPointDetailed({
+        point,
+        walls: [...getCurrentLevelWalls(), ...getBelowLevelWalls()],
+        magnetic: isMagneticSnapActive(),
+      }).point
+    }
+    const clear = () => {
+      startRef.current = null
+      endRef.current = null
+      setStart(null)
+      setEnd(null)
+    }
+    const onMove = (event: GridEvent) => {
+      const point = snap(event)
+      endRef.current = point
+      setEnd(point)
+      cursorRef.current?.position.set(point[0], event.localPosition[1], point[1])
+    }
+    const onClick = (event: GridEvent) => {
+      const point = snap(event)
+      if (!startRef.current) {
+        startRef.current = point
+        endRef.current = point
+        setStart(point)
+        setEnd(point)
+        triggerSFX('sfx:structure-build-start')
+        return
+      }
+      const first = startRef.current
+      if (Math.abs(point[0] - first[0]) < 0.01 || Math.abs(point[1] - first[1]) < 0.01) return
+      const corners = getRectangleRoomCenterlineCorners(first, point, thickness)
+      pauseSceneHistory(useScene)
+      try {
+        for (let index = 0; index < corners.length; index += 1) {
+          createWallOnCurrentLevel(corners[index]!, corners[(index + 1) % corners.length]!, {
+            preserveExactEndpoints: true,
+          })
+        }
+        flushAutoSurfacesForCurrentLevel()
+      } finally {
+        resumeSceneHistory(useScene)
+      }
+      // The space-detection sync skips store events while scene history is
+      // paused, so the batched room commit above never receives its walls'
+      // interior/exterior side tags — and cutaway mode needs them to hide
+      // camera-facing walls. Apply the side classification explicitly here,
+      // like the per-segment draw flow gets from the sync.
+      const levelId = useViewer.getState().selection.levelId
+      if (levelId) {
+        const { wallUpdates } = detectSpacesForLevel(levelId, getCurrentLevelWalls())
+        const sideUpdates = wallUpdates.filter(
+          (update) => update.frontSide !== 'unknown' || update.backSide !== 'unknown',
+        )
+        if (sideUpdates.length > 0) {
+          useScene.getState().updateNodes(
+            sideUpdates.map((update) => ({
+              id: update.wallId as AnyNodeId,
+              data: { frontSide: update.frontSide, backSide: update.backSide },
+            })),
+          )
+        }
+      }
+      clear()
+    }
+    const onCancel = () => {
+      if (!startRef.current) return
+      markToolCancelConsumed()
+      clear()
+    }
+    emitter.on('grid:move', onMove)
+    emitter.on('grid:click', onClick)
+    emitter.on('tool:cancel', onCancel)
+    return () => {
+      emitter.off('grid:move', onMove)
+      emitter.off('grid:click', onClick)
+      emitter.off('tool:cancel', onCancel)
+    }
+  }, [])
+
+  const segments =
+    start && end
+      ? getRectangleRoomCenterlineCorners(start, end, thickness).map(
+          (corner, index, corners) =>
+            [corner, corners[(index + 1) % corners.length]!] as [WallPlanPoint, WallPlanPoint],
+        )
+      : []
+
+  return (
+    <group>
+      <CursorSphere height={height} ref={cursorRef} />
+      {segments.map(([segmentStart, segmentEnd], index) => (
+        <RectanglePreviewWall
+          end={segmentEnd}
+          height={height}
+          key={index}
+          start={segmentStart}
+          thickness={thickness}
+        />
+      ))}
+      {start && end && Math.abs(end[0] - start[0]) >= 0.01 && (
+        <DraftMeasurementLabel
+          color={color}
+          label={formatLinearMeasurement(Math.abs(end[0] - start[0]), unit)}
+          position={[(start[0] + end[0]) / 2, height + DRAFT_LABEL_Y_OFFSET, start[1]]}
+          shadowColor={shadowColor}
+        />
+      )}
+      {start && end && Math.abs(end[1] - start[1]) >= 0.01 && (
+        <DraftMeasurementLabel
+          color={color}
+          label={formatLinearMeasurement(Math.abs(end[1] - start[1]), unit)}
+          position={[end[0], height + DRAFT_LABEL_Y_OFFSET, (start[1] + end[1]) / 2]}
+          shadowColor={shadowColor}
+        />
+      )}
+    </group>
+  )
+}
+
+const WallToolRouter: React.FC = () => {
+  const placementMode = useEditor((state) => state.toolDefaults.wall?.placementMode)
+  return placementMode === 'rectangle-room' ? <RectangleRoomTool /> : <WallTool />
+}
+
 function WallAxisGuides({
   guide,
   labelColor,
@@ -947,10 +1326,11 @@ function WallAxisGuides({
 
   return (
     <>
-      <group position={[x, guide.y + DRAFT_AXIS_GUIDE_Y_OFFSET, z]}>
-        <WallAxisGuideLine axis="x" />
-        <WallAxisGuideLine axis="z" />
-      </group>
+      {guide.lockedAxis && (
+        <group position={[x, guide.y + DRAFT_AXIS_GUIDE_Y_OFFSET, z]}>
+          <WallAxisGuideLine axis={guide.lockedAxis} />
+        </group>
+      )}
       {guide.angleLabel && (
         <>
           <DraftAngleArc arc={guide.angleLabel.arc} color="#818cf8" />
@@ -981,7 +1361,7 @@ function WallAxisGuideLine({ axis }: { axis: 'x' | 'z' }) {
         color="#818cf8"
         depthTest={false}
         depthWrite={false}
-        opacity={0.36}
+        opacity={0.9}
         transparent
       />
     </mesh>
@@ -1055,4 +1435,4 @@ function DraftMeasurementLabel({
   )
 }
 
-export default WallTool
+export default WallToolRouter

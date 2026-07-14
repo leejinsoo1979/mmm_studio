@@ -31,8 +31,10 @@ import {
   nodeRegistry,
   normalizeWallCurveOffset,
   type Point2D,
+  pauseSceneHistory,
   type RoofNode,
   type RoofSegmentNode,
+  resumeSceneHistory,
   type SiteNode,
   type SlabNode,
   SlabNode as SlabNodeSchema,
@@ -170,6 +172,9 @@ import {
 } from '../tools/stair/stair-defaults'
 import {
   createWallOnCurrentLevel,
+  flushAutoFloorForCurrentLevel,
+  getRectangleRoomCenterlineCorners,
+  inferOrthogonalWallPoint,
   isSegmentLongEnough,
   snapWallDraftPoint,
   snapWallDraftPointDetailed,
@@ -260,6 +265,41 @@ const FLOORPLAN_MARQUEE_DRAG_THRESHOLD_PX = 4
 const FLOORPLAN_ACTION_MENU_HORIZONTAL_PADDING = 60
 const FLOORPLAN_ACTION_MENU_MIN_ANCHOR_Y = 56
 const FLOORPLAN_DEFAULT_WINDOW_LOCAL_Y = 1.5
+
+function publishOrthogonalInferenceGuide(start: WallPlanPoint, end: WallPlanPoint) {
+  const extent = 1000
+  if (Math.abs(end[1] - start[1]) < 1e-6) {
+    useAlignmentGuides.getState().set([
+      {
+        axis: 'z',
+        coord: start[1],
+        from: { x: start[0] - extent, z: start[1] },
+        to: { x: start[0] + extent, z: start[1] },
+        anchor: { x: start[0], z: start[1] },
+        movingAnchorKind: 'corner',
+        candidateAnchorKind: 'corner',
+        candidateNodeId: '__orthogonal__',
+        distance: 0,
+      },
+    ])
+    return
+  }
+  if (Math.abs(end[0] - start[0]) < 1e-6) {
+    useAlignmentGuides.getState().set([
+      {
+        axis: 'x',
+        coord: start[0],
+        from: { x: start[0], z: start[1] - extent },
+        to: { x: start[0], z: start[1] + extent },
+        anchor: { x: start[0], z: start[1] },
+        movingAnchorKind: 'corner',
+        candidateAnchorKind: 'corner',
+        candidateNodeId: '__orthogonal__',
+        distance: 0,
+      },
+    ])
+  }
+}
 
 // Match the guide plane footprint used in the 3D renderer so the 2D overlay aligns.
 const FLOORPLAN_GUIDE_BASE_WIDTH = 10
@@ -4962,6 +5002,11 @@ function FloorplanLinearDraftLayer({
   unitsPerPixel: number
   sceneRotationDeg: number
 }) {
+  const isRectangleRoomMode = useEditor((state) => state.tool === 'rectangle-room')
+  const rectangleWallThickness = useEditor((state) => {
+    const thickness = state.toolDefaults.wall?.thickness
+    return typeof thickness === 'number' ? thickness : 0.1
+  })
   const wallDraftEnd = useFloorplanDraftPreview((s) => s.wallDraftEnd)
   const fenceDraftEnd = useFloorplanDraftPreview((s) => s.fenceDraftEnd)
   const roofDraftEnd = useFloorplanDraftPreview((s) => s.roofDraftEnd)
@@ -4983,6 +5028,9 @@ function FloorplanLinearDraftLayer({
   }, [levelId, wallDraftStart, wallDraftEnd])
 
   const draftPolygonPoints = useMemo(() => {
+    if (isRectangleRoomMode && wallDraftStart && wallDraftEnd) {
+      return null
+    }
     if (isRoofBuildActive && roofDraftStart && roofDraftEnd) {
       const minX = Math.min(roofDraftStart[0], roofDraftEnd[0])
       const maxX = Math.max(roofDraftStart[0], roofDraftEnd[0])
@@ -4999,7 +5047,15 @@ function FloorplanLinearDraftLayer({
       }
     }
     return draftPolygon ? formatPolygonPoints(draftPolygon) : null
-  }, [draftPolygon, isRoofBuildActive, roofDraftEnd, roofDraftStart])
+  }, [
+    draftPolygon,
+    isRectangleRoomMode,
+    isRoofBuildActive,
+    roofDraftEnd,
+    roofDraftStart,
+    wallDraftEnd,
+    wallDraftStart,
+  ])
 
   const fenceDraftSegment = useMemo(() => {
     if (!(isFenceBuildActive && fenceDraftStart && fenceDraftEnd)) {
@@ -5090,8 +5146,60 @@ function FloorplanLinearDraftLayer({
     }
   }, [isWallBuildActive, unit, wallDraftEnd, wallDraftStart, walls])
 
+  const rectangleDraftMeasurements = useMemo((): DraftWallMeasurement[] => {
+    if (!(isRectangleRoomMode && wallDraftStart && wallDraftEnd)) return []
+    const width = Math.abs(wallDraftEnd[0] - wallDraftStart[0])
+    const depth = Math.abs(wallDraftEnd[1] - wallDraftStart[1])
+    if (width < 0.01 || depth < 0.01) return []
+    return [
+      {
+        lengthLabel: formatMeasurement(width, unit),
+        midpoint: [(wallDraftStart[0] + wallDraftEnd[0]) / 2, wallDraftStart[1]],
+        direction: [1, 0],
+        angleLabels: [],
+      },
+      {
+        lengthLabel: formatMeasurement(depth, unit),
+        midpoint: [wallDraftEnd[0], (wallDraftStart[1] + wallDraftEnd[1]) / 2],
+        direction: [0, 1],
+        angleLabels: [],
+      },
+    ]
+  }, [isRectangleRoomMode, rectangleWallThickness, unit, wallDraftEnd, wallDraftStart])
+
+  const rectangleWallPreviewPolygons = useMemo(() => {
+    if (!(isRectangleRoomMode && levelId && wallDraftStart && wallDraftEnd)) return []
+    const corners = getRectangleRoomCenterlineCorners(
+      wallDraftStart,
+      wallDraftEnd,
+      rectangleWallThickness,
+    )
+    if (
+      Math.abs(wallDraftEnd[0] - wallDraftStart[0]) < 0.01 ||
+      Math.abs(wallDraftEnd[1] - wallDraftStart[1]) < 0.01
+    ) {
+      return []
+    }
+    return corners.map((corner, index) => {
+      const wall = buildDraftWall(levelId, corner, corners[(index + 1) % corners.length]!)
+      wall.thickness = rectangleWallThickness
+      return formatPolygonPoints(getWallPlanFootprint(wall, EMPTY_WALL_MITER_DATA))
+    })
+  }, [isRectangleRoomMode, levelId, rectangleWallThickness, wallDraftEnd, wallDraftStart])
+
   return (
     <>
+      {rectangleWallPreviewPolygons.map((points, index) => (
+        <polygon
+          fill={draftFill}
+          fillOpacity={0.5}
+          key={index}
+          points={points}
+          stroke={draftStroke}
+          strokeWidth={FLOORPLAN_WALL_STROKE_WIDTH}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
       <FloorplanDraftLayer
         anchorFill={draftStroke}
         draftAnchorPoints={EMPTY_DRAFT_ANCHOR_POINTS}
@@ -5105,7 +5213,7 @@ function FloorplanLinearDraftLayer({
         unitsPerPixel={unitsPerPixel}
       />
 
-      {draftWallMeasurement && (
+      {draftWallMeasurement && !isRectangleRoomMode && (
         <FloorplanDraftWallMeasurement
           labelBackground={isDark ? '#0f172a' : '#ffffff'}
           labelText={isDark ? '#e2e8f0' : '#171717'}
@@ -5115,6 +5223,17 @@ function FloorplanLinearDraftLayer({
           unitsPerPixel={unitsPerPixel}
         />
       )}
+      {rectangleDraftMeasurements.map((measurement, index) => (
+        <FloorplanDraftWallMeasurement
+          key={index}
+          labelBackground={isDark ? '#0f172a' : '#ffffff'}
+          labelText={isDark ? '#e2e8f0' : '#171717'}
+          measurement={measurement}
+          measurementStroke={measurementStroke}
+          sceneRotationDeg={sceneRotationDeg}
+          unitsPerPixel={unitsPerPixel}
+        />
+      ))}
     </>
   )
 }
@@ -5189,17 +5308,36 @@ function FloorplanWallDimensions({
     const leftDistance = Math.hypot(leftMid.x - planCenter.x, leftMid.y - planCenter.y)
     const rightDistance = Math.hypot(rightMid.x - planCenter.x, rightMid.y - planCenter.y)
     const leftIsInner = leftDistance <= rightDistance
+    const wallNx = -wallUy
+    const wallNy = wallUx
+    const straightenFace = (startPoint: Point2D, endPoint: Point2D) => {
+      const startS =
+        (startPoint.x - wall.start[0]) * wallUx + (startPoint.y - wall.start[1]) * wallUy
+      const endS = (endPoint.x - wall.start[0]) * wallUx + (endPoint.y - wall.start[1]) * wallUy
+      const startOffset =
+        (startPoint.x - wall.start[0]) * wallNx + (startPoint.y - wall.start[1]) * wallNy
+      const endOffset =
+        (endPoint.x - wall.start[0]) * wallNx + (endPoint.y - wall.start[1]) * wallNy
+      const offsetFromCenter = (startOffset + endOffset) / 2
+      const pointAt = (s: number) => ({
+        x: wall.start[0] + wallUx * s + wallNx * offsetFromCenter,
+        y: wall.start[1] + wallUy * s + wallNy * offsetFromCenter,
+      })
+      return { start: pointAt(startS), end: pointAt(endS) }
+    }
+    const leftFace = straightenFace(boundary.startLeft, boundary.endLeft)
+    const rightFace = straightenFace(boundary.startRight, boundary.endRight)
     const faces = [
       {
         id: `${wall.id}:left:${leftIsInner ? 'inner' : 'outer'}`,
-        start: boundary.startLeft,
-        end: boundary.endLeft,
+        start: leftFace.start,
+        end: leftFace.end,
         outward: 1,
       },
       {
         id: `${wall.id}:right:${leftIsInner ? 'outer' : 'inner'}`,
-        start: boundary.startRight,
-        end: boundary.endRight,
+        start: rightFace.start,
+        end: rightFace.end,
         outward: -1,
       },
     ]
@@ -6013,7 +6151,6 @@ export function FloorplanPanel({
     ? (guideInteractionRef.current?.mode ?? null)
     : null
   const floorplanWalls = useMemo(() => walls.map(getFloorplanWall), [walls])
-  const wallMiterData = useMemo(() => calculateLevelMiters(floorplanWalls), [floorplanWalls])
   const wallById = useMemo(() => new Map(walls.map((wall) => [wall.id, wall] as const)), [walls])
   const floorplanWallById = useMemo(
     () => new Map(floorplanWalls.map((wall) => [wall.id, wall] as const)),
@@ -6079,6 +6216,14 @@ export function FloorplanPanel({
 
     return hasPreviewWalls ? nextFloorplanWallById : floorplanWallById
   }, [displayWallById, floorplanWallById, wallCurveDraft, wallEndpointDraft])
+  const displayFloorplanWalls = useMemo(
+    () => [...displayFloorplanWallById.values()],
+    [displayFloorplanWallById],
+  )
+  const displayWallMiterData = useMemo(
+    () => calculateLevelMiters(displayFloorplanWalls),
+    [displayFloorplanWalls],
+  )
   // Fence is fully registry-driven (`def.floorplan` + `buildFenceFloorplan`).
   // The legacy entry list is permanently empty; kept as a typed stable
   // reference so downstream prop sites stay typed without each having to
@@ -6409,7 +6554,10 @@ export function FloorplanPanel({
   )
 
   const isSiteEditActive = phase === 'site'
-  const isWallBuildActive = phase === 'structure' && mode === 'build' && tool === 'wall'
+  const isWallBuildActive =
+    phase === 'structure' &&
+    mode === 'build' &&
+    (tool === 'wall' || tool === 'rectangle-room' || tool === 'wall-arc')
   const isSlabBuildActive = phase === 'structure' && mode === 'build' && tool === 'slab'
   const isCeilingBuildActive = phase === 'structure' && mode === 'build' && tool === 'ceiling'
   const isZoneBuildActive = phase === 'structure' && mode === 'build' && tool === 'zone'
@@ -8107,6 +8255,32 @@ export function FloorplanPanel({
     setZoneDraftPoints([])
   }, [])
 
+  const handleFloorplanContextMenu = useCallback(
+    (event: ReactMouseEvent<SVGSVGElement>) => {
+      event.preventDefault()
+      if (isWallBuildActive) {
+        clearWallPlacementDraft()
+        setCursorPoint(null)
+        useAlignmentGuides.getState().clear()
+        useWallSnapIndicator.getState().clear()
+        emitter.emit('tool:cancel')
+        return
+      }
+      if (isFenceBuildActive) {
+        clearFencePlacementDraft()
+        setCursorPoint(null)
+        emitter.emit('tool:cancel')
+      }
+    },
+    [
+      clearFencePlacementDraft,
+      clearWallPlacementDraft,
+      isFenceBuildActive,
+      isWallBuildActive,
+      setCursorPoint,
+    ],
+  )
+
   const clearWallEndpointDrag = useCallback(() => {
     wallEndpointDragRef.current = null
     setWallEndpointDraft(null)
@@ -8613,7 +8787,21 @@ export function FloorplanPanel({
           ignoreWallIds: [dragState.wallId],
           magnetic: isMagneticSnapActive(),
         })
-        const snappedPoint = snapResult.point
+        const inferredPoint = inferOrthogonalWallPoint(
+          dragState.fixedPoint,
+          planPoint,
+          shiftPressed || event.shiftKey,
+        )
+        const snappedPoint = snapResult.snap
+          ? snapResult.point
+          : inferredPoint === planPoint
+            ? snapResult.point
+            : inferOrthogonalWallPoint(dragState.fixedPoint, snapResult.point, true)
+        if (!snapResult.snap && inferredPoint !== planPoint) {
+          publishOrthogonalInferenceGuide(dragState.fixedPoint, snappedPoint)
+        } else {
+          useAlignmentGuides.getState().clear()
+        }
         // Magnetic beacon at the endpoint when it locked onto existing geometry.
         useWallSnapIndicator
           .getState()
@@ -9649,13 +9837,36 @@ export function FloorplanPanel({
         return
       }
 
+      if (useEditor.getState().tool === 'rectangle-room') {
+        const rectangleSnap = snapWallDraftPointDetailed({
+          point: planPoint,
+          walls,
+          magnetic: isMagneticSnapActive(),
+        })
+        const snappedPoint = rectangleSnap.point
+        useWallSnapIndicator
+          .getState()
+          .set(
+            rectangleSnap.snap
+              ? { x: snappedPoint[0], z: snappedPoint[1], kind: rectangleSnap.snap }
+              : null,
+          )
+        emitFloorplanGridEvent('move', snappedPoint, event)
+        setCursorPoint(snappedPoint)
+        if (draftStart) setDraftEnd(snappedPoint)
+        return
+      }
+
       // Wall draft: grid + magnetic snap, then Figma-style alignment.
       // While a draft is open the segment locks to 15° rays from its start.
       // Snapping is governed by the snapping mode (`'off'` is the bypass);
       // there is no Shift hold-to-bypass.
-      const wallAngleSnap = draftStart !== null && isAngleSnapActive()
+      const wallInputPoint = draftStart
+        ? inferOrthogonalWallPoint(draftStart, planPoint, event.shiftKey)
+        : planPoint
+      const wallAngleSnap = draftStart !== null && !event.shiftKey && isAngleSnapActive()
       const wallSnap = snapWallDraftPointDetailed({
-        point: planPoint,
+        point: wallInputPoint,
         walls,
         start: draftStart ?? undefined,
         angleSnap: wallAngleSnap,
@@ -9674,6 +9885,10 @@ export function FloorplanPanel({
         snappedPoint = alignFloorplanDraftPoint(wallSnapped, {
           applySnap: isMagneticSnapActive() && !wallAngleSnap,
         })
+      }
+      if (!lockedToWall && draftStart && (event.shiftKey || wallInputPoint !== planPoint)) {
+        snappedPoint = inferOrthogonalWallPoint(draftStart, snappedPoint, true)
+        publishOrthogonalInferenceGuide(draftStart, snappedPoint)
       }
       useWallSnapIndicator
         .getState()
@@ -9917,6 +10132,56 @@ export function FloorplanPanel({
         return
       }
 
+      const isRectangleRoomMode = useEditor.getState().tool === 'rectangle-room'
+      if (isRectangleRoomMode) {
+        if (
+          Math.abs(point[0] - draftStart[0]) < 0.01 ||
+          Math.abs(point[1] - draftStart[1]) < 0.01
+        ) {
+          return
+        }
+
+        // In split/3D the registry wall tool owns the commit. A hidden 3D
+        // canvas does not mount tools in 2D-only mode, so commit the same four
+        // clockwise segments here.
+        if (useEditor.getState().viewMode === '2d') {
+          const thickness = useEditor.getState().toolDefaults.wall?.thickness
+          const corners = getRectangleRoomCenterlineCorners(
+            draftStart,
+            point,
+            typeof thickness === 'number' ? thickness : 0.1,
+          )
+          pauseSceneHistory(useScene)
+          try {
+            for (let index = 0; index < corners.length; index += 1) {
+              createWallOnCurrentLevel(corners[index]!, corners[(index + 1) % corners.length]!, {
+                preserveExactEndpoints: true,
+              })
+            }
+          } finally {
+            resumeSceneHistory(useScene)
+          }
+          flushAutoFloorForCurrentLevel()
+        }
+        clearWallPlacementDraft()
+        setCursorPoint(null)
+        return
+      }
+
+      if (useEditor.getState().tool === 'wall-arc') {
+        if (useEditor.getState().viewMode === '2d') {
+          const createdWall = createWallOnCurrentLevel(draftStart, point)
+          if (createdWall) {
+            const length = Math.hypot(point[0] - draftStart[0], point[1] - draftStart[1])
+            useScene.getState().updateNode(createdWall.id, { curveOffset: length * 0.25 })
+            useScene.getState().markDirty(createdWall.id as AnyNodeId)
+          }
+        }
+        clearWallPlacementDraft()
+        setCursorPoint(null)
+        return
+      }
+
       // The 3D wall tool's `grid:click` listener
       // (`packages/nodes/src/wall/tool.tsx`) owns the wall-create
       // call. `emitFloorplanGridEvent('click', …)` in
@@ -9957,6 +10222,34 @@ export function FloorplanPanel({
       setCursorPoint(nextStart)
     },
     [clearWallPlacementDraft, draftStart, wallChainFirstVertex, setDraftEnd, setCursorPoint],
+  )
+  // The 3D wall tool can commit a segment WITHOUT a 2D click — its typed-length
+  // entry (digits + Enter) creates the wall and publishes the next chain start
+  // to `useSegmentDraftChain`. The click callback above never runs then, so the
+  // 2D draft would stay anchored at the stale start point. Follow the published
+  // chain start here: re-anchor while drafting, dismiss when the tool stopped
+  // (published null after a room-close / single-segment commit).
+  const wallDraftStartRef = useRef(draftStart)
+  wallDraftStartRef.current = draftStart
+  useEffect(
+    () =>
+      useSegmentDraftChain.subscribe((state, prevState) => {
+        if (state.wall === prevState.wall) return
+        if (!wallDraftStartRef.current) return
+        if (useEditor.getState().tool !== 'wall') return
+        if (!state.wall) {
+          clearWallPlacementDraft()
+          setCursorPoint(null)
+          return
+        }
+        const [x, z] = state.wall
+        const current = wallDraftStartRef.current
+        if (current[0] === x && current[1] === z) return
+        setDraftStart([x, z])
+        setDraftEnd([x, z])
+        setCursorPoint([x, z])
+      }),
+    [clearWallPlacementDraft, setDraftEnd, setCursorPoint],
   )
   const { getFloorplanHitIdAtPoint, getFloorplanSelectionIdsInBounds } = useFloorplanHitTesting({
     ceilingPolygons: displayCeilingPolygons,
@@ -11427,7 +11720,7 @@ export function FloorplanPanel({
           <svg
             className="h-full w-full touch-none"
             onClick={isMarqueeSelectionToolActive ? undefined : handleSvgClick}
-            onContextMenu={(event) => event.preventDefault()}
+            onContextMenu={handleFloorplanContextMenu}
             onDoubleClick={isMarqueeSelectionToolActive ? undefined : handleBackgroundDoubleClick}
             onPointerCancel={endFloorplanNavigation}
             onPointerDown={handlePointerDown}
@@ -11601,7 +11894,7 @@ export function FloorplanPanel({
                       `floorplan-wall-move-ghost-layer.tsx`. */}
                   <FloorplanWallMoveGhostLayer />
                 </g>
-                {showDimensions && (
+                {showDimensions && !(tool === 'rectangle-room' && draftStart) && (
                   <FloorplanWallDimensions
                     labelBackground={isDark ? '#0f172a' : '#ffffff'}
                     labelText={isDark ? '#e2e8f0' : '#171717'}
@@ -11610,8 +11903,8 @@ export function FloorplanPanel({
                     stroke={palette.measurementStroke}
                     unit={unit}
                     unitsPerPixel={floorplanUnitsPerPixel}
-                    walls={floorplanWalls}
-                    wallMiterData={wallMiterData}
+                    walls={displayFloorplanWalls}
+                    wallMiterData={displayWallMiterData}
                   />
                 )}
               </FloorplanRenderProvider>

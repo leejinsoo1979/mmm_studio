@@ -9,7 +9,11 @@ import {
 import { useViewer } from '@pascal-app/viewer'
 import useEditor from '../../../store/use-editor'
 import useInteractionScope from '../../../store/use-interaction-scope'
-import { createWallOnCurrentLevel, snapWallDraftPointDetailed } from './wall-drafting'
+import {
+  createWallOnCurrentLevel,
+  inferOrthogonalWallPoint,
+  snapWallDraftPointDetailed,
+} from './wall-drafting'
 import type { WallPlanPoint } from './wall-snap-geometry'
 
 const LEVEL_ID = 'level_test' as AnyNodeId
@@ -125,5 +129,19 @@ describe('snapWallDraftPointDetailed', () => {
 
     expect(result.point).toEqual([3.99, 0.03])
     expect(result.snap).toBeNull()
+  })
+})
+
+describe('inferOrthogonalWallPoint', () => {
+  test('locks a near-vertical 110 degree draft to an exact right angle', () => {
+    expect(inferOrthogonalWallPoint([0, 0], [-1.17, 3.21])).toEqual([0, 3.21])
+  })
+
+  test('keeps an intentional diagonal outside the inference cone', () => {
+    expect(inferOrthogonalWallPoint([0, 0], [2, 2])).toEqual([2, 2])
+  })
+
+  test('Shift forces the nearest orthogonal axis', () => {
+    expect(inferOrthogonalWallPoint([1, 1], [3, 3], true)).toEqual([3, 1])
   })
 })

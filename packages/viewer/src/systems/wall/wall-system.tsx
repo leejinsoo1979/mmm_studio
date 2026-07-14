@@ -253,7 +253,15 @@ function assignWallMaterialGroups(
     normal.normalize()
 
     if (Math.abs(normal.y) >= WALL_FACE_NORMAL_Y_EPSILON) {
-      triangleMaterials[triangleIndex] = 0
+      // A curved wall's cap is triangulated across every sampled bend.  Using
+      // the generic/base slot here makes those individual cap triangles show
+      // up as bright, tape-like patches along the arc (especially while the
+      // wall is selected).  They are not real corners or edit handles.  Keep
+      // the curved cap in the wall's face finish so the sampled joints read as
+      // one continuous surface.  Straight walls retain the dedicated cap slot.
+      triangleMaterials[triangleIndex] = isCurvedWall(wall)
+        ? getWallFaceMaterialIndex(wall, 'front')
+        : 0
       continue
     }
 
@@ -706,7 +714,7 @@ export function generateExtrudedWall(
   const polyPoints = isCurvedWall(wallNode)
     ? getWallSurfacePolygon(
         wallNode,
-        24,
+        64,
         insetCurvedWallBoundaryPointsFor3D(wallNode, boundaryPoints, miterData) ?? undefined,
       )
     : getWallPlanFootprint(wallNode, miterData)

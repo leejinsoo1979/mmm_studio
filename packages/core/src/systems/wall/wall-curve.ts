@@ -2,7 +2,7 @@ import type { FenceNode, WallNode } from '../../schema'
 import type { Point2D } from './wall-mitering'
 
 const CURVE_EPSILON = 1e-6
-const DEFAULT_SAMPLE_SEGMENTS = 24
+const DEFAULT_SAMPLE_SEGMENTS = 64
 
 type WallCurveLike = Pick<WallNode | FenceNode, 'start' | 'end' | 'curveOffset'>
 

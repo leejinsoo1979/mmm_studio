@@ -10,7 +10,11 @@ import useEditor, { isAngleSnapActive, isMagneticSnapActive } from '../../store/
 import usePlacementPreview from '../../store/use-placement-preview'
 import useSegmentDraftChain from '../../store/use-segment-draft-chain'
 import { snapFenceDraftPoint } from '../tools/fence/fence-drafting'
-import { getSegmentGridStep, type WallPlanPoint } from '../tools/wall/wall-drafting'
+import {
+  getSegmentGridStep,
+  inferOrthogonalWallPoint,
+  type WallPlanPoint,
+} from '../tools/wall/wall-drafting'
 
 type UseFloorplanBackgroundPlacementArgs = {
   activePolygonDraftPoints: WallPlanPoint[]
@@ -68,6 +72,7 @@ type UseFloorplanBackgroundPlacementArgs = {
     start?: WallPlanPoint
     angleSnap?: boolean
     bypassSnap?: boolean
+    magnetic?: boolean
     step?: number
     gridSnap?: (point: WallPlanPoint) => WallPlanPoint
   }) => WallPlanPoint
@@ -206,7 +211,7 @@ export function useFloorplanBackgroundPlacement({
         // `gridSnap` callback), `angles` locks 15° rays from the start, `lines`
         // pulls onto walls / fences / alignment, `off` is free.
         const fenceStep = getSegmentGridStep()
-        const fenceAngleSnap = fenceDraftStart !== null && isAngleSnapActive()
+        const fenceAngleSnap = fenceDraftStart !== null && (event.shiftKey || isAngleSnapActive())
         const fenceSnapped = snapFenceDraftPoint({
           point: planPoint,
           walls,
@@ -306,14 +311,30 @@ export function useFloorplanBackgroundPlacement({
       // / draftEnd state in the floor plan would never update, leaving
       // the dashed-line draft preview invisible.
       if (isWallBuildActive) {
+        if (useEditor.getState().tool === 'rectangle-room') {
+          const wallStep = getSegmentGridStep()
+          const snappedPoint = snapWallDraftPoint({
+            point: planPoint,
+            walls,
+            magnetic: isMagneticSnapActive(),
+            gridSnap: (p) => worldGridSnap(p, wallStep),
+          })
+          emitFloorplanGridEvent('click', snappedPoint, event)
+          handleWallPlacementPoint(snappedPoint)
+          return true
+        }
+
         // Wall draft: mode-driven (matches the chip + the move-preview branch).
         // `grid` snaps to the world XZ grid (rotation-safe via `gridSnap`),
         // `angles` locks 15° rays from the start, `lines` pulls the endpoint
         // onto existing wall corners / edges + alignment, `off` is free.
         const wallStep = getSegmentGridStep()
-        const wallAngleSnap = draftStart !== null && isAngleSnapActive()
+        const wallInputPoint = draftStart
+          ? inferOrthogonalWallPoint(draftStart, planPoint, event.shiftKey)
+          : planPoint
+        const wallAngleSnap = draftStart !== null && !event.shiftKey && isAngleSnapActive()
         const wallSnapped = snapWallDraftPoint({
-          point: planPoint,
+          point: wallInputPoint,
           walls,
           start: draftStart ?? undefined,
           angleSnap: wallAngleSnap,
@@ -330,6 +351,10 @@ export function useFloorplanBackgroundPlacement({
           snappedPoint = alignFloorplanDraftPoint(wallSnapped, {
             applySnap: isMagneticSnapActive() && !wallAngleSnap,
           })
+        }
+        if (!wallLocked && draftStart && (event.shiftKey || wallInputPoint !== planPoint)) {
+          snappedPoint = inferOrthogonalWallPoint(draftStart, snappedPoint, true)
+          useAlignmentGuides.getState().clear()
         }
 
         emitFloorplanGridEvent('click', snappedPoint, event)
