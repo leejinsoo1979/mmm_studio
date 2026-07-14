@@ -7,10 +7,10 @@ import Link from 'next/link'
 import { AccountCta } from './account-cta'
 
 const MENU_ITEMS = [
-  { href: '/scenes', icon: Layers3, label: 'Scenes' },
-  { href: '/scenes', icon: Grid2X2, label: 'Assets' },
-  { href: '/scenes', icon: Palette, label: 'Materials' },
-  { href: '/scenes', icon: Lightbulb, label: 'Lighting' },
+  { href: '/dashboard', icon: Layers3, label: 'Scenes' },
+  { href: '/dashboard', icon: Grid2X2, label: 'Assets' },
+  { href: '/dashboard', icon: Palette, label: 'Materials' },
+  { href: '/dashboard', icon: Lightbulb, label: 'Lighting' },
 ]
 
 export function Navbar() {

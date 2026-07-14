@@ -106,9 +106,9 @@ export function EditorHeader({ sceneId, sceneName, onRename }: EditorHeaderProps
         <ExportCenter sceneId={sceneId} sceneName={sceneName} />
         <Link
           className="rounded-md border border-border bg-background/60 px-3 py-1.5 font-medium text-xs hover:bg-accent/40"
-          href="/scenes"
+          href="/dashboard"
         >
-          All scenes
+          Dashboard
         </Link>
       </div>
     </header>

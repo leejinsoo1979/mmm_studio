@@ -52,9 +52,9 @@ export default async function ScenePage({ params }: { params: Promise<{ id: stri
           <div className="mt-4 flex items-center justify-center gap-2">
             <Link
               className="rounded-md border border-border bg-accent px-3 py-2 font-medium text-sm hover:bg-accent/80"
-              href="/scenes"
+              href="/dashboard"
             >
-              Browse scenes
+              Open dashboard
             </Link>
             <Link
               className="rounded-md border border-border bg-background px-3 py-2 font-medium text-sm hover:bg-accent/40"

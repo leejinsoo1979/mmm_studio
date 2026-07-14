@@ -36,9 +36,9 @@ export default async function PlayPage({ params }: { params: Promise<{ id: strin
           <h1 className="mt-3 font-semibold text-2xl">This experience is not available.</h1>
           <Link
             className="mt-6 inline-block rounded-lg bg-white px-4 py-2 text-black text-sm"
-            href="/scenes"
+            href="/dashboard"
           >
-            Back to scenes
+            Back to dashboard
           </Link>
         </div>
       </main>
