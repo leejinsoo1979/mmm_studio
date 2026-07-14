@@ -3,6 +3,8 @@ import {
   type AnyNode,
   type AnyNodeId,
   collectAlignmentAnchors,
+  DEFAULT_LEVEL_HEIGHT,
+  DEFAULT_WALL_THICKNESS,
   emitter,
   type GridEvent,
   type LevelNode,
@@ -82,6 +84,90 @@ function getRoofSnapWalls(
   nodes: Readonly<Record<string, AnyNode>>,
 ): WallNode[] {
   return [...getLevelWalls(currentLevelId, nodes), ...getBelowLevelWalls(currentLevelId, nodes)]
+}
+
+// Liang-Barsky slab test — does segment [a → b] cross the XZ rect?
+function segmentIntersectsRect(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  minX: number,
+  minZ: number,
+  maxX: number,
+  maxZ: number,
+): boolean {
+  const dx = bx - ax
+  const dz = bz - az
+  let t0 = 0
+  let t1 = 1
+  const clips: [number, number][] = [
+    [-dx, ax - minX],
+    [dx, maxX - ax],
+    [-dz, az - minZ],
+    [dz, maxZ - az],
+  ]
+  for (const [p, q] of clips) {
+    if (p === 0) {
+      if (q < 0) return false
+    } else {
+      const r = q / p
+      if (p < 0) {
+        if (r > t1) return false
+        if (r > t0) t0 = r
+      } else {
+        if (r < t0) return false
+        if (r < t1) t1 = r
+      }
+    }
+  }
+  return true
+}
+
+// Top of the tallest active-level wall crossing the drawn footprint
+// (level-local Y), so a roof drawn on the same level as its walls lands on
+// the wall tops instead of the level floor. 0 when no wall crosses — the
+// draw-on-the-level-above flow keeps working, since that level's base
+// already sits at the wall tops of the floor below.
+function getFootprintWallTopY(
+  levelId: string | null,
+  nodes: Readonly<Record<string, AnyNode>>,
+  corner1: [number, number, number],
+  corner2: [number, number, number],
+): number {
+  const minX = Math.min(corner1[0], corner2[0])
+  const maxX = Math.max(corner1[0], corner2[0])
+  const minZ = Math.min(corner1[2], corner2[2])
+  const maxZ = Math.max(corner1[2], corner2[2])
+
+  let top = 0
+  for (const wall of getLevelWalls(levelId, nodes)) {
+    // Inflate by half the thickness so a rect snapped to a wall's inner
+    // face still counts that wall (start/end run along the centerline).
+    const pad = (wall.thickness ?? DEFAULT_WALL_THICKNESS) / 2 + 0.01
+    const [ax, az] = wall.start
+    const [bx, bz] = wall.end
+    let hits = segmentIntersectsRect(ax, az, bx, bz, minX - pad, minZ - pad, maxX + pad, maxZ + pad)
+    if (!hits && wall.curveOffset) {
+      // Curved wall: approximate the arc with two half-chords through the
+      // sagitta midpoint.
+      const len = Math.hypot(bx - ax, bz - az) || 1
+      const mx = (ax + bx) / 2 - ((bz - az) / len) * wall.curveOffset
+      const mz = (az + bz) / 2 + ((bx - ax) / len) * wall.curveOffset
+      hits =
+        segmentIntersectsRect(ax, az, mx, mz, minX - pad, minZ - pad, maxX + pad, maxZ + pad) ||
+        segmentIntersectsRect(mx, mz, bx, bz, minX - pad, minZ - pad, maxX + pad, maxZ + pad)
+    }
+    if (!hits) continue
+
+    // Same base-Y source as getLevelHeight: raised walls report their mesh
+    // elevation; negatives clamp to the level floor.
+    let baseY = sceneRegistry.nodes.get(wall.id)?.position.y ?? 0
+    if (baseY < 0) baseY = 0
+    const wallTop = baseY + (wall.height ?? DEFAULT_LEVEL_HEIGHT)
+    if (wallTop > top) top = wallTop
+  }
+  return top
 }
 
 // Current-level alignment anchors plus the floor-below wall corners.
@@ -173,6 +259,9 @@ const commitRoofPlacement = (
   const roofCount = Object.values(nodes).filter((n) => n.type === 'roof').length
   const name = `Roof ${roofCount + 1}`
 
+  // Rest the roof on the tallest wall it covers on this level (0 with none).
+  const baseY = getFootprintWallTopY(levelId, nodes, corner1, corner2)
+
   // Create the segment first (centered in its new parent)
   const segment = RoofSegmentNode.parse({
     wallHeight: DEFAULT_WALL_HEIGHT,
@@ -189,7 +278,7 @@ const commitRoofPlacement = (
   const roof = RoofNode.parse({
     ...defaults,
     name,
-    position: [centerX, 0, centerZ],
+    position: [centerX, baseY, centerZ],
     children: [segment.id],
   })
 
@@ -207,6 +296,8 @@ type PreviewState = {
   corner1: [number, number, number] | null
   cursorPosition: [number, number, number]
   levelY: number
+  /** Ghost base Y — levelY plus the covered walls' top (see getFootprintWallTopY). */
+  baseY: number
 }
 
 function buildRoofGhostGeometry(
@@ -387,6 +478,7 @@ export const RoofTool: React.FC = () => {
     corner1: null,
     cursorPosition: [0, 0, 0],
     levelY: 0,
+    baseY: 0,
   })
 
   useEffect(() => {
@@ -469,10 +561,21 @@ export const RoofTool: React.FC = () => {
 
       previousGridPosRef.current = [gridX, gridZ]
 
+      const baseY = corner1Ref.current
+        ? y +
+          getFootprintWallTopY(
+            currentLevelId,
+            useScene.getState().nodes,
+            corner1Ref.current,
+            cursorPosition,
+          )
+        : y
+
       setPreview({
         corner1: corner1Ref.current,
         cursorPosition,
         levelY: y,
+        baseY,
       })
 
       if (corner1Ref.current) {
@@ -534,7 +637,7 @@ export const RoofTool: React.FC = () => {
     }
   }, [currentLevelId, setSelection])
 
-  const { corner1, cursorPosition, levelY } = preview
+  const { corner1, cursorPosition, levelY, baseY } = preview
 
   const previewDimensions = useMemo(() => {
     if (!corner1) return null
@@ -608,7 +711,7 @@ export const RoofTool: React.FC = () => {
       {previewDimensions && previewDimensions.length > 0.1 && previewDimensions.width > 0.1 && (
         <group
           layers={EDITOR_LAYER}
-          position={[previewDimensions.centerX, levelY + GRID_OFFSET, previewDimensions.centerZ]}
+          position={[previewDimensions.centerX, baseY + GRID_OFFSET, previewDimensions.centerZ]}
         >
           {roofGhostGeometry && (
             <mesh geometry={roofGhostGeometry} layers={EDITOR_LAYER} renderOrder={1}>
