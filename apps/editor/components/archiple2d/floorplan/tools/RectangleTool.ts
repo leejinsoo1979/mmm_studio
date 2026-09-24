@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { BaseTool } from './Tool';
+import { FloorplanEditCommand } from '../../core/commands/FloorplanEditCommand';
 import { Vector2 } from '../../core/math/Vector2';
 import type { Point } from '../../core/types/Point';
 import type { Wall } from '../../core/types/Wall';
@@ -142,6 +143,22 @@ export class RectangleTool extends BaseTool {
   }
 
   private createRectangle(start: Point, end: Vector2): void {
+    // A zero-width / zero-height rectangle would create overlapping walls.
+    if (Math.abs(end.x - start.x) < 1 || Math.abs(end.y - start.y) < 1) return;
+
+    // The four walls (and their splits) are one undo step.
+    const objectManager = this.sceneManager.objectManager;
+    this.sceneManager.historyManager.execute(
+      new FloorplanEditCommand(objectManager, 'Add rectangle room', () =>
+        this.addRectangleWalls(start, end),
+      ),
+    );
+
+    // Clear preview
+    eventBus.emit(FloorEvents.WALL_PREVIEW_CLEARED, {});
+  }
+
+  private addRectangleWalls(start: Point, end: Vector2): void {
     // Create 4 corner points - FORCE perfect rectangle
     // Lock X coordinates to start.x and end.x
     // Lock Y coordinates to start.y and end.y
@@ -179,9 +196,6 @@ export class RectangleTool extends BaseTool {
       this.sceneManager.objectManager.addWall(wall);
       // NOTE: WALL_ADDED event is emitted by BlueprintObjectManager, no need to emit here
     });
-
-    // Clear preview
-    eventBus.emit(FloorEvents.WALL_PREVIEW_CLEARED, {});
   }
 
   private emitPreview(): void {

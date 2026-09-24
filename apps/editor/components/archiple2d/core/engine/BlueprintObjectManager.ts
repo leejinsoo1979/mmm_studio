@@ -8,6 +8,21 @@ import { Floorplan } from '../../floorplan/blueprint/floorplan';
 import { eventBus } from '../events/EventBus';
 import { FloorEvents } from '../events/FloorEvents';
 
+/** Plain copy of the drawing (points, walls, openings) used for undo / redo. */
+export interface FloorplanSnapshot {
+  points: Point[];
+  walls: Array<{
+    startPointId: string;
+    endPointId: string;
+    thickness: number;
+    height: number;
+    frontTexture: Wall['frontTexture'];
+    backTexture: Wall['backTexture'];
+  }>;
+  doors: Door[];
+  windows: Window[];
+}
+
 /**
  * BlueprintObjectManager - Adapter that wraps blueprint Floorplan
  * Provides same interface as ObjectManager for backward compatibility
@@ -17,12 +32,14 @@ export class BlueprintObjectManager {
   private doors: Map<string, Door> = new Map();
   private windows: Map<string, Window> = new Map();
   private detectedRooms: Room[] = []; // Store rooms from RoomDetectionService
+  private restoring = false;
 
   constructor() {
     this.floorplan = new Floorplan();
 
     // Listen to blueprint events and forward to existing event system
     this.floorplan.fireOnNewCorner((corner) => {
+      if (this.restoring) return;
       const point: Point = {
         id: corner.id,
         x: corner.x,
@@ -33,6 +50,7 @@ export class BlueprintObjectManager {
     });
 
     this.floorplan.fireOnNewWall((wall) => {
+      if (this.restoring) return;
       const wallData: Wall = {
         id: wall.id,
         startPointId: wall.getStart().id,
@@ -441,6 +459,50 @@ export class BlueprintObjectManager {
     walls.forEach(w => w.remove());
     this.doors.clear();
     this.windows.clear();
+  }
+
+  snapshot(): FloorplanSnapshot {
+    return {
+      points: this.getAllPoints(),
+      walls: this.floorplan.getWalls().map((wall) => ({
+        startPointId: wall.getStart().id,
+        endPointId: wall.getEnd().id,
+        thickness: wall.thickness,
+        height: wall.height,
+        frontTexture: { ...wall.frontTexture },
+        backTexture: { ...wall.backTexture },
+      })),
+      doors: [...this.doors.values()].map((door) => ({ ...door })),
+      windows: [...this.windows.values()].map((window) => ({ ...window })),
+    };
+  }
+
+  /**
+   * Replaces the drawing with `snapshot`. Corner ids are kept, and wall ids
+   * derive from their corner ids, so doors / windows keep their wall refs.
+   * Emits one WALL_MODIFIED afterwards so rooms and layers refresh once.
+   */
+  restore(snapshot: FloorplanSnapshot): void {
+    this.restoring = true;
+    try {
+      this.clear();
+      const corners = new Map(
+        snapshot.points.map((point) => [point.id, this.floorplan.newCorner(point.x, point.y, point.id)]),
+      );
+      for (const wall of snapshot.walls) {
+        const start = corners.get(wall.startPointId);
+        const end = corners.get(wall.endPointId);
+        if (!(start && end)) continue;
+        const created = this.floorplan.newWall(start, end, wall.thickness, wall.height);
+        created.frontTexture = { ...wall.frontTexture };
+        created.backTexture = { ...wall.backTexture };
+      }
+      for (const door of snapshot.doors) this.doors.set(door.id, { ...door });
+      for (const window of snapshot.windows) this.windows.set(window.id, { ...window });
+    } finally {
+      this.restoring = false;
+    }
+    eventBus.emit(FloorEvents.WALL_MODIFIED, {});
   }
 
   getCounts(): { points: number; walls: number; rooms: number; doors: number; windows: number } {

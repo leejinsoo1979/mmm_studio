@@ -28,25 +28,27 @@ export class KeyboardController {
    * Setup keyboard event listeners
    */
   private setupEventListeners(): void {
-    window.addEventListener('keydown', this.handleKeyDown.bind(this));
-    window.addEventListener('keyup', this.handleKeyUp.bind(this));
+    window.addEventListener('keydown', this.handleKeyDown);
+    window.addEventListener('keyup', this.handleKeyUp);
   }
 
   /**
-   * Remove event listeners (cleanup)
+   * Remove event listeners (cleanup). The handlers are bound once as fields,
+   * so the references removed here are exactly the ones that were added.
    */
   dispose(): void {
-    window.removeEventListener('keydown', this.handleKeyDown.bind(this));
-    window.removeEventListener('keyup', this.handleKeyUp.bind(this));
+    window.removeEventListener('keydown', this.handleKeyDown);
+    window.removeEventListener('keyup', this.handleKeyUp);
   }
 
   /**
    * Handle key down
    */
-  private handleKeyDown(event: KeyboardEvent): void {
+  private handleKeyDown = (event: KeyboardEvent): void => {
     // Undo/Redo
     if (event.ctrlKey || event.metaKey) {
-      if (event.shiftKey && event.key === 'z') {
+      // Shift makes the key 'Z' on most layouts.
+      if (event.shiftKey && event.key.toLowerCase() === 'z') {
         // Ctrl+Shift+Z: Redo
         console.log('[KeyboardController] Redo triggered (Cmd/Ctrl+Shift+Z)');
         event.preventDefault();
@@ -122,7 +124,7 @@ export class KeyboardController {
   /**
    * Handle key up
    */
-  private handleKeyUp(event: KeyboardEvent): void {
+  private handleKeyUp = (event: KeyboardEvent): void => {
     // Route to active tool
     this.toolManager.handleKeyUp(event);
   }
