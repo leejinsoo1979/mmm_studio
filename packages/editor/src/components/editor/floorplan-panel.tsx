@@ -31,10 +31,8 @@ import {
   nodeRegistry,
   normalizeWallCurveOffset,
   type Point2D,
-  pauseSceneHistory,
   type RoofNode,
   type RoofSegmentNode,
-  resumeSceneHistory,
   type SiteNode,
   type SlabNode,
   SlabNode as SlabNodeSchema,
@@ -88,6 +86,7 @@ import {
   type FloorplanNodeTransform as SharedFloorplanNodeTransform,
   worldToFloorplanLocalPoint,
 } from '../../lib/floorplan'
+import { markFloorplanInputEvent } from '../../lib/floorplan-input'
 import { guideEmitter } from '../../lib/guide-events'
 import { parseMeasurement } from '../../lib/measurement-parser'
 import {
@@ -171,17 +170,18 @@ import {
   DEFAULT_STAIR_WIDTH,
 } from '../tools/stair/stair-defaults'
 import {
-  createWallOnCurrentLevel,
-  flushAutoFloorForCurrentLevel,
+  commitWallDraftSegment,
+  createRectangleRoomOnCurrentLevel,
   getRectangleRoomCenterlineCorners,
   inferOrthogonalWallPoint,
   isSegmentLongEnough,
-  snapWallDraftPoint,
+  resolveWallDraftPoint,
   snapWallDraftPointDetailed,
   snapPointToGrid as snapWallPointToGrid,
   WALL_GRID_STEP,
   WALL_JOIN_SNAP_RADIUS,
   type WallPlanPoint,
+  wallDraftChainEnds,
 } from '../tools/wall/wall-drafting'
 
 import { PALETTE_COLORS } from '../ui/primitives/color-dot'
@@ -9362,6 +9362,7 @@ export function FloorplanPanel({
       const worldX = buildingPosition[0] + planPoint[0] * cos + planPoint[1] * sin
       const worldZ = buildingPosition[2] - planPoint[0] * sin + planPoint[1] * cos
 
+      markFloorplanInputEvent(nativeEvent.nativeEvent)
       emitter.emit(`grid:${eventType}` as any, {
         nativeEvent: nativeEvent.nativeEvent as any,
         position: [worldX, floorplanGridWorldY, worldZ],
@@ -9514,6 +9515,130 @@ export function FloorplanPanel({
       isCeilingItemPlacementActive,
     ],
   )
+
+  // The wall tools' live preview and click commit resolve the cursor through
+  // this one function, so a click commits exactly the endpoint on screen.
+  const resolveFloorplanWallDraft = useCallback(
+    (planPoint: WallPlanPoint, shiftKey: boolean, start: WallPlanPoint | null) => {
+      if (useEditor.getState().tool === 'rectangle-room') {
+        return snapWallDraftPointDetailed({
+          point: planPoint,
+          walls,
+          magnetic: isMagneticSnapActive(),
+        })
+      }
+      const resolved = resolveWallDraftPoint({
+        point: planPoint,
+        walls,
+        start,
+        forceOrthogonal: shiftKey,
+        align: alignFloorplanDraftPoint,
+      })
+      if (resolved.snap) {
+        useAlignmentGuides.getState().clear()
+      } else if (start && resolved.orthogonal) {
+        publishOrthogonalInferenceGuide(start, resolved.point)
+      }
+      return resolved
+    },
+    [walls],
+  )
+
+  // Last pointer sample the wall preview was drawn from. Re-resolved when the
+  // view, the snapping mode or Shift changes without a pointer move, and
+  // reused by the click so both see the same input.
+  const wallDraftPointerRef = useRef<{
+    clientX: number
+    clientY: number
+    shiftKey: boolean
+    event: ReactPointerEvent<SVGSVGElement>
+  } | null>(null)
+
+  const previewWallDraftAt = useCallback(
+    (pointer: NonNullable<typeof wallDraftPointerRef.current>) => {
+      const planPoint = getPlanPointFromClientPoint(pointer.clientX, pointer.clientY)
+      if (!planPoint) return
+      const { point, snap } = resolveFloorplanWallDraft(planPoint, pointer.shiftKey, draftStart)
+      useWallSnapIndicator.getState().set(snap ? { x: point[0], z: point[1], kind: snap } : null)
+
+      // Emit `grid:move` so the 3D wall tool mirrors the draft in split view.
+      emitFloorplanGridEvent('move', point, pointer.event)
+      setCursorPoint(point)
+
+      if (!draftStart) return
+      setDraftEnd((previousEnd) => {
+        if (!(previousEnd && pointsEqual(previousEnd, point))) {
+          sfxEmitter.emit('sfx:grid-snap')
+        }
+        return point
+      })
+    },
+    [
+      draftStart,
+      emitFloorplanGridEvent,
+      getPlanPointFromClientPoint,
+      resolveFloorplanWallDraft,
+      setCursorPoint,
+      setDraftEnd,
+    ],
+  )
+
+  const resolveWallClickPoint = useCallback(
+    (
+      planPoint: WallPlanPoint,
+      event: ReactMouseEvent<SVGSVGElement>,
+      start: WallPlanPoint | null,
+    ) => {
+      // A click reports integer client coordinates while the pointermove that
+      // drew the preview may be fractional (HiDPI) — re-deriving the point from
+      // the click could move the wall by up to half a pixel. Commit from the
+      // preview's pointer sample when the click is on it.
+      const pointer = wallDraftPointerRef.current
+      const onPreviewPointer =
+        pointer &&
+        Math.abs(pointer.clientX - event.clientX) <= 1 &&
+        Math.abs(pointer.clientY - event.clientY) <= 1
+      const input =
+        (onPreviewPointer && getPlanPointFromClientPoint(pointer.clientX, pointer.clientY)) ||
+        planPoint
+      return resolveFloorplanWallDraft(input, event.shiftKey, start).point
+    },
+    [getPlanPointFromClientPoint, resolveFloorplanWallDraft],
+  )
+
+  const wallSnappingMode = useEditor((state) => state.snappingModeByContext.wall)
+  const gridSnapStep = useEditor((state) => state.gridSnapStep)
+  // Zoom / pan / rotate, a snapping-mode or grid-step change, and a new draft
+  // start all change what the cursor resolves to without a pointer move —
+  // re-resolve so the preview never shows a stale endpoint the click won't hit.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the view / snapping values are intentional re-run triggers; the resolver reads them from the DOM and the editor store.
+  useEffect(() => {
+    const pointer = wallDraftPointerRef.current
+    if (!(isWallBuildActive && pointer)) return
+    previewWallDraftAt(pointer)
+  }, [
+    floorplanSceneRotationDeg,
+    gridSnapStep,
+    isWallBuildActive,
+    previewWallDraftAt,
+    viewBox,
+    wallSnappingMode,
+  ])
+  useEffect(() => {
+    if (!isWallBuildActive) return
+    const onShiftChange = (event: KeyboardEvent) => {
+      const pointer = wallDraftPointerRef.current
+      if (event.key !== 'Shift' || !pointer) return
+      pointer.shiftKey = event.type === 'keydown'
+      previewWallDraftAt(pointer)
+    }
+    window.addEventListener('keydown', onShiftChange)
+    window.addEventListener('keyup', onShiftChange)
+    return () => {
+      window.removeEventListener('keydown', onShiftChange)
+      window.removeEventListener('keyup', onShiftChange)
+    }
+  }, [isWallBuildActive, previewWallDraftAt])
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
@@ -9837,88 +9962,16 @@ export function FloorplanPanel({
         return
       }
 
-      if (useEditor.getState().tool === 'rectangle-room') {
-        const rectangleSnap = snapWallDraftPointDetailed({
-          point: planPoint,
-          walls,
-          magnetic: isMagneticSnapActive(),
-        })
-        const snappedPoint = rectangleSnap.point
-        useWallSnapIndicator
-          .getState()
-          .set(
-            rectangleSnap.snap
-              ? { x: snappedPoint[0], z: snappedPoint[1], kind: rectangleSnap.snap }
-              : null,
-          )
-        emitFloorplanGridEvent('move', snappedPoint, event)
-        setCursorPoint(snappedPoint)
-        if (draftStart) setDraftEnd(snappedPoint)
-        return
-      }
-
-      // Wall draft: grid + magnetic snap, then Figma-style alignment.
-      // While a draft is open the segment locks to 15° rays from its start.
-      // Snapping is governed by the snapping mode (`'off'` is the bypass);
-      // there is no Shift hold-to-bypass.
-      const wallInputPoint = draftStart
-        ? inferOrthogonalWallPoint(draftStart, planPoint, event.shiftKey)
-        : planPoint
-      const wallAngleSnap = draftStart !== null && !event.shiftKey && isAngleSnapActive()
-      const wallSnap = snapWallDraftPointDetailed({
-        point: wallInputPoint,
-        walls,
-        start: draftStart ?? undefined,
-        angleSnap: wallAngleSnap,
-        magnetic: isMagneticSnapActive(),
-      })
-      const wallSnapped = wallSnap.point
-      // Locked onto existing geometry (corner / midpoint / crossing / edge) →
-      // that snap wins, so skip Figma alignment and stand the beacon there.
-      const lockedToWall = wallSnap.snap !== null
-      let snappedPoint = wallSnapped
-      if (lockedToWall) {
-        useAlignmentGuides.getState().clear()
-      } else {
-        // Alignment lines show in every mode; the pull applies only when
-        // magnetic ('lines') and the segment isn't angle-locked.
-        snappedPoint = alignFloorplanDraftPoint(wallSnapped, {
-          applySnap: isMagneticSnapActive() && !wallAngleSnap,
-        })
-      }
-      if (!lockedToWall && draftStart && (event.shiftKey || wallInputPoint !== planPoint)) {
-        snappedPoint = inferOrthogonalWallPoint(draftStart, snappedPoint, true)
-        publishOrthogonalInferenceGuide(draftStart, snappedPoint)
-      }
-      useWallSnapIndicator
-        .getState()
-        .set(wallSnap.snap ? { x: snappedPoint[0], z: snappedPoint[1], kind: wallSnap.snap } : null)
-
-      // Emit `grid:move` so the registry-driven wall tool's 3D preview
-      // tracks the cursor. The local draftEnd update below is what
-      // drives the 2D draft polygon — both views update in parallel.
-      emitFloorplanGridEvent('move', snappedPoint, event)
-      setCursorPoint(snappedPoint)
-
-      if (!draftStart) {
-        return
-      }
-
-      setDraftEnd((previousEnd) => {
-        if (
-          !previousEnd ||
-          previousEnd[0] !== snappedPoint[0] ||
-          previousEnd[1] !== snappedPoint[1]
-        ) {
-          sfxEmitter.emit('sfx:grid-snap')
-        }
-
-        return snappedPoint
+      previewWallDraftAt({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        shiftKey: event.shiftKey,
+        event,
       })
     },
     [
       buildingRotationDeg,
-      draftStart,
+      previewWallDraftAt,
       ceilingDraftPoints,
       emitFloorplanWallLeave,
       emitFloorplanGridEvent,
@@ -9958,7 +10011,6 @@ export function FloorplanPanel({
       viewBox.width,
       walls,
       setCursorPoint,
-      setDraftEnd,
       setRoofDraftEnd,
       setFenceDraftEnd,
     ],
@@ -10118,6 +10170,10 @@ export function FloorplanPanel({
     [clearDraft, createZoneOnCurrentLevel, zoneDraftPoints],
   )
 
+  // The floor plan commits the input it received in every view mode: the 3D
+  // wall tool only mirrors floor-plan events (`isFloorplanInputEvent`), so one
+  // click creates exactly one wall whichever views are showing. The open draft
+  // start is published to `useSegmentDraftChain` for that mirror.
   const handleWallPlacementPoint = useCallback(
     (point: WallPlanPoint) => {
       if (!draftStart) {
@@ -10125,6 +10181,7 @@ export function FloorplanPanel({
         setWallChainFirstVertex(point)
         setDraftEnd(point)
         setCursorPoint(point)
+        useSegmentDraftChain.getState().setChainStart('wall', point)
         return
       }
 
@@ -10132,94 +10189,46 @@ export function FloorplanPanel({
         return
       }
 
-      const isRectangleRoomMode = useEditor.getState().tool === 'rectangle-room'
-      if (isRectangleRoomMode) {
+      const tool = useEditor.getState().tool
+      if (tool === 'rectangle-room') {
         if (
           Math.abs(point[0] - draftStart[0]) < 0.01 ||
           Math.abs(point[1] - draftStart[1]) < 0.01
         ) {
           return
         }
-
-        // In split/3D the registry wall tool owns the commit. A hidden 3D
-        // canvas does not mount tools in 2D-only mode, so commit the same four
-        // clockwise segments here.
-        if (useEditor.getState().viewMode === '2d') {
-          const thickness = useEditor.getState().toolDefaults.wall?.thickness
-          const corners = getRectangleRoomCenterlineCorners(
-            draftStart,
-            point,
-            typeof thickness === 'number' ? thickness : 0.1,
-          )
-          pauseSceneHistory(useScene)
-          try {
-            for (let index = 0; index < corners.length; index += 1) {
-              createWallOnCurrentLevel(corners[index]!, corners[(index + 1) % corners.length]!, {
-                preserveExactEndpoints: true,
-              })
-            }
-          } finally {
-            resumeSceneHistory(useScene)
-          }
-          flushAutoFloorForCurrentLevel()
-        }
+        const thickness = useEditor.getState().toolDefaults.wall?.thickness
+        createRectangleRoomOnCurrentLevel(
+          draftStart,
+          point,
+          typeof thickness === 'number' ? thickness : 0.1,
+        )
         clearWallPlacementDraft()
         setCursorPoint(null)
         return
       }
 
-      if (useEditor.getState().tool === 'wall-arc') {
-        if (useEditor.getState().viewMode === '2d') {
-          const createdWall = createWallOnCurrentLevel(draftStart, point)
-          if (createdWall) {
-            const length = Math.hypot(point[0] - draftStart[0], point[1] - draftStart[1])
-            useScene.getState().updateNode(createdWall.id, { curveOffset: length * 0.25 })
-            useScene.getState().markDirty(createdWall.id as AnyNodeId)
-          }
-        }
+      if (tool === 'wall-arc') {
+        const length = Math.hypot(point[0] - draftStart[0], point[1] - draftStart[1])
+        commitWallDraftSegment(draftStart, point, { curveOffset: length * 0.25 })
         clearWallPlacementDraft()
         setCursorPoint(null)
         return
       }
 
-      // The 3D wall tool's `grid:click` listener
-      // (`packages/nodes/src/wall/tool.tsx`) owns the wall-create
-      // call. `emitFloorplanGridEvent('click', …)` in
-      // `useFloorplanBackgroundPlacement` fires it synchronously
-      // just before this callback runs, so by the time we get here
-      // the wall already exists in the scene. Committing here as
-      // well used to double-create walls whenever the two snap
-      // pipelines resolved endpoints ≥1e-6 apart (the duplicate
-      // check compares exact endpoints).
-      //
-      // That 3D path is dead in 2D-only view — the canvas is
-      // `display:none`, so the tool never commits. Mirror the slab /
-      // ceiling 2D-only committers: create locally here, gated on the
-      // view, so split / 3D keep their single-owner tool commit.
-      const createdWall =
-        useEditor.getState().viewMode === '2d' ? createWallOnCurrentLevel(draftStart, point) : null
-
-      // Chain the next segment from the resolved commit endpoint (it may
-      // have corner-snapped or split-adjusted): the wall we just made in
-      // 2D-only, otherwise the 3D tool's published chain start. Both views
-      // then draft from the same start.
-      const publishedNextStart = useSegmentDraftChain.getState().wall
-      const nextStart: WallPlanPoint = createdWall
-        ? (createdWall.end as WallPlanPoint)
-        : (publishedNextStart ?? point)
-
-      if (
-        useEditor.getState().getContinuation('wall') === 'single' ||
-        (wallChainFirstVertex && isWithinWallJoinSnapRadius(nextStart, wallChainFirstVertex))
-      ) {
+      const createdWall = commitWallDraftSegment(draftStart, point)
+      if (createdWall && wallDraftChainEnds(createdWall, wallChainFirstVertex)) {
         clearWallPlacementDraft()
         setCursorPoint(null)
         return
       }
 
+      // Chain from the committed endpoint (identical to the previewed one).
+      const nextStart = (createdWall?.end as WallPlanPoint | undefined) ?? point
       setDraftStart(nextStart)
       setDraftEnd(nextStart)
       setCursorPoint(nextStart)
+      useSegmentDraftChain.getState().setChainStart('wall', nextStart)
     },
     [clearWallPlacementDraft, draftStart, wallChainFirstVertex, setDraftEnd, setCursorPoint],
   )
@@ -10251,6 +10260,18 @@ export function FloorplanPanel({
       }),
     [clearWallPlacementDraft, setDraftEnd, setCursorPoint],
   )
+  // A draft start is building-local and was taken in the current view —
+  // switching view, level or building cancels the open draft instead of
+  // chaining the next click from a stale start.
+  const viewMode = useEditor((state) => state.viewMode)
+  const wallDraftScope = `${viewMode}|${levelId}|${buildingId}`
+  const wallDraftScopeRef = useRef(wallDraftScope)
+  useEffect(() => {
+    if (wallDraftScopeRef.current === wallDraftScope) return
+    wallDraftScopeRef.current = wallDraftScope
+    clearWallPlacementDraft()
+    setCursorPoint(null)
+  }, [clearWallPlacementDraft, setCursorPoint, wallDraftScope])
   const { getFloorplanHitIdAtPoint, getFloorplanSelectionIdsInBounds } = useFloorplanHitTesting({
     ceilingPolygons: displayCeilingPolygons,
     columnPolygons: floorplanColumnEntries,
@@ -10268,20 +10289,6 @@ export function FloorplanPanel({
     phase,
     toPoint2D,
   })
-  // Wall-commit snap for the placement hook. Mirrors the move-preview branch:
-  // it honours the Magnetic snap toggle so a click never snaps to geometry the
-  // preview didn't (keeps 2D commit consistent with the preview and with 3D).
-  const snapWallDraftPointMagnetic = useCallback(
-    (args: {
-      point: WallPlanPoint
-      walls: WallNode[]
-      start?: WallPlanPoint
-      angleSnap?: boolean
-      bypassSnap?: boolean
-      step?: number
-    }) => snapWallDraftPoint({ ...args, magnetic: isMagneticSnapActive() }),
-    [],
-  )
   const { handleBackgroundPlacementClick } = useFloorplanBackgroundPlacement({
     activePolygonDraftPoints,
     ceilingDraftPoints,
@@ -10323,8 +10330,8 @@ export function FloorplanPanel({
     setFenceDraftStart,
     setRoofDraftEnd,
     setRoofDraftStart,
+    resolveWallClickPoint,
     snapPolygonDraftPoint,
-    snapWallDraftPoint: snapWallDraftPointMagnetic,
     toPoint2D,
     walls,
     // World-axis grid snap so drafts land on the visible grid even
@@ -11112,6 +11119,16 @@ export function FloorplanPanel({
 
   const handleSvgPointerMove = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
+      // Track the pointer on every move (also while panning) so a view change
+      // re-resolves the wall preview under where the cursor actually is.
+      if (isWallBuildActive) {
+        wallDraftPointerRef.current = {
+          clientX: event.clientX,
+          clientY: event.clientY,
+          shiftKey: event.shiftKey,
+          event,
+        }
+      }
       if (
         hasFloorplanCursorIndicator &&
         !isSpacePanPressed &&
@@ -11146,6 +11163,7 @@ export function FloorplanPanel({
       handlePointerMove,
       hasFloorplanCursorIndicator,
       isSpacePanPressed,
+      isWallBuildActive,
       elevatorResizeDragState,
       siteVertexDragState,
       setFloorplanCursorPosition,
@@ -11153,6 +11171,7 @@ export function FloorplanPanel({
   )
 
   const handleSvgPointerLeave = useCallback(() => {
+    wallDraftPointerRef.current = null
     setFloorplanCursorPosition(null)
     setHoveredGuideCorner(null)
     handlePointerLeave()

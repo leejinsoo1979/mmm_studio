@@ -5,16 +5,11 @@ import { type MouseEvent as ReactMouseEvent, useCallback } from 'react'
 import { resolveCeilingPlanPointSnap } from '../../lib/ceiling-plan-snap'
 import { alignFloorplanDraftPoint, getPlanPointDistance } from '../../lib/floorplan'
 import { resolveSlabPlanPointSnap } from '../../lib/slab-plan-snap'
-import useAlignmentGuides from '../../store/use-alignment-guides'
 import useEditor, { isAngleSnapActive, isMagneticSnapActive } from '../../store/use-editor'
 import usePlacementPreview from '../../store/use-placement-preview'
 import useSegmentDraftChain from '../../store/use-segment-draft-chain'
 import { snapFenceDraftPoint } from '../tools/fence/fence-drafting'
-import {
-  getSegmentGridStep,
-  inferOrthogonalWallPoint,
-  type WallPlanPoint,
-} from '../tools/wall/wall-drafting'
+import { getSegmentGridStep, type WallPlanPoint } from '../tools/wall/wall-drafting'
 
 type UseFloorplanBackgroundPlacementArgs = {
   activePolygonDraftPoints: WallPlanPoint[]
@@ -66,16 +61,15 @@ type UseFloorplanBackgroundPlacementArgs = {
   setFenceDraftStart: React.Dispatch<React.SetStateAction<WallPlanPoint | null>>
   setRoofDraftEnd: React.Dispatch<React.SetStateAction<WallPlanPoint | null>>
   setRoofDraftStart: React.Dispatch<React.SetStateAction<WallPlanPoint | null>>
-  snapWallDraftPoint: (args: {
-    point: WallPlanPoint
-    walls: WallNode[]
-    start?: WallPlanPoint
-    angleSnap?: boolean
-    bypassSnap?: boolean
-    magnetic?: boolean
-    step?: number
-    gridSnap?: (point: WallPlanPoint) => WallPlanPoint
-  }) => WallPlanPoint
+  /**
+   * Resolves a wall-tool click to the exact point its live preview shows
+   * (same pointer input, same snap pipeline) — the commit never re-snaps.
+   */
+  resolveWallClickPoint: (
+    planPoint: WallPlanPoint,
+    event: ReactMouseEvent<SVGSVGElement>,
+    draftStart: WallPlanPoint | null,
+  ) => WallPlanPoint
   snapPolygonDraftPoint: (args: {
     point: WallPlanPoint
     start?: WallPlanPoint
@@ -126,7 +120,7 @@ export function useFloorplanBackgroundPlacement({
   setFenceDraftStart,
   setRoofDraftEnd,
   setRoofDraftStart,
-  snapWallDraftPoint,
+  resolveWallClickPoint,
   snapPolygonDraftPoint,
   toPoint2D,
   walls,
@@ -311,59 +305,12 @@ export function useFloorplanBackgroundPlacement({
       // / draftEnd state in the floor plan would never update, leaving
       // the dashed-line draft preview invisible.
       if (isWallBuildActive) {
-        if (useEditor.getState().tool === 'rectangle-room') {
-          const wallStep = getSegmentGridStep()
-          const snappedPoint = snapWallDraftPoint({
-            point: planPoint,
-            walls,
-            magnetic: isMagneticSnapActive(),
-            gridSnap: (p) => worldGridSnap(p, wallStep),
-          })
-          emitFloorplanGridEvent('click', snappedPoint, event)
-          handleWallPlacementPoint(snappedPoint)
-          return true
-        }
-
-        // Wall draft: mode-driven (matches the chip + the move-preview branch).
-        // `grid` snaps to the world XZ grid (rotation-safe via `gridSnap`),
-        // `angles` locks 15° rays from the start, `lines` pulls the endpoint
-        // onto existing wall corners / edges + alignment, `off` is free.
-        const wallStep = getSegmentGridStep()
-        const wallInputPoint = draftStart
-          ? inferOrthogonalWallPoint(draftStart, planPoint, event.shiftKey)
-          : planPoint
-        const wallAngleSnap = draftStart !== null && !event.shiftKey && isAngleSnapActive()
-        const wallSnapped = snapWallDraftPoint({
-          point: wallInputPoint,
-          walls,
-          start: draftStart ?? undefined,
-          angleSnap: wallAngleSnap,
-          gridSnap: (p) => worldGridSnap(p, wallStep),
-        })
-        const wallGridBase = worldGridSnap(planPoint, wallStep)
-        const wallLocked = wallSnapped[0] !== wallGridBase[0] || wallSnapped[1] !== wallGridBase[1]
-        let snappedPoint = wallSnapped
-        if (wallLocked) {
-          useAlignmentGuides.getState().clear()
-        } else {
-          // Alignment lines are shown in every mode; the pull applies only when
-          // magnetic ('lines') and the segment isn't angle-locked.
-          snappedPoint = alignFloorplanDraftPoint(wallSnapped, {
-            applySnap: isMagneticSnapActive() && !wallAngleSnap,
-          })
-        }
-        if (!wallLocked && draftStart && (event.shiftKey || wallInputPoint !== planPoint)) {
-          snappedPoint = inferOrthogonalWallPoint(draftStart, snappedPoint, true)
-          useAlignmentGuides.getState().clear()
-        }
-
+        const snappedPoint = resolveWallClickPoint(planPoint, event, draftStart)
         emitFloorplanGridEvent('click', snappedPoint, event)
 
-        // Double-click finishes the chain. The emit above already made the
-        // 3D wall tool stopDrafting (its detail >= 2 guard), so close the
-        // 2D draft too — otherwise it stays open against a closed 3D tool
-        // and the next previewed segment is silently never created.
-        if (draftStart && event.detail >= 2) {
+        // Double-click finishes the chain (its first click already committed
+        // the segment). Clearing the draft also stops the 3D tool's mirror.
+        if (draftStart && event.detail >= 2 && useEditor.getState().tool !== 'rectangle-room') {
           clearWallPlacementDraft()
           setCursorPoint(snappedPoint)
           return true
@@ -427,7 +374,7 @@ export function useFloorplanBackgroundPlacement({
       setFenceDraftStart,
       setRoofDraftEnd,
       setRoofDraftStart,
-      snapWallDraftPoint,
+      resolveWallClickPoint,
       snapPolygonDraftPoint,
       toPoint2D,
       walls,

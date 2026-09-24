@@ -148,12 +148,18 @@ export {
 } from './components/tools/stair/stair-defaults'
 export { ToolManager } from './components/tools/tool-manager'
 export {
+  commitWallDraftSegment,
+  createRectangleRoomOnCurrentLevel,
   createWallOnCurrentLevel,
+  createWallSegmentsOnCurrentLevel,
+  flushAutoSurfacesForCurrentLevel,
   getRectangleRoomCenterlineCorners,
   getSegmentGridStep,
   getWallResizeGridStep,
   inferOrthogonalWallPoint,
   isSegmentLongEnough,
+  type ResolvedWallDraftPoint,
+  resolveWallDraftPoint,
   snapPointToGrid,
   snapScalarToGrid,
   snapWallDraftPoint,
@@ -165,6 +171,7 @@ export {
   type WallDraftSnapResult,
   type WallPlanPoint,
   type WallSnapRadii,
+  wallDraftChainEnds,
 } from './components/tools/wall/wall-drafting'
 // `ToolbarLeft` / `ToolbarRight` are the headless-spec aliases for the
 // existing `ViewerToolbarLeft` / `ViewerToolbarRight` exports — the
@@ -285,6 +292,7 @@ export {
   type FloorplanStairSegmentEntry,
   getFloorplanWallThickness,
 } from './lib/floorplan'
+export { isFloorplanInputEvent } from './lib/floorplan-input'
 export { commitFreshPlacementSubtree } from './lib/fresh-planar-placement'
 export { exportSceneToGlb } from './lib/glb-export'
 export {

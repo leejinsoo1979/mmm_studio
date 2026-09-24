@@ -1,10 +1,12 @@
 // Ephemeral store for the wall / fence tools' click-chaining start points.
-// The 3D tools (`@pascal-app/nodes` wall/tool.tsx, fence/tool.tsx) own node
-// creation for both views; after each chained commit they publish the
-// created segment's resolved end here so the 2D floor-plan draft chains its
-// next segment from the same point instead of re-deriving it through a
-// different snap pipeline. Cleared on cancel, single-segment commit, and
-// unmount — never persisted, never in undo history.
+// Fence: the 3D tool (`@pascal-app/nodes` fence/tool.tsx) owns node creation
+// for both views and publishes each chained commit's resolved end here so the
+// 2D floor-plan draft chains from the same point.
+// Wall: the view that received the input commits it — the 2D floor plan
+// publishes its open draft start (and each committed end) for the 3D wall
+// tool to mirror, and the 3D tool publishes its own chained commits for the
+// floor plan to follow. Cleared on cancel, chain end, and unmount — never
+// persisted, never in undo history.
 
 import { create } from 'zustand'
 import type { WallPlanPoint } from '../components/tools/wall/wall-snap-geometry'
