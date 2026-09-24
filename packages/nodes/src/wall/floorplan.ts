@@ -128,9 +128,8 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
   ]
 
   // Hit-line on the centerline. Stroke width is in screen pixels so it
-  // stays clickable at any zoom. Skipped while selected — the user has
-  // the side-arrows / endpoint handles by then, and leaving the hit-line
-  // live would re-introduce a "click-and-drag the wall body" path.
+  // stays clickable at any zoom. Replaced by the body-drag handle below
+  // once the wall is selected.
   if (!isSelected) {
     children.push({
       kind: 'hit-line',
@@ -143,8 +142,26 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
     })
   }
 
-  // Endpoint handles only when the user has actively selected this wall.
-  if (isSelected) {
+  // The selected wall's body drags the wall sideways along its normal —
+  // the same move as the side arrows (`wallFloorplanMoveTarget`); linked
+  // walls follow. Pushed before the handles so they stay on top.
+  if (isSelected && !isCurvedWall(node)) {
+    children.push({
+      kind: 'edge-handle',
+      x1: node.start[0],
+      y1: node.start[1],
+      x2: node.end[0],
+      y2: node.end[1],
+      affordance: 'move',
+      payload: { wallId: node.id },
+      cursor: 'move',
+    })
+  }
+
+  // Corner handles on hover as well as when selected, so a corner can be
+  // grabbed and dragged (freely, linked walls following) without selecting
+  // the wall first.
+  if (isSelected || isHovered) {
     children.push({
       kind: 'endpoint-handle',
       point: [node.start[0], node.start[1]],
@@ -159,7 +176,9 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
       affordance: 'move-endpoint',
       payload: { wallId: node.id, endpoint: 'end' as const },
     })
+  }
 
+  if (isSelected) {
     // Side move arrows — two directional arrows at the wall midpoint,
     // pointing outward perpendicular to the wall. Mirrors the 3D
     // `WallMoveSideHandles` arrows so users can grab the wall body

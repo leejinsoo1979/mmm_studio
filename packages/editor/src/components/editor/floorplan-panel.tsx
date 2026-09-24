@@ -79,6 +79,7 @@ import {
   buildFloorplanItemEntry,
   buildFloorplanStairEntry as buildSharedFloorplanStairEntry,
   collectLevelDescendants,
+  FLOORPLAN_ALIGNMENT_THRESHOLD_M,
   FLOORPLAN_VIEW_ROTATION_DEG,
   floorplanLocalToWorldPoint,
   getFloorplanWall as getSharedFloorplanWall,
@@ -265,40 +266,36 @@ const FLOORPLAN_MARQUEE_DRAG_THRESHOLD_PX = 4
 const FLOORPLAN_ACTION_MENU_HORIZONTAL_PADDING = 60
 const FLOORPLAN_ACTION_MENU_MIN_ANCHOR_Y = 56
 const FLOORPLAN_DEFAULT_WINDOW_LOCAL_Y = 1.5
+// Screen-space catch radius for aligning a drafted wall endpoint with existing
+// corners / faces (see `resolveFloorplanWallDraft`).
+const WALL_DRAFT_ALIGNMENT_PX = 12
 
 function publishOrthogonalInferenceGuide(start: WallPlanPoint, end: WallPlanPoint) {
+  const horizontal = Math.abs(end[1] - start[1]) < 1e-6
+  if (!(horizontal || Math.abs(end[0] - start[0]) < 1e-6)) return
   const extent = 1000
-  if (Math.abs(end[1] - start[1]) < 1e-6) {
-    useAlignmentGuides.getState().set([
-      {
-        axis: 'z',
-        coord: start[1],
-        from: { x: start[0] - extent, z: start[1] },
-        to: { x: start[0] + extent, z: start[1] },
-        anchor: { x: start[0], z: start[1] },
-        movingAnchorKind: 'corner',
-        candidateAnchorKind: 'corner',
-        candidateNodeId: '__orthogonal__',
-        distance: 0,
-      },
-    ])
-    return
-  }
-  if (Math.abs(end[0] - start[0]) < 1e-6) {
-    useAlignmentGuides.getState().set([
-      {
-        axis: 'x',
-        coord: start[0],
-        from: { x: start[0], z: start[1] - extent },
-        to: { x: start[0], z: start[1] + extent },
-        anchor: { x: start[0], z: start[1] },
-        movingAnchorKind: 'corner',
-        candidateAnchorKind: 'corner',
-        candidateNodeId: '__orthogonal__',
-        distance: 0,
-      },
-    ])
-  }
+  const axis = horizontal ? 'z' : 'x'
+  // Keep the alignment guides across the locked axis — e.g. the vertical guide
+  // to the corner a horizontal segment's end lines up with.
+  const alignment = useAlignmentGuides.getState().guides.filter((guide) => guide.axis !== axis)
+  useAlignmentGuides.getState().set([
+    ...alignment,
+    {
+      axis,
+      coord: horizontal ? start[1] : start[0],
+      from: horizontal
+        ? { x: start[0] - extent, z: start[1] }
+        : { x: start[0], z: start[1] - extent },
+      to: horizontal
+        ? { x: start[0] + extent, z: start[1] }
+        : { x: start[0], z: start[1] + extent },
+      anchor: { x: start[0], z: start[1] },
+      movingAnchorKind: 'corner',
+      candidateAnchorKind: 'corner',
+      candidateNodeId: '__orthogonal__',
+      distance: 0,
+    },
+  ])
 }
 
 // Match the guide plane footprint used in the 3D renderer so the 2D overlay aligns.
@@ -9527,12 +9524,19 @@ export function FloorplanPanel({
           magnetic: isMagneticSnapActive(),
         })
       }
+      // A fixed 8cm alignment catch is a couple of pixels at plan zoom; keep
+      // it at least WALL_DRAFT_ALIGNMENT_PX on screen so lining an endpoint up
+      // with an existing corner actually catches.
+      const threshold = Math.max(
+        FLOORPLAN_ALIGNMENT_THRESHOLD_M,
+        WALL_DRAFT_ALIGNMENT_PX * floorplanUnitsPerPixel,
+      )
       const resolved = resolveWallDraftPoint({
         point: planPoint,
         walls,
         start,
         forceOrthogonal: shiftKey,
-        align: alignFloorplanDraftPoint,
+        align: (point, { applySnap }) => alignFloorplanDraftPoint(point, { applySnap, threshold }),
       })
       if (resolved.snap) {
         useAlignmentGuides.getState().clear()
@@ -9541,7 +9545,7 @@ export function FloorplanPanel({
       }
       return resolved
     },
-    [walls],
+    [floorplanUnitsPerPixel, walls],
   )
 
   // Last pointer sample the wall preview was drawn from. Re-resolved when the

@@ -24,6 +24,7 @@ import {
   useAlignmentGuides,
   type WallPlanPoint,
 } from '@pascal-app/editor'
+import { wallFloorplanMoveTarget } from './floorplan-move'
 
 /**
  * Floor-plan 2D drag affordances for wall.
@@ -168,6 +169,22 @@ export const wallCurveAffordance: FloorplanAffordance<WallNode> = {
         })
       },
     }
+  },
+}
+
+/**
+ * Dragging the selected wall's body: the same sideways move as the side
+ * arrows (`wallFloorplanMoveTarget` — normal-axis lock, linked-wall
+ * junctions, one undo step), anchored at the grabbed point.
+ */
+export const wallMoveAffordance: FloorplanAffordance<WallNode> = {
+  start({ node, nodes, initialPlanPoint }) {
+    const session = wallFloorplanMoveTarget({ node, nodes })
+    session.apply({
+      planPoint: initialPlanPoint,
+      modifiers: { shiftKey: false, altKey: false, ctrlKey: false, metaKey: false },
+    })
+    return session
   },
 }
 
