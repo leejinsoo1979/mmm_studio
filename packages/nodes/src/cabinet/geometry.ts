@@ -1,6 +1,14 @@
 import type { GeometryContext } from '@pascal-app/core'
 import { createDefaultMaterial, type RenderShading } from '@pascal-app/viewer'
-import { BoxGeometry, CylinderGeometry, Group, type Material, Mesh } from 'three'
+import {
+  BoxGeometry,
+  CylinderGeometry,
+  ExtrudeGeometry,
+  Group,
+  type Material,
+  Mesh,
+  Shape,
+} from 'three'
 import { buildCabinetParts, type CabinetPart, type PartFinish } from './engine/parts'
 import type { CabinetNode } from './schema'
 
@@ -54,6 +62,13 @@ function partMesh(node: CabinetNode, part: CabinetPart, material: Material): Mes
     mesh = new Mesh(geometry, material)
   } else if (part.shape === 'foot') {
     mesh = new Mesh(new CylinderGeometry((b.w / 2) * MM, (b.w / 2) * MM, b.h * MM, 12), material)
+  } else if (part.notches?.length) {
+    mesh = new Mesh(notchedSideGeometry(part), material)
+    // The profile is built from the part's min corner; place that corner.
+    mesh.position.set((b.x - node.widthMm / 2) * MM, b.y * MM, (b.z - node.depthMm / 2) * MM)
+    mesh.name = `cabinet-${part.role}-${part.id}`
+    mesh.userData.partId = part.id
+    return mesh
   } else {
     mesh = new Mesh(new BoxGeometry(b.w * MM, b.h * MM, b.d * MM), material)
   }
@@ -61,4 +76,37 @@ function partMesh(node: CabinetNode, part: CabinetPart, material: Material): Mes
   mesh.name = `cabinet-${part.role}-${part.id}`
   mesh.userData.partId = part.id
   return mesh
+}
+
+/**
+ * A side panel with front notches (목찬넬 따내기): its profile in the
+ * depth/height plane, extruded through the board thickness along X. Built
+ * from the part's min corner (x 0…w, y 0…h, z 0…d).
+ */
+function notchedSideGeometry(part: CabinetPart) {
+  const { w, h, d } = part.box
+  const notches = [...(part.notches ?? [])].sort((a, b) => a.fromBottom - b.fromBottom)
+  // Shape plane: u = depth (z), v = height (y). Walk the outline counter-
+  // clockwise: back bottom → front bottom → up the notched front → top.
+  const shape = new Shape()
+  shape.moveTo(0, 0)
+  shape.lineTo(d, 0)
+  for (const n of notches) {
+    const top = Math.min(h, n.fromBottom + n.height)
+    shape.lineTo(d, n.fromBottom)
+    shape.lineTo(d - n.depth, n.fromBottom)
+    shape.lineTo(d - n.depth, top)
+    if (top < h) shape.lineTo(d, top)
+  }
+  const last = notches.at(-1)
+  if (!last || last.fromBottom + last.height < h) shape.lineTo(d, h)
+  else shape.lineTo(d - last.depth, h)
+  shape.lineTo(0, h)
+  shape.closePath()
+  const geometry = new ExtrudeGeometry(shape, { depth: w, bevelEnabled: false })
+  // (u, v, extrude) → (z, y, x): rotate the extrude axis onto +X.
+  geometry.rotateY(-Math.PI / 2)
+  geometry.translate(w, 0, 0)
+  geometry.scale(MM, MM, MM)
+  return geometry
 }

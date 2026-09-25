@@ -48,6 +48,13 @@ export const CellContent = z.discriminatedUnion('type', [
     /** Inner drawers only: individual front heights, bottom → top (mmmcraft
      *  `drawerHeights`, e.g. 255/255/176/176). Overrides `stepMm`. */
     heightsMm: z.array(z.number().min(60).max(600)).optional(),
+    /** External drawers only: explicit front ranges [bottom, top] in mm from
+     *  the carcass bottom, bottom → top (mmmcraft 마이다 ranges; a front may
+     *  run past the carcass, e.g. −5 or up to the countertop). */
+    frontsMm: z.array(z.tuple([z.number(), z.number()])).optional(),
+    /** External drawers only: drawer box [bottom, height] in mm from the
+     *  carcass bottom, one per front. */
+    boxesMm: z.array(z.tuple([z.number(), z.number().positive()])).optional(),
   }),
 ])
 export type CellContent = z.infer<typeof CellContent>
@@ -144,8 +151,8 @@ export const CabinetNode = BaseNode.extend({
    *  negative = it overhangs (e.g. an upper cabinet's finger-pull lip). */
   frontReveal: z
     .object({
-      top: z.number().min(-60).max(60).default(1.5),
-      bottom: z.number().min(-60).max(60).default(1.5),
+      top: z.number().min(-200).max(200).default(1.5),
+      bottom: z.number().min(-200).max(200).default(1.5),
       side: z.number().min(0).max(20).default(1.5),
       /** Half of this gap sits on each side of a divider between fronts. */
       between: z.number().min(0).max(20).default(3),
@@ -158,6 +165,33 @@ export const CabinetNode = BaseNode.extend({
     content: { type: 'shelves', count: 4, kind: 'dowel' },
     front: { type: 'door', leaves: 'auto', hinge: 'auto' },
   }),
+
+  /** `auto` keeps the family default (solid; base cabinets use bands).
+   *  mmmcraft kitchen bases are `none` (open top under a top channel) or
+   *  `solid` (도어올림 / 상판내림). */
+  top: z.enum(['auto', 'solid', 'none']).default('auto'),
+  /** Solid top pulled back from the front (상판내림: 18.5). */
+  topSetbackMm: z.number().min(0).max(200).default(0),
+  /** Stretcher across the top front (상판내림 가로전대(상), 55 for a 20 mm stone). */
+  topStretcher: z
+    .object({ heightMm: z.number().min(20).max(200), setbackMm: z.number().min(0).max(60) })
+    .nullable()
+    .default(null),
+  /** Handleless channels (목찬넬): notches cut into the front of both sides,
+   *  measured from the carcass bottom, with an optional PET L-frame and a
+   *  PB rail (가로전대) behind. */
+  channels: z
+    .array(
+      z.object({
+        fromBottomMm: z.number().min(0),
+        heightMm: z.number().min(10).max(300),
+        depthMm: z.number().min(5).max(100).default(40),
+        frame: z.boolean().default(true),
+        /** Height of the rail behind the notch; `null` = no rail. */
+        railHeightMm: z.number().min(10).max(300).nullable().default(null),
+      }),
+    )
+    .default([]),
 
   handle: z.enum(['none', 'bar', 'knob']).default('bar'),
   bodyColor: HexColor.default('#f1ede4'),
@@ -191,6 +225,8 @@ export const CountertopNode = BaseNode.extend({
   thicknessMm: z.union([z.literal(10), z.literal(20), z.literal(30)]).default(20),
   /** Up-stand along the back edge (뒷턱); 0 = none. */
   backsplashMm: z.number().min(0).max(200).default(0),
+  /** Vertical stone apron down the front edge (상판내림 앞판, 80 high overall). */
+  frontDropMm: z.number().min(0).max(200).default(0),
   cutouts: z.array(CountertopCutout).default([]),
   color: HexColor.default('#e9e6e0'),
 })

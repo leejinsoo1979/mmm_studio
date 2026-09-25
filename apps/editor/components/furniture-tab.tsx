@@ -21,6 +21,8 @@ const GROUPS: { id: CabinetPreset['group']; label: string }[] = [
   { id: 'wardrobe', label: '옷장' },
   { id: 'shoe', label: '선반장 · 현관장' },
   { id: 'kitchen-base', label: '주방 하부장' },
+  { id: 'kitchen-lift', label: '도어올림' },
+  { id: 'kitchen-top-down', label: '상판내림' },
   { id: 'kitchen-upper', label: '주방 상부장' },
   { id: 'kitchen-tall', label: '키큰장' },
 ]

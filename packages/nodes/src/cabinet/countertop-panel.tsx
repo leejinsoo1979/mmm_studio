@@ -120,6 +120,13 @@ export default function CountertopPanel() {
           value={node.backsplashMm}
         />
         <NumberRow
+          label="앞판 높이 (상판내림 80)"
+          max={200}
+          min={0}
+          onCommit={(frontDropMm) => update({ frontDropMm })}
+          value={node.frontDropMm}
+        />
+        <NumberRow
           label="설치 높이"
           max={2000}
           min={0}

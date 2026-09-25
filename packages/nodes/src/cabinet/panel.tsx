@@ -751,16 +751,16 @@ export default function CabinetPanel() {
         />
         <MmField
           label="도어 위 여유"
-          max={60}
-          min={-60}
+          max={200}
+          min={-200}
           onCommit={(top) => update({ frontReveal: { ...node.frontReveal, top } })}
           step={0.5}
           value={node.frontReveal.top}
         />
         <MmField
           label="도어 아래 여유"
-          max={60}
-          min={-60}
+          max={200}
+          min={-200}
           onCommit={(bottom) => update({ frontReveal: { ...node.frontReveal, bottom } })}
           step={0.5}
           value={node.frontReveal.bottom}
@@ -807,7 +807,12 @@ export default function CabinetPanel() {
                   className="border-border/30 border-t"
                   key={`${row.name}-${row.lengthMm}-${row.widthMm}-${row.thicknessMm}`}
                 >
-                  <td className="px-1.5 py-1">{row.name}</td>
+                  <td className="px-1.5 py-1">
+                    {row.name}
+                    {row.notes && (
+                      <div className="text-[10px] text-muted-foreground">{row.notes}</div>
+                    )}
+                  </td>
                   <td className="px-1 py-1 text-center">{row.material}</td>
                   <td className="px-1 py-1 text-right tabular-nums">
                     {row.lengthMm}×{row.widthMm}×{row.thicknessMm}

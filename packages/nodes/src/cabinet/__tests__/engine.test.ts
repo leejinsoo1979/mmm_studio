@@ -431,7 +431,7 @@ describe('panel list', () => {
     const doors = rows.find((r) => r.name.startsWith('양문'))
     expect(doors?.material).toBe('PET')
     const csv = cutlistCsv([{ node, label: '옷장' }])
-    expect(csv.startsWith('﻿가구,부재,재질,두께,길이,폭,수량')).toBe(true)
+    expect(csv.startsWith('﻿가구,부재,재질,두께,길이,폭,수량,비고')).toBe(true)
     expect(csv).toContain('옷장,뒷판,MDF,9')
     const hardware = cabinetHardwareRows(node)
     expect(hardware.find((h) => h.name === '경첩')?.quantity).toBe(8)
@@ -528,6 +528,85 @@ test('바지걸이장 is two bodies: drawers | pants below, hanging above', () =
   expect(parts.find((p) => p.name === '(하)좌측')?.box.h).toBe(1000)
   const pants = leaves.find((l) => l.content.type === 'hanging' && l.content.rod === 'pants')
   expect((pants?.rect.x1 ?? 0) - (pants?.rect.x0 ?? 0)).toBe(586)
-  expect(parts.filter((p) => p.role === 'drawer-front').map((p) => p.box.h)).toEqual([255, 255, 176, 176])
+  expect(parts.filter((p) => p.role === 'drawer-front').map((p) => p.box.h)).toEqual([
+    255, 255, 176, 176,
+  ])
   expect(parts.filter((p) => p.role === 'door')).toHaveLength(2)
+})
+
+describe('목찬넬 kitchen bases (mmmcraft numbers, body 785 on 65)', () => {
+  const build = (id: string) => {
+    const preset = CABINET_PRESETS.find((p) => p.id === id)
+    if (!preset) throw new Error(`missing preset ${id}`)
+    return buildCabinetParts(cabinet(instantiateSpec(preset.spec())))
+  }
+  const byName = (parts: CabinetPart[], name: string) => parts.find((p) => p.name === name)
+
+  test('기본하부장: open top, 60×40 top channel, door 785 − 20 + 5', () => {
+    const { parts, issues } = build('lower-half-cabinet')
+    expect(issues).toEqual([])
+    expect(parts.some((p) => p.role === 'top' || p.role === 'top-band')).toBe(false)
+    expect(byName(parts, '좌측판')?.notches).toEqual([{ fromBottom: 725, height: 60, depth: 40 }])
+    expect(byName(parts, '가로전대1')?.box.h).toBe(60)
+    expect(byName(parts, '목찬넬프레임수직1')?.box.h).toBe(42)
+    const door = parts.find((p) => p.role === 'door')
+    expect(door?.box.h).toBe(770)
+    expect(door?.box.y).toBe(60)
+    expect(parts.some((p) => p.role === 'handle')).toBe(false)
+  })
+
+  test('싱크장: the rail behind the top channel is 150', () => {
+    const { parts } = build('lower-sink-cabinet')
+    expect(byName(parts, '가로전대1')?.box.h).toBe(150)
+    expect(parts.some((p) => p.role === 'back')).toBe(false)
+  })
+
+  test('도어올림 2단: 355 channel, fronts 400 / 400 rising 30 above the carcass', () => {
+    const { parts, issues } = build('lower-door-lift-2tier')
+    expect(issues).toEqual([])
+    expect(byName(parts, '상판')).toBeDefined()
+    expect(byName(parts, '좌측판')?.notches).toEqual([{ fromBottom: 355, height: 65, depth: 40 }])
+    const frame = byName(parts, '목찬넬프레임수평1')
+    expect([frame?.box.w, frame?.box.d, frame?.box.h, frame?.material]).toEqual([
+      600,
+      40,
+      18,
+      'PET',
+    ])
+    expect(frame?.box.y).toBe(65 + 355)
+    expect(byName(parts, '목찬넬프레임수직1')?.box.h).toBe(47)
+    const fronts = parts.filter((p) => p.role === 'drawer-front').sort((a, b) => a.box.y - b.box.y)
+    expect(fronts.map((f) => [f.box.y - 65, f.box.y - 65 + f.box.h])).toEqual([
+      [-5, 395],
+      [415, 815],
+    ])
+  })
+
+  test('도어올림 3단: channels 315 / 545, fronts 360 / 210 / 210', () => {
+    const { parts } = build('lower-door-lift-3tier')
+    expect(byName(parts, '좌측판')?.notches?.map((n) => n.fromBottom)).toEqual([315, 545])
+    const fronts = parts.filter((p) => p.role === 'drawer-front').sort((a, b) => a.box.y - b.box.y)
+    expect(fronts.map((f) => f.box.h)).toEqual([360, 210, 210])
+  })
+
+  test('상판내림: top set back 18.5 behind a 55 stretcher, 665 channel without rail, door 710', () => {
+    const { parts, issues } = build('lower-top-down-half')
+    expect(issues).toEqual([])
+    const top = byName(parts, '상판')
+    expect(top?.box.d).toBe(600 - 26 - 18.5)
+    expect(byName(parts, '가로전대(상)')?.box.h).toBe(55)
+    expect(byName(parts, '좌측판')?.notches).toEqual([{ fromBottom: 665, height: 65, depth: 40 }])
+    expect(parts.some((p) => p.name.startsWith('가로전대') && p.name !== '가로전대(상)')).toBe(
+      false,
+    )
+    const door = parts.find((p) => p.role === 'door')
+    expect([door?.box.y, (door?.box.y ?? 0) + (door?.box.h ?? 0)]).toEqual([60, 65 + 705])
+  })
+
+  test('side-panel notches reach the panel list and the 3D mesh', () => {
+    const preset = CABINET_PRESETS.find((p) => p.id === 'lower-door-lift-2tier')
+    const node = cabinet(instantiateSpec(preset?.spec() as never))
+    const rows = cabinetPanelRows(node)
+    expect(rows.find((r) => r.name === '좌측판')?.notes).toBe('따내기 65×40 @355')
+  })
 })

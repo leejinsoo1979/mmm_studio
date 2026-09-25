@@ -59,6 +59,14 @@ export function buildCountertopGeometry(
   slab.name = 'countertop-slab'
   group.add(slab)
 
+  // 상판내림: the stone's front apron hangs down, its top flush with the slab.
+  if (node.frontDropMm > 0) {
+    const apron = new Mesh(new BoxGeometry(L * MM, node.frontDropMm * MM, T * MM), stone)
+    apron.position.set(0, (T - node.frontDropMm / 2) * MM, (D / 2 - T / 2) * MM)
+    apron.name = 'countertop-front-apron'
+    group.add(apron)
+  }
+
   if (node.backsplashMm > 0) {
     const splash = new Mesh(new BoxGeometry(L * MM, node.backsplashMm * MM, 20 * MM), stone)
     splash.position.set(0, (T + node.backsplashMm / 2) * MM, (-D / 2 + 10) * MM)

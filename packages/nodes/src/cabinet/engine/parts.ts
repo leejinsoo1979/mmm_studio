@@ -60,6 +60,7 @@ export type PartRole =
   | 'foot'
   | 'handle'
   | 'appliance'
+  | 'channel-frame'
 
 export type PartMaterial = 'PB' | 'MDF' | 'PET' | 'metal' | 'appliance'
 
@@ -88,6 +89,8 @@ export type CabinetPart = {
   /** Hinge cup centres along the hinge edge (mm from the leaf's bottom, or
    *  from its left end for a flap). */
   hingePositionsMm?: number[]
+  /** Side panels: front notches (목찬넬 따내기), mm from the part's bottom. */
+  notches?: { fromBottom: number; height: number; depth: number }[]
 }
 
 export type CabinetBuild = {
@@ -129,12 +132,12 @@ function hasBottom(node: CabinetNode): boolean {
 function hasBack(node: CabinetNode): boolean {
   return node.variant !== 'dishwasher' && node.variant !== 'sink'
 }
-/** Base cabinets use front/back bands under the countertop instead of a top. */
+/** `top: 'auto'` base cabinets use front/back bands under the countertop. */
 function isBandedTop(node: CabinetNode): boolean {
-  return node.family === 'base'
+  return node.top === 'auto' && node.family === 'base'
 }
 function hasSolidTop(node: CabinetNode): boolean {
-  return node.family !== 'base'
+  return node.top === 'solid' || (node.top === 'auto' && node.family !== 'base')
 }
 /** Appliance housings (dishwasher, built-in appliance) have no interior. */
 function hasInterior(node: CabinetNode): boolean {
@@ -182,6 +185,7 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
     const isFirst = bi === 0
     const isLast = bi === bodies.length - 1
     const sideH = body.y1 - body.y0
+    const notches = sideNotches(node, bodyY0, body.y0, body.y1)
     push({
       id: `side-left${key}`,
       role: 'side',
@@ -189,6 +193,7 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
       material: 'PB',
       finish: 'body',
       box: { x: carcassX0, y: body.y0, z: 0, w: T, h: sideH, d: D },
+      ...(notches.length > 0 ? { notches } : {}),
     })
     push({
       id: `side-right${key}`,
@@ -197,6 +202,7 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
       material: 'PB',
       finish: 'body',
       box: { x: carcassX1 - T, y: body.y0, z: 0, w: T, h: sideH, d: D },
+      ...(notches.length > 0 ? { notches } : {}),
     })
     if (hasBottom(node) || !isFirst) {
       push({
@@ -221,7 +227,7 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
           z: backReduction,
           w: horizontalW,
           h: T,
-          d: horizontalD,
+          d: horizontalD - (isLast ? node.topSetbackMm : 0),
         },
       })
     } else if (isBandedTop(node)) {
@@ -279,6 +285,75 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
           w: horizontalW,
           h: REAR_RAIL_HEIGHT_MM,
           d: REAR_RAIL_THICKNESS_MM,
+        },
+      })
+    }
+  })
+
+  // 상판내림: stretcher across the top front (가로전대(상)).
+  if (node.topStretcher) {
+    const st = node.topStretcher
+    push({
+      id: 'top-stretcher',
+      role: 'front-rail',
+      name: '가로전대(상)',
+      material: 'PB',
+      finish: 'body',
+      box: {
+        x: horizontalX,
+        y: H - st.heightMm,
+        z: D - st.setbackMm - T,
+        w: horizontalW,
+        h: st.heightMm,
+        d: T,
+      },
+    })
+  }
+
+  // 목찬넬: PET L-frame in each notch, PB rail (가로전대) behind it.
+  node.channels.forEach((ch, i) => {
+    const nb = bodyY0 + ch.fromBottomMm
+    const nt = Math.min(H, nb + ch.heightMm)
+    const n = i + 1
+    if (ch.frame) {
+      push({
+        id: `channel-frame-h-${i}`,
+        role: 'channel-frame',
+        name: `목찬넬프레임수평${n}`,
+        material: 'PET',
+        finish: 'front',
+        box: { x: 0, y: nb, z: D - ch.depthMm, w: W, h: FRONT_THICKNESS_MM, d: ch.depthMm },
+      })
+      push({
+        id: `channel-frame-v-${i}`,
+        role: 'channel-frame',
+        name: `목찬넬프레임수직${n}`,
+        material: 'PET',
+        finish: 'front',
+        box: {
+          x: 0,
+          y: nb + FRONT_THICKNESS_MM,
+          z: D - ch.depthMm,
+          w: W,
+          h: Math.max(1, nt - nb - FRONT_THICKNESS_MM),
+          d: FRONT_THICKNESS_MM,
+        },
+      })
+    }
+    if (ch.railHeightMm != null) {
+      push({
+        id: `channel-rail-${i}`,
+        role: 'front-rail',
+        name: `가로전대${n}`,
+        material: 'PB',
+        finish: 'body',
+        box: {
+          x: horizontalX,
+          y: nt - ch.railHeightMm,
+          z: D - ch.depthMm - T,
+          w: horizontalW,
+          h: ch.railHeightMm,
+          d: T,
         },
       })
     }
@@ -467,11 +542,20 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
     if (leaf.content.type !== 'drawers' || leaf.content.style !== 'external') continue
     const rect = frontRectFor(leaf.rect)
     frontRects.push({ id: leaf.id, rect })
-    const count = leaf.content.count
+    // Explicit mmmcraft 마이다 ranges (from the carcass bottom), or equal
+    // fronts over the compartment.
     const gap = node.frontReveal.between
-    const frontH = (rect.y1 - rect.y0 - gap * (count - 1)) / count
-    for (let i = 0; i < count; i += 1) {
-      const y0 = rect.y0 + i * (frontH + gap)
+    const ranges: [number, number][] = leaf.content.frontsMm?.length
+      ? leaf.content.frontsMm.map(([a, b]) => [bodyY0 + a, bodyY0 + b])
+      : Array.from({ length: leaf.content.count }, (_, i) => {
+          const count = leaf.content.type === 'drawers' ? leaf.content.count : 1
+          const h = (rect.y1 - rect.y0 - gap * (count - 1)) / count
+          const y = rect.y0 + i * (h + gap)
+          return [y, y + h]
+        })
+    for (let i = 0; i < ranges.length; i += 1) {
+      const [y0, y1] = ranges[i] as [number, number]
+      const frontH = y1 - y0
       push({
         id: `drawer-front-${leaf.id}-${i}`,
         role: 'drawer-front',
@@ -509,6 +593,18 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
     cellRects: tree.rects,
     frontRects,
   }
+}
+
+/** The cabinet's channels that cut into a side spanning [y0, y1], relative
+ *  to that side's bottom. */
+function sideNotches(node: CabinetNode, carcassBottom: number, y0: number, y1: number) {
+  return node.channels
+    .map((ch) => {
+      const nb = Math.max(y0, carcassBottom + ch.fromBottomMm)
+      const nt = Math.min(y1, carcassBottom + ch.fromBottomMm + ch.heightMm)
+      return { fromBottom: round1(nb - y0), height: round1(nt - nb), depth: ch.depthMm }
+    })
+    .filter((n) => n.height > 0)
 }
 
 type Body = { y0: number; y1: number; prefix: string; hasBack: boolean }
@@ -659,7 +755,7 @@ function buildLeafContent(
     if (clearH < 800) issues.push('옷봉 칸 높이가 800mm보다 낮습니다')
   } else if (c.type === 'drawers') {
     if (c.style === 'inner') buildInnerDrawers(node, leaf, f, push, issues)
-    else buildExternalDrawerBoxes(leaf, f, c.count, push, issues)
+    else buildExternalDrawerBoxes(leaf, f, c.count, c.boxesMm, push, issues)
   }
 }
 
@@ -791,6 +887,7 @@ function buildExternalDrawerBoxes(
   leaf: ResolvedLeaf,
   f: Frame,
   count: number,
+  boxesMm: [number, number][] | undefined,
   push: Push,
   issues: string[],
 ) {
@@ -804,10 +901,17 @@ function buildExternalDrawerBoxes(
     issues.push('깊이가 부족해 서랍 레일을 고를 수 없습니다')
     return
   }
-  const boxH = Math.max(cfg.minBoxHeightMm, slotH - cfg.boxHeightReductionMm)
   const boxW = clearW - 2 * cfg.runnerClearanceMm
-  for (let i = 0; i < count; i += 1) {
-    const y0 = r.y0 + i * slotH + 15
+  // Explicit boxes (mmmcraft wood / Legrabox positions from the carcass
+  // bottom) or one box per equal slot.
+  const boxes: [number, number][] = boxesMm?.length
+    ? boxesMm.map(([y, h]) => [f.toe + y, h])
+    : Array.from({ length: count }, (_, i) => [
+        r.y0 + i * slotH + 15,
+        Math.max(cfg.minBoxHeightMm, slotH - cfg.boxHeightReductionMm),
+      ])
+  for (let i = 0; i < boxes.length; i += 1) {
+    const [y0, boxH] = boxes[i] as [number, number]
     pushDrawerBox(
       push,
       `${leaf.id}-${i}`,

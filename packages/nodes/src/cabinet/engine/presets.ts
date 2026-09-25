@@ -15,7 +15,19 @@ export type CabinetSpec = Pick<
   | 'toeKick'
   | 'handle'
 > &
-  Partial<Pick<CabinetNode, 'endPanels' | 'bodyColor' | 'frontColor' | 'handleColor'>>
+  Partial<
+    Pick<
+      CabinetNode,
+      | 'endPanels'
+      | 'bodyColor'
+      | 'frontColor'
+      | 'handleColor'
+      | 'top'
+      | 'topSetbackMm'
+      | 'topStretcher'
+      | 'channels'
+    >
+  >
 
 /**
  * Catalog entry. Ids, names, thumbnails and section layouts follow the
@@ -25,7 +37,14 @@ export type CabinetSpec = Pick<
  */
 export type CabinetPreset = {
   id: string
-  group: 'wardrobe' | 'shoe' | 'kitchen-base' | 'kitchen-upper' | 'kitchen-tall'
+  group:
+    | 'wardrobe'
+    | 'shoe'
+    | 'kitchen-base'
+    | 'kitchen-lift'
+    | 'kitchen-top-down'
+    | 'kitchen-upper'
+    | 'kitchen-tall'
   label: string
   description: string
   /** Gallery image served from the editor's public folder, when mmmcraft has one. */
@@ -164,7 +183,34 @@ function tall(width: number, interior: CabinetCell, depth = DEPTH): CabinetSpec 
   }
 }
 
-function base(width: number, interior: CabinetCell): CabinetSpec {
+type Channel = CabinetNode['channels'][number]
+/** A 40-deep 목찬넬 notch, from the carcass bottom; the rail behind it
+ *  defaults to the notch height, `null` = no rail. */
+const channel = (
+  fromBottomMm: number,
+  heightMm: number,
+  railHeightMm: number | null = heightMm,
+): Channel => ({
+  fromBottomMm,
+  heightMm,
+  depthMm: 40,
+  frame: true,
+  railHeightMm,
+})
+/** External drawers with mmmcraft's front ranges and box positions (mm from
+ *  the carcass bottom). */
+const drawerFronts = (frontsMm: [number, number][], boxesMm: [number, number][]): CellContent => ({
+  type: 'drawers',
+  count: frontsMm.length,
+  style: 'external',
+  stepMm: 250,
+  frontsMm,
+  boxesMm,
+})
+
+/** mmmcraft 기본하부장: open top under a 60×40 top channel (L-frame + rail),
+ *  doors 20 short of the top and 5 past the bottom. Handleless. */
+function base(width: number, interior: CabinetCell, topRailMm = 60): CabinetSpec {
   return {
     family: 'base',
     variant: 'standard',
@@ -172,9 +218,36 @@ function base(width: number, interior: CabinetCell): CabinetSpec {
     heightMm: BASE_BODY + TOE_H,
     depthMm: DEPTH,
     interior,
-    frontReveal: REVEAL,
+    frontReveal: { top: 20, bottom: -5, side: 1.5, between: 3 },
     toeKick: TOE,
-    handle: 'bar',
+    handle: 'none',
+    top: 'none',
+    channels: [channel(BASE_BODY - 60, 60, topRailMm)],
+  }
+}
+
+/** 도어올림: solid top, fronts rise 30 above the carcass (lift gap under the
+ *  countertop), 65×40 channels between drawer fronts. */
+function doorLift(width: number, interior: CabinetCell, channels: Channel[] = []): CabinetSpec {
+  return {
+    ...base(width, interior),
+    frontReveal: { top: -30, bottom: -5, side: 1.5, between: 3 },
+    top: 'solid',
+    channels,
+  }
+}
+
+/** 상판내림 (20 mm stone): top set back 18.5 behind a 55 stretcher, fronts end
+ *  80 below the carcass top under the stone's front apron, and a 665 channel
+ *  (L-frame only — the stretcher sits where its rail would be). */
+function topDown(width: number, interior: CabinetCell, lowerChannels: Channel[] = []): CabinetSpec {
+  return {
+    ...base(width, interior),
+    frontReveal: { top: 80, bottom: -5, side: 1.5, between: 3 },
+    top: 'solid',
+    topSetbackMm: 18.5,
+    topStretcher: { heightMm: 55, setbackMm: 0 },
+    channels: [...lowerChannels, channel(665, 65, null)],
   }
 }
 
@@ -413,7 +486,7 @@ export const CABINET_PRESETS: CabinetPreset[] = [
     id: 'lower-half-cabinet',
     group: 'kitchen-base',
     label: '기본하부장 반통',
-    description: 'H785 D600, 선반 2',
+    description: 'H785 D600, 선반 2, 상단 목찬넬',
     thumbnail: thumb('lower-half-cabinet.png'),
     elevationMm: 0,
     spec: () => base(SINGLE_W, leaf(shelves(2), door())),
@@ -422,7 +495,7 @@ export const CABINET_PRESETS: CabinetPreset[] = [
     id: 'dual-lower-half-cabinet',
     group: 'kitchen-base',
     label: '기본하부장 한통',
-    description: 'H785 D600, 선반 2, 양문',
+    description: 'H785 D600, 선반 2, 상단 목찬넬',
     thumbnail: thumb('dual-lower-half-cabinet.png'),
     elevationMm: 0,
     spec: () => base(DUAL_W, leaf(shelves(2), door())),
@@ -434,7 +507,7 @@ export const CABINET_PRESETS: CabinetPreset[] = [
     description: '내부 오픈, 뒷판 없음, 전대 150',
     thumbnail: thumb('lower-sink-cabinet.png'),
     elevationMm: 0,
-    spec: () => ({ ...base(SINGLE_W, leaf(empty, door())), variant: 'sink' }),
+    spec: () => ({ ...base(SINGLE_W, leaf(empty, door()), 150), variant: 'sink' }),
   },
   {
     id: 'dual-lower-sink-cabinet',
@@ -443,25 +516,25 @@ export const CABINET_PRESETS: CabinetPreset[] = [
     description: '내부 오픈, 뒷판 없음, 전대 150',
     thumbnail: thumb('dual-lower-sink-cabinet.png'),
     elevationMm: 0,
-    spec: () => ({ ...base(DUAL_W, leaf(empty, door())), variant: 'sink' }),
+    spec: () => ({ ...base(DUAL_W, leaf(empty, door()), 150), variant: 'sink' }),
   },
   {
     id: 'lower-induction-cabinet',
     group: 'kitchen-base',
     label: '인덕션장 반통',
-    description: '겉서랍 2단',
+    description: '겉서랍 2단, 전대 150',
     thumbnail: thumb('lower-induction-cabinet.png'),
     elevationMm: 0,
-    spec: () => ({ ...base(SINGLE_W, leaf(externalDrawers(2))), variant: 'cooktop' }),
+    spec: () => ({ ...base(SINGLE_W, leaf(externalDrawers(2)), 150), variant: 'cooktop' }),
   },
   {
     id: 'dual-lower-induction-cabinet',
     group: 'kitchen-base',
     label: '인덕션장 한통',
-    description: '겉서랍 2단',
+    description: '겉서랍 2단, 전대 150',
     thumbnail: thumb('dual-lower-induction-cabinet.png'),
     elevationMm: 0,
-    spec: () => ({ ...base(DUAL_W, leaf(externalDrawers(2))), variant: 'cooktop' }),
+    spec: () => ({ ...base(DUAL_W, leaf(externalDrawers(2)), 150), variant: 'cooktop' }),
   },
   {
     id: 'lower-drawer-2tier',
@@ -509,6 +582,498 @@ export const CABINET_PRESETS: CabinetPreset[] = [
       ...base(SINGLE_W, leaf(empty, { type: 'panel', leaves: '1', hinge: 'auto' })),
       variant: 'dishwasher',
     }),
+  },
+  {
+    id: 'lower-door-lift-half',
+    group: 'kitchen-lift',
+    label: '도어올림 반통',
+    description: '도어가 상판 쪽으로 30 올라옴, 선반 2',
+    thumbnail: thumb('lower-door-lift-half.png'),
+    elevationMm: 0,
+    spec: () => doorLift(SINGLE_W, leaf(shelves(2), door())),
+  },
+  {
+    id: 'dual-lower-door-lift-half',
+    group: 'kitchen-lift',
+    label: '도어올림 한통',
+    description: '도어가 상판 쪽으로 30 올라옴, 선반 2',
+    thumbnail: thumb('dual-lower-door-lift-half.png'),
+    elevationMm: 0,
+    spec: () => doorLift(DUAL_W, leaf(shelves(2), door())),
+  },
+  {
+    id: 'lower-door-lift-2tier',
+    group: 'kitchen-lift',
+    label: '도어올림 2단 반통',
+    description: '목찬넬 355, 앞판 400·400',
+    thumbnail: thumb('lower-door-lift-2tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      doorLift(
+        SINGLE_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 395],
+              [415, 815],
+            ],
+            [
+              [33, 240],
+              [435, 240],
+            ],
+          ),
+        ),
+        [channel(355, 65)],
+      ),
+  },
+  {
+    id: 'dual-lower-door-lift-2tier',
+    group: 'kitchen-lift',
+    label: '도어올림 2단 한통',
+    description: '목찬넬 355, 앞판 400·400',
+    thumbnail: thumb('dual-lower-door-lift-2tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      doorLift(
+        DUAL_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 395],
+              [415, 815],
+            ],
+            [
+              [33, 240],
+              [435, 240],
+            ],
+          ),
+        ),
+        [channel(355, 65)],
+      ),
+  },
+  {
+    id: 'lower-door-lift-3tier',
+    group: 'kitchen-lift',
+    label: '도어올림 3단 반통',
+    description: '목찬넬 315·545, 앞판 360·210·210',
+    thumbnail: thumb('lower-door-lift-3tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      doorLift(
+        SINGLE_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 355],
+              [375, 585],
+              [605, 815],
+            ],
+            [
+              [33, 240],
+              [395, 130],
+              [625, 130],
+            ],
+          ),
+        ),
+        [channel(315, 65), channel(545, 65)],
+      ),
+  },
+  {
+    id: 'dual-lower-door-lift-3tier',
+    group: 'kitchen-lift',
+    label: '도어올림 3단 한통',
+    description: '목찬넬 315·545, 앞판 360·210·210',
+    thumbnail: thumb('dual-lower-door-lift-3tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      doorLift(
+        DUAL_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 355],
+              [375, 585],
+              [605, 815],
+            ],
+            [
+              [33, 240],
+              [395, 130],
+              [625, 130],
+            ],
+          ),
+        ),
+        [channel(315, 65), channel(545, 65)],
+      ),
+  },
+  {
+    id: 'lower-door-lift-touch-2tier-a',
+    group: 'kitchen-lift',
+    label: '도어올림터치2단A 반통',
+    description: '푸시 오픈, 앞판 409·408',
+    thumbnail: thumb('lower-door-lift-touch-2tier-a.png'),
+    elevationMm: 0,
+    spec: () =>
+      doorLift(
+        SINGLE_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 404],
+              [407, 815],
+            ],
+            [
+              [46, 228],
+              [424, 228],
+            ],
+          ),
+        ),
+      ),
+  },
+  {
+    id: 'dual-lower-door-lift-touch-2tier-a',
+    group: 'kitchen-lift',
+    label: '도어올림터치2단A 한통',
+    description: '푸시 오픈, 앞판 409·408',
+    thumbnail: thumb('dual-lower-door-lift-touch-2tier-a.png'),
+    elevationMm: 0,
+    spec: () =>
+      doorLift(
+        DUAL_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 404],
+              [407, 815],
+            ],
+            [
+              [46, 228],
+              [424, 228],
+            ],
+          ),
+        ),
+      ),
+  },
+  {
+    id: 'lower-door-lift-touch-2tier-b',
+    group: 'kitchen-lift',
+    label: '도어올림터치2단B 반통',
+    description: '푸시 오픈, 서랍 228·164',
+    thumbnail: thumb('lower-door-lift-touch-2tier-b.png'),
+    elevationMm: 0,
+    spec: () =>
+      doorLift(
+        SINGLE_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 404],
+              [407, 815],
+            ],
+            [
+              [46, 228],
+              [424, 164],
+            ],
+          ),
+        ),
+      ),
+  },
+  {
+    id: 'dual-lower-door-lift-touch-2tier-b',
+    group: 'kitchen-lift',
+    label: '도어올림터치2단B 한통',
+    description: '푸시 오픈, 서랍 228·164',
+    thumbnail: thumb('dual-lower-door-lift-touch-2tier-b.png'),
+    elevationMm: 0,
+    spec: () =>
+      doorLift(
+        DUAL_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 404],
+              [407, 815],
+            ],
+            [
+              [46, 228],
+              [424, 164],
+            ],
+          ),
+        ),
+      ),
+  },
+  {
+    id: 'lower-door-lift-touch-3tier',
+    group: 'kitchen-lift',
+    label: '도어올림터치3단 반통',
+    description: '푸시 오픈, 앞판 360·227·227',
+    thumbnail: thumb('lower-door-lift-touch-3tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      doorLift(
+        SINGLE_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 355],
+              [358, 585],
+              [588, 815],
+            ],
+            [
+              [46, 228],
+              [375, 117],
+              [605, 117],
+            ],
+          ),
+        ),
+      ),
+  },
+  {
+    id: 'dual-lower-door-lift-touch-3tier',
+    group: 'kitchen-lift',
+    label: '도어올림터치3단 한통',
+    description: '푸시 오픈, 앞판 360·227·227',
+    thumbnail: thumb('dual-lower-door-lift-touch-3tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      doorLift(
+        DUAL_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 355],
+              [358, 585],
+              [588, 815],
+            ],
+            [
+              [46, 228],
+              [375, 117],
+              [605, 117],
+            ],
+          ),
+        ),
+      ),
+  },
+  {
+    id: 'lower-top-down-half',
+    group: 'kitchen-top-down',
+    label: '상판내림 반통',
+    description: '상판 앞판 아래 도어 710, 선반 2',
+    thumbnail: thumb('lower-top-down-half.png'),
+    elevationMm: 0,
+    spec: () => topDown(SINGLE_W, leaf(shelves(2), door())),
+  },
+  {
+    id: 'dual-lower-top-down-half',
+    group: 'kitchen-top-down',
+    label: '상판내림 한통',
+    description: '상판 앞판 아래 도어 710, 선반 2',
+    thumbnail: thumb('dual-lower-top-down-half.png'),
+    elevationMm: 0,
+    spec: () => topDown(DUAL_W, leaf(shelves(2), door())),
+  },
+  {
+    id: 'lower-top-down-2tier',
+    group: 'kitchen-top-down',
+    label: '상판내림 2단 반통',
+    description: '목찬넬 300·665, 앞판 345·345',
+    thumbnail: thumb('lower-top-down-2tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      topDown(
+        SINGLE_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 340],
+              [360, 705],
+            ],
+            [
+              [33, 240],
+              [380, 240],
+            ],
+          ),
+        ),
+        [channel(300, 65)],
+      ),
+  },
+  {
+    id: 'dual-lower-top-down-2tier',
+    group: 'kitchen-top-down',
+    label: '상판내림 2단 한통',
+    description: '목찬넬 300·665, 앞판 345·345',
+    thumbnail: thumb('dual-lower-top-down-2tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      topDown(
+        DUAL_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 340],
+              [360, 705],
+            ],
+            [
+              [33, 240],
+              [380, 240],
+            ],
+          ),
+        ),
+        [channel(300, 65)],
+      ),
+  },
+  {
+    id: 'lower-top-down-3tier',
+    group: 'kitchen-top-down',
+    label: '상판내림 3단 반통',
+    description: '목찬넬 225·445·665, 앞판 270·200·200',
+    thumbnail: thumb('lower-top-down-3tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      topDown(
+        SINGLE_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 265],
+              [285, 485],
+              [505, 705],
+            ],
+            [
+              [33, 180],
+              [305, 130],
+              [525, 130],
+            ],
+          ),
+        ),
+        [channel(225, 65), channel(445, 65)],
+      ),
+  },
+  {
+    id: 'dual-lower-top-down-3tier',
+    group: 'kitchen-top-down',
+    label: '상판내림 3단 한통',
+    description: '목찬넬 225·445·665, 앞판 270·200·200',
+    thumbnail: thumb('dual-lower-top-down-3tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      topDown(
+        DUAL_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 265],
+              [285, 485],
+              [505, 705],
+            ],
+            [
+              [33, 180],
+              [305, 130],
+              [525, 130],
+            ],
+          ),
+        ),
+        [channel(225, 65), channel(445, 65)],
+      ),
+  },
+  {
+    id: 'lower-top-down-touch-2tier',
+    group: 'kitchen-top-down',
+    label: '상판내림터치2단 반통',
+    description: '푸시 오픈, 앞판 354·353',
+    thumbnail: thumb('lower-top-down-touch-2tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      topDown(
+        SINGLE_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 349],
+              [352, 705],
+            ],
+            [
+              [46, 228],
+              [374, 228],
+            ],
+          ),
+        ),
+      ),
+  },
+  {
+    id: 'dual-lower-top-down-touch-2tier',
+    group: 'kitchen-top-down',
+    label: '상판내림터치2단 한통',
+    description: '푸시 오픈, 앞판 354·353',
+    thumbnail: thumb('dual-lower-top-down-touch-2tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      topDown(
+        DUAL_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 349],
+              [352, 705],
+            ],
+            [
+              [46, 228],
+              [374, 228],
+            ],
+          ),
+        ),
+      ),
+  },
+  {
+    id: 'lower-top-down-touch-3tier',
+    group: 'kitchen-top-down',
+    label: '상판내림터치3단 반통',
+    description: '푸시 오픈, 앞판 186·259·259',
+    thumbnail: thumb('lower-top-down-touch-3tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      topDown(
+        SINGLE_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 181],
+              [184, 443],
+              [446, 705],
+            ],
+            [
+              [46, 164],
+              [184.4, 164],
+              [456, 164],
+            ],
+          ),
+        ),
+      ),
+  },
+  {
+    id: 'dual-lower-top-down-touch-3tier',
+    group: 'kitchen-top-down',
+    label: '상판내림터치3단 한통',
+    description: '푸시 오픈, 앞판 186·259·259',
+    thumbnail: thumb('dual-lower-top-down-touch-3tier.png'),
+    elevationMm: 0,
+    spec: () =>
+      topDown(
+        DUAL_W,
+        leaf(
+          drawerFronts(
+            [
+              [-5, 181],
+              [184, 443],
+              [446, 705],
+            ],
+            [
+              [46, 164],
+              [184.4, 164],
+              [456, 164],
+            ],
+          ),
+        ),
+      ),
   },
 
   // ── 주방 상부장 ─────────────────────────────────────────────────────

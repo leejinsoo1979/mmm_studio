@@ -11,6 +11,8 @@ export type PanelRow = {
   widthMm: number
   quantity: number
   cabinet: string
+  /** Machining notes, e.g. 목찬넬 따내기 positions on a side panel. */
+  notes: string
 }
 
 export type HardwareRow = { name: string; quantity: number; note?: string }
@@ -36,7 +38,10 @@ export function cabinetPanelRows(node: CabinetNode, label = node.name ?? '가구
   for (const part of buildCabinetParts(node).parts) {
     if (!part.isPanel) continue
     const face = panelFace(part)
-    const key = [part.name, part.material, face.thickness, face.length, face.width].join('|')
+    const notes = (part.notches ?? [])
+      .map((n) => `따내기 ${n.height}×${n.depth} @${n.fromBottom}`)
+      .join(', ')
+    const key = [part.name, part.material, face.thickness, face.length, face.width, notes].join('|')
     const existing = rows.get(key)
     if (existing) existing.quantity += 1
     else
@@ -48,6 +53,7 @@ export function cabinetPanelRows(node: CabinetNode, label = node.name ?? '가구
         widthMm: face.width,
         quantity: 1,
         cabinet: label,
+        notes,
       })
   }
   return Array.from(rows.values())
@@ -95,7 +101,7 @@ function csvCell(value: string | number): string {
 
 /** Cutlist CSV for a set of cabinets (UTF-8 with BOM so Excel reads Korean). */
 export function cutlistCsv(cabinets: { node: CabinetNode; label: string }[]): string {
-  const header = ['가구', '부재', '재질', '두께', '길이', '폭', '수량']
+  const header = ['가구', '부재', '재질', '두께', '길이', '폭', '수량', '비고']
   const lines = [header.join(',')]
   for (const { node, label } of cabinets) {
     for (const row of cabinetPanelRows(node, label)) {
@@ -108,6 +114,7 @@ export function cutlistCsv(cabinets: { node: CabinetNode; label: string }[]): st
           row.lengthMm,
           row.widthMm,
           row.quantity,
+          row.notes,
         ]
           .map(csvCell)
           .join(','),
