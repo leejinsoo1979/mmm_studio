@@ -45,6 +45,9 @@ export const CellContent = z.discriminatedUnion('type', [
     style: z.enum(['inner', 'external']).default('inner'),
     /** Inner drawers only: drawer front pitch (mm). */
     stepMm: z.number().min(80).max(600).default(250),
+    /** Inner drawers only: individual front heights, bottom → top (mmmcraft
+     *  `drawerHeights`, e.g. 255/255/176/176). Overrides `stepMm`. */
+    heightsMm: z.array(z.number().min(60).max(600)).optional(),
   }),
 ])
 export type CellContent = z.infer<typeof CellContent>
@@ -60,7 +63,7 @@ export const CellFront = z.object({
 export type CellFront = z.infer<typeof CellFront>
 
 export type CabinetCell =
-  | { id: string; kind: 'leaf'; content: CellContent; front?: CellFront }
+  | { id: string; kind: 'leaf'; content: CellContent; front?: CellFront; hasBack?: boolean }
   | {
       id: string
       kind: 'split'
@@ -70,7 +73,12 @@ export type CabinetCell =
       children: CabinetCell[]
       /** Clear (inner) size of each child in mm; `null` shares what is left. */
       sizesMm: (number | null)[]
+      /** Root `y` split only: `stack` builds every child as its own carcass
+       *  ((하)/(상) sides, bottom and top per section, two panels at each
+       *  joint), as mmmcraft does for wardrobes. Default one shared shelf. */
+      joint?: 'shelf' | 'stack'
       front?: CellFront
+      hasBack?: boolean
     }
 
 export const CabinetCell: z.ZodType<CabinetCell> = z.lazy(() =>
@@ -80,6 +88,9 @@ export const CabinetCell: z.ZodType<CabinetCell> = z.lazy(() =>
       kind: z.literal('leaf'),
       content: CellContent,
       front: CellFront.optional(),
+      /** Stacked sections only: `false` drops that section's back panel
+       *  (e.g. the fridge space of a 냉장고장). */
+      hasBack: z.boolean().optional(),
     }),
     z.object({
       id: z.string(),
@@ -87,7 +98,9 @@ export const CabinetCell: z.ZodType<CabinetCell> = z.lazy(() =>
       axis: z.enum(['x', 'y']),
       children: z.array(CabinetCell).min(2),
       sizesMm: z.array(z.number().positive().nullable()),
+      joint: z.enum(['shelf', 'stack']).optional(),
       front: CellFront.optional(),
+      hasBack: z.boolean().optional(),
     }),
   ]),
 )

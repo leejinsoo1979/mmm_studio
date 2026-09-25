@@ -13,8 +13,12 @@ export const BACK_GROOVE_DEPTH_MM = 7
 export function backReductionMm(backThicknessMm: number): number {
   return BACK_GROOVE_OFFSET_MM + backThicknessMm + 0.5
 }
-/** Clearance subtracted from horizontal panels that sit between two sides. */
-export const HORIZONTAL_CLEARANCE_MM = 1
+/** Clearance subtracted from horizontal panels that sit between two sides:
+ *  0.5 mm per side for 15 / 18 mm board, none for 15.5 / 18.5 (mmmcraft
+ *  `sidePanelGap`). */
+export function horizontalClearanceMm(panelThicknessMm: number): number {
+  return panelThicknessMm === 15.5 || panelThicknessMm === 18.5 ? 0 : 1
+}
 
 export const END_PANEL_THICKNESS_MM = 18
 export const FRONT_THICKNESS_MM = 18

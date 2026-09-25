@@ -15,7 +15,9 @@ import {
   removeCell,
   setCellContent,
   setCellFront,
+  setCellHasBack,
   setCellSize,
+  setSplitJoint,
   splitCell,
 } from '../engine/tree'
 import { type CabinetCell, CabinetNode } from '../schema'
@@ -433,5 +435,87 @@ describe('panel list', () => {
     expect(csv).toContain('옷장,뒷판,MDF,9')
     const hardware = cabinetHardwareRows(node)
     expect(hardware.find((h) => h.name === '경첩')?.quantity).toBe(8)
+  })
+})
+
+describe('stacked bodies (mmmcraft 하부장 / 상부장)', () => {
+  const coat = () => {
+    const preset = CABINET_PRESETS.find((p) => p.id === 'single-2drawer-hanging')
+    return cabinet(instantiateSpec(preset?.spec() as never))
+  }
+
+  test('each section is its own carcass with split sides and two joint panels', () => {
+    const node = coat()
+    const { parts, issues } = buildCabinetParts(node)
+    expect(issues).toEqual([])
+    const names = parts.filter((p) => p.isPanel).map((p) => p.name)
+    for (const name of [
+      '(하)좌측',
+      '(하)우측',
+      '(상)좌측',
+      '(상)우측',
+      '(하)바닥',
+      '(하)상판',
+      '(상)바닥',
+      '(상)상판',
+      '(하)뒷판',
+      '(상)뒷판',
+    ]) {
+      expect(names).toContain(name)
+    }
+    expect(names).not.toContain('좌측판')
+    const lowerSide = parts.find((p) => p.name === '(하)좌측')
+    const upperSide = parts.find((p) => p.name === '(상)좌측')
+    // mmmcraft section height 600 is the whole lower body.
+    expect(lowerSide?.box.y).toBe(65)
+    expect(lowerSide?.box.h).toBe(600)
+    expect(upperSide?.box.y).toBe(665)
+    expect(upperSide?.box.h).toBe(2300 - 65 - 600)
+    const lowerTop = parts.find((p) => p.name === '(하)상판')
+    const upperBottom = parts.find((p) => p.name === '(상)바닥')
+    expect(lowerTop?.box.y).toBe(665 - 18)
+    expect(upperBottom?.box.y).toBe(665)
+    // One full-height door over both bodies.
+    const doors = parts.filter((p) => p.role === 'door')
+    expect(doors).toHaveLength(1)
+    expect(doors[0]?.box.h).toBe(2300 - 65 - 3)
+  })
+
+  test('drawer fronts follow mmmcraft heights, gap below each', () => {
+    const preset = CABINET_PRESETS.find((p) => p.id === 'single-4drawer-hanging')
+    const { parts, issues } = buildCabinetParts(cabinet(instantiateSpec(preset?.spec() as never)))
+    expect(issues).toEqual([])
+    const fronts = parts.filter((p) => p.role === 'drawer-front').sort((a, b) => a.box.y - b.box.y)
+    expect(fronts.map((f) => f.box.h)).toEqual([255, 255, 176, 176])
+    // Lower body clear starts at 65 + 18; first gap 24.
+    expect(fronts[0]?.box.y).toBe(65 + 18 + 24)
+    expect((fronts[1]?.box.y ?? 0) - ((fronts[0]?.box.y ?? 0) + 255)).toBe(24)
+  })
+
+  test('a section can drop its back (냉장고장 fridge space)', () => {
+    const preset = CABINET_PRESETS.find((p) => p.id === 'single-fridge-cabinet')
+    const { parts } = buildCabinetParts(cabinet(instantiateSpec(preset?.spec() as never)))
+    const backs = parts.filter((p) => p.role === 'back').map((p) => p.name)
+    expect(backs).toEqual(['(상)뒷판'])
+  })
+
+  test('18.5 mm board has no side clearance on horizontal panels', () => {
+    const { parts } = buildCabinetParts(cabinet({ widthMm: 600, panelThicknessMm: 18.5 }))
+    const bottom = parts.find((p) => p.role === 'bottom')
+    expect(bottom?.box.w).toBe(600 - 37)
+    expect(bottom?.box.x).toBe(18.5)
+  })
+
+  test('joint and back toggles', () => {
+    const node = coat()
+    const unstacked = setSplitJoint(node.interior, 'root', 'shelf')
+    const flat = buildCabinetParts({ ...node, interior: unstacked })
+    expect(flat.parts.some((p) => p.name === '좌측판')).toBe(true)
+    expect(flat.parts.some((p) => p.name === '(하)좌측')).toBe(false)
+    if (node.interior.kind !== 'split') throw new Error('expected split')
+    const lowerId = node.interior.children[0]?.id ?? ''
+    const noBack = setCellHasBack(node.interior, lowerId, false)
+    const built = buildCabinetParts({ ...node, interior: noBack })
+    expect(built.parts.filter((p) => p.role === 'back').map((p) => p.name)).toEqual(['(상)뒷판'])
   })
 })

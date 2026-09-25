@@ -76,6 +76,36 @@ const innerDrawers = (count: number, stepMm: number): CellContent => ({
   style: 'inner',
   stepMm,
 })
+const innerDrawerFronts = (heightsMm: number[]): CellContent => ({
+  type: 'drawers',
+  count: heightsMm.length,
+  style: 'inner',
+  stepMm: heightsMm[0] ?? 250,
+  heightsMm,
+})
+/**
+ * Two carcasses stacked (mmmcraft 하부장 / 상부장 bodies). `lowerOuterMm` is
+ * mmmcraft's section height — the whole lower body, its bottom and top
+ * panels included — so the lower compartment is that minus two boards.
+ */
+const bodies = (
+  lowerOuterMm: number,
+  lower: CabinetCell,
+  upper: CabinetCell,
+  front?: CellFront,
+): CabinetCell => {
+  const cell: CabinetCell = {
+    id: newCellId(),
+    kind: 'split',
+    axis: 'y',
+    joint: 'stack',
+    children: [lower, upper],
+    sizesMm: [lowerOuterMm - 2 * T, null],
+  }
+  return front ? { ...cell, front } : cell
+}
+/** Hanging space with the safety shelf's top box above it. */
+const hangingWithSafetyShelf = () => stackY([leaf(hanging), leaf(empty)], [null, SAFETY_TOP_BOX])
 const externalDrawers = (count: number): CellContent => ({
   type: 'drawers',
   count,
@@ -89,12 +119,14 @@ const DUAL_W = 1200
 const TALL_H = 2300
 const DEPTH = 600
 const ENTRYWAY_DEPTH = 380
-/** Drawer section heights: 2-drawer 600, 4-drawer 1000; front 255 (2단). */
+/** Board thickness the section heights below are converted with. */
+const T = 18
+/** Drawer section heights (outer, panels included): 2-drawer 600, 4-drawer 1000. */
 const DRAWER2_SECTION = 600
 const DRAWER4_SECTION = 1000
-const DRAWER2_STEP = 255
-/** 4-drawer fronts are 255/255/176/176 in mmmcraft; one pitch that fits the 1000 section. */
-const DRAWER4_STEP = 200
+/** mmmcraft DRAWER_HEIGHTS_2TIER / _4TIER, bottom → top. */
+const DRAWER2_HEIGHTS = [255, 255]
+const DRAWER4_HEIGHTS = [255, 255, 176, 176]
 /** Short hanging section of 붙박이장 B. */
 const TYPE2_BOTTOM = 1000
 /** Safety shelf: 2050 mm, but at least 200 mm clear above it → a 200 mm top box at 2300. */
@@ -102,6 +134,7 @@ const SAFETY_TOP_BOX = 200
 const STYLER_W = 694
 const PANTSHANGER_W = 586
 const ENTRYWAY_BOTTOM = 1200
+const ENTRYWAY_DRAWER_ZONE = 206
 const PANTRY_SECTION1 = 1825
 /** Base cabinets: 785 body on 65 feet/toe kick = 850 before the top. */
 const BASE_BODY = 785
@@ -161,25 +194,38 @@ function upper(width: number, interior: CabinetCell): CabinetSpec {
 
 // Section layouts (bottom → top), one per mmmcraft module family.
 const coat = () =>
-  stackY(
-    [leaf(innerDrawers(2, DRAWER2_STEP)), leaf(hanging), leaf(empty)],
-    [DRAWER2_SECTION, null, SAFETY_TOP_BOX],
+  bodies(
+    DRAWER2_SECTION,
+    leaf(innerDrawerFronts(DRAWER2_HEIGHTS)),
+    hangingWithSafetyShelf(),
     door(),
   )
-const typeB = () =>
-  stackY([leaf(hanging), leaf(hanging), leaf(empty)], [TYPE2_BOTTOM, null, SAFETY_TOP_BOX], door())
+const typeB = () => bodies(TYPE2_BOTTOM, leaf(hanging), hangingWithSafetyShelf(), door())
 const typeD = () =>
-  stackY(
-    [leaf(innerDrawers(4, DRAWER4_STEP)), leaf(hanging), leaf(empty)],
-    [DRAWER4_SECTION, null, SAFETY_TOP_BOX],
+  bodies(
+    DRAWER4_SECTION,
+    leaf(innerDrawerFronts(DRAWER4_HEIGHTS)),
+    hangingWithSafetyShelf(),
     door(),
   )
-const shelfCabinet = () =>
-  stackY([leaf(shelves(2)), leaf(shelves(3))], [TYPE2_BOTTOM, null], door())
+const shelfCabinet = () => bodies(TYPE2_BOTTOM, leaf(shelves(2)), leaf(shelves(3)), door())
 const shelfWithDrawers = (count: 2 | 4) =>
-  stackY(
-    [leaf(innerDrawers(count, count === 2 ? DRAWER2_STEP : DRAWER4_STEP)), leaf(shelves(3))],
-    [count === 2 ? DRAWER2_SECTION : DRAWER4_SECTION, null],
+  bodies(
+    count === 2 ? DRAWER2_SECTION : DRAWER4_SECTION,
+    leaf(innerDrawerFronts(count === 2 ? DRAWER2_HEIGHTS : DRAWER4_HEIGHTS)),
+    leaf(shelves(3)),
+    door(),
+  )
+/** 현관장 H: lower body 1200 (shoe shelves under a 206 drawer zone — the
+ *  support board plus the drawer), upper body with shelves. */
+const entrywayH = () =>
+  bodies(
+    ENTRYWAY_BOTTOM,
+    stackY(
+      [leaf(shelves(3)), leaf(innerDrawers(1, ENTRYWAY_DRAWER_ZONE - T - 24))],
+      [null, ENTRYWAY_DRAWER_ZONE - T],
+    ),
+    leaf(shelves(4)),
     door(),
   )
 
@@ -253,8 +299,8 @@ export const CABINET_PRESETS: CabinetPreset[] = [
           [
             {
               ...stackY(
-                [leaf(innerDrawers(2, DRAWER2_STEP)), leaf(hanging), leaf(empty)],
-                [DRAWER2_SECTION, null, SAFETY_TOP_BOX],
+                [leaf(innerDrawerFronts(DRAWER2_HEIGHTS)), leaf(hanging), leaf(empty)],
+                [DRAWER2_SECTION - 2 * T, null, SAFETY_TOP_BOX],
               ),
               front: door('1'),
             },
@@ -278,8 +324,8 @@ export const CABINET_PRESETS: CabinetPreset[] = [
           [
             {
               ...stackY(
-                [leaf(innerDrawers(4, DRAWER4_STEP)), leaf(hanging), leaf(empty)],
-                [DRAWER4_SECTION, null, SAFETY_TOP_BOX],
+                [leaf(innerDrawerFronts(DRAWER4_HEIGHTS)), leaf(hanging), leaf(empty)],
+                [DRAWER4_SECTION - 2 * T, null, SAFETY_TOP_BOX],
               ),
               front: door('1'),
             },
@@ -352,19 +398,7 @@ export const CABINET_PRESETS: CabinetPreset[] = [
     description: '하단 신발장(1200) + 서랍 + 상단 다보선반, 깊이 380',
     thumbnail: thumb('entrance_single-H.png'),
     elevationMm: 0,
-    spec: () =>
-      tall(
-        SINGLE_W,
-        stackY(
-          [
-            { ...stackY([leaf(shelves(3)), leaf(innerDrawers(1, 200))], [null, 248]) },
-            leaf(shelves(4)),
-          ],
-          [ENTRYWAY_BOTTOM, null],
-          door(),
-        ),
-        ENTRYWAY_DEPTH,
-      ),
+    spec: () => tall(SINGLE_W, entrywayH(), ENTRYWAY_DEPTH),
   },
   {
     id: 'dual-entryway-h',
@@ -373,19 +407,7 @@ export const CABINET_PRESETS: CabinetPreset[] = [
     description: '하단 신발장(1200) + 서랍 + 상단 다보선반, 깊이 380',
     thumbnail: thumb('entrance_duel-H.png'),
     elevationMm: 0,
-    spec: () =>
-      tall(
-        DUAL_W,
-        stackY(
-          [
-            { ...stackY([leaf(shelves(3)), leaf(innerDrawers(1, 200))], [null, 248]) },
-            leaf(shelves(4)),
-          ],
-          [ENTRYWAY_BOTTOM, null],
-          door(),
-        ),
-        ENTRYWAY_DEPTH,
-      ),
+    spec: () => tall(DUAL_W, entrywayH(), ENTRYWAY_DEPTH),
   },
 
   // ── 주방 하부장 ─────────────────────────────────────────────────────
@@ -573,18 +595,20 @@ export const CABINET_PRESETS: CabinetPreset[] = [
     description: '1단 오픈(1825) + 2단 다보선반',
     thumbnail: thumb('pantry.png'),
     elevationMm: 0,
-    spec: () =>
-      tall(SINGLE_W, stackY([leaf(empty), leaf(shelves(1))], [PANTRY_SECTION1, null], door())),
+    spec: () => tall(SINGLE_W, bodies(PANTRY_SECTION1, leaf(empty), leaf(shelves(1)), door())),
   },
   {
     id: 'single-fridge-cabinet',
     group: 'kitchen-tall',
     label: '냉장고장',
-    description: '1단 냉장고 자리(1825, 오픈) + 2단 다보선반',
+    description: '1단 냉장고 자리(1825, 백패널 없음) + 2단 다보선반',
     thumbnail: thumb('single_builtin.png'),
     elevationMm: 0,
     spec: () =>
-      tall(SINGLE_W, stackY([leaf(empty), leaf(shelves(1), door())], [PANTRY_SECTION1, null])),
+      tall(
+        SINGLE_W,
+        bodies(PANTRY_SECTION1, { ...leaf(empty), hasBack: false }, leaf(shelves(1), door())),
+      ),
   },
 ]
 

@@ -16,8 +16,11 @@ export type ResolvedDivider = {
   splitId: string
   index: number
   axis: 'x' | 'y'
-  /** Panel rectangle on the front plane (width = thickness for `x`). */
+  /** Panel rectangle on the front plane (width = thickness for `x`). For a
+   *  stacked joint it spans both panels (the lower top and the upper bottom). */
   rect: CellRect
+  /** Joint between two separate carcasses (two panels, 2T) — root only. */
+  stacked: boolean
 }
 
 export type ResolvedFrontOwner = {
@@ -65,6 +68,11 @@ export function distributeSizes(
   return nominal.map((s) => (s / nominalSum) * total)
 }
 
+/** True when the root splits into separately built carcasses. */
+export function isStackedRoot(root: CabinetCell): boolean {
+  return root.kind === 'split' && root.axis === 'y' && root.joint === 'stack'
+}
+
 /** Walk the cell tree inside `rect`, producing leaf and divider rectangles. */
 export function resolveCellTree(
   root: CabinetCell,
@@ -82,9 +90,11 @@ export function resolveCellTree(
       leaves.push({ id: cell.id, rect: r, content: cell.content })
       return
     }
+    const stacked = cell === root && isStackedRoot(cell)
+    const jointMm = stacked ? 2 * thicknessMm : thicknessMm
     const n = cell.children.length
     const span = cell.axis === 'x' ? r.x1 - r.x0 : r.y1 - r.y0
-    const clear = span - (n - 1) * thicknessMm
+    const clear = span - (n - 1) * jointMm
     const requested = cell.children.map((_, i) => cell.sizesMm[i] ?? null)
     const sizes = distributeSizes(
       requested,
@@ -106,12 +116,13 @@ export function resolveCellTree(
           splitId: cell.id,
           index: i,
           axis: cell.axis,
+          stacked,
           rect:
             cell.axis === 'x'
-              ? { x0: cursor, x1: cursor + thicknessMm, y0: r.y0, y1: r.y1 }
-              : { x0: r.x0, x1: r.x1, y0: cursor, y1: cursor + thicknessMm },
+              ? { x0: cursor, x1: cursor + jointMm, y0: r.y0, y1: r.y1 }
+              : { x0: r.x0, x1: r.x1, y0: cursor, y1: cursor + jointMm },
         })
-        cursor += thicknessMm
+        cursor += jointMm
       }
     })
   }
@@ -349,4 +360,25 @@ export function cloneWithFreshIds(cell: CabinetCell, rootId?: string): CabinetCe
   const id = rootId ?? newCellId()
   if (cell.kind === 'leaf') return { ...cell, id }
   return { ...cell, id, children: cell.children.map((child) => cloneWithFreshIds(child)) }
+}
+
+/** Build the root's stacked sections as separate carcasses (or join them
+ *  with one shelf again). Only meaningful on a root `y` split. */
+export function setSplitJoint(
+  root: CabinetCell,
+  id: string,
+  joint: 'shelf' | 'stack',
+): CabinetCell {
+  return mapCell(root, id, (cell) => (cell.kind === 'split' ? { ...cell, joint } : cell))
+}
+
+/** Stacked sections only: keep or drop that section's back panel. */
+export function setCellHasBack(root: CabinetCell, id: string, hasBack: boolean): CabinetCell {
+  return mapCell(root, id, (cell) => {
+    if (hasBack) {
+      const { hasBack: _drop, ...rest } = cell
+      return rest as CabinetCell
+    }
+    return { ...cell, hasBack: false }
+  })
 }

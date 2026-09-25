@@ -18,11 +18,14 @@ import {
   findCell,
   findParent,
   frontOwnerOf,
+  isStackedRoot,
   mergeCell,
   removeCell,
   setCellContent,
   setCellFront,
+  setCellHasBack,
   setCellSize,
+  setSplitJoint,
   splitCell,
 } from './engine/tree'
 import { useMyCabinetModules } from './my-modules'
@@ -112,6 +115,51 @@ function ColorField({
         onChange={(e) => onCommit(e.target.value)}
         type="color"
         value={value}
+      />
+    </label>
+  )
+}
+
+/** Comma-separated mm list (e.g. drawer fronts 255, 255, 176, 176). */
+function HeightsField({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string
+  value: number[]
+  onCommit: (value: number[]) => void
+}) {
+  const text = value.join(', ')
+  const [draft, setDraft] = useState(text)
+  useEffect(() => setDraft(text), [text])
+  const commit = () => {
+    const parsed = draft
+      .split(/[,\s]+/)
+      .filter(Boolean)
+      .map(Number)
+    if (parsed.length === 0 || parsed.some((n) => !Number.isFinite(n) || n < 60 || n > 600)) {
+      setDraft(text)
+      return
+    }
+    if (parsed.join(', ') !== text) onCommit(parsed)
+  }
+  return (
+    <label className="flex flex-col gap-1 rounded-lg border border-border/50 bg-[#2C2C2E] px-3 py-2 text-sm">
+      <span className="text-muted-foreground text-xs">{label}</span>
+      <input
+        className="bg-transparent text-foreground outline-none"
+        onBlur={commit}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          if (e.key === 'Escape') {
+            setDraft(text)
+            ;(e.target as HTMLInputElement).blur()
+          }
+          e.stopPropagation()
+        }}
+        value={draft}
       />
     </label>
   )
@@ -341,6 +389,20 @@ function CellEditor({
         )}
       </ActionGroup>
 
+      {cell.kind === 'split' && cell.axis === 'y' && cell.id === root.id && (
+        <ToggleControl
+          checked={cell.joint === 'stack'}
+          label="단마다 몸통 분리 (하·상 몸통)"
+          onChange={(on) => onTree(setSplitJoint(root, cellId, on ? 'stack' : 'shelf'))}
+        />
+      )}
+      {parent?.id === root.id && isStackedRoot(root) && (
+        <ToggleControl
+          checked={cell.hasBack !== false}
+          label="이 단 뒷판"
+          onChange={(on) => onTree(setCellHasBack(root, cellId, on))}
+        />
+      )}
       {parent && (
         <div className="flex items-center gap-1.5">
           <div className="flex-1">
@@ -435,19 +497,28 @@ function CellEditor({
                 min={1}
                 onCommit={(v) =>
                   cell.content.type === 'drawers' &&
-                  setContent({ ...cell.content, count: Math.round(v) })
+                  setContent({ ...cell.content, count: Math.round(v), heightsMm: undefined })
                 }
                 value={cell.content.count}
               />
               {cell.content.style === 'inner' && (
-                <MmField
-                  label="서랍 앞판 높이"
-                  max={600}
-                  min={80}
-                  onCommit={(v) =>
-                    cell.content.type === 'drawers' && setContent({ ...cell.content, stepMm: v })
+                <HeightsField
+                  label="앞판 높이 (아래→위)"
+                  onCommit={(heightsMm) =>
+                    cell.content.type === 'drawers' &&
+                    setContent({
+                      ...cell.content,
+                      count: heightsMm.length,
+                      stepMm: heightsMm[0] ?? 250,
+                      heightsMm,
+                    })
                   }
-                  value={cell.content.stepMm}
+                  value={
+                    cell.content.heightsMm ??
+                    Array.from({ length: cell.content.count }, () =>
+                      cell.content.type === 'drawers' ? cell.content.stepMm : 0,
+                    )
+                  }
                 />
               )}
             </>

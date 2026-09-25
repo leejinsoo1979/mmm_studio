@@ -14,8 +14,8 @@ import {
   FRONT_GAP_MM,
   FRONT_THICKNESS_MM,
   HINGE_CUP_EDGE_OFFSET_MM,
-  HORIZONTAL_CLEARANCE_MM,
   hingePositionsMm,
+  horizontalClearanceMm,
   INNER_DRAWER,
   PANTS_HANGER_DROP_MM,
   PANTS_HANGER_HEIGHT_MM,
@@ -27,7 +27,14 @@ import {
   SINK_FRONT_RAIL_HEIGHT_MM,
   TOP_BAND_DEPTH_MM,
 } from './rules'
-import { type CellRect, collectFrontOwners, type ResolvedLeaf, resolveCellTree } from './tree'
+import {
+  type CellRect,
+  collectFrontOwners,
+  isStackedRoot,
+  type ResolvedLeaf,
+  type ResolvedTree,
+  resolveCellTree,
+} from './tree'
 
 export type PartRole =
   | 'side'
@@ -153,139 +160,121 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
   }
   const bodyY0 = toe
   const bodyH = H - toe
-  const horizontalW = carcassX1 - carcassX0 - 2 * T - HORIZONTAL_CLEARANCE_MM
-  const horizontalX = carcassX0 + T + HORIZONTAL_CLEARANCE_MM / 2
+  const clearance = horizontalClearanceMm(T)
+  const horizontalW = carcassX1 - carcassX0 - 2 * T - clearance
+  const horizontalX = carcassX0 + T + clearance / 2
   const horizontalD = D - backReduction
 
   if (bodyH <= 2 * T) issues.push('높이가 너무 낮습니다')
   if (interior.x1 - interior.x0 < 100) issues.push('폭이 너무 좁습니다')
 
   // ── Carcass ────────────────────────────────────────────────────────
-  // Dishwasher housings stand on the floor (no toe kick of their own).
-  const sideY0 = node.variant === 'dishwasher' ? 0 : bodyY0
-  const sideH = H - sideY0
-  push({
-    id: 'side-left',
-    role: 'side',
-    name: '좌측판',
-    material: 'PB',
-    finish: 'body',
-    box: { x: carcassX0, y: sideY0, z: 0, w: T, h: sideH, d: D },
-  })
-  push({
-    id: 'side-right',
-    role: 'side',
-    name: '우측판',
-    material: 'PB',
-    finish: 'body',
-    box: { x: carcassX1 - T, y: sideY0, z: 0, w: T, h: sideH, d: D },
-  })
-
-  if (hasBottom(node)) {
+  // One carcass, or one per section when the root is a stacked split
+  // (mmmcraft (하)/(상) bodies: own sides, bottom, top, back and rails).
+  const tree = resolveCellTree(node.interior, interior, T)
+  issues.push(...tree.issues)
+  const bodies = carcassBodies(node, f, tree)
+  const stacked = bodies.length > 1
+  const railZ = BACK_GROOVE_OFFSET_MM - REAR_RAIL_THICKNESS_MM
+  bodies.forEach((body, bi) => {
+    const p = body.prefix
+    const key = stacked ? `-${bi}` : ''
+    const isFirst = bi === 0
+    const isLast = bi === bodies.length - 1
+    const sideH = body.y1 - body.y0
     push({
-      id: 'bottom',
-      role: 'bottom',
-      name: '바닥판',
+      id: `side-left${key}`,
+      role: 'side',
+      name: stacked ? `${p}좌측` : '좌측판',
       material: 'PB',
       finish: 'body',
-      box: { x: horizontalX, y: bodyY0, z: backReduction, w: horizontalW, h: T, d: horizontalD },
+      box: { x: carcassX0, y: body.y0, z: 0, w: T, h: sideH, d: D },
     })
-  }
-  if (hasSolidTop(node)) {
     push({
-      id: 'top',
-      role: 'top',
-      name: '상판',
+      id: `side-right${key}`,
+      role: 'side',
+      name: stacked ? `${p}우측` : '우측판',
       material: 'PB',
       finish: 'body',
-      box: { x: horizontalX, y: H - T, z: backReduction, w: horizontalW, h: T, d: horizontalD },
+      box: { x: carcassX1 - T, y: body.y0, z: 0, w: T, h: sideH, d: D },
     })
-  } else if (isBandedTop(node)) {
-    // Back band always; the front band becomes a vertical stretcher on a
-    // sink cabinet (room for the bowl and trap).
-    push({
-      id: 'top-band-back',
-      role: 'top-band',
-      name: '상판 뒤띠',
-      material: 'PB',
-      finish: 'body',
-      box: {
-        x: horizontalX,
-        y: H - T,
-        z: backReduction,
-        w: horizontalW,
-        h: T,
-        d: TOP_BAND_DEPTH_MM,
-      },
-    })
-    if (node.variant === 'sink') {
+    if (hasBottom(node) || !isFirst) {
       push({
-        id: 'front-rail',
-        role: 'front-rail',
-        name: '전대',
+        id: `bottom${key}`,
+        role: 'bottom',
+        name: stacked ? `${p}바닥` : '바닥판',
         material: 'PB',
         finish: 'body',
-        box: {
-          x: horizontalX,
-          y: H - SINK_FRONT_RAIL_HEIGHT_MM,
-          z: D - T,
-          w: horizontalW,
-          h: SINK_FRONT_RAIL_HEIGHT_MM,
-          d: T,
-        },
-      })
-    } else {
-      push({
-        id: 'top-band-front',
-        role: 'top-band',
-        name: '상판 앞띠',
-        material: 'PB',
-        finish: 'body',
-        box: {
-          x: horizontalX,
-          y: H - T,
-          z: D - TOP_BAND_DEPTH_MM,
-          w: horizontalW,
-          h: T,
-          d: TOP_BAND_DEPTH_MM,
-        },
+        box: { x: horizontalX, y: body.y0, z: backReduction, w: horizontalW, h: T, d: horizontalD },
       })
     }
-  }
-
-  if (hasBack(node)) {
-    const backW = carcassX1 - carcassX0 - 2 * T + 2 * BACK_GROOVE_DEPTH_MM - HORIZONTAL_CLEARANCE_MM
-    const backX = carcassX0 + T - BACK_GROOVE_DEPTH_MM + HORIZONTAL_CLEARANCE_MM / 2
-    push({
-      id: 'back',
-      role: 'back',
-      name: '뒷판',
-      material: 'MDF',
-      finish: 'body',
-      box: {
-        x: backX,
-        y: bodyY0 + 0.5,
-        z: BACK_GROOVE_OFFSET_MM,
-        w: backW,
-        h: bodyH - 1,
-        d: node.backThicknessMm,
-      },
-    })
-    if (backW > 1220) issues.push(`뒷판 폭 ${round1(backW)}mm가 원장 폭(1220mm)을 넘습니다`)
-    if (bodyH - 1 > 2440)
-      issues.push(`뒷판 높이 ${round1(bodyH - 1)}mm가 원장 길이(2440mm)를 넘습니다`)
-    // Rear rails (보강대) behind the back: base cabinets only need the top one.
-    const railZ = BACK_GROOVE_OFFSET_MM - REAR_RAIL_THICKNESS_MM
-    if (node.family !== 'base') {
+    if (hasSolidTop(node) || !isLast) {
       push({
-        id: 'rear-rail-bottom',
-        role: 'rear-rail',
-        name: '후면 보강대(하)',
+        id: `top${key}`,
+        role: 'top',
+        name: stacked ? `${p}상판` : '상판',
         material: 'PB',
         finish: 'body',
         box: {
           x: horizontalX,
-          y: bodyY0 + T,
+          y: body.y1 - T,
+          z: backReduction,
+          w: horizontalW,
+          h: T,
+          d: horizontalD,
+        },
+      })
+    } else if (isBandedTop(node)) {
+      pushTopBands(node, push, horizontalX, horizontalW, H, D, T, backReduction)
+    }
+    if (hasBack(node) && body.hasBack) {
+      const backW = carcassX1 - carcassX0 - 2 * T + 2 * BACK_GROOVE_DEPTH_MM - clearance
+      const backX = carcassX0 + T - BACK_GROOVE_DEPTH_MM + clearance / 2
+      push({
+        id: `back${key}`,
+        role: 'back',
+        name: stacked ? `${p}뒷판` : '뒷판',
+        material: 'MDF',
+        finish: 'body',
+        box: {
+          x: backX,
+          y: body.y0 + 0.5,
+          z: BACK_GROOVE_OFFSET_MM,
+          w: backW,
+          h: sideH - 1,
+          d: node.backThicknessMm,
+        },
+      })
+      if (backW > 1220) issues.push(`뒷판 폭 ${round1(backW)}mm가 원장 폭(1220mm)을 넘습니다`)
+      if (sideH - 1 > 2440)
+        issues.push(`뒷판 높이 ${round1(sideH - 1)}mm가 원장 길이(2440mm)를 넘습니다`)
+      // Rear rails (보강대) behind the back: base cabinets only need the top one.
+      if (node.family !== 'base') {
+        push({
+          id: `rear-rail-bottom${key}`,
+          role: 'rear-rail',
+          name: `${p}후면 보강대(하)`,
+          material: 'PB',
+          finish: 'body',
+          box: {
+            x: horizontalX,
+            y: body.y0 + T,
+            z: railZ,
+            w: horizontalW,
+            h: REAR_RAIL_HEIGHT_MM,
+            d: REAR_RAIL_THICKNESS_MM,
+          },
+        })
+      }
+      push({
+        id: `rear-rail-top${key}`,
+        role: 'rear-rail',
+        name: `${p}후면 보강대(상)`,
+        material: 'PB',
+        finish: 'body',
+        box: {
+          x: horizontalX,
+          y: body.y1 - T - REAR_RAIL_HEIGHT_MM,
           z: railZ,
           w: horizontalW,
           h: REAR_RAIL_HEIGHT_MM,
@@ -293,22 +282,7 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
         },
       })
     }
-    push({
-      id: 'rear-rail-top',
-      role: 'rear-rail',
-      name: '후면 보강대(상)',
-      material: 'PB',
-      finish: 'body',
-      box: {
-        x: horizontalX,
-        y: H - T - REAR_RAIL_HEIGHT_MM,
-        z: railZ,
-        w: horizontalW,
-        h: REAR_RAIL_HEIGHT_MM,
-        d: REAR_RAIL_THICKNESS_MM,
-      },
-    })
-  }
+  })
 
   // End panels (EP) run flush with the fronts.
   const frontDepth = FRONT_GAP_MM + FRONT_THICKNESS_MM
@@ -371,10 +345,9 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
   }
 
   // ── Interior ───────────────────────────────────────────────────────
-  const tree = resolveCellTree(node.interior, interior, T)
-  issues.push(...tree.issues)
   if (hasInterior(node)) {
     for (const divider of tree.dividers) {
+      if (divider.stacked) continue // built as the two carcasses' top and bottom
       const r = divider.rect
       if (divider.axis === 'x') {
         push({
@@ -395,10 +368,10 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
           finish: 'body',
           cellId: divider.splitId,
           box: {
-            x: r.x0 + HORIZONTAL_CLEARANCE_MM / 2,
+            x: r.x0 + clearance / 2,
             y: r.y0,
             z: backReduction,
-            w: r.x1 - r.x0 - HORIZONTAL_CLEARANCE_MM,
+            w: r.x1 - r.x0 - clearance,
             h: T,
             d: horizontalD,
           },
@@ -428,6 +401,23 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
 
   // ── Fronts ─────────────────────────────────────────────────────────
   const frontRects: { id: string; rect: CellRect }[] = []
+  // A front edge that meets another front stops half the gap short of the
+  // joint's centre line (a divider, a fixed shelf, or two stacked panels).
+  const jointCentre = (edge: 'x0' | 'x1' | 'y0' | 'y1', rect: CellRect): number | null => {
+    for (const d of tree.dividers) {
+      const r = d.rect
+      if ((edge === 'x0' || edge === 'x1') !== (d.axis === 'x')) continue
+      if (edge === 'x0' && Math.abs(r.x1 - rect.x0) < 0.01 && r.y0 < rect.y1 && r.y1 > rect.y0)
+        return (r.x0 + r.x1) / 2
+      if (edge === 'x1' && Math.abs(r.x0 - rect.x1) < 0.01 && r.y0 < rect.y1 && r.y1 > rect.y0)
+        return (r.x0 + r.x1) / 2
+      if (edge === 'y0' && Math.abs(r.y1 - rect.y0) < 0.01 && r.x0 < rect.x1 && r.x1 > rect.x0)
+        return (r.y0 + r.y1) / 2
+      if (edge === 'y1' && Math.abs(r.y0 - rect.y1) < 0.01 && r.x0 < rect.x1 && r.x1 > rect.x0)
+        return (r.y0 + r.y1) / 2
+    }
+    return null
+  }
   const frontRectFor = (rect: CellRect): CellRect => {
     const rev = node.frontReveal
     const halfBetween = rev.between / 2
@@ -436,10 +426,16 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
     const atBottom = Math.abs(rect.y0 - interior.y0) < 0.01
     const atTop = Math.abs(rect.y1 - interior.y1) < 0.01
     return {
-      x0: atLeft ? carcassX0 + rev.side : rect.x0 - T / 2 + halfBetween,
-      x1: atRight ? carcassX1 - rev.side : rect.x1 + T / 2 - halfBetween,
-      y0: atBottom ? bodyY0 + rev.bottom : rect.y0 - T / 2 + halfBetween,
-      y1: atTop ? H - rev.top : rect.y1 + T / 2 - halfBetween,
+      x0: atLeft
+        ? carcassX0 + rev.side
+        : (jointCentre('x0', rect) ?? rect.x0 - T / 2) + halfBetween,
+      x1: atRight
+        ? carcassX1 - rev.side
+        : (jointCentre('x1', rect) ?? rect.x1 + T / 2) - halfBetween,
+      y0: atBottom
+        ? bodyY0 + rev.bottom
+        : (jointCentre('y0', rect) ?? rect.y0 - T / 2) + halfBetween,
+      y1: atTop ? H - rev.top : (jointCentre('y1', rect) ?? rect.y1 + T / 2) - halfBetween,
     }
   }
 
@@ -515,6 +511,70 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
   }
 }
 
+type Body = { y0: number; y1: number; prefix: string; hasBack: boolean }
+
+/**
+ * Carcass bodies bottom → top. One body normally; one per root child for a
+ * stacked root, split at the middle of each two-panel joint. Prefixes follow
+ * mmmcraft: (하)/(상) for two bodies, (1단)/(2단)/… beyond that.
+ */
+function carcassBodies(node: CabinetNode, f: Frame, tree: ResolvedTree): Body[] {
+  const sideY0 = node.variant === 'dishwasher' ? 0 : f.toe
+  const root = node.interior
+  if (!isStackedRoot(root) || root.kind !== 'split') {
+    return [{ y0: sideY0, y1: f.H, prefix: '', hasBack: true }]
+  }
+  const joints = tree.dividers.filter((d) => d.stacked).sort((a, b) => a.index - b.index)
+  const n = root.children.length
+  return root.children.map((child, i) => {
+    const y0 = i === 0 ? sideY0 : (joints[i - 1]?.rect.y0 ?? 0) + f.T
+    const y1 = i === n - 1 ? f.H : (joints[i]?.rect.y0 ?? 0) + f.T
+    const prefix = n === 2 ? (i === 0 ? '(하)' : '(상)') : `(${i + 1}단)`
+    return { y0, y1, prefix, hasBack: child.hasBack !== false }
+  })
+}
+
+function pushTopBands(
+  node: CabinetNode,
+  push: Push,
+  x: number,
+  w: number,
+  H: number,
+  D: number,
+  T: number,
+  backReduction: number,
+) {
+  // Back band always; the front band becomes a vertical stretcher on a sink
+  // cabinet (room for the bowl and trap).
+  push({
+    id: 'top-band-back',
+    role: 'top-band',
+    name: '상판 뒤띠',
+    material: 'PB',
+    finish: 'body',
+    box: { x, y: H - T, z: backReduction, w, h: T, d: TOP_BAND_DEPTH_MM },
+  })
+  if (node.variant === 'sink') {
+    push({
+      id: 'front-rail',
+      role: 'front-rail',
+      name: '전대',
+      material: 'PB',
+      finish: 'body',
+      box: { x, y: H - SINK_FRONT_RAIL_HEIGHT_MM, z: D - T, w, h: SINK_FRONT_RAIL_HEIGHT_MM, d: T },
+    })
+  } else {
+    push({
+      id: 'top-band-front',
+      role: 'top-band',
+      name: '상판 앞띠',
+      material: 'PB',
+      finish: 'body',
+      box: { x, y: H - T, z: D - TOP_BAND_DEPTH_MM, w, h: T, d: TOP_BAND_DEPTH_MM },
+    })
+  }
+}
+
 function defaultFront(): CellFront {
   return { type: 'door', leaves: 'auto', hinge: 'auto' }
 }
@@ -538,7 +598,7 @@ function buildLeafContent(
     const gap = (clearH - c.count * T) / (c.count + 1)
     if (gap < 60) issues.push('선반 간격이 60mm보다 좁습니다')
     const dowel = c.kind === 'dowel'
-    const w = clearW - (dowel ? DOWEL_SHELF_WIDTH_CLEARANCE_MM : HORIZONTAL_CLEARANCE_MM)
+    const w = clearW - (dowel ? DOWEL_SHELF_WIDTH_CLEARANCE_MM : horizontalClearanceMm(T))
     const d = D - backReduction - (dowel ? DOWEL_SHELF_FRONT_INSET_MM : 0)
     for (let i = 0; i < c.count; i += 1) {
       push({
@@ -616,14 +676,27 @@ function buildInnerDrawers(
   const cfg = INNER_DRAWER
   const clearW = r.x1 - r.x0
   const clearH = r.y1 - r.y0
-  const step = leaf.content.stepMm
-  const maxCount = Math.max(0, Math.floor((clearH - cfg.gapMm) / (step + cfg.gapMm)))
-  const count = Math.min(leaf.content.count, maxCount)
-  if (count < leaf.content.count) {
-    issues.push(`서랍 ${leaf.content.count}개가 칸에 들어가지 않아 ${count}개만 만들었습니다`)
+  // Front heights bottom → top: the individual list (mmmcraft drawerHeights,
+  // gap below each front, none above the last) or a uniform pitch.
+  const requested =
+    leaf.content.heightsMm && leaf.content.heightsMm.length > 0
+      ? leaf.content.heightsMm
+      : Array.from({ length: leaf.content.count }, () =>
+          leaf.content.type === 'drawers' ? leaf.content.stepMm : 0,
+        )
+  const heights: number[] = []
+  let used = 0
+  for (const h of requested) {
+    if (used + cfg.gapMm + h > clearH + 0.01) break
+    heights.push(h)
+    used += cfg.gapMm + h
+  }
+  const count = heights.length
+  if (count < requested.length) {
+    issues.push(`서랍 ${requested.length}개가 칸에 들어가지 않아 ${count}개만 만들었습니다`)
   }
   if (count === 0) return
-  const stackH = cfg.gapMm + count * (step + cfg.gapMm)
+  const stackH = used
   const innerD = D - backReduction
   const frontZ0 = D - cfg.fillerSetbackMm + cfg.overlayProjectionMm - FRONT_THICKNESS_MM
   // Side fillers (서랍속장): a rail board on each side, set in from the wall.
@@ -658,8 +731,10 @@ function buildInnerDrawers(
   const boxW = clearW - 2 * cfg.fillerWidthMm - cfg.railClearanceMm
   const boxX = r.x0 + (clearW - boxW) / 2
   const boxZ1 = frontZ0
+  let y0 = r.y0
   for (let i = 0; i < count; i += 1) {
-    const y0 = r.y0 + cfg.gapMm + i * (step + cfg.gapMm)
+    const step = heights[i] ?? 0
+    y0 += cfg.gapMm
     push({
       id: `inner-drawer-front-${leaf.id}-${i}`,
       role: 'drawer-front',
@@ -689,6 +764,7 @@ function buildInnerDrawers(
       cfg.boxSideThicknessMm,
       cfg.boxBottomThicknessMm,
     )
+    y0 += step
   }
   // Cover shelf over the stack when there is room above it.
   if (clearH - stackH > T + 60) {
@@ -700,10 +776,10 @@ function buildInnerDrawers(
       finish: 'body',
       cellId: leaf.id,
       box: {
-        x: r.x0 + HORIZONTAL_CLEARANCE_MM / 2,
+        x: r.x0 + horizontalClearanceMm(T) / 2,
         y: r.y0 + stackH,
         z: backReduction,
-        w: clearW - HORIZONTAL_CLEARANCE_MM,
+        w: clearW - horizontalClearanceMm(T),
         h: T,
         d: innerD,
       },
