@@ -208,11 +208,13 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
     }
 
     // Curve sagitta handle — teal dot at the wall midpoint that
-    // controls `curveOffset`. Hidden when the wall hosts a door /
-    // window / wall-attached item: bending the wall would tear those
-    // children, so the legacy disables the handle in that case (see
+    // controls `curveOffset`. Only on walls that are already curved: on a
+    // straight wall the midpoint belongs to the body drag, and bending
+    // starts from the inspector's curve field instead. Hidden when the
+    // wall hosts a door / window / wall-attached item: bending the wall
+    // would tear those children (see
     // `wallCurveHandles.hasWallChildrenBlockingCurve`).
-    if (!hasCurveBlockingChildren(ctx.children)) {
+    if (isCurvedWall(node) && !hasCurveBlockingChildren(ctx.children)) {
       const handle = getWallMidpointHandlePoint(node)
       children.push({
         kind: 'endpoint-handle',
