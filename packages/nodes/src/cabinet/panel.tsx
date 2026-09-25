@@ -11,7 +11,7 @@ import {
 } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { downloadTextFile } from './download'
+import { downloadCabinetsDxf, downloadCabinetsMpr, downloadTextFile } from './download'
 import { cabinetHardwareRows, cabinetPanelRows, cutlistCsv } from './engine/cutlist'
 import { buildCabinetParts, type CabinetBuild } from './engine/parts'
 import {
@@ -830,6 +830,14 @@ export default function CabinetPanel() {
           <ActionButton
             label="재단목록 CSV"
             onClick={() => downloadTextFile(`${label}-재단목록.csv`, cutlistCsv([{ node, label }]))}
+          />
+          <ActionButton
+            label="MPR 미리보기"
+            onClick={() => downloadCabinetsMpr(label, [{ node, label }])}
+          />
+          <ActionButton
+            label="보링 DXF"
+            onClick={() => downloadCabinetsDxf(label, [{ node, label }])}
           />
         </ActionGroup>
         <div className="flex gap-1.5">

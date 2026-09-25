@@ -10,6 +10,8 @@ import {
   createKitchenOnWall,
   createWardrobesOnWall,
   cutlistCsv,
+  downloadCabinetsDxf,
+  downloadCabinetsMpr,
   downloadTextFile,
   useCabinetBrush,
   useMyCabinetModules,
@@ -100,6 +102,10 @@ export function FurnitureTab() {
         (n) => (n as { type: string }).type === 'cabinet',
       ) as unknown as CabinetNode[],
     [nodes],
+  )
+  const labeled = useMemo(
+    () => cabinets.map((node, i) => ({ node, label: `${i + 1}. ${node.name ?? '가구'}` })),
+    [cabinets],
   )
 
   const placing = tool === 'cabinet'
@@ -255,25 +261,37 @@ export function FurnitureTab() {
       </section>
 
       <section className="mt-4 rounded-xl border border-[#343434] bg-[#202020] p-3">
-        <h3 className="font-semibold text-sm">재단목록</h3>
+        <h3 className="font-semibold text-sm">재단목록 · 가공</h3>
         <p className="mt-1 text-[#9a9a9a] text-xs">
-          장면의 가구 {cabinets.length}개의 판재를 CSV로 내려받습니다.
+          장면의 가구 {cabinets.length}개의 판재를 CSV, 보링 MPR(가공 비활성 미리보기), DXF로
+          내려받습니다.
         </p>
         <button
           className="mt-2 h-9 w-full rounded-lg border border-[#3a3a3a] bg-[#2C2C2E] text-sm hover:bg-[#3e3e3e] disabled:opacity-40"
           disabled={cabinets.length === 0}
-          onClick={() =>
-            downloadTextFile(
-              '재단목록.csv',
-              cutlistCsv(
-                cabinets.map((node, i) => ({ node, label: `${i + 1}. ${node.name ?? '가구'}` })),
-              ),
-            )
-          }
+          onClick={() => downloadTextFile('재단목록.csv', cutlistCsv(labeled))}
           type="button"
         >
           전체 재단목록 CSV
         </button>
+        <div className="mt-1.5 flex gap-1.5">
+          <button
+            className="h-9 flex-1 rounded-lg border border-[#3a3a3a] bg-[#2C2C2E] text-sm hover:bg-[#3e3e3e] disabled:opacity-40"
+            disabled={cabinets.length === 0}
+            onClick={() => downloadCabinetsMpr('전체', labeled)}
+            type="button"
+          >
+            MPR 미리보기
+          </button>
+          <button
+            className="h-9 flex-1 rounded-lg border border-[#3a3a3a] bg-[#2C2C2E] text-sm hover:bg-[#3e3e3e] disabled:opacity-40"
+            disabled={cabinets.length === 0}
+            onClick={() => downloadCabinetsDxf('전체', labeled)}
+            type="button"
+          >
+            보링 DXF
+          </button>
+        </div>
       </section>
     </div>
   )

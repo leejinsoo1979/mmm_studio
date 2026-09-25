@@ -146,6 +146,8 @@ export {
   createKitchenOnWall,
   createWardrobesOnWall,
   cutlistCsv,
+  downloadCabinetsDxf,
+  downloadCabinetsMpr,
   downloadTextFile,
   type MyCabinetModule,
   useCabinetBrush,

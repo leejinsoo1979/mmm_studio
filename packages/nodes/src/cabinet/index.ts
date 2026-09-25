@@ -1,5 +1,5 @@
 export { cabinetDefinition, countertopDefinition } from './definition'
-export { downloadTextFile } from './download'
+export { downloadCabinetsDxf, downloadCabinetsMpr, downloadTextFile } from './download'
 export {
   cabinetHardwareRows,
   cabinetHingeBorings,
