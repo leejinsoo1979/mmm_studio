@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./cabinet/schema": {
+      "types": "./dist/cabinet/schema.d.ts",
+      "import": "./dist/cabinet/schema.js",
+      "default": "./dist/cabinet/schema.js"
     }
   },
   "files": [

@@ -21,6 +21,7 @@ import {
 } from '@pascal-app/editor'
 import TreesPanel from '@pascal-app/plugin-trees/panel'
 import {
+  Archive,
   Bot,
   Box,
   Brush,
@@ -56,6 +57,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { ArchipleFloorplanBridge } from './archiple-floorplan-bridge'
 import { BuildTab } from './build-tab'
 import { EditorHeader } from './editor-header'
+import { FurnitureTab } from './furniture-tab'
 import { LightingTab } from './lighting-tab'
 import { MaterialTab } from './material-tab'
 import { MaterialSurfaceInspector } from './material-surface-inspector'
@@ -99,6 +101,14 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
     mobileDefaultSnap: 0.5,
     mobileIcon: <Box className="h-5 w-5" />,
     icon: <Box />,
+  },
+  {
+    id: 'furniture',
+    label: '가구',
+    component: FurnitureTab,
+    mobileDefaultSnap: 0.5,
+    mobileIcon: <Archive className="h-5 w-5" />,
+    icon: <Archive />,
   },
   {
     id: 'material',
