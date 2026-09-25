@@ -314,24 +314,22 @@ export const CABINET_PRESETS: CabinetPreset[] = [
     id: 'dual-4drawer-pantshanger',
     group: 'wardrobe',
     label: '바지걸이장',
-    description: '4단 서랍·옷장 + 바지걸이(내경 586)',
+    description: '하부 4단 서랍 + 바지걸이(내경 586), 상부 옷장',
     thumbnail: thumb('dual-4drawer-pantshanger.png'),
     elevationMm: 0,
     spec: () =>
       tall(
         DUAL_W,
-        rowX(
-          [
-            {
-              ...stackY(
-                [leaf(innerDrawerFronts(DRAWER4_HEIGHTS)), leaf(hanging), leaf(empty)],
-                [DRAWER4_SECTION - 2 * T, null, SAFETY_TOP_BOX],
-              ),
-              front: door('1'),
-            },
-            { ...stackY([leaf(pants), leaf(empty)], [null, SAFETY_TOP_BOX]), front: door('1') },
-          ],
-          [null, PANTSHANGER_W],
+        // mmmcraft DualType6: lower body 1000 (4 drawers | pants hanger 586),
+        // upper body hanging on both sides under one shared safety shelf.
+        bodies(
+          DRAWER4_SECTION,
+          rowX([leaf(innerDrawerFronts(DRAWER4_HEIGHTS)), leaf(pants)], [null, PANTSHANGER_W]),
+          stackY(
+            [rowX([leaf(hanging), leaf(hanging)], [null, PANTSHANGER_W]), leaf(empty)],
+            [null, SAFETY_TOP_BOX],
+          ),
+          door('2'),
         ),
       ),
   },

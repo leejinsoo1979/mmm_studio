@@ -519,3 +519,15 @@ describe('stacked bodies (mmmcraft 하부장 / 상부장)', () => {
     expect(built.parts.filter((p) => p.role === 'back').map((p) => p.name)).toEqual(['(상)뒷판'])
   })
 })
+
+test('바지걸이장 is two bodies: drawers | pants below, hanging above', () => {
+  const preset = CABINET_PRESETS.find((p) => p.id === 'dual-4drawer-pantshanger')
+  const node = cabinet(instantiateSpec(preset?.spec() as never))
+  const { parts, issues, leaves } = buildCabinetParts(node)
+  expect(issues).toEqual([])
+  expect(parts.find((p) => p.name === '(하)좌측')?.box.h).toBe(1000)
+  const pants = leaves.find((l) => l.content.type === 'hanging' && l.content.rod === 'pants')
+  expect((pants?.rect.x1 ?? 0) - (pants?.rect.x0 ?? 0)).toBe(586)
+  expect(parts.filter((p) => p.role === 'drawer-front').map((p) => p.box.h)).toEqual([255, 255, 176, 176])
+  expect(parts.filter((p) => p.role === 'door')).toHaveLength(2)
+})
