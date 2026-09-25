@@ -226,6 +226,37 @@ function base(width: number, interior: CabinetCell, topRailMm = 60): CabinetSpec
   }
 }
 
+/** mmmcraft 기본장 서랍장: 65-high channels between the drawers under the
+ *  60 top channel; each front runs from 5 below the channel under it to 40
+ *  into the one above, each box sits 15 above the board or channel below. */
+function drawerBase(width: number, tiers: 2 | 3): CabinetSpec {
+  const fronts: [number, number][] =
+    tiers === 3
+      ? [
+          [-5, 335],
+          [355, 550],
+          [570, 765],
+        ]
+      : [
+          [-5, 370],
+          [390, 765],
+        ]
+  const boxes: [number, number][] =
+    tiers === 3
+      ? [
+          [33, 240],
+          [375, 130],
+          [590, 130],
+        ]
+      : [
+          [33, 240],
+          [410, 240],
+        ]
+  const mid = tiers === 3 ? [channel(295, 65), channel(510, 65)] : [channel(330, 65)]
+  const spec = base(width, leaf(drawerFronts(fronts, boxes)))
+  return { ...spec, channels: [...mid, ...(spec.channels ?? [])] }
+}
+
 /** 도어올림: solid top, fronts rise 30 above the carcass (lift gap under the
  *  countertop), 65×40 channels between drawer fronts. */
 function doorLift(width: number, interior: CabinetCell, channels: Channel[] = []): CabinetSpec {
@@ -540,37 +571,37 @@ export const CABINET_PRESETS: CabinetPreset[] = [
     id: 'lower-drawer-2tier',
     group: 'kitchen-base',
     label: '2단서랍장 반통',
-    description: '겉서랍 2단',
+    description: '목찬넬 330, 앞판 375·375',
     thumbnail: thumb('lower-drawer-2tier.png'),
     elevationMm: 0,
-    spec: () => base(SINGLE_W, leaf(externalDrawers(2))),
+    spec: () => drawerBase(SINGLE_W, 2),
   },
   {
     id: 'dual-lower-drawer-2tier',
     group: 'kitchen-base',
     label: '2단서랍장 한통',
-    description: '겉서랍 2단',
+    description: '목찬넬 330, 앞판 375·375',
     thumbnail: thumb('dual-lower-drawer-2tier.png'),
     elevationMm: 0,
-    spec: () => base(DUAL_W, leaf(externalDrawers(2))),
+    spec: () => drawerBase(DUAL_W, 2),
   },
   {
     id: 'lower-drawer-3tier',
     group: 'kitchen-base',
     label: '3단서랍장 반통',
-    description: '겉서랍 3단',
+    description: '목찬넬 295·510, 앞판 340·195·195',
     thumbnail: thumb('lower-drawer-3tier.png'),
     elevationMm: 0,
-    spec: () => base(SINGLE_W, leaf(externalDrawers(3))),
+    spec: () => drawerBase(SINGLE_W, 3),
   },
   {
     id: 'dual-lower-drawer-3tier',
     group: 'kitchen-base',
     label: '3단서랍장 한통',
-    description: '겉서랍 3단',
+    description: '목찬넬 295·510, 앞판 340·195·195',
     thumbnail: thumb('dual-lower-drawer-3tier.png'),
     elevationMm: 0,
-    spec: () => base(DUAL_W, leaf(externalDrawers(3))),
+    spec: () => drawerBase(DUAL_W, 3),
   },
   {
     id: 'lower-dishwasher-cabinet',

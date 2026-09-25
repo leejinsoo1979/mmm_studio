@@ -582,6 +582,48 @@ describe('목찬넬 kitchen bases (mmmcraft numbers, body 785 on 65)', () => {
     ])
   })
 
+  test.each([
+    [
+      'lower-drawer-3tier',
+      [295, 510, 725],
+      [
+        [-5, 335],
+        [355, 550],
+        [570, 765],
+      ],
+      [
+        [33, 240],
+        [375, 130],
+        [590, 130],
+      ],
+    ],
+    [
+      'lower-drawer-2tier',
+      [330, 725],
+      [
+        [-5, 370],
+        [390, 765],
+      ],
+      [
+        [33, 240],
+        [410, 240],
+      ],
+    ],
+  ])('%s: mmmcraft channels, fronts and boxes', (id, notches, fronts, boxes) => {
+    const { parts, issues } = build(id)
+    expect(issues).toEqual([])
+    expect(byName(parts, '좌측판')?.notches?.map((n) => n.fromBottom)).toEqual(notches)
+    const fromBody = (p: CabinetPart) => [p.box.y - 65, p.box.y - 65 + p.box.h]
+    const drawerFronts = parts
+      .filter((p) => p.role === 'drawer-front')
+      .sort((a, b) => a.box.y - b.box.y)
+    expect(drawerFronts.map(fromBody)).toEqual(fronts)
+    const sides = parts
+      .filter((p) => p.role === 'drawer-side' && p.id.startsWith('drawer-side-l-'))
+      .sort((a, b) => a.box.y - b.box.y)
+    expect(sides.map((p) => [p.box.y - 65, p.box.h])).toEqual(boxes)
+  })
+
   test('도어올림 3단: channels 315 / 545, fronts 360 / 210 / 210', () => {
     const { parts } = build('lower-door-lift-3tier')
     expect(byName(parts, '좌측판')?.notches?.map((n) => n.fromBottom)).toEqual([315, 545])
