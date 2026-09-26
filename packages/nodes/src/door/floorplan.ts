@@ -750,7 +750,7 @@ function hiddenDoorSymbol(node: DoorNode, wall: WallNode, selected: boolean): Fl
     sx + u[0] * (c + xMm / 1000) + n[0] * (offsetMm / 1000),
     sz + u[1] * (c + xMm / 1000) + n[1] * (offsetMm / 1000),
   ]
-  const stroke = selected ? '#7464ff' : '#536078'
+  const stroke = selected ? '#f97316' : '#536078'
   const line = { stroke, strokeWidth: 1, vectorEffect: 'non-scaling-stroke' as const }
   const error = hiddenDoorError(node, wall)
   if (error) {

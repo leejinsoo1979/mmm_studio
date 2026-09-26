@@ -80,6 +80,15 @@ export const WindowNode = BaseNode.extend({
   sill: z.boolean().default(true),
   sillDepth: z.number().default(0.08),
   sillThickness: z.number().default(0.03),
+
+  // mmmcraft 시스템창호 selection. When set, the window renders the LX Z:IN
+  // traced sections (closed casement only) instead of the parametric frame.
+  windowSystem: z
+    .object({
+      model: z.literal('E9-PTT85-PHI'),
+      glassThicknessMm: z.union([z.literal(47), z.literal(51)]),
+    })
+    .optional(),
 }).describe(dedent`Window node - a parametric window placed on a wall
   - position: center of the window in wall-local coordinate system
   - width/height: overall outer dimensions

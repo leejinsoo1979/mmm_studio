@@ -1,9 +1,14 @@
-import type {
-  FloorplanGeometry,
-  FloorplanPoint,
-  GeometryContext,
-  WallNode,
-  WindowNode,
+import {
+  type FloorplanGeometry,
+  type FloorplanPoint,
+  type GeometryContext,
+  LX_WINDOW_COLORS,
+  type LxPoint,
+  lxWindowError,
+  lxWindowGlass,
+  lxWindowJambPlan,
+  type WallNode,
+  type WindowNode,
 } from '@pascal-app/core'
 import { buildOpeningPlacementDimensions } from '../shared/opening-placement-dimensions'
 
@@ -91,43 +96,45 @@ export function buildWindowFloorplan(
   const mullionStart: FloorplanPoint = [cx - dirX * halfWidth, cz - dirZ * halfWidth]
   const mullionEnd: FloorplanPoint = [cx + dirX * halfWidth, cz + dirZ * halfWidth]
 
-  const children: FloorplanGeometry[] = [
-    // Outer footprint — white fill so the wall hatch underneath
-    // doesn't bleed through.
-    {
-      kind: 'polygon',
-      points,
-      fill: fillColor,
-      stroke: accentColor,
-      strokeWidth: showSelectedChrome ? 1.9 : 1.25,
-      vectorEffect: 'non-scaling-stroke',
-      strokeLinejoin: 'round',
-    },
-    // Inset glass-pane outline.
-    {
-      kind: 'polygon',
-      points: [innerStartA, innerEndA, innerEndB, innerStartB],
-      fill: 'none',
-      stroke: accentColor,
-      strokeOpacity: 0.6,
-      strokeWidth: showSelectedChrome ? 1.3 : 0.9,
-      vectorEffect: 'non-scaling-stroke',
-      strokeLinejoin: 'round',
-    },
-    // Center mullion.
-    {
-      kind: 'line',
-      x1: mullionStart[0],
-      y1: mullionStart[1],
-      x2: mullionEnd[0],
-      y2: mullionEnd[1],
-      stroke: accentColor,
-      strokeWidth: showSelectedChrome ? 1.6 : 1.1,
-      strokeOpacity: 0.85,
-      strokeLinecap: 'round',
-      vectorEffect: 'non-scaling-stroke',
-    },
-  ]
+  const children: FloorplanGeometry[] = node.windowSystem
+    ? lxWindowSymbol(node, points, cx, cz, dirX, dirZ, isSelected || isHighlighted)
+    : [
+        // Outer footprint — white fill so the wall hatch underneath
+        // doesn't bleed through.
+        {
+          kind: 'polygon',
+          points,
+          fill: fillColor,
+          stroke: accentColor,
+          strokeWidth: showSelectedChrome ? 1.9 : 1.25,
+          vectorEffect: 'non-scaling-stroke',
+          strokeLinejoin: 'round',
+        },
+        // Inset glass-pane outline.
+        {
+          kind: 'polygon',
+          points: [innerStartA, innerEndA, innerEndB, innerStartB],
+          fill: 'none',
+          stroke: accentColor,
+          strokeOpacity: 0.6,
+          strokeWidth: showSelectedChrome ? 1.3 : 0.9,
+          vectorEffect: 'non-scaling-stroke',
+          strokeLinejoin: 'round',
+        },
+        // Center mullion.
+        {
+          kind: 'line',
+          x1: mullionStart[0],
+          y1: mullionStart[1],
+          x2: mullionEnd[0],
+          y2: mullionEnd[1],
+          stroke: accentColor,
+          strokeWidth: showSelectedChrome ? 1.6 : 1.1,
+          strokeOpacity: 0.85,
+          strokeLinecap: 'round',
+          vectorEffect: 'non-scaling-stroke',
+        },
+      ]
 
   // Move handle — orange dot at the window center. Only when selected.
   if (isSelected) {
@@ -170,4 +177,70 @@ export function buildWindowFloorplan(
   }
 
   return { kind: 'group', children }
+}
+
+/** Plan fill under the sections: the cavities stay open onto it. */
+const LX_PLAN_BACKGROUND = '#fafbfe'
+
+/**
+ * mmmcraft `LxSystemWindow2D`: the B-B′ jamb sections (fixed frame, sash,
+ * cross-hatched inserts) and the glass, or a red outline when invalid.
+ */
+function lxWindowSymbol(
+  node: WindowNode,
+  footprint: readonly FloorplanPoint[],
+  cx: number,
+  cz: number,
+  dirX: number,
+  dirZ: number,
+  selected: boolean,
+): FloorplanGeometry[] {
+  // Window-local (x along the wall, z across) mm → plan; local +z is the
+  // wall's right normal, as in the 3D window frame.
+  const plan = ([x, z]: LxPoint): FloorplanPoint => [
+    cx + (dirX * x - dirZ * z) / 1000,
+    cz + (dirZ * x + dirX * z) / 1000,
+  ]
+  const stroke = selected ? '#f97316' : '#536078'
+  const line = { stroke, strokeWidth: 0.7, vectorEffect: 'non-scaling-stroke' as const }
+  const base: FloorplanGeometry = { kind: 'polygon', points: footprint, fill: LX_PLAN_BACKGROUND }
+  if (lxWindowError(node) || !node.windowSystem) {
+    return [
+      base,
+      {
+        kind: 'polygon',
+        points: footprint,
+        fill: 'none',
+        stroke: '#c13b4c',
+        strokeWidth: 2,
+        vectorEffect: 'non-scaling-stroke',
+      },
+    ]
+  }
+  const out: FloorplanGeometry[] = [base]
+  for (const part of lxWindowJambPlan(node.width * 1000)) {
+    const [outline, ...cavities] = part.rings
+    if (!outline) continue
+    out.push({
+      kind: 'polygon',
+      points: outline.map(plan),
+      fill: LX_WINDOW_COLORS[part.kind],
+      ...line,
+    })
+    for (const cavity of cavities) {
+      out.push({ kind: 'polygon', points: cavity.map(plan), fill: LX_PLAN_BACKGROUND, ...line })
+    }
+  }
+  const g = lxWindowGlass(node.width * 1000, node.height * 1000, node.windowSystem)
+  const x0 = -g.width / 2
+  const x1 = g.width / 2
+  const z0 = g.centerZ - g.thickness / 2
+  const z1 = g.centerZ + g.thickness / 2
+  out.push({
+    kind: 'polygon',
+    points: [plan([x0, z0]), plan([x1, z0]), plan([x1, z1]), plan([x0, z1])],
+    fill: LX_WINDOW_COLORS.planGlass,
+    ...line,
+  })
+  return out
 }

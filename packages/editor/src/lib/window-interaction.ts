@@ -56,6 +56,8 @@ export function toggleWindowOpenState(windowId: AnyNodeId, options?: WindowOpenA
   if (
     node?.type !== 'window' ||
     node.openingKind === 'opening' ||
+    // 시스템창호 is closed-only.
+    node.windowSystem !== undefined ||
     !isOperableWindowType(node.windowType)
   ) {
     return
@@ -76,6 +78,8 @@ export function closeWindowOpenState(windowId: AnyNodeId, options?: WindowOpenAn
   if (
     node?.type !== 'window' ||
     node.openingKind === 'opening' ||
+    // 시스템창호 is closed-only.
+    node.windowSystem !== undefined ||
     !isOperableWindowType(node.windowType)
   ) {
     return

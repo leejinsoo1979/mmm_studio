@@ -293,6 +293,29 @@ export {
   type WallMoveLinkedWallTargetPlan,
   type WallPlanPoint,
 } from './systems/wall/wall-move'
+export {
+  DEFAULT_LX_WINDOW_SELECTION,
+  isPublishedVentSize,
+  LX_PHI_GLAZING_TRACE,
+  LX_PHI_HEAD_TRACES,
+  LX_PHI_JAMB_TRACES,
+  LX_PHI_SILL_TRACES,
+  LX_WINDOW_COLORS,
+  LX_WINDOW_MODELS,
+  LX_WINDOW_SOURCE,
+  LX_WINDOW_UNVERIFIED,
+  type LxEdge,
+  type LxFrameKind,
+  type LxPoint,
+  type LxSectionShape,
+  type LxWindowSelection,
+  lxEdgeSection,
+  lxWindowError,
+  lxWindowGlass,
+  lxWindowJambPlan,
+  lxWindowSelectionUpdates,
+  validateLxSectionTrace,
+} from './systems/window/lx-window'
 export type { SceneGraph } from './utils/clone-scene-graph'
 export { cloneLevelSubtree, cloneSceneGraph, forkSceneGraph } from './utils/clone-scene-graph'
 export { isObject } from './utils/types'

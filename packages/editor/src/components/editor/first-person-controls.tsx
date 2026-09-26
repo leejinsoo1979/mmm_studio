@@ -729,7 +729,7 @@ export const FirstPersonControls = () => {
       const node = nodes[windowId as AnyNodeId]
       if (node?.type !== 'window') continue
       if (node.openingKind === 'opening') continue
-      if (!isOperableWindowType(node.windowType)) continue
+      if (node.windowSystem !== undefined || !isOperableWindowType(node.windowType)) continue
 
       const object = sceneRegistry.nodes.get(windowId)
       if (!object) continue
@@ -849,6 +849,7 @@ export const FirstPersonControls = () => {
       if (
         node?.type !== 'window' ||
         node.openingKind === 'opening' ||
+        node.windowSystem !== undefined ||
         !isOperableWindowType(node.windowType)
       ) {
         return
@@ -877,6 +878,7 @@ export const FirstPersonControls = () => {
       if (
         node?.type !== 'window' ||
         node.openingKind === 'opening' ||
+        node.windowSystem !== undefined ||
         !isOperableWindowType(node.windowType)
       ) {
         return

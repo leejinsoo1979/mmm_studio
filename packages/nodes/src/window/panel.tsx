@@ -3,6 +3,10 @@
 import {
   type AnyNode,
   type AnyNodeId,
+  DEFAULT_LX_WINDOW_SELECTION,
+  LX_WINDOW_MODELS,
+  lxWindowError,
+  lxWindowSelectionUpdates,
   useInteractive,
   useScene,
   WindowNode,
@@ -282,16 +286,21 @@ export default function WindowPanel() {
   const supportsWindowShape = shapedWindowTypes.has(node.windowType ?? 'fixed')
   const supportsGrid = isFixedWindow
   const supportsSill = !silllessWindowTypes.has(node.windowType)
-  const showWindowTypeSection = !isOpening
-  const showWindowShapeSection = !isOpening && supportsWindowShape
+  // A 시스템창호 is the catalogued closed section: its own type, shape,
+  // frame, grid and sill controls do not apply (mmmcraft hides them too).
+  const lxSelection = node.windowSystem
+  const isLxWindow = !isOpening && !!lxSelection
+  const lxError = lxWindowError(node)
+  const showWindowTypeSection = !isOpening && !isLxWindow
+  const showWindowShapeSection = !isOpening && !isLxWindow && supportsWindowShape
   const showOpeningShapeSection = isOpening
-  const showFrameSection = !isOpening
-  const showGridSection = !isOpening && supportsGrid
-  const showSillSection = !isOpening && supportsSill
+  const showFrameSection = !isOpening && !isLxWindow
+  const showGridSection = !isOpening && !isLxWindow && supportsGrid
+  const showSillSection = !isOpening && !isLxWindow && supportsSill
   const showOperationSection = !isOpening && isOperableWindow
   const showAwningDirectionSection = !isOpening && displayedWindowType === 'awning'
   const showCasementSection = !isOpening && windowType === 'casement'
-  const showFlipSide = !isOpening
+  const showFlipSide = !isOpening && !isLxWindow
   const operationLabel = isTrackSashWindow
     ? windowType === 'sliding'
       ? 'Slide'
@@ -412,6 +421,72 @@ export default function WindowPanel() {
           value={node.openingKind ?? 'window'}
         />
       </PanelSection>
+
+      {!isOpening && (
+        <PanelSection title="시스템창호">
+          <div className="grid grid-cols-2 gap-2 px-1 pt-1">
+            {[
+              { value: null, label: '기본 창호' },
+              {
+                value: DEFAULT_LX_WINDOW_SELECTION,
+                label: LX_WINDOW_MODELS['E9-PTT85-PHI'].label,
+              },
+            ].map((option) => {
+              const isSelected = !!option.value === !!lxSelection
+              return (
+                <button
+                  className={cn(
+                    'flex min-h-12 items-center rounded-lg border px-3 py-2.5 text-left text-xs transition-colors',
+                    isSelected
+                      ? 'border-orange-400/60 bg-orange-400/10 text-foreground'
+                      : 'border-border/50 bg-[#2C2C2E] text-muted-foreground hover:bg-[#3e3e3e] hover:text-foreground',
+                  )}
+                  key={option.label}
+                  onClick={() => {
+                    if (isSelected) return
+                    useInteractive.getState().cancelWindowAnimation(node.id)
+                    useInteractive.getState().removeWindowOpenState(node.id)
+                    handleUpdate(lxWindowSelectionUpdates(option.value))
+                  }}
+                  type="button"
+                >
+                  <span className="font-medium">{option.label}</span>
+                </button>
+              )
+            })}
+          </div>
+          {lxSelection && (
+            <div className="mt-2 space-y-2 px-1">
+              <div className="text-muted-foreground text-xs">유리 두께</div>
+              <SegmentedControl
+                onChange={(value) =>
+                  handleUpdate({
+                    windowSystem: { ...lxSelection, glassThicknessMm: Number(value) as 47 | 51 },
+                  })
+                }
+                options={LX_WINDOW_MODELS['E9-PTT85-PHI'].glazingThicknessesMm.map((mm) => ({
+                  value: String(mm),
+                  label: `${mm} mm`,
+                }))}
+                value={String(lxSelection.glassThicknessMm)}
+              />
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                닫힌 창호 미리보기입니다. 가동짝 규격은 벽 개구부 규격이 아닙니다. 51 mm 유리의
+                비드·패킹과 시공 접합은 별도 확인이 필요합니다.
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                폭·높이는 화면에 표시할 창틀 외곽 기준입니다. 벽과 창틀 사이 시공 여유는 포함하지
+                않습니다. 단면 깊이 85 mm · 닫힌 상태
+              </p>
+              {lxError && (
+                <p className="text-[11px] text-red-400 leading-snug" role="alert">
+                  {lxError}
+                </p>
+              )}
+            </div>
+          )}
+        </PanelSection>
+      )}
 
       {showWindowTypeSection && (
         <PanelSection title="Window Type">

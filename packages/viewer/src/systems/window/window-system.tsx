@@ -3,6 +3,7 @@ import {
   DEFAULT_WALL_THICKNESS,
   getEffectiveNode,
   getWallThickness,
+  lxWindowError,
   type SceneMaterial,
   type SceneMaterialId,
   sceneRegistry,
@@ -26,6 +27,7 @@ import {
 } from '../../lib/materials'
 import useViewer from '../../store/use-viewer'
 import { getOpeningCutoutProxyDepth } from '../wall/opening-cutout-geometry'
+import { addLxWindow } from './lx-window-geometry'
 
 // Invisible material for root mesh — used as selection hitbox only
 const hitboxMaterial = new THREE.MeshBasicMaterial({ visible: false })
@@ -3398,6 +3400,19 @@ function updateWindowMesh(node: WindowNode, mesh: THREE.Mesh) {
   } = node
 
   if (openingKind === 'opening') {
+    syncWindowCutout(node, mesh)
+    return
+  }
+
+  if (node.windowSystem) {
+    // An invalid 시스템창호 keeps only its opening; the panel and the plan
+    // show mmmcraft's message. The traced sections are wall-oriented (no flip).
+    if (!lxWindowError(node)) {
+      const frame = new THREE.Group()
+      frame.rotation.y = -node.rotation[1]
+      mesh.add(frame)
+      addLxWindow(frame, node, currentShading)
+    }
     syncWindowCutout(node, mesh)
     return
   }
