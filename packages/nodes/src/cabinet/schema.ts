@@ -193,10 +193,8 @@ export const CabinetNode = BaseNode.extend({
     )
     .default([]),
 
-  handle: z.enum(['none', 'bar', 'knob']).default('bar'),
   bodyColor: HexColor.default('#f1ede4'),
   frontColor: HexColor.default('#e4ddd0'),
-  handleColor: HexColor.default('#8c8c8c'),
 })
 export type CabinetNode = z.infer<typeof CabinetNode>
 

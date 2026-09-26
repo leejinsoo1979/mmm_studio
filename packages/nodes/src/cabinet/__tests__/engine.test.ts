@@ -534,6 +534,13 @@ test('바지걸이장 is two bodies: drawers | pants below, hanging above', () =
   expect(parts.filter((p) => p.role === 'door')).toHaveLength(2)
 })
 
+test('no preset has handles (mmmcraft fronts are handleless)', () => {
+  for (const preset of CABINET_PRESETS) {
+    const { parts } = buildCabinetParts(cabinet(instantiateSpec(preset.spec())))
+    expect(parts.filter((p) => p.name === '손잡이').map((p) => preset.id)).toEqual([])
+  }
+})
+
 describe('목찬넬 kitchen bases (mmmcraft numbers, body 785 on 65)', () => {
   const build = (id: string) => {
     const preset = CABINET_PRESETS.find((p) => p.id === id)
@@ -552,7 +559,6 @@ describe('목찬넬 kitchen bases (mmmcraft numbers, body 785 on 65)', () => {
     const door = parts.find((p) => p.role === 'door')
     expect(door?.box.h).toBe(770)
     expect(door?.box.y).toBe(60)
-    expect(parts.some((p) => p.role === 'handle')).toBe(false)
   })
 
   test('싱크장: the rail behind the top channel is 150', () => {

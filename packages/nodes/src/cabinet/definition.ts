@@ -172,10 +172,8 @@ export const cabinetDefinition: NodeDefinition<typeof CabinetNode> = {
       c.topSetbackMm,
       c.topStretcher,
       c.channels,
-      c.handle,
       c.bodyColor,
       c.frontColor,
-      c.handleColor,
     ])
   },
   floorplan: buildCabinetFloorplan,

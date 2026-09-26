@@ -71,7 +71,6 @@ export function cabinetHardwareRows(node: CabinetNode): HardwareRow[] {
       add('경첩', part.hingePositionsMm.length, 'Ø35 컵')
     }
     if (part.role === 'foot') add('조절발')
-    if (part.role === 'handle') add('손잡이')
     if (part.role === 'rod') add('옷봉', 1, `${round1(part.box.w)}mm`)
     if (part.role === 'pants-hanger') add('바지걸이')
     if (part.role === 'drawer-side' && part.id.startsWith('drawer-side-l-')) {

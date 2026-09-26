@@ -51,7 +51,6 @@ export function specOf(node: CabinetNode): CabinetSpec {
     interior: node.interior,
     frontReveal: node.frontReveal,
     toeKick: node.toeKick,
-    handle: node.handle,
     endPanels: node.endPanels,
     top: node.top,
     topSetbackMm: node.topSetbackMm,
@@ -59,7 +58,6 @@ export function specOf(node: CabinetNode): CabinetSpec {
     channels: node.channels,
     bodyColor: node.bodyColor,
     frontColor: node.frontColor,
-    handleColor: node.handleColor,
   }
 }
 

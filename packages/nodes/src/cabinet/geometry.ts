@@ -14,6 +14,8 @@ import type { CabinetNode } from './schema'
 
 const MM = 0.001
 const APPLIANCE_COLOR = '#b9bcc0'
+/** Rods, pants hangers and feet. */
+const HARDWARE_COLOR = '#8c8c8c'
 
 /**
  * Pure cabinet geometry: every part from `buildCabinetParts` becomes one mesh
@@ -31,7 +33,7 @@ export function buildCabinetGeometry(
   const materials: Record<PartFinish, Material> = {
     body: createDefaultMaterial(node.bodyColor, 0.8, shading),
     front: createDefaultMaterial(node.frontColor, 0.6, shading),
-    hardware: createDefaultMaterial(node.handleColor, 0.35, shading),
+    hardware: createDefaultMaterial(HARDWARE_COLOR, 0.35, shading),
     appliance: createDefaultMaterial(APPLIANCE_COLOR, 0.4, shading),
   }
   for (const part of parts) group.add(partMesh(node, part, materials[part.finish]))

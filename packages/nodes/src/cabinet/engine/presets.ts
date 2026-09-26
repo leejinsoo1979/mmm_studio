@@ -5,15 +5,7 @@ import { cloneWithFreshIds, newCellId } from './tree'
  *  by the tool. */
 export type CabinetSpec = Pick<
   CabinetNode,
-  | 'family'
-  | 'variant'
-  | 'widthMm'
-  | 'heightMm'
-  | 'depthMm'
-  | 'interior'
-  | 'frontReveal'
-  | 'toeKick'
-  | 'handle'
+  'family' | 'variant' | 'widthMm' | 'heightMm' | 'depthMm' | 'interior' | 'frontReveal' | 'toeKick'
 > &
   Partial<
     Pick<
@@ -21,7 +13,6 @@ export type CabinetSpec = Pick<
       | 'endPanels'
       | 'bodyColor'
       | 'frontColor'
-      | 'handleColor'
       | 'top'
       | 'topSetbackMm'
       | 'topStretcher'
@@ -179,7 +170,6 @@ function tall(width: number, interior: CabinetCell, depth = DEPTH): CabinetSpec 
     interior,
     frontReveal: REVEAL,
     toeKick: TOE,
-    handle: 'bar',
   }
 }
 
@@ -220,7 +210,6 @@ function base(width: number, interior: CabinetCell, topRailMm = 60): CabinetSpec
     interior,
     frontReveal: { top: 20, bottom: -5, side: 1.5, between: 3 },
     toeKick: TOE,
-    handle: 'none',
     top: 'none',
     channels: [channel(BASE_BODY - 60, 60, topRailMm)],
   }
@@ -292,7 +281,6 @@ function upper(width: number, interior: CabinetCell): CabinetSpec {
     interior,
     frontReveal: UPPER_REVEAL,
     toeKick: NO_TOE,
-    handle: 'bar',
   }
 }
 

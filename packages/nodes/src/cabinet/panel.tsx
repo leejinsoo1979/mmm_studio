@@ -725,15 +725,6 @@ export default function CabinetPanel() {
             onChange={(right) => update({ endPanels: { ...node.endPanels, right } })}
           />
         </ActionGroup>
-        <SegmentedControl
-          onChange={(handle) => update({ handle })}
-          options={[
-            { label: '손잡이 없음', value: 'none' },
-            { label: '바', value: 'bar' },
-            { label: '노브', value: 'knob' },
-          ]}
-          value={node.handle}
-        />
         <ColorField
           label="몸통 색"
           onCommit={(bodyColor) => update({ bodyColor })}
@@ -743,11 +734,6 @@ export default function CabinetPanel() {
           label="도어 색"
           onCommit={(frontColor) => update({ frontColor })}
           value={node.frontColor}
-        />
-        <ColorField
-          label="손잡이 색"
-          onCommit={(handleColor) => update({ handleColor })}
-          value={node.handleColor}
         />
         <MmField
           label="도어 위 여유"

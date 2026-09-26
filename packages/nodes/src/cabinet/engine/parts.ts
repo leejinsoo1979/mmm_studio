@@ -58,7 +58,6 @@ export type PartRole =
   | 'rod'
   | 'pants-hanger'
   | 'foot'
-  | 'handle'
   | 'appliance'
   | 'channel-frame'
 
@@ -572,16 +571,6 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
           d: FRONT_THICKNESS_MM,
         },
       })
-      if (node.handle !== 'none') {
-        push({
-          id: `handle-${leaf.id}-${i}`,
-          role: 'handle',
-          name: '손잡이',
-          material: 'metal',
-          finish: 'hardware',
-          box: handleBox(node, { x0: rect.x0, x1: rect.x1, y0, y1: y0 + frontH }, 'drawer', frontZ),
-        })
-      }
     }
   }
 
@@ -1015,16 +1004,6 @@ function buildDoorLeaves(
       cellId: ownerId,
       box: { x: rect.x0, y: rect.y0, z: frontZ, w: width, h: height, d: FRONT_THICKNESS_MM },
     })
-    if (node.handle !== 'none') {
-      push({
-        id: `handle-${ownerId}`,
-        role: 'handle',
-        name: '손잡이',
-        material: 'metal',
-        finish: 'hardware',
-        box: handleBox(node, rect, 'drawer', frontZ),
-      })
-    }
     return
   }
   if (front.type === 'flap') {
@@ -1039,16 +1018,6 @@ function buildDoorLeaves(
       hingePositionsMm: hingePositionsMm(width),
       box: { x: rect.x0, y: rect.y0, z: frontZ, w: width, h: height, d: FRONT_THICKNESS_MM },
     })
-    if (node.handle !== 'none') {
-      push({
-        id: `handle-${ownerId}`,
-        role: 'handle',
-        name: '손잡이',
-        material: 'metal',
-        finish: 'hardware',
-        box: handleBox(node, rect, 'flap', frontZ),
-      })
-    }
     return
   }
   const leaves =
@@ -1080,47 +1049,7 @@ function buildDoorLeaves(
       hingePositionsMm: hingePositionsMm(height),
       box: { x: x0, y: rect.y0, z: frontZ, w: leafW, h: height, d: FRONT_THICKNESS_MM },
     })
-    if (node.handle !== 'none') {
-      push({
-        id: `handle-${ownerId}-${i}`,
-        role: 'handle',
-        name: '손잡이',
-        material: 'metal',
-        finish: 'hardware',
-        box: handleBox(node, leafRect, hinge === 'left' ? 'door-right' : 'door-left', frontZ),
-      })
-    }
   }
-}
-
-/** Handle placement: on the opening edge of a door, centred on drawers,
- *  low on flaps. Reads naturally for each family (upper cabinets low, base
- *  cabinets high, tall units at ~1000 mm). */
-function handleBox(
-  node: CabinetNode,
-  rect: CellRect,
-  where: 'door-left' | 'door-right' | 'drawer' | 'flap',
-  frontZ: number,
-) {
-  const knob = node.handle === 'knob'
-  const len = knob
-    ? 30
-    : where === 'drawer' || where === 'flap'
-      ? Math.min(320, (rect.x1 - rect.x0) * 0.5)
-      : 160
-  const t = knob ? 30 : 14
-  const z = frontZ + FRONT_THICKNESS_MM
-  if (where === 'drawer' || where === 'flap') {
-    const cx = (rect.x0 + rect.x1) / 2
-    const cy = where === 'flap' ? rect.y0 + 45 : rect.y1 - Math.min(60, (rect.y1 - rect.y0) / 2)
-    return { x: cx - len / 2, y: cy - t / 2, z, w: len, h: t, d: 24 }
-  }
-  const x = where === 'door-right' ? rect.x1 - 45 - t / 2 : rect.x0 + 45 - t / 2
-  let cy: number
-  if (node.family === 'upper') cy = rect.y0 + 40 + len / 2
-  else if (node.family === 'base') cy = rect.y1 - 40 - len / 2
-  else cy = Math.min(Math.max(1000 - node.toeKick.heightMm, rect.y0 + len), rect.y1 - len)
-  return { x, y: cy - len / 2, z, w: t, h: len, d: 24 }
 }
 
 /** Hinge cup centre on the door leaf (leaf-local mm, from its left/bottom). */
