@@ -1,8 +1,16 @@
-import type { FloorplanGeometry, GeometryContext, LightNode } from '@pascal-app/core'
+import type {
+  ElectricalState,
+  FloorplanGeometry,
+  GeometryContext,
+  LightNode,
+} from '@pascal-app/core'
 
 export function buildLightFloorplan(node: LightNode, ctx: GeometryContext): FloorplanGeometry {
   const [x, , z] = node.position
-  const color = node.enabled ? node.color : '#777777'
+  // Wired lights show their circuit state (the wiring simulation).
+  const wiring = (ctx.levelData as ElectricalState | undefined)?.lights.get(node.id)
+  const lit = node.enabled && (!wiring?.wired || wiring.powered)
+  const color = lit ? node.color : '#777777'
   const children: FloorplanGeometry[] = [
     {
       kind: 'circle',

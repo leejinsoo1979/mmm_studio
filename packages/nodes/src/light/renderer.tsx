@@ -1,6 +1,6 @@
 'use client'
 
-import { type LightNode, useRegistry } from '@pascal-app/core'
+import { isLightLit, type LightNode, useRegistry, useScene } from '@pascal-app/core'
 import { useNodeEvents, useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useRef } from 'react'
 import type { Group, SpotLight } from 'three'
@@ -24,7 +24,8 @@ const LightRenderer = ({ node }: { node: LightNode }) => {
     }
   }, [])
 
-  const active = node.visible !== false && node.enabled
+  // Wired lights follow their circuit (switch + breaker); others their own flag.
+  const active = useScene((s) => isLightLit(s.nodes, node.id))
   const castShadow = active && shadows && node.castShadow && node.kind !== 'area'
   const glowScale = useMemo(() => {
     const intensity = active ? node.intensity : 0

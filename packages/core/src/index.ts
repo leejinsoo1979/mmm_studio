@@ -8,6 +8,7 @@ export type {
   ColumnEvent,
   DoorEvent,
   DormerEvent,
+  ElectricPanelEvent,
   ElevatorEvent,
   EventSuffix,
   FenceEvent,
@@ -17,6 +18,7 @@ export type {
   ItemEvent,
   LevelEvent,
   LightEvent,
+  LightSwitchEvent,
   NodeEvent,
   RidgeVentEvent,
   RoofEvent,
@@ -33,6 +35,7 @@ export type {
   StairSegmentEvent,
   WallEvent,
   WindowEvent,
+  WireEvent,
   ZoneEvent,
 } from './events/bus'
 export { emitter, eventSuffixes } from './events/bus'
@@ -177,6 +180,13 @@ export {
   hiddenLeafOutline,
   type SectionPoint,
 } from './systems/door/hidden-door'
+export {
+  type DeviceTerminal,
+  deviceTerminals,
+  type ElectricalState,
+  isLightLit,
+  solveElectrical,
+} from './systems/electrical/circuit'
 export { resolveElevatorDispatchTarget } from './systems/elevator/elevator-dispatch'
 export {
   type ElevatorDoorSide,

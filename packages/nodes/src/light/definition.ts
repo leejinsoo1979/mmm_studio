@@ -1,4 +1,9 @@
-import type { HandleDescriptor, LightNode as LightNodeType, NodeDefinition } from '@pascal-app/core'
+import {
+  type HandleDescriptor,
+  type LightNode as LightNodeType,
+  type NodeDefinition,
+  solveElectrical,
+} from '@pascal-app/core'
 import { buildLightFloorplan } from './floorplan'
 import { lightParametrics } from './parametrics'
 import { LightNode } from './schema'
@@ -49,6 +54,9 @@ export const lightDefinition: NodeDefinition<typeof LightNode> = {
   handles: [moveHandle()],
   renderer: { kind: 'parametric', module: () => import('./renderer') },
   floorplan: buildLightFloorplan,
+  // On / off in the plan follows the wiring simulation.
+  floorplanDependsOnSiblings: true,
+  computeFloorplanLevelData: ({ nodes }) => solveElectrical(nodes),
   tool: () => import('./tool'),
   toolHints: [
     { key: 'Left click', label: 'Place light' },

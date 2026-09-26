@@ -1,0 +1,1 @@
+export { wireDefinition } from './definition'

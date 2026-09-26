@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { BaseNode, nodeType, objectId } from '../base'
 import { CeilingNode } from './ceiling'
 import { ColumnNode } from './column'
+import { ElectricPanelNode, LightSwitchNode, WireNode } from './electrical'
 import { FenceNode } from './fence'
 import { GuideNode } from './guide'
 import { ItemNode } from './item'
@@ -27,6 +28,9 @@ export const LevelNode = BaseNode.extend({
         ColumnNode.shape.id,
         ItemNode.shape.id,
         LightNode.shape.id,
+        LightSwitchNode.shape.id,
+        ElectricPanelNode.shape.id,
+        WireNode.shape.id,
         ZoneNode.shape.id,
         SlabNode.shape.id,
         CeilingNode.shape.id,

@@ -5,6 +5,7 @@ import { CursorSphere, isGridSnapActive, triggerSFX, useEditor } from '@pascal-a
 import { useViewer } from '@pascal-app/viewer'
 import { forwardRef, useEffect, useRef } from 'react'
 import { DoubleSide, type Group } from 'three'
+import { ceilingHeightAt } from '../shared/ceiling-height'
 import {
   type FloorPlacementClickTriggerEvent,
   getLevelLocalSnappedPosition,
@@ -12,7 +13,8 @@ import {
   subscribeFloorPlacementClicks,
 } from '../shared/floor-placement'
 
-type LightToolDefaults = { kind?: LightNode['kind']; height?: number }
+/** `ceiling`: mount just under the ceiling that covers the click (천장등). */
+type LightToolDefaults = { kind?: LightNode['kind']; height?: number; ceiling?: boolean }
 
 const DEFAULT_LIGHT_PROPS: Record<
   LightNode['kind'],
@@ -22,6 +24,9 @@ const DEFAULT_LIGHT_PROPS: Record<
   spot: { decay: 1.15, distance: 22, intensity: 140 },
   area: { decay: 1, distance: 0, intensity: 180 },
 }
+
+/** A ceiling light hangs this far under the ceiling surface. */
+const CEILING_DROP_M = 0.05
 
 const LightTool = () => {
   const levelId = useViewer((state) => state.selection.levelId)
@@ -43,7 +48,10 @@ const LightTool = () => {
       const z = isGridSnapActive()
         ? Math.round(event.localPosition[2] / step) * step
         : event.localPosition[2]
-      lastPosition = [x, placementHeight, z]
+      const ceiling = defaults.ceiling
+        ? ceilingHeightAt(useScene.getState().nodes, levelId, x, z)
+        : null
+      lastPosition = [x, ceiling !== null ? ceiling - CEILING_DROP_M : placementHeight, z]
       cursorRef.current?.position.set(x, 0, z)
     }
 
@@ -57,7 +65,7 @@ const LightTool = () => {
       const position = lastPosition ?? [fallback[0], placementHeight, fallback[2]]
       const lightProps = DEFAULT_LIGHT_PROPS[kind]
       const light = LightNode.parse({
-        name: `${kind[0]?.toUpperCase()}${kind.slice(1)} Light`,
+        name: defaults.ceiling ? '천장등' : `${kind[0]?.toUpperCase()}${kind.slice(1)} Light`,
         kind,
         position,
         rotation: kind === 'area' ? [-Math.PI / 2, 0, 0] : [0, 0, 0],

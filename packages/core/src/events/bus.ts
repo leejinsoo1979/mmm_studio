@@ -14,6 +14,7 @@ import type {
   DuctFittingNode,
   DuctSegmentNode,
   DuctTerminalNode,
+  ElectricPanelNode,
   ElevatorNode,
   EyebrowVentNode,
   FenceNode,
@@ -23,6 +24,7 @@ import type {
   ItemNode,
   LevelNode,
   LightNode,
+  LightSwitchNode,
   LinesetNode,
   LiquidLineNode,
   PipeFittingNode,
@@ -43,6 +45,7 @@ import type {
   TurbineVentNode,
   WallNode,
   WindowNode,
+  WireNode,
   ZoneNode,
 } from '../schema'
 import type { AnyNode } from '../schema/types'
@@ -92,6 +95,9 @@ export type SiteEvent = NodeEvent<SiteNode>
 export type BuildingEvent = NodeEvent<BuildingNode>
 export type LevelEvent = NodeEvent<LevelNode>
 export type LightEvent = NodeEvent<LightNode>
+export type LightSwitchEvent = NodeEvent<LightSwitchNode>
+export type ElectricPanelEvent = NodeEvent<ElectricPanelNode>
+export type WireEvent = NodeEvent<WireNode>
 export type ZoneEvent = NodeEvent<ZoneNode>
 export type ShelfEvent = NodeEvent<ShelfNode>
 export type SlabEvent = NodeEvent<SlabNode>
@@ -262,6 +268,9 @@ type EditorEvents = GridEvents &
   NodeEvents<'elevator', ElevatorEvent> &
   NodeEvents<'level', LevelEvent> &
   NodeEvents<'light', LightEvent> &
+  NodeEvents<'light-switch', LightSwitchEvent> &
+  NodeEvents<'electric-panel', ElectricPanelEvent> &
+  NodeEvents<'wire', WireEvent> &
   NodeEvents<'zone', ZoneEvent> &
   NodeEvents<'slab', SlabEvent> &
   NodeEvents<'shelf', ShelfEvent> &

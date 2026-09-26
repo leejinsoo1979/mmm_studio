@@ -12,6 +12,7 @@ import { downspoutDefinition } from './downspout'
 import { ductFittingDefinition } from './duct-fitting'
 import { ductSegmentDefinition } from './duct-segment'
 import { ductTerminalDefinition } from './duct-terminal'
+import { electricPanelDefinition } from './electric-panel'
 import { elevatorDefinition } from './elevator'
 import { eyebrowVentDefinition } from './eyebrow-vent'
 import { fenceDefinition } from './fence'
@@ -21,6 +22,7 @@ import { hvacEquipmentDefinition } from './hvac-equipment'
 import { itemDefinition } from './item'
 import { levelDefinition } from './level'
 import { lightDefinition } from './light'
+import { lightSwitchDefinition } from './light-switch'
 import { linesetDefinition } from './lineset'
 import { liquidLineDefinition } from './liquid-line'
 import { pipeFittingDefinition } from './pipe-fitting'
@@ -41,6 +43,7 @@ import { stairSegmentDefinition } from './stair-segment'
 import { turbineVentDefinition } from './turbine-vent'
 import { wallDefinition } from './wall'
 import { windowDefinition } from './window'
+import { wireDefinition } from './wire'
 import { zoneDefinition } from './zone'
 
 /**
@@ -74,6 +77,9 @@ export const builtinPlugin: Plugin = {
     windowDefinition as unknown as AnyNodeDefinition,
     itemDefinition as unknown as AnyNodeDefinition,
     lightDefinition as unknown as AnyNodeDefinition,
+    lightSwitchDefinition as unknown as AnyNodeDefinition,
+    electricPanelDefinition as unknown as AnyNodeDefinition,
+    wireDefinition as unknown as AnyNodeDefinition,
     // Stage A — wrap-exports the legacy renderer + system. Legacy
     // panels / move tools / floorplan branches still serve these.
     columnDefinition as unknown as AnyNodeDefinition,
@@ -170,6 +176,7 @@ export { downspoutDefinition } from './downspout'
 export { ductFittingDefinition } from './duct-fitting'
 export { ductSegmentDefinition } from './duct-segment'
 export { ductTerminalDefinition } from './duct-terminal'
+export { electricPanelDefinition } from './electric-panel'
 export { elevatorDefinition } from './elevator'
 export { eyebrowVentDefinition } from './eyebrow-vent'
 export { fenceDefinition } from './fence'
@@ -179,6 +186,7 @@ export { hvacEquipmentDefinition } from './hvac-equipment'
 export { itemDefinition } from './item'
 export { levelDefinition } from './level'
 export { lightDefinition } from './light'
+export { lightSwitchDefinition } from './light-switch'
 export { linesetDefinition } from './lineset'
 export { liquidLineDefinition, useLiquidLineToolOptions } from './liquid-line'
 export { pipeFittingDefinition } from './pipe-fitting'
@@ -204,4 +212,5 @@ export {
   wallDefinition,
 } from './wall'
 export { windowDefinition } from './window'
+export { wireDefinition } from './wire'
 export { zoneDefinition } from './zone'

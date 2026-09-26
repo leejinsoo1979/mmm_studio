@@ -63,6 +63,13 @@ export { DuctFittingNode } from './nodes/duct-fitting'
 export { DuctSegmentNode } from './nodes/duct-segment'
 export { DuctTerminalNode } from './nodes/duct-terminal'
 export {
+  ElectricCircuit,
+  ElectricPanelNode,
+  LightSwitchNode,
+  WireEnd,
+  WireNode,
+} from './nodes/electrical'
+export {
   ElevatorDoorPanelStyle,
   ElevatorDoorStyle,
   ElevatorNode,

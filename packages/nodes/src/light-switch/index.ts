@@ -1,0 +1,1 @@
+export { lightSwitchDefinition } from './definition'
