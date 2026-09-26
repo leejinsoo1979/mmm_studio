@@ -6,6 +6,21 @@ import { DoorNode } from './door'
 import { ItemNode } from './item'
 import { WindowNode } from './window'
 
+/**
+ * mmmcraft wall construction (시공 방식): 목상 (timber studs behind board
+ * finishes on one face) or 떡가베 (boards bonded on both faces). `side` is
+ * the finished face, left or right of the start → end direction as seen on
+ * the plan; `studSpacing` (mm) repeats the 30 mm timber studs. Absent =
+ * 일반 벽. `thickness` always includes the finish build-up.
+ */
+export const WallConstruction = z.object({
+  kind: z.enum(['timber', 'bonded']),
+  side: z.enum(['left', 'right']).default('left'),
+  bothFaces: z.literal(true).optional(),
+  studSpacing: z.number().min(30).optional(),
+})
+export type WallConstruction = z.infer<typeof WallConstruction>
+
 export const WallNode = BaseNode.extend({
   id: objectId('wall'),
   type: nodeType('wall'),
@@ -28,6 +43,7 @@ export const WallNode = BaseNode.extend({
   // in a follow-up once migrated scenes are the norm.
   slots: z.record(z.string(), z.string()).optional(),
   thickness: z.number().optional(),
+  construction: WallConstruction.optional(),
   height: z.number().optional(),
   curveOffset: z.number().optional(),
   // e.g., start/end points for path
@@ -39,7 +55,8 @@ export const WallNode = BaseNode.extend({
 }).describe(
   dedent`
   Wall node - used to represent a wall in the building
-  - thickness: thickness in meters
+  - thickness: thickness in meters (including any construction finish)
+  - construction: 목상 / 떡가베 construction; absent for a plain wall
   - height: height in meters
   - curveOffset: midpoint sagitta offset used to bend the wall into an arc
   - start: start point of the wall in level coordinate system

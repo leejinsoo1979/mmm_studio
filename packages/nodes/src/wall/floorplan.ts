@@ -1,16 +1,22 @@
 import {
   type AnyNode,
+  CAD_BOARD_BACK_MM,
+  CAD_STUD_SIZE_MM,
   calculateLevelMiters,
   type FloorplanGeometry,
   type FloorplanPoint,
+  finishDepthToOffsetMm,
   type GeometryContext,
   getWallCurveLength,
   getWallInnerFaceLine,
   getWallMidpointHandlePoint,
   getWallPlanFootprint,
   isCurvedWall,
+  timberStudCentresMm,
   type WallMiterData,
   type WallNode,
+  wallConstructionLayers,
+  wallLeftNormal,
 } from '@pascal-app/core'
 
 // Same constants the legacy `getFloorplanWall` uses (editor/lib/floorplan/walls.ts).
@@ -22,6 +28,8 @@ const FLOORPLAN_MAX_EXTRA_THICKNESS = 0.035
 
 function floorplanWallThickness(wall: WallNode): number {
   const baseThickness = wall.thickness ?? 0.1
+  // A constructed wall draws its real layers, so it keeps its true thickness.
+  if (wall.construction) return baseThickness
   const scaledThickness = baseThickness * FLOORPLAN_WALL_THICKNESS_SCALE
   return Math.min(
     baseThickness + FLOORPLAN_MAX_EXTRA_THICKNESS,
@@ -126,6 +134,10 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
       cursor: isSelected ? 'default' : undefined,
     },
   ]
+
+  if (node.construction && !isCurvedWall(node)) {
+    children.push(...constructionLayers(node, points, ctx.children))
+  }
 
   // Hit-line on the centerline. Stroke width is in screen pixels so it
   // stays clickable at any zoom. Replaced by the body-drag handle below
@@ -285,6 +297,116 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
   }
 
   return { kind: 'group', children }
+}
+
+const LAYER_STROKE = '#697586'
+const STUD_COLOR = '#bd9969'
+const STUD_DEPTH_MM: [number, number] = [CAD_BOARD_BACK_MM, CAD_BOARD_BACK_MM + CAD_STUD_SIZE_MM]
+
+/** Sutherland–Hodgman: keep the part of `poly` where f(p) ≥ 0 (f linear). */
+function clipHalfPlane(poly: FloorplanPoint[], f: (p: FloorplanPoint) => number): FloorplanPoint[] {
+  const out: FloorplanPoint[] = []
+  for (let i = 0; i < poly.length; i += 1) {
+    const a = poly[i] as FloorplanPoint
+    const b = poly[(i + 1) % poly.length] as FloorplanPoint
+    const fa = f(a)
+    const fb = f(b)
+    if (fa >= 0) out.push(a)
+    if (fa >= 0 !== fb >= 0) {
+      const t = fa / (fa - fb)
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t])
+    }
+  }
+  return out
+}
+
+function polygonArea(poly: FloorplanPoint[]): number {
+  let area = 0
+  for (let i = 0; i < poly.length; i += 1) {
+    const a = poly[i] as FloorplanPoint
+    const b = poly[(i + 1) % poly.length] as FloorplanPoint
+    area += a[0] * b[1] - b[0] * a[1]
+  }
+  return Math.abs(area) / 2
+}
+
+/**
+ * mmmcraft `WallConstruction2D`: each finish / core layer (and 목상 stud)
+ * is the mitred footprint clipped to its depth band, on the floor-level
+ * pieces between doors, so corners wrap like the plain wall and door gaps
+ * stay open. Unfilled bands are the stud / adhesive cavities.
+ */
+function constructionLayers(
+  wall: WallNode,
+  footprint: FloorplanPoint[],
+  children: readonly AnyNode[],
+): FloorplanGeometry[] {
+  const c = wall.construction
+  if (!c) return []
+  const T = (wall.thickness ?? 0.1) * 1000
+  const [sx, sz] = wall.start
+  const len = Math.hypot(wall.end[0] - sx, wall.end[1] - sz)
+  if (len < 1e-6) return []
+  const u: [number, number] = [(wall.end[0] - sx) / len, (wall.end[1] - sz) / len]
+  const n = wallLeftNormal(wall)
+  const along = (p: FloorplanPoint) => (p[0] - sx) * u[0] + (p[1] - sz) * u[1]
+  const across = (p: FloorplanPoint) => (p[0] - sx) * n[0] + (p[1] - sz) * n[1]
+
+  // Floor-level pieces: doors cut the wall, windows do not.
+  const doors = children
+    .filter((ch) => ch.type === 'door')
+    .map((ch) => {
+      const d = ch as unknown as { position: [number, number, number]; width: number }
+      return [d.position[0] - d.width / 2, d.position[0] + d.width / 2] as const
+    })
+    .sort((a, b) => a[0] - b[0])
+  const pieces: [number, number][] = []
+  let cursor = Number.NEGATIVE_INFINITY
+  for (const [a, b] of doors) {
+    if (a > cursor) pieces.push([cursor, a])
+    cursor = Math.max(cursor, b)
+  }
+  pieces.push([cursor, Number.POSITIVE_INFINITY])
+
+  const band = (fromMm: number, toMm: number, x0: number, x1: number) => {
+    const o1 = finishDepthToOffsetMm(T, c.side, fromMm) / 1000
+    const o2 = finishDepthToOffsetMm(T, c.side, toMm) / 1000
+    const lo = Math.min(o1, o2)
+    const hi = Math.max(o1, o2)
+    let poly = clipHalfPlane(footprint, (p) => across(p) - lo)
+    poly = clipHalfPlane(poly, (p) => hi - across(p))
+    if (Number.isFinite(x0)) poly = clipHalfPlane(poly, (p) => along(p) - x0)
+    if (Number.isFinite(x1)) poly = clipHalfPlane(poly, (p) => x1 - along(p))
+    return poly.length >= 3 && polygonArea(poly) > 1e-8 ? poly : null
+  }
+  const style = (fill: string): Partial<FloorplanGeometry> => ({
+    fill,
+    stroke: LAYER_STROKE,
+    strokeWidth: 0.7,
+    vectorEffect: 'non-scaling-stroke',
+    pointerEvents: 'none',
+  })
+
+  const out: FloorplanGeometry[] = []
+  for (const [x0, x1] of pieces) {
+    for (const layer of wallConstructionLayers(T, c)) {
+      const poly = band(layer.fromMm, layer.toMm, x0, x1)
+      if (!poly) continue
+      out.push({
+        kind: 'polygon',
+        points: poly,
+        ...style(layer.id === 'core' ? 'none' : layer.color),
+      } as FloorplanGeometry)
+    }
+  }
+  const half = CAD_STUD_SIZE_MM / 2000
+  for (const xMm of timberStudCentresMm(len * 1000, c)) {
+    const x = xMm / 1000
+    if (!pieces.some(([a, b]) => x - half >= a && x + half <= b)) continue
+    const poly = band(STUD_DEPTH_MM[0], STUD_DEPTH_MM[1], x - half, x + half)
+    if (poly) out.push({ kind: 'polygon', points: poly, ...style(STUD_COLOR) } as FloorplanGeometry)
+  }
+  return out
 }
 
 function wallCentroid(walls: WallNode[]): [number, number] {

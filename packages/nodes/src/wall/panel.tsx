@@ -3,6 +3,7 @@
 import {
   type AnyNode,
   type AnyNodeId,
+  constructionBuildUpMm,
   getClampedWallCurveOffset,
   getMaxWallCurveOffset,
   getWallCurveLength,
@@ -10,6 +11,8 @@ import {
   useLiveNodeOverrides,
   useScene,
   type WallNode,
+  wallConstructionError,
+  withWallConstruction,
 } from '@pascal-app/core'
 import {
   ActionButton,
@@ -26,7 +29,8 @@ import {
 } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { Spline } from 'lucide-react'
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { WallConstructionFields } from './construction-fields'
 
 export default function WallPanel() {
   const selectedId = useViewer((s) => s.selection.selectedIds[0])
@@ -108,6 +112,19 @@ export default function WallPanel() {
     [handleUpdate],
   )
 
+  const [constructionError, setConstructionError] = useState<string | null>(null)
+  const applyConstruction = useCallback(
+    (next: WallNode['construction']) => {
+      const n = nodeRef.current
+      if (!n) return
+      const updates = withWallConstruction(n, next)
+      const error = wallConstructionError({ ...n, ...updates })
+      setConstructionError(error)
+      if (!error) handleUpdate(updates)
+    },
+    [handleUpdate],
+  )
+
   const handleClose = useCallback(() => {
     setSelection({ selectedIds: [] })
   }, [setSelection])
@@ -124,7 +141,9 @@ export default function WallPanel() {
   const length = getWallCurveLength(node)
 
   const height = node.height ?? 2.5
-  const thickness = node.thickness ?? 0.1
+  // A constructed wall edits its core (벽체 두께); the finish build-up rides on top.
+  const buildUp = constructionBuildUpMm(node.construction) / 1000
+  const thickness = (node.thickness ?? 0.1) - buildUp
   const curveOffset = getClampedWallCurveOffset(node)
   const maxCurveOffset = getMaxWallCurveOffset(node)
   const unitLabel = getLinearUnitLabel(unit)
@@ -172,12 +191,13 @@ export default function WallPanel() {
           value={Math.round(displayHeight * 100) / 100}
         />
         <SliderControl
-          label="Thickness"
+          label={node.construction ? '벽체 두께' : 'Thickness'}
           max={metersToLinearUnit(1, unit)}
           min={metersToLinearUnit(0.05, unit)}
           onChange={(v) =>
             handleUpdate({
-              thickness: linearControlValueToMeters(v, unit, { maxMeters: 1, minMeters: 0.05 }),
+              thickness:
+                linearControlValueToMeters(v, unit, { maxMeters: 1, minMeters: 0.05 }) + buildUp,
             })
           }
           precision={3}
@@ -207,6 +227,11 @@ export default function WallPanel() {
             value={Math.round(displayCurveOffset * 100) / 100}
           />
         )}
+      </PanelSection>
+
+      <PanelSection title="시공">
+        <WallConstructionFields onChange={applyConstruction} value={node.construction} />
+        {constructionError && <p className="text-red-400 text-xs">{constructionError}</p>}
       </PanelSection>
 
       {!hasWallChildrenBlockingCurve && (

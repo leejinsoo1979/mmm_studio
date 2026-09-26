@@ -214,6 +214,22 @@ export { createSurfaceOpeningPreviewController } from './systems/stair/stair-ope
 export { syncAutoStairOpenings } from './systems/stair/stair-opening-sync'
 export { StairOpeningSystem } from './systems/stair/stair-opening-system'
 export {
+  CAD_BOARD_BACK_MM,
+  CAD_STUD_SIZE_MM,
+  constructionBuildUpMm,
+  finishDepthToOffsetMm,
+  normalizeWallConstruction,
+  timberStudCentresMm,
+  WALL_CONSTRUCTION_KINDS,
+  type WallConstructionLayer,
+  wallConstructionError,
+  wallConstructionLayers,
+  wallCoreThicknessMm,
+  wallLeftNormal,
+  wallThicknessMm,
+  withWallConstruction,
+} from './systems/wall/wall-construction'
+export {
   getClampedWallCurveOffset,
   getMaxWallCurveOffset,
   getWallChordFrame,

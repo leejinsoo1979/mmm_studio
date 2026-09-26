@@ -2,7 +2,7 @@
 
 import { type AssetInput, nodeRegistry } from '@pascal-app/core'
 import { triggerSFX, useEditor } from '@pascal-app/editor'
-import { useLiquidLineToolOptions } from '@pascal-app/nodes'
+import { useLiquidLineToolOptions, WallConstructionFields } from '@pascal-app/nodes'
 import { ChevronLeft, Search } from 'lucide-react'
 import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
@@ -13,6 +13,7 @@ import {
   TooltipTrigger,
 } from '@/components/toolbar-tooltip'
 import { cn } from '@/lib/utils'
+import { useWallDrawingDefaults, wallDrawingToolDefaults } from '@/lib/wall-drawing-defaults'
 
 type BuildToolKind =
   | 'wall'
@@ -183,7 +184,12 @@ function activateBuildTool(kind: BuildToolKind | MepToolKind): void {
   ed.setPhase('structure')
   ed.setStructureLayer('elements')
   ed.setCatalogCategory(null)
-  ed.setToolDefaults(kind, null)
+  ed.setToolDefaults(
+    kind,
+    kind === 'wall'
+      ? wallDrawingToolDefaults(useWallDrawingDefaults.getState().construction)
+      : null,
+  )
   if (kind === 'wall') ed.setSnappingMode('wall', 'lines')
   ed.setMode('build')
   ed.setTool(kind)
@@ -194,7 +200,10 @@ function activateRectangleRoomTool(): void {
   ed.setPhase('structure')
   ed.setStructureLayer('elements')
   ed.setCatalogCategory(null)
-  ed.setToolDefaults('wall', { placementMode: 'rectangle-room', thickness: 0.1 })
+  ed.setToolDefaults('wall', {
+    placementMode: 'rectangle-room',
+    ...wallDrawingToolDefaults(useWallDrawingDefaults.getState().construction),
+  })
   ed.setSnappingMode('wall', 'lines')
   ed.setMode('build')
   ed.setTool('rectangle-room')
@@ -205,7 +214,10 @@ function activateArcWallTool(): void {
   ed.setPhase('structure')
   ed.setStructureLayer('elements')
   ed.setCatalogCategory(null)
-  ed.setToolDefaults('wall', { placementMode: 'arc-wall', thickness: 0.1 })
+  ed.setToolDefaults('wall', {
+    placementMode: 'arc-wall',
+    ...wallDrawingToolDefaults(useWallDrawingDefaults.getState().construction),
+  })
   ed.setSnappingMode('wall', 'lines')
   ed.setMode('build')
   ed.setTool('wall-arc')
@@ -287,6 +299,19 @@ function Section({ children, title }: { children: React.ReactNode; title: string
       <h2 className="mb-4 font-bold text-[#f0f0f0] text-[17px] leading-none">{title}</h2>
       {children}
     </section>
+  )
+}
+
+/** mmmcraft: the construction new walls are drawn with (existing walls are
+ *  changed in their own panel). */
+function NewWallConstruction() {
+  const construction = useWallDrawingDefaults((s) => s.construction)
+  const setConstruction = useWallDrawingDefaults((s) => s.setConstruction)
+  return (
+    <div className="mt-4 rounded-xl border border-[#343434] bg-[#202020] p-3">
+      <div className="mb-2 text-[#9a9a9a] text-xs">새로 그릴 벽 · 벽체 두께 100 mm 기준</div>
+      <WallConstructionFields onChange={setConstruction} value={construction} />
+    </div>
   )
 }
 
@@ -422,6 +447,7 @@ export function BuildTab() {
                   />
                 ))}
               </div>
+              {section.id === 'walls' && <NewWallConstruction />}
             </Section>
           ))}
 
