@@ -33,7 +33,11 @@ export function cabinetFromBrush(brush: CabinetBrush): { node: CabinetNode; elev
   const preset = getCabinetPreset(brush.presetId) ?? getCabinetPreset('single-2drawer-hanging')
   if (!preset) throw new Error('cabinet presets missing')
   return {
-    node: CabinetNode.parse({ ...instantiateSpec(preset.spec()), name: preset.label }),
+    node: CabinetNode.parse({
+      ...instantiateSpec(preset.spec()),
+      name: preset.label,
+      presetId: preset.id,
+    }),
     elevationMm: preset.elevationMm,
   }
 }

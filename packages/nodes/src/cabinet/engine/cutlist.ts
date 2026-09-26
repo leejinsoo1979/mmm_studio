@@ -1,4 +1,5 @@
 import type { CabinetNode } from '../schema'
+import { defaultGrain, type Grain } from './grain'
 import { buildCabinetParts, type CabinetPart, hingeCupCentres, type PartMaterial } from './parts'
 import { HINGE_CUP_DEPTH_MM, HINGE_CUP_DIAMETER_MM, round1 } from './rules'
 
@@ -13,6 +14,13 @@ export type PanelRow = {
   cabinet: string
   /** Machining notes, e.g. 목찬넬 따내기 positions on a side panel. */
   notes: string
+  /** Wood grain: vertical = along the length's height direction (mmmcraft). */
+  grain: Grain
+}
+
+/** A panel's grain: the 패널 목록 override, else mmmcraft's name rule. */
+export function panelGrain(node: CabinetNode, name: string): Grain {
+  return node.panelGrain[name] ?? defaultGrain(name)
 }
 
 export type HardwareRow = { name: string; quantity: number; note?: string }
@@ -32,16 +40,36 @@ export function panelFace(part: CabinetPart): { thickness: number; length: numbe
   return { thickness: dims[0] ?? 0, width: dims[1] ?? 0, length: dims[2] ?? 0 }
 }
 
-/** Panel list for one cabinet: identical panels are merged with a quantity. */
-export function cabinetPanelRows(node: CabinetNode, label = node.name ?? '가구'): PanelRow[] {
+/** Panel list for one cabinet: identical panels are merged with a quantity.
+ *  `cutting` drops the panels unticked in the 패널 목록. */
+export function cabinetPanelRows(
+  node: CabinetNode,
+  label = node.name ?? '가구',
+  { cutting = false }: { cutting?: boolean } = {},
+): PanelRow[] {
   const rows = new Map<string, PanelRow>()
   for (const part of buildCabinetParts(node).parts) {
     if (!part.isPanel) continue
+    if (cutting && node.panelExclusions.includes(part.name)) continue
     const face = panelFace(part)
-    const notes = (part.notches ?? [])
-      .map((n) => `따내기 ${n.height}×${n.depth} @${n.fromBottom}`)
-      .join(', ')
-    const key = [part.name, part.material, face.thickness, face.length, face.width, notes].join('|')
+    const notes = [
+      ...(part.notches ?? []).map((n) => `따내기 ${n.height}×${n.depth} @${n.fromBottom}`),
+      ...(part.cornerNotch
+        ? [
+            `따내기 ${part.cornerNotch.width}×${part.cornerNotch.depth}(${part.cornerNotch.side === 'left' ? '좌' : '우'})`,
+          ]
+        : []),
+    ].join(', ')
+    const grain = panelGrain(node, part.name)
+    const key = [
+      part.name,
+      part.material,
+      face.thickness,
+      face.length,
+      face.width,
+      notes,
+      grain,
+    ].join('|')
     const existing = rows.get(key)
     if (existing) existing.quantity += 1
     else
@@ -54,6 +82,7 @@ export function cabinetPanelRows(node: CabinetNode, label = node.name ?? '가구
         quantity: 1,
         cabinet: label,
         notes,
+        grain,
       })
   }
   return Array.from(rows.values())
@@ -82,7 +111,13 @@ export function cabinetHardwareRows(node: CabinetNode): HardwareRow[] {
 
 export function cabinetHingeBorings(node: CabinetNode, label = node.name ?? '가구'): HingeBoring[] {
   return buildCabinetParts(node)
-    .parts.filter((part) => part.role === 'door' && part.hinge)
+    .parts.filter(
+      (part) =>
+        part.role === 'door' &&
+        part.hinge &&
+        !node.panelExclusions.includes(part.name) &&
+        !node.hingeBoringExclusions.includes(part.name),
+    )
     .map((part) => ({
       cabinet: label,
       door: part.name,
@@ -100,10 +135,13 @@ function csvCell(value: string | number): string {
 
 /** Cutlist CSV for a set of cabinets (UTF-8 with BOM so Excel reads Korean). */
 export function cutlistCsv(cabinets: { node: CabinetNode; label: string }[]): string {
-  const header = ['가구', '부재', '재질', '두께', '길이', '폭', '수량', '비고']
+  const header = ['가구', '부재', '재질', '두께', '길이', '폭', '수량', '결', '비고']
   const lines = [header.join(',')]
   for (const { node, label } of cabinets) {
-    for (const row of cabinetPanelRows(node, label)) {
+    // Stone is cut by the stone supplier, not the panel saw (mmmcraft drops
+    // 인조대리석 from its CNC list).
+    for (const row of cabinetPanelRows(node, label, { cutting: true })) {
+      if (row.material === 'stone') continue
       lines.push(
         [
           row.cabinet,
@@ -113,6 +151,7 @@ export function cutlistCsv(cabinets: { node: CabinetNode; label: string }[]): st
           row.lengthMm,
           row.widthMm,
           row.quantity,
+          row.grain === 'vertical' ? '세로' : '가로',
           row.notes,
         ]
           .map(csvCell)

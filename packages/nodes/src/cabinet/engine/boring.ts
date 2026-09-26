@@ -64,6 +64,8 @@ const HINGE_SCREW_ROW_MM = 9.5
 const HINGE_SCREW_SPACING_MM = 45
 /** Mounting-plate screws on the carcass side, mm from the front edge. */
 const BRACKET_FROM_FRONT_MM = [20, 52]
+/** mmmcraft additional dowel spacing. */
+const DOWEL_PITCH_MM = 32
 /** Parts meeting a side within this gap (clearances are 0.5–1 mm) are joined to it. */
 const JOIN_TOLERANCE_MM = 2.5
 
@@ -109,9 +111,18 @@ function sidePanel(
     if (!(fixed || part.role === 'shelf') || !joinsSide(side, part, left)) continue
     // Fixed panels are bored on their centre line; a movable shelf rests on
     // pins at its underside.
-    const row = fixed ? part.box.y + part.box.h / 2 - s.y : part.box.y - s.y
+    const baseRow = fixed ? part.box.y + part.box.h / 2 - s.y : part.box.y - s.y
+    // 다보보링 추가: 32 mm steps above and below a movable shelf's pins.
+    const rows = [baseRow]
+    for (let step = 1; !fixed && step <= (part.extraDowels ?? 0); step += 1) {
+      for (const y of [baseRow - DOWEL_PITCH_MM * step, baseRow + DOWEL_PITCH_MM * step]) {
+        if (y > 0 && y < s.h) rows.push(y)
+      }
+    }
     const frontInset = sideFront - (part.box.z + part.box.d)
-    for (const d of depthPositions(part.box.d, fixed)) {
+    for (const [row, d] of rows.flatMap((y) =>
+      depthPositions(part.box.d, fixed).map((dd) => [y, dd] as const),
+    )) {
       const p = point(row, frontInset + d)
       borings.push(
         fixed
@@ -334,11 +345,19 @@ function plainPanel(node: CabinetNode, part: CabinetPart, furnitureName: string)
 export function cabinetBoringPanels(node: CabinetNode, furnitureName: string): PanelBoringData[] {
   const { parts } = buildCabinetParts(node)
   return parts
-    .filter((part) => part.isPanel)
+    .filter(
+      (part) =>
+        part.isPanel && part.material !== 'stone' && !node.panelExclusions.includes(part.name),
+    )
     .map((part) => {
       if (part.role === 'side') return sidePanel(node, part, parts, furnitureName)
       if (isFixedHorizontal(part)) return horizontalPanel(node, part, furnitureName)
-      if (part.role === 'door' && part.hinge !== 'top')
+      // 보링숨김: the door goes out as a plain outline.
+      if (
+        part.role === 'door' &&
+        part.hinge !== 'top' &&
+        !node.hingeBoringExclusions.includes(part.name)
+      )
         return doorPanel(node, part, parts, furnitureName)
       return plainPanel(node, part, furnitureName)
     })

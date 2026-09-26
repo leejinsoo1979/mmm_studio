@@ -1,4 +1,5 @@
-import type { CabinetNode, CellFront } from '../schema'
+import { type CabinetNode, type CellFront, resolveCabinetNode } from '../schema'
+import { resolveDoorHinges, type ShelfRange } from './hinges'
 import {
   BACK_GROOVE_DEPTH_MM,
   BACK_GROOVE_OFFSET_MM,
@@ -11,9 +12,11 @@ import {
   EXTERNAL_DRAWER,
   FOOT_FRONT_INSET_MM,
   FOOT_INSET_MM,
+  FRAME_THICKNESS_MM,
   FRONT_GAP_MM,
   FRONT_THICKNESS_MM,
   HINGE_CUP_EDGE_OFFSET_MM,
+  HINGE_END_OFFSET_MM,
   hingePositionsMm,
   horizontalClearanceMm,
   INNER_DRAWER,
@@ -25,7 +28,9 @@ import {
   ROD_DROP_MM,
   round1,
   SINK_FRONT_RAIL_HEIGHT_MM,
+  SINK_TOP_HINGE_INSET_MM,
   TOP_BAND_DEPTH_MM,
+  TOP_NOTCH_DEPTH_MM,
 } from './rules'
 import {
   type CellRect,
@@ -60,11 +65,13 @@ export type PartRole =
   | 'foot'
   | 'appliance'
   | 'channel-frame'
+  | 'top-moulding'
+  | 'stone-top'
 
-export type PartMaterial = 'PB' | 'MDF' | 'PET' | 'metal' | 'appliance'
+export type PartMaterial = 'PB' | 'MDF' | 'PET' | 'metal' | 'appliance' | 'stone'
 
 /** Which colour a part takes in 3D (carcass, fronts, or hardware). */
-export type PartFinish = 'body' | 'front' | 'hardware' | 'appliance'
+export type PartFinish = 'body' | 'front' | 'hardware' | 'appliance' | 'stone'
 
 /** Min-corner box in cabinet-local mm: x from the left, y from the floor,
  *  z from the back (0) towards the front (depth). */
@@ -90,6 +97,10 @@ export type CabinetPart = {
   hingePositionsMm?: number[]
   /** Side panels: front notches (목찬넬 따내기), mm from the part's bottom. */
   notches?: { fromBottom: number; height: number; depth: number }[]
+  /** Movable shelves: 다보보링 추가 — extra pin rows 32 mm apart above and below. */
+  extraDowels?: number
+  /** Top panels: 상판 따내기, a rectangle cut from the back corner on `side`. */
+  cornerNotch?: { width: number; depth: number; side: 'left' | 'right' }
 }
 
 export type CabinetBuild = {
@@ -103,26 +114,51 @@ export type CabinetBuild = {
 }
 
 /** Carcass layout numbers shared by the part builder and the editors. */
-export function cabinetFrame(node: CabinetNode) {
+export function cabinetFrame(raw: CabinetNode) {
+  const node = resolveCabinetNode(raw)
   const T = node.panelThicknessMm
   const W = node.widthMm
   const H = node.heightMm
   const D = node.depthMm
-  const epL = node.endPanels.left ? END_PANEL_THICKNESS_MM : 0
-  const epR = node.endPanels.right ? END_PANEL_THICKNESS_MM : 0
+  const ep = node.endPanelOptions
+  const inside = ep.mode === 'inside'
+  // 내치: the EP sits inside the width and the carcass narrows; 외치: the
+  // carcass keeps the width and the EP is added outside it.
+  const epL = node.endPanels.left && inside ? ep.thicknessMm : 0
+  const epR = node.endPanels.right && inside ? ep.thicknessMm : 0
   const hasToeKick =
     node.family !== 'upper' && node.variant !== 'dishwasher' && node.toeKick.enabled
   const toe = hasToeKick ? node.toeKick.heightMm : 0
   const backReduction = backReductionMm(node.backThicknessMm)
   const carcassX0 = epL
   const carcassX1 = W - epR
+  const mouldingH =
+    node.family !== 'base' && node.topMoulding.enabled ? node.topMoulding.heightMm : 0
+  // EP gaps default to running alongside the 상단몰딩 / 걸레받이.
+  const epTopGap = ep.topGapMm ?? mouldingH
+  const epBottomGap = ep.bottomGapMm ?? toe
   const interior: CellRect = {
     x0: carcassX0 + T,
     x1: carcassX1 - T,
     y0: toe + (hasBottom(node) ? T : 0),
     y1: H - (hasSolidTop(node) || isBandedTop(node) ? T : 0),
   }
-  return { T, W, H, D, epL, epR, toe, hasToeKick, backReduction, carcassX0, carcassX1, interior }
+  return {
+    T,
+    W,
+    H,
+    D,
+    epL,
+    epR,
+    toe,
+    hasToeKick,
+    backReduction,
+    carcassX0,
+    carcassX1,
+    interior,
+    epTopGap,
+    epBottomGap,
+  }
 }
 
 function hasBottom(node: CabinetNode): boolean {
@@ -148,14 +184,19 @@ function hasInterior(node: CabinetNode): boolean {
  * hardware. Single source of truth for the 3D mesh, the 2D plan and the
  * panel list — nothing else recomputes panel sizes.
  */
-export function buildCabinetParts(node: CabinetNode): CabinetBuild {
+export function buildCabinetParts(raw: CabinetNode): CabinetBuild {
+  const node = resolveCabinetNode(raw)
   const f = cabinetFrame(node)
   const { T, W, H, D, toe, backReduction, carcassX0, carcassX1, interior } = f
   const parts: CabinetPart[] = []
   const issues: string[] = []
   const push = (part: Omit<CabinetPart, 'isPanel'> & { isPanel?: boolean }) => {
     parts.push({
-      isPanel: part.material === 'PB' || part.material === 'MDF' || part.material === 'PET',
+      isPanel:
+        part.material === 'PB' ||
+        part.material === 'MDF' ||
+        part.material === 'PET' ||
+        part.material === 'stone',
       ...part,
       box: roundBox(part.box),
     })
@@ -228,6 +269,16 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
           h: T,
           d: horizontalD - (isLast ? node.topSetbackMm : 0),
         },
+        // 상판 따내기 (upper cabinets): a 140 deep notch at a back corner.
+        ...(isLast && node.family === 'upper' && node.topNotch
+          ? {
+              cornerNotch: {
+                width: Math.min(node.topNotch.widthMm, horizontalW),
+                depth: Math.min(TOP_NOTCH_DEPTH_MM, horizontalD),
+                side: node.topNotch.side,
+              },
+            }
+          : {}),
       })
     } else if (isBandedTop(node)) {
       pushTopBands(node, push, horizontalX, horizontalW, H, D, T, backReduction)
@@ -358,47 +409,40 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
     }
   })
 
-  // End panels (EP) run flush with the fronts.
-  const frontDepth = FRONT_GAP_MM + FRONT_THICKNESS_MM
-  if (node.endPanels.left) {
-    push({
-      id: 'end-panel-left',
-      role: 'end-panel',
-      name: 'EP(좌)',
-      material: 'PET',
-      finish: 'front',
-      box: { x: 0, y: 0, z: 0, w: END_PANEL_THICKNESS_MM, h: H, d: D + frontDepth },
-    })
-  }
-  if (node.endPanels.right) {
-    push({
-      id: 'end-panel-right',
-      role: 'end-panel',
-      name: 'EP(우)',
-      material: 'PET',
-      finish: 'front',
-      box: {
-        x: W - END_PANEL_THICKNESS_MM,
-        y: 0,
-        z: 0,
-        w: END_PANEL_THICKNESS_MM,
-        h: H,
-        d: D + frontDepth,
-      },
-    })
-  }
+  // End panels (EP): flush with the fronts, from the body bottom − 하단 갭
+  // to its top + 상단 갭, extended by the front / back offsets.
+  if (node.endPanels.left) pushEndPanels(node, f, 'left', push)
+  if (node.endPanels.right) pushEndPanels(node, f, 'right', push)
+  // A frame strip stops at the EPs only where they reach down / up to it.
+  const frameX = (gap: number): [number, number] =>
+    gap > 0 ? [carcassX0, carcassX1] : [Math.min(carcassX0, 0), Math.max(carcassX1, W)]
+  const [toeX0, toeX1] = frameX(f.epBottomGap)
+  const [topX0, topX1] = frameX(f.epTopGap)
 
-  // Toe kick (걸레받이) + adjustable feet.
+  // Toe kick (걸레받이) + adjustable feet. mmmcraft: runs between the end
+  // panels (they reach the floor), 옵셋 pushes it back, 갭 is cut from the
+  // bottom, 폭확장 widens either end.
   if (f.hasToeKick) {
-    const setback = node.toeKick.setbackMm
-    push({
-      id: 'toe-kick',
-      role: 'toe-kick',
-      name: '걸레받이',
-      material: 'PET',
-      finish: 'front',
-      box: { x: 0, y: 0, z: D - setback - T, w: W, h: toe, d: T },
-    })
+    const kick = node.toeKick
+    const gap = Math.min(kick.gapMm, toe)
+    const [x0, x1] = frameSpan(kick.widthAdjust, toeX0, toeX1)
+    if (toe - gap > 0) {
+      push({
+        id: 'toe-kick',
+        role: 'toe-kick',
+        name: '걸레받이',
+        material: 'PET',
+        finish: 'front',
+        box: {
+          x: x0,
+          y: gap,
+          z: D - kick.setbackMm - kick.offsetMm - T,
+          w: x1 - x0,
+          h: toe - gap,
+          d: T,
+        },
+      })
+    }
     const footXs = [carcassX0 + FOOT_INSET_MM, carcassX1 - FOOT_INSET_MM]
     const footZs = [FOOT_INSET_MM, D - FOOT_FRONT_INSET_MM]
     let i = 0
@@ -417,6 +461,33 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
       }
     }
   }
+
+  // 상단몰딩 (tall / upper): on the carcass top, flush with its front; 옵셋
+  // pushes it back, 갭 is cut from the top.
+  const moulding = node.topMoulding
+  if (moulding.enabled && node.family !== 'base') {
+    const h = moulding.heightMm - Math.min(moulding.gapMm, moulding.heightMm)
+    const [x0, x1] = frameSpan(moulding.widthAdjust, topX0, topX1)
+    if (h > 0) {
+      push({
+        id: 'top-moulding',
+        role: 'top-moulding',
+        name: '상단몰딩',
+        material: 'PET',
+        finish: 'front',
+        box: {
+          x: x0,
+          y: H,
+          z: D - moulding.offsetMm - FRAME_THICKNESS_MM,
+          w: x1 - x0,
+          h,
+          d: FRAME_THICKNESS_MM,
+        },
+      })
+    }
+  }
+
+  pushTopAndBottomExtras(node, f, push)
 
   // ── Interior ───────────────────────────────────────────────────────
   if (hasInterior(node)) {
@@ -524,6 +595,22 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
           hasExternalDrawers: false,
         },
       ]
+  // Shelves and joints a hinge must keep clear of (side coordinates).
+  const shelfRanges = parts
+    .filter(
+      (p) =>
+        p.role === 'shelf' ||
+        p.role === 'fixed-shelf' ||
+        ((p.role === 'top' || p.role === 'bottom') &&
+          p.box.y > bodyY0 + 0.5 &&
+          p.box.y + p.box.h < H - 0.5),
+    )
+    .map((p) => ({
+      x0: p.box.x,
+      x1: p.box.x + p.box.w,
+      bottomMm: p.box.y - bodyY0,
+      topMm: p.box.y + p.box.h - bodyY0,
+    }))
   for (const owner of owners) {
     if (owner.front.type === 'none') continue
     if (owner.hasExternalDrawers) {
@@ -532,7 +619,25 @@ export function buildCabinetParts(node: CabinetNode): CabinetBuild {
     }
     const rect = frontRectFor(owner.rect)
     frontRects.push({ id: owner.id, rect })
-    buildDoorLeaves(node, owner.id, rect, owner.front, frontZ, push)
+    // mmmcraft side anchors: 120 above the section bottom, 120 below its top
+    // (300 under a sink cabinet's top).
+    const atTop = Math.abs(owner.rect.y1 - interior.y1) < 0.01
+    const sectionBottom =
+      Math.abs(owner.rect.y0 - interior.y0) < 0.01
+        ? bodyY0
+        : (jointCentre('y0', owner.rect) ?? owner.rect.y0 - T / 2)
+    const sectionTop = atTop ? H : (jointCentre('y1', owner.rect) ?? owner.rect.y1 + T / 2)
+    buildDoorLeaves(node, owner.id, rect, owner.front, frontZ, push, {
+      bodyY0,
+      firstSideMm: sectionBottom - bodyY0 + HINGE_END_OFFSET_MM,
+      lastSideMm:
+        sectionTop -
+        bodyY0 -
+        (atTop && node.variant === 'sink' ? SINK_TOP_HINGE_INSET_MM : HINGE_END_OFFSET_MM),
+      shelves: shelfRanges.filter((r) => r.x1 > rect.x0 && r.x0 < rect.x1),
+      carcassX0,
+      carcassX1,
+    })
   }
 
   // External drawer fronts.
@@ -660,6 +765,161 @@ function pushTopBands(
   }
 }
 
+/**
+ * One side's EP. Up to 18 mm it is a single board; thicker, mmmcraft builds
+ * a ㄷ frame: an 18 mm 측판 on the outside plus front and back 연결판 of
+ * (thickness − 18) closing it against the carcass.
+ */
+function pushEndPanels(node: CabinetNode, f: Frame, side: 'left' | 'right', push: Push) {
+  const ep = node.endPanelOptions
+  const t = ep.thicknessMm
+  const front = side === 'left' ? ep.leftFrontMm : ep.rightFrontMm
+  const back = side === 'left' ? ep.leftBackMm : ep.rightBackMm
+  const y0 = f.toe - f.epBottomGap
+  const h = f.H - y0 + f.epTopGap
+  const z0 = -back
+  const d = Math.max(0, f.D + FRONT_GAP_MM + FRONT_THICKNESS_MM + front + back)
+  if (h <= 0 || d <= 0) return
+  const inside = ep.mode === 'inside'
+  // Outer face of the EP.
+  const outer = side === 'left' ? (inside ? 0 : -t) : inside ? f.W : f.W + t
+  const dir = side === 'left' ? 1 : -1
+  const label = side === 'left' ? '좌' : '우'
+  const board = (id: string, name: string, xFrom: number, w: number, z: number, depth: number) =>
+    push({
+      id: `end-panel-${side}${id}`,
+      role: 'end-panel',
+      name,
+      material: 'PET',
+      finish: 'front',
+      box: { x: dir > 0 ? xFrom : xFrom - w, y: y0, z, w, h, d: depth },
+    })
+  if (t <= END_PANEL_THICKNESS_MM) {
+    board('', `엔드패널(${label})`, outer, t, z0, d)
+    return
+  }
+  const inner = outer + dir * END_PANEL_THICKNESS_MM
+  board('', `EP(${label})측판`, outer, END_PANEL_THICKNESS_MM, z0, d)
+  board(
+    '-front',
+    `EP(${label})전면연결판`,
+    inner,
+    t - END_PANEL_THICKNESS_MM,
+    z0 + d - END_PANEL_THICKNESS_MM,
+    END_PANEL_THICKNESS_MM,
+  )
+  board(
+    '-back',
+    `EP(${label})후면연결판`,
+    inner,
+    t - END_PANEL_THICKNESS_MM,
+    z0,
+    END_PANEL_THICKNESS_MM,
+  )
+}
+
+/** 하부 EP (upper), 상부 EP / 인조대리석 상판 (base). */
+function pushTopAndBottomExtras(node: CabinetNode, f: Frame, push: Push) {
+  const { H, D, carcassX0, carcassX1 } = f
+  if (node.family === 'upper' && node.bottomEndPanel.enabled) {
+    const b = node.bottomEndPanel
+    const z0 = Math.abs(b.backGapMm)
+    const d = D - b.frontGapMm - z0
+    if (d > 0) {
+      push({
+        id: 'bottom-end-panel',
+        role: 'end-panel',
+        name: '하부 EP',
+        material: 'PET',
+        finish: 'front',
+        box: {
+          x: carcassX0,
+          y: -END_PANEL_THICKNESS_MM,
+          z: z0,
+          w: carcassX1 - carcassX0,
+          h: END_PANEL_THICKNESS_MM,
+          d,
+        },
+      })
+    }
+  }
+  if (node.family !== 'base') return
+  const t = node.endPanelOptions.thicknessMm
+  if (node.topEndPanel.enabled) {
+    const top = node.topEndPanel
+    // Over the side EPs too when they stop at the body top.
+    const [x0, x1] =
+      f.epTopGap <= 0 ? [Math.min(0, carcassX0), Math.max(f.W, carcassX1)] : [carcassX0, carcassX1]
+    const z0 = -top.backOffsetMm
+    push({
+      id: 'top-end-panel',
+      role: 'end-panel',
+      name: '상부 EP',
+      material: 'PET',
+      finish: 'front',
+      box: { x: x0, y: H, z: z0, w: x1 - x0, h: t, d: D + top.frontOffsetMm + top.backOffsetMm },
+    })
+    if (top.backLip) {
+      push({
+        id: 'top-end-panel-lip',
+        role: 'end-panel',
+        name: '상부 EP 뒷턱',
+        material: 'PET',
+        finish: 'front',
+        box: {
+          x: x0,
+          y: H + t,
+          z: z0,
+          w: x1 - x0,
+          h: top.backLip.heightMm,
+          d: top.backLip.thicknessMm,
+        },
+      })
+    }
+    return
+  }
+  const stone = node.stoneTop
+  if (stone.thicknessMm > 0) {
+    const x0 = carcassX0 - stone.leftMm
+    const w = carcassX1 + stone.rightMm - x0
+    const z0 = -stone.backMm
+    push({
+      id: 'stone-top',
+      role: 'stone-top',
+      name: '인조대리석 상판',
+      material: 'stone',
+      finish: 'stone',
+      box: { x: x0, y: H, z: z0, w, h: stone.thicknessMm, d: D + stone.frontMm + stone.backMm },
+    })
+    if (stone.backLip) {
+      push({
+        id: 'stone-top-lip',
+        role: 'stone-top',
+        name: '인조대리석 뒷턱',
+        material: 'stone',
+        finish: 'stone',
+        box: {
+          x: x0,
+          y: H + stone.thicknessMm,
+          z: z0,
+          w,
+          h: stone.backLip.heightMm,
+          d: stone.backLip.thicknessMm,
+        },
+      })
+    }
+  }
+}
+
+/** A frame strip's x span: between the end panels, widened by 폭확장. */
+function frameSpan(
+  adjust: CabinetNode['toeKick']['widthAdjust'],
+  x0: number,
+  x1: number,
+): [number, number] {
+  return adjust.enabled ? [x0 - adjust.leftMm, x1 + adjust.rightMm] : [x0, x1]
+}
+
 function defaultFront(): CellFront {
   return { type: 'door', leaves: 'auto', hinge: 'auto' }
 }
@@ -681,7 +941,16 @@ function buildLeafContent(
   const c = leaf.content
   if (c.type === 'shelves' && c.count > 0) {
     const gap = (clearH - c.count * T) / (c.count + 1)
-    if (gap < 60) issues.push('선반 간격이 60mm보다 좁습니다')
+    // 칸 내경: explicit shelf centres, else evenly spaced.
+    const centres =
+      c.positionsMm?.length === c.count
+        ? c.positionsMm
+        : Array.from({ length: c.count }, (_, i) => gap * (i + 1) + i * T + T / 2)
+    const gaps = centres.map(
+      (y, i) => y - T / 2 - (i === 0 ? 0 : (centres[i - 1] as number) + T / 2),
+    )
+    gaps.push(clearH - ((centres.at(-1) as number) + T / 2))
+    if (Math.min(...gaps) < 60) issues.push('선반 간격이 60mm보다 좁습니다')
     const dowel = c.kind === 'dowel'
     const w = clearW - (dowel ? DOWEL_SHELF_WIDTH_CLEARANCE_MM : horizontalClearanceMm(T))
     const d = D - backReduction - (dowel ? DOWEL_SHELF_FRONT_INSET_MM : 0)
@@ -693,9 +962,10 @@ function buildLeafContent(
         material: 'PB',
         finish: 'body',
         cellId: leaf.id,
+        ...(dowel && c.extraDowels ? { extraDowels: c.extraDowels } : {}),
         box: {
           x: r.x0 + (clearW - w) / 2,
-          y: r.y0 + gap * (i + 1) + i * T,
+          y: r.y0 + (centres[i] as number) - T / 2,
           z: backReduction,
           w,
           h: T,
@@ -705,6 +975,29 @@ function buildLeafContent(
     }
   } else if (c.type === 'hanging') {
     const zMid = (backReduction + D) / 2
+    // 옷봉선반: a fixed shelf under the compartment top; the rod hangs from it.
+    let hangFrom = r.y1
+    if (c.shelfTopGapMm !== undefined) {
+      const topGap = Math.min(c.shelfTopGapMm, Math.max(0, clearH - T))
+      const w = clearW - horizontalClearanceMm(T)
+      hangFrom = r.y1 - topGap - T
+      push({
+        id: `rod-shelf-${leaf.id}`,
+        role: 'fixed-shelf',
+        name: '옷봉선반',
+        material: 'PB',
+        finish: 'body',
+        cellId: leaf.id,
+        box: {
+          x: r.x0 + (clearW - w) / 2,
+          y: hangFrom,
+          z: backReduction,
+          w,
+          h: T,
+          d: D - backReduction,
+        },
+      })
+    }
     if (c.rod === 'rod') {
       push({
         id: `rod-${leaf.id}`,
@@ -716,7 +1009,7 @@ function buildLeafContent(
         cellId: leaf.id,
         box: {
           x: r.x0 + 1,
-          y: r.y1 - ROD_DROP_MM - ROD_DIAMETER_MM / 2,
+          y: hangFrom - ROD_DROP_MM - ROD_DIAMETER_MM / 2,
           z: zMid - ROD_DIAMETER_MM / 2,
           w: clearW - 2,
           h: ROD_DIAMETER_MM,
@@ -733,7 +1026,7 @@ function buildLeafContent(
         cellId: leaf.id,
         box: {
           x: r.x0 + 20,
-          y: r.y1 - PANTS_HANGER_DROP_MM,
+          y: hangFrom - PANTS_HANGER_DROP_MM,
           z: backReduction + 20,
           w: clearW - 40,
           h: PANTS_HANGER_HEIGHT_MM,
@@ -984,6 +1277,15 @@ function pushDrawerBox(
   })
 }
 
+type DoorContext = {
+  bodyY0: number
+  firstSideMm: number
+  lastSideMm: number
+  shelves: ShelfRange[]
+  carcassX0: number
+  carcassX1: number
+}
+
 function buildDoorLeaves(
   node: CabinetNode,
   ownerId: string,
@@ -991,6 +1293,7 @@ function buildDoorLeaves(
   front: CellFront,
   frontZ: number,
   push: Push,
+  ctx: DoorContext,
 ) {
   const width = rect.x1 - rect.x0
   const height = rect.y1 - rect.y0
@@ -1025,8 +1328,18 @@ function buildDoorLeaves(
   const gap = node.frontReveal.between
   const leafW = leaves === 2 ? (width - gap) / 2 : width
   const cabinetMid = node.widthMm / 2
+  const hinges = resolveDoorHinges({
+    doorHeightMm: height,
+    doorBottomOnSideMm: rect.y0 - ctx.bodyY0,
+    firstSideMm: ctx.firstSideMm,
+    lastSideMm: ctx.lastSideMm,
+    shelves: ctx.shelves,
+    ...(front.hingesMm?.length ? { customSideMm: front.hingesMm } : {}),
+  })
+  const adjust = node.doorWidthAdjust
   for (let i = 0; i < leaves; i += 1) {
-    const x0 = rect.x0 + i * (leafW + gap)
+    let x0 = rect.x0 + i * (leafW + gap)
+    let x1 = x0 + leafW
     const hinge: 'left' | 'right' =
       leaves === 2
         ? i === 0
@@ -1037,7 +1350,25 @@ function buildDoorLeaves(
             ? 'right'
             : 'left'
           : front.hinge
-    const leafRect = { x0, x1: x0 + leafW, y0: rect.y0, y1: rect.y1 }
+    // 도어 확장/축소 (mmmcraft): a single leaf's edge away from the hinge
+    // moves to the carcass edge + v; a double door's right leaf widens by
+    // v + 3 at its outer edge. Only edges on the carcass side are moved.
+    if (adjust.enabled) {
+      if (
+        leaves === 1 &&
+        hinge === 'left' &&
+        Math.abs(x1 - (ctx.carcassX1 - node.frontReveal.side)) < 0.01
+      )
+        x1 = ctx.carcassX1 + adjust.mm
+      if (
+        leaves === 1 &&
+        hinge === 'right' &&
+        Math.abs(x0 - (ctx.carcassX0 + node.frontReveal.side)) < 0.01
+      )
+        x0 = ctx.carcassX0 - adjust.mm
+      if (leaves === 2 && i === 1 && Math.abs(x1 - (ctx.carcassX1 - node.frontReveal.side)) < 0.01)
+        x1 += adjust.mm + 3
+    }
     push({
       id: `door-${ownerId}-${i}`,
       role: 'door',
@@ -1046,8 +1377,8 @@ function buildDoorLeaves(
       finish: 'front',
       cellId: ownerId,
       hinge,
-      hingePositionsMm: hingePositionsMm(height),
-      box: { x: x0, y: rect.y0, z: frontZ, w: leafW, h: height, d: FRONT_THICKNESS_MM },
+      hingePositionsMm: hinges,
+      box: { x: x0, y: rect.y0, z: frontZ, w: x1 - x0, h: height, d: FRONT_THICKNESS_MM },
     })
   }
 }

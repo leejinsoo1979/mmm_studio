@@ -16,6 +16,8 @@ const MM = 0.001
 const APPLIANCE_COLOR = '#b9bcc0'
 /** Rods, pants hangers and feet. */
 const HARDWARE_COLOR = '#8c8c8c'
+/** mmmcraft's countertop colour when none is chosen. */
+const STONE_COLOR = '#ffffff'
 
 /**
  * Pure cabinet geometry: every part from `buildCabinetParts` becomes one mesh
@@ -35,6 +37,7 @@ export function buildCabinetGeometry(
     front: createDefaultMaterial(node.frontColor, 0.6, shading),
     hardware: createDefaultMaterial(HARDWARE_COLOR, 0.35, shading),
     appliance: createDefaultMaterial(APPLIANCE_COLOR, 0.4, shading),
+    stone: createDefaultMaterial(STONE_COLOR, 0.35, shading),
   }
   for (const part of parts) group.add(partMesh(node, part, materials[part.finish]))
   for (const child of group.children) {
@@ -64,6 +67,12 @@ function partMesh(node: CabinetNode, part: CabinetPart, material: Material): Mes
     mesh = new Mesh(geometry, material)
   } else if (part.shape === 'foot') {
     mesh = new Mesh(new CylinderGeometry((b.w / 2) * MM, (b.w / 2) * MM, b.h * MM, 12), material)
+  } else if (part.cornerNotch) {
+    mesh = new Mesh(cornerNotchGeometry(part), material)
+    mesh.position.set((b.x - node.widthMm / 2) * MM, b.y * MM, (b.z - node.depthMm / 2) * MM)
+    mesh.name = `cabinet-${part.role}-${part.id}`
+    mesh.userData.partId = part.id
+    return mesh
   } else if (part.notches?.length) {
     mesh = new Mesh(notchedSideGeometry(part), material)
     // The profile is built from the part's min corner; place that corner.
@@ -109,6 +118,48 @@ function notchedSideGeometry(part: CabinetPart) {
   // (u, v, extrude) → (z, y, x): rotate the extrude axis onto +X.
   geometry.rotateY(-Math.PI / 2)
   geometry.translate(w, 0, 0)
+  geometry.scale(MM, MM, MM)
+  return geometry
+}
+
+/**
+ * A top panel with 상판 따내기: its plan outline (x across, z from the back)
+ * minus the notch at the back corner on `side`, extruded up by the board
+ * thickness. Built from the part's min corner.
+ */
+function cornerNotchGeometry(part: CabinetPart) {
+  const { w, h, d } = part.box
+  const n = part.cornerNotch
+  const nw = Math.min(n?.width ?? 0, w)
+  const nd = Math.min(n?.depth ?? 0, d)
+  // Shape plane: u = x, v = z (0 = back). Counter-clockwise outline.
+  const pts: [number, number][] =
+    n?.side === 'left'
+      ? [
+          [nw, 0],
+          [w, 0],
+          [w, d],
+          [0, d],
+          [0, nd],
+          [nw, nd],
+        ]
+      : [
+          [0, 0],
+          [w - nw, 0],
+          [w - nw, nd],
+          [w, nd],
+          [w, d],
+          [0, d],
+        ]
+  const shape = new Shape()
+  shape.moveTo(pts[0]![0], pts[0]![1])
+  for (const [u, v] of pts.slice(1)) shape.lineTo(u, v)
+  shape.closePath()
+  const geometry = new ExtrudeGeometry(shape, { depth: h, bevelEnabled: false })
+  // (u, v, e) → (u, −e, v): the shape plane lies on XZ, extruded downwards;
+  // lift it by the thickness so it spans 0…h.
+  geometry.rotateX(Math.PI / 2)
+  geometry.translate(0, h, 0)
   geometry.scale(MM, MM, MM)
   return geometry
 }

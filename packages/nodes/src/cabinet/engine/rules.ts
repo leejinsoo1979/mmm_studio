@@ -21,6 +21,8 @@ export function horizontalClearanceMm(panelThicknessMm: number): number {
 }
 
 export const END_PANEL_THICKNESS_MM = 18
+/** 걸레받이 / 상단몰딩 strip thickness (mmmcraft END_PANEL_THICKNESS). */
+export const FRAME_THICKNESS_MM = 18
 export const FRONT_THICKNESS_MM = 18
 /** Air gap between the carcass front edge and the back of a front. */
 export const FRONT_GAP_MM = 1
@@ -73,6 +75,8 @@ export const DOUBLE_DOOR_MIN_WIDTH_MM = 600
 
 /** Hinge rule: count by leaf length, cups 120 mm from each end. */
 export const HINGE_END_OFFSET_MM = 120
+/** mmmcraft sink cabinet: the top hinge sits 300 below the body top. */
+export const SINK_TOP_HINGE_INSET_MM = 300
 export const HINGE_CUP_DIAMETER_MM = 35
 export const HINGE_CUP_DEPTH_MM = 13
 export const HINGE_CUP_EDGE_OFFSET_MM = 22.5
@@ -114,8 +118,12 @@ export function drawerRailLengthMm(availableDepthMm: number): number | null {
 }
 
 export function round1(value: number): number {
-  return Math.round(value * 10) / 10
+  // `+ 0` turns −0 (from negated zero offsets) into 0.
+  return Math.round(value * 10) / 10 + 0
 }
+
+/** mmmcraft 상판 따내기 (upper cabinets): 340×140 or 680×140. */
+export const TOP_NOTCH_DEPTH_MM = 140
 
 /** mmmcraft 인조대리석 상판: 600 deep base + 23 front offset = 623. */
 export const COUNTERTOP_DEPTH_MM = 623

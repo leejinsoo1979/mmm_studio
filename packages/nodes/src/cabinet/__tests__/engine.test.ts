@@ -98,13 +98,15 @@ describe('fronts', () => {
     expect(gap).toBe(3)
   })
 
-  test('hinge rule: count by leaf length, 120 mm from the ends', () => {
+  test('hinge rule: count by leaf length, anchored 120 mm up the side panel', () => {
     expect(hingePositionsMm(700)).toEqual([120, 580])
     expect(hingePositionsMm(1200)).toHaveLength(3)
     expect(hingePositionsMm(2237)).toEqual([120, 785.7, 1451.3, 2117])
     expect(hingePositionsMm(2400)).toHaveLength(5)
+    // The lowest hinge is 120 above the carcass body bottom; the door starts
+    // 1.5 above it, so the cup sits 118.5 → 119 (integer mm) up the leaf.
     const borings = cabinetHingeBorings(cabinet({ widthMm: 600 }))
-    expect(borings[0]?.cups[0]).toEqual({ x: 22.5, y: 120 })
+    expect(borings[0]?.cups[0]).toEqual({ x: 22.5, y: 119 })
   })
 
   test('side-by-side doors meet on the divider centre with a 3 mm gap', () => {
@@ -431,7 +433,7 @@ describe('panel list', () => {
     const doors = rows.find((r) => r.name.startsWith('양문'))
     expect(doors?.material).toBe('PET')
     const csv = cutlistCsv([{ node, label: '옷장' }])
-    expect(csv.startsWith('﻿가구,부재,재질,두께,길이,폭,수량,비고')).toBe(true)
+    expect(csv.startsWith('﻿가구,부재,재질,두께,길이,폭,수량,결,비고')).toBe(true)
     expect(csv).toContain('옷장,뒷판,MDF,9')
     const hardware = cabinetHardwareRows(node)
     expect(hardware.find((h) => h.name === '경첩')?.quantity).toBe(8)

@@ -12,7 +12,7 @@ import {
 import { useViewer } from '@pascal-app/viewer'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { downloadCabinetsDxf, downloadCabinetsMpr, downloadTextFile } from './download'
-import { cabinetHardwareRows, cabinetPanelRows, cutlistCsv } from './engine/cutlist'
+import { cabinetHardwareRows, cutlistCsv } from './engine/cutlist'
 import { buildCabinetParts, type CabinetBuild } from './engine/parts'
 import {
   findCell,
@@ -29,7 +29,21 @@ import {
   splitCell,
 } from './engine/tree'
 import { useMyCabinetModules } from './my-modules'
-import type { CabinetCell, CabinetNode, CellContent, CellFront } from './schema'
+import { DoorSettingsSection, DoorSizeSection, HingeEditor } from './panel-doors'
+import { ColorField, HeightsField, MmField } from './panel-fields'
+import { EndPanelSection, StoneTopSection, TopNotchSection } from './panel-finish'
+import { DepthAnchorControl, ToeKickSection, TopMouldingSection } from './panel-frames'
+import { PanelListTab } from './panel-list'
+import { PresetButtons } from './panel-presets'
+import { RodShelfSettings, ShelfSettings } from './panel-shelves'
+import { backWallGapPatch, depthPatch } from './placement-updates'
+import {
+  type CabinetCell,
+  type CabinetNode,
+  type CellContent,
+  type CellFront,
+  resolveCabinetNode,
+} from './schema'
 
 const FAMILY_LABEL = { tall: '키큰장', base: '하부장', upper: '상부장' } as const
 const VARIANT_LABEL = {
@@ -39,131 +53,6 @@ const VARIANT_LABEL = {
   cooktop: '인덕션',
   appliance: '가전',
 } as const
-
-/** Integer-mm input: commits on Enter / blur, Escape restores. */
-function MmField({
-  label,
-  value,
-  onCommit,
-  min,
-  max,
-  step = 1,
-}: {
-  label: string
-  value: number
-  onCommit: (value: number) => void
-  min?: number
-  max?: number
-  step?: number
-}) {
-  const [draft, setDraft] = useState(String(value))
-  useEffect(() => setDraft(String(value)), [value])
-  const commit = () => {
-    const parsed = Number(draft)
-    if (!Number.isFinite(parsed)) {
-      setDraft(String(value))
-      return
-    }
-    const clamped = Math.min(
-      max ?? Number.POSITIVE_INFINITY,
-      Math.max(min ?? Number.NEGATIVE_INFINITY, parsed),
-    )
-    setDraft(String(clamped))
-    if (clamped !== value) onCommit(clamped)
-  }
-  return (
-    <label className="flex h-9 items-center justify-between gap-2 rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="flex items-center gap-1">
-        <input
-          className="w-20 bg-transparent text-right text-foreground outline-none"
-          inputMode="decimal"
-          onBlur={commit}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-            if (e.key === 'Escape') {
-              setDraft(String(value))
-              ;(e.target as HTMLInputElement).blur()
-            }
-            e.stopPropagation()
-          }}
-          step={step}
-          type="text"
-          value={draft}
-        />
-        <span className="text-muted-foreground text-xs">mm</span>
-      </span>
-    </label>
-  )
-}
-
-function ColorField({
-  label,
-  value,
-  onCommit,
-}: {
-  label: string
-  value: string
-  onCommit: (v: string) => void
-}) {
-  return (
-    <label className="flex h-9 items-center justify-between rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <input
-        className="h-6 w-10 cursor-pointer rounded border-0 bg-transparent"
-        onChange={(e) => onCommit(e.target.value)}
-        type="color"
-        value={value}
-      />
-    </label>
-  )
-}
-
-/** Comma-separated mm list (e.g. drawer fronts 255, 255, 176, 176). */
-function HeightsField({
-  label,
-  value,
-  onCommit,
-}: {
-  label: string
-  value: number[]
-  onCommit: (value: number[]) => void
-}) {
-  const text = value.join(', ')
-  const [draft, setDraft] = useState(text)
-  useEffect(() => setDraft(text), [text])
-  const commit = () => {
-    const parsed = draft
-      .split(/[,\s]+/)
-      .filter(Boolean)
-      .map(Number)
-    if (parsed.length === 0 || parsed.some((n) => !Number.isFinite(n) || n < 60 || n > 600)) {
-      setDraft(text)
-      return
-    }
-    if (parsed.join(', ') !== text) onCommit(parsed)
-  }
-  return (
-    <label className="flex flex-col gap-1 rounded-lg border border-border/50 bg-[#2C2C2E] px-3 py-2 text-sm">
-      <span className="text-muted-foreground text-xs">{label}</span>
-      <input
-        className="bg-transparent text-foreground outline-none"
-        onBlur={commit}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-          if (e.key === 'Escape') {
-            setDraft(text)
-            ;(e.target as HTMLInputElement).blur()
-          }
-          e.stopPropagation()
-        }}
-        value={draft}
-      />
-    </label>
-  )
-}
 
 /**
  * Front elevation of the cabinet (drawn from the part list) with clickable
@@ -184,8 +73,10 @@ function Elevation({
   const W = node.widthMm
   const H = node.heightMm
   const top = node.family === 'upper' ? Math.min(0, ...build.parts.map((p) => p.box.y)) : 0
+  // Parts above the carcass (상단몰딩) extend the drawing upwards.
+  const above = Math.max(0, ...build.parts.map((p) => p.box.y + p.box.h - H))
   const pad = 40
-  const vb = `${-pad} ${-pad} ${W + pad * 2} ${H - top + pad * 2}`
+  const vb = `${-pad} ${-pad - above} ${W + pad * 2} ${H - top + above + pad * 2}`
   const fy = (y: number, h: number) => H - (y + h)
   const owner = selectedId ? frontOwnerOf(node.interior, selectedId) : null
   const ownerRect = owner ? build.frontRects.find((f) => f.id === owner.id)?.rect : undefined
@@ -203,13 +94,18 @@ function Elevation({
             'divider',
             'fixed-shelf',
             'toe-kick',
+            'top-moulding',
             'end-panel',
             'front-rail',
           ].includes(p.role),
         )
         .map((p) => (
           <rect
-            fill={p.role === 'toe-kick' || p.role === 'end-panel' ? '#6b6258' : '#8b8175'}
+            fill={
+              p.role === 'toe-kick' || p.role === 'end-panel' || p.role === 'top-moulding'
+                ? '#6b6258'
+                : '#8b8175'
+            }
             height={p.box.h}
             key={p.id}
             width={p.box.w}
@@ -323,11 +219,13 @@ function contentLabel(c: CellContent): string {
 
 function CellEditor({
   node,
+  build,
   cellId,
   onTree,
   onSelect,
 }: {
   node: CabinetNode
+  build: CabinetBuild
   cellId: string
   onTree: (tree: CabinetCell) => void
   onSelect: (id: string | null) => void
@@ -447,16 +345,6 @@ function CellEditor({
           />
           {cell.content.type === 'shelves' && (
             <>
-              <MmField
-                label="선반 수"
-                max={12}
-                min={0}
-                onCommit={(v) =>
-                  cell.content.type === 'shelves' &&
-                  setContent({ ...cell.content, count: Math.round(v) })
-                }
-                value={cell.content.count}
-              />
               <SegmentedControl
                 onChange={(kind) =>
                   cell.content.type === 'shelves' && setContent({ ...cell.content, kind })
@@ -467,17 +355,35 @@ function CellEditor({
                 ]}
                 value={cell.content.kind}
               />
+              <ShelfSettings
+                build={build}
+                content={cell.content}
+                leafId={cell.id}
+                node={node}
+                onContent={setContent}
+              />
             </>
           )}
           {cell.content.type === 'hanging' && (
-            <SegmentedControl
-              onChange={(rod) => setContent({ type: 'hanging', rod })}
-              options={[
-                { label: '옷봉', value: 'rod' },
-                { label: '바지걸이', value: 'pants' },
-              ]}
-              value={cell.content.rod}
-            />
+            <>
+              <SegmentedControl
+                onChange={(rod) =>
+                  cell.content.type === 'hanging' && setContent({ ...cell.content, rod })
+                }
+                options={[
+                  { label: '옷봉', value: 'rod' },
+                  { label: '바지걸이', value: 'pants' },
+                ]}
+                value={cell.content.rod}
+              />
+              <RodShelfSettings
+                build={build}
+                content={cell.content}
+                leafId={cell.id}
+                node={node}
+                onContent={setContent}
+              />
+            </>
           )}
           {cell.content.type === 'drawers' && (
             <>
@@ -554,16 +460,27 @@ function CellEditor({
             value={front.leaves}
           />
           {front.leaves !== '2' && (
-            <SegmentedControl
-              onChange={(hinge) => setFront({ ...front, hinge })}
-              options={[
-                { label: '경첩 자동', value: 'auto' },
-                { label: '왼쪽', value: 'left' },
-                { label: '오른쪽', value: 'right' },
-              ]}
-              value={front.hinge}
-            />
+            <>
+              <div className="mt-1 text-muted-foreground text-xs">경첩 방향</div>
+              <SegmentedControl
+                onChange={(hinge) => setFront({ ...front, hinge })}
+                options={[
+                  { label: '자동', value: 'auto' },
+                  { label: '좌측 · 오른쪽으로 열림', value: 'left' },
+                  { label: '우측 · 왼쪽으로 열림', value: 'right' },
+                ]}
+                value={front.hinge}
+              />
+            </>
           )}
+          <div className="mt-1 text-muted-foreground text-xs">경첩 위치</div>
+          <HingeEditor
+            build={build}
+            front={front}
+            node={node}
+            onFront={(next) => setFront(next)}
+            ownerId={cell.id}
+          />
         </>
       )}
     </div>
@@ -579,12 +496,14 @@ function sizeOf(node: CabinetNode, cellId: string, axis: 'x' | 'y'): number {
 export default function CabinetPanel() {
   const selectedId = useViewer((s) => s.selection.selectedIds[0])
   const setSelection = useViewer((s) => s.setSelection)
-  const node = useScene((s) =>
+  const raw = useScene((s) =>
     selectedId
       ? (s.nodes[selectedId as AnyNodeId] as unknown as CabinetNode | undefined)
       : undefined,
   )
+  const node = raw?.type === 'cabinet' ? resolveCabinetNode(raw) : raw
   const [cellId, setCellId] = useState<string | null>(null)
+  const [tab, setTab] = useState<'edit' | 'list'>('edit')
   const [moduleName, setModuleName] = useState('')
   const saveModule = useMyCabinetModules((s) => s.save)
   const build = useMemo(() => (node?.type === 'cabinet' ? buildCabinetParts(node) : null), [node])
@@ -604,7 +523,6 @@ export default function CabinetPanel() {
   )
 
   if (node?.type !== 'cabinet' || !build) return null
-  const panelRows = cabinetPanelRows(node)
   const hardware = cabinetHardwareRows(node)
   const label = node.name || FAMILY_LABEL[node.family]
 
@@ -615,235 +533,188 @@ export default function CabinetPanel() {
       title={label}
       width={320}
     >
-      <PanelSection title="종류">
+      <div className="px-3 pt-2">
         <SegmentedControl
-          onChange={(family) =>
-            update({
-              family,
-              toeKick: { ...node.toeKick, enabled: family !== 'upper' },
-              position: [
-                node.position[0],
-                family === 'upper' ? Math.max(node.position[1], 1.4) : 0,
-                node.position[2],
-              ],
-            })
-          }
-          options={(['tall', 'base', 'upper'] as const).map((f) => ({
-            label: FAMILY_LABEL[f],
-            value: f,
-          }))}
-          value={node.family}
+          onChange={setTab}
+          options={[
+            { label: '가구 편집', value: 'edit' },
+            { label: '패널 목록', value: 'list' },
+          ]}
+          value={tab}
         />
-        <SegmentedControl
-          onChange={(variant) => update({ variant })}
-          options={(Object.keys(VARIANT_LABEL) as (keyof typeof VARIANT_LABEL)[]).map((v) => ({
-            label: VARIANT_LABEL[v],
-            value: v,
-          }))}
-          value={node.variant}
-        />
-      </PanelSection>
-
-      <PanelSection title="치수">
-        <MmField
-          label="폭"
-          max={2400}
-          min={150}
-          onCommit={(widthMm) => update({ widthMm })}
-          value={node.widthMm}
-        />
-        <MmField
-          label="높이"
-          max={2800}
-          min={200}
-          onCommit={(heightMm) => update({ heightMm })}
-          value={node.heightMm}
-        />
-        <MmField
-          label="깊이"
-          max={900}
-          min={250}
-          onCommit={(depthMm) => update({ depthMm })}
-          value={node.depthMm}
-        />
-        <MmField
-          label="설치 높이"
-          max={2600}
-          min={0}
-          onCommit={(mm) => update({ position: [node.position[0], mm / 1000, node.position[2]] })}
-          value={Math.round(node.position[1] * 1000)}
-        />
-        <SegmentedControl
-          onChange={(t) =>
-            update({ panelThicknessMm: Number(t) as CabinetNode['panelThicknessMm'] })
-          }
-          options={['15', '15.5', '18', '18.5'].map((t) => ({ label: `${t}T`, value: t }))}
-          value={String(node.panelThicknessMm)}
-        />
-        {node.family !== 'upper' && (
-          <>
-            <ToggleControl
-              checked={node.toeKick.enabled}
-              label="걸레받이"
-              onChange={(enabled) => update({ toeKick: { ...node.toeKick, enabled } })}
+      </div>
+      {tab === 'list' ? (
+        <>
+          <PanelListTab build={build} node={node} update={update} />
+          <PanelSection title="제작 출력">
+            {build.issues.length > 0 && (
+              <ul className="flex flex-col gap-1 rounded-lg border border-[#6b4b2a] bg-[#2a2118] p-2 text-[#f5c48a] text-xs">
+                {build.issues.map((issue) => (
+                  <li key={issue}>{issue}</li>
+                ))}
+              </ul>
+            )}
+            <div className="text-muted-foreground text-xs">
+              철물: {hardware.map((h) => `${h.name} ${h.quantity}`).join(' · ') || '없음'}
+            </div>
+            <ActionGroup>
+              <ActionButton
+                label="재단목록 CSV"
+                onClick={() =>
+                  downloadTextFile(`${label}-재단목록.csv`, cutlistCsv([{ node, label }]))
+                }
+              />
+              <ActionButton
+                label="MPR 미리보기"
+                onClick={() => downloadCabinetsMpr(label, [{ node, label }])}
+              />
+              <ActionButton
+                label="보링 DXF"
+                onClick={() => downloadCabinetsDxf(label, [{ node, label }])}
+              />
+            </ActionGroup>
+          </PanelSection>
+        </>
+      ) : (
+        <>
+          <PresetButtons node={node} />
+          <PanelSection title="종류">
+            <SegmentedControl
+              onChange={(family) =>
+                update({
+                  family,
+                  toeKick: { ...node.toeKick, enabled: family !== 'upper' },
+                  position: [
+                    node.position[0],
+                    family === 'upper' ? Math.max(node.position[1], 1.4) : 0,
+                    node.position[2],
+                  ],
+                })
+              }
+              options={(['tall', 'base', 'upper'] as const).map((f) => ({
+                label: FAMILY_LABEL[f],
+                value: f,
+              }))}
+              value={node.family}
             />
-            {node.toeKick.enabled && (
+            <SegmentedControl
+              onChange={(variant) => update({ variant })}
+              options={(Object.keys(VARIANT_LABEL) as (keyof typeof VARIANT_LABEL)[]).map((v) => ({
+                label: VARIANT_LABEL[v],
+                value: v,
+              }))}
+              value={node.variant}
+            />
+          </PanelSection>
+
+          <PanelSection title="치수">
+            <MmField
+              label="폭"
+              max={2400}
+              min={150}
+              onCommit={(widthMm) => update({ widthMm })}
+              value={node.widthMm}
+            />
+            <MmField
+              label="높이"
+              max={2800}
+              min={200}
+              onCommit={(heightMm) => update({ heightMm })}
+              value={node.heightMm}
+            />
+            <MmField
+              label="깊이"
+              max={900}
+              min={250}
+              onCommit={(depthMm) => update(depthPatch(node, depthMm))}
+              value={node.depthMm}
+            />
+            <DepthAnchorControl node={node} update={update} />
+            {node.family === 'upper' ? (
               <MmField
-                label="걸레받이 높이"
-                max={200}
-                min={30}
-                onCommit={(heightMm) => update({ toeKick: { ...node.toeKick, heightMm } })}
-                value={node.toeKick.heightMm}
+                label="설치 높이"
+                max={2600}
+                min={0}
+                onCommit={(mm) =>
+                  update({ position: [node.position[0], mm / 1000, node.position[2]] })
+                }
+                value={Math.round(node.position[1] * 1000)}
+              />
+            ) : (
+              <MmField
+                label="뒷벽 이격"
+                max={500}
+                min={-500}
+                onCommit={(gapMm) => update(backWallGapPatch(node, gapMm))}
+                value={node.backWallGapMm}
               />
             )}
-          </>
-        )}
-      </PanelSection>
+            <SegmentedControl
+              onChange={(t) =>
+                update({ panelThicknessMm: Number(t) as CabinetNode['panelThicknessMm'] })
+              }
+              options={['15', '15.5', '18', '18.5'].map((t) => ({ label: `${t}T`, value: t }))}
+              value={String(node.panelThicknessMm)}
+            />
+          </PanelSection>
 
-      <PanelSection title="내부 구성">
-        <Elevation build={build} node={node} onSelect={setCellId} selectedId={cellId} />
-        {cellId && (
-          <CellEditor
-            cellId={cellId}
-            node={node}
-            onSelect={(id) => setCellId(id ?? node.interior.id)}
-            onTree={(interior) => update({ interior })}
-          />
-        )}
-      </PanelSection>
+          <TopMouldingSection node={node} update={update} />
+          <ToeKickSection node={node} update={update} />
 
-      <PanelSection defaultExpanded={false} title="마감">
-        <ActionGroup>
-          <ToggleControl
-            checked={node.endPanels.left}
-            label="EP 왼쪽"
-            onChange={(left) => update({ endPanels: { ...node.endPanels, left } })}
-          />
-          <ToggleControl
-            checked={node.endPanels.right}
-            label="EP 오른쪽"
-            onChange={(right) => update({ endPanels: { ...node.endPanels, right } })}
-          />
-        </ActionGroup>
-        <ColorField
-          label="몸통 색"
-          onCommit={(bodyColor) => update({ bodyColor })}
-          value={node.bodyColor}
-        />
-        <ColorField
-          label="도어 색"
-          onCommit={(frontColor) => update({ frontColor })}
-          value={node.frontColor}
-        />
-        <MmField
-          label="도어 위 여유"
-          max={200}
-          min={-200}
-          onCommit={(top) => update({ frontReveal: { ...node.frontReveal, top } })}
-          step={0.5}
-          value={node.frontReveal.top}
-        />
-        <MmField
-          label="도어 아래 여유"
-          max={200}
-          min={-200}
-          onCommit={(bottom) => update({ frontReveal: { ...node.frontReveal, bottom } })}
-          step={0.5}
-          value={node.frontReveal.bottom}
-        />
-        <MmField
-          label="도어 옆 여유"
-          max={20}
-          min={0}
-          onCommit={(side) => update({ frontReveal: { ...node.frontReveal, side } })}
-          step={0.5}
-          value={node.frontReveal.side}
-        />
-        <MmField
-          label="도어 사이 틈"
-          max={20}
-          min={0}
-          onCommit={(between) => update({ frontReveal: { ...node.frontReveal, between } })}
-          step={0.5}
-          value={node.frontReveal.between}
-        />
-      </PanelSection>
+          <DoorSettingsSection node={node} update={update} />
+          <DoorSizeSection build={build} node={node} update={update} />
 
-      <PanelSection defaultExpanded={false} title="제작 정보">
-        {build.issues.length > 0 && (
-          <ul className="flex flex-col gap-1 rounded-lg border border-[#6b4b2a] bg-[#2a2118] p-2 text-[#f5c48a] text-xs">
-            {build.issues.map((issue) => (
-              <li key={issue}>{issue}</li>
-            ))}
-          </ul>
-        )}
-        <div className="max-h-64 overflow-auto rounded-lg border border-border/50">
-          <table className="w-full text-[11px]">
-            <thead className="sticky top-0 bg-[#2C2C2E] text-muted-foreground">
-              <tr>
-                <th className="px-1.5 py-1 text-left">부재</th>
-                <th className="px-1 py-1">재질</th>
-                <th className="px-1 py-1 text-right">길이×폭×두께</th>
-                <th className="px-1.5 py-1 text-right">수량</th>
-              </tr>
-            </thead>
-            <tbody>
-              {panelRows.map((row) => (
-                <tr
-                  className="border-border/30 border-t"
-                  key={`${row.name}-${row.lengthMm}-${row.widthMm}-${row.thicknessMm}`}
-                >
-                  <td className="px-1.5 py-1">
-                    {row.name}
-                    {row.notes && (
-                      <div className="text-[10px] text-muted-foreground">{row.notes}</div>
-                    )}
-                  </td>
-                  <td className="px-1 py-1 text-center">{row.material}</td>
-                  <td className="px-1 py-1 text-right tabular-nums">
-                    {row.lengthMm}×{row.widthMm}×{row.thicknessMm}
-                  </td>
-                  <td className="px-1.5 py-1 text-right">{row.quantity}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="text-muted-foreground text-xs">
-          철물: {hardware.map((h) => `${h.name} ${h.quantity}`).join(' · ') || '없음'}
-        </div>
-        <ActionGroup>
-          <ActionButton
-            label="재단목록 CSV"
-            onClick={() => downloadTextFile(`${label}-재단목록.csv`, cutlistCsv([{ node, label }]))}
-          />
-          <ActionButton
-            label="MPR 미리보기"
-            onClick={() => downloadCabinetsMpr(label, [{ node, label }])}
-          />
-          <ActionButton
-            label="보링 DXF"
-            onClick={() => downloadCabinetsDxf(label, [{ node, label }])}
-          />
-        </ActionGroup>
-        <div className="flex gap-1.5">
-          <input
-            className="h-9 min-w-0 flex-1 rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm outline-none"
-            onChange={(e) => setModuleName(e.target.value)}
-            onKeyDown={(e) => e.stopPropagation()}
-            placeholder="모듈 이름"
-            value={moduleName}
-          />
-          <ActionButton
-            className="flex-none"
-            label="내 모듈로 저장"
-            onClick={() => {
-              saveModule(moduleName || label, node)
-              setModuleName('')
-            }}
-          />
-        </div>
-      </PanelSection>
+          <PanelSection title="내부 구성">
+            <Elevation build={build} node={node} onSelect={setCellId} selectedId={cellId} />
+            {cellId && (
+              <CellEditor
+                build={build}
+                cellId={cellId}
+                node={node}
+                onSelect={(id) => setCellId(id ?? node.interior.id)}
+                onTree={(interior) => update({ interior })}
+              />
+            )}
+          </PanelSection>
+
+          <EndPanelSection node={node} update={update} />
+          <StoneTopSection node={node} update={update} />
+          <TopNotchSection node={node} update={update} />
+
+          <PanelSection defaultExpanded={false} title="색상">
+            <ColorField
+              label="몸통 색"
+              onCommit={(bodyColor) => update({ bodyColor })}
+              value={node.bodyColor}
+            />
+            <ColorField
+              label="도어 색"
+              onCommit={(frontColor) => update({ frontColor })}
+              value={node.frontColor}
+            />
+          </PanelSection>
+
+          <PanelSection defaultExpanded={false} title="내 모듈">
+            <div className="flex gap-1.5">
+              <input
+                className="h-9 min-w-0 flex-1 rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm outline-none"
+                onChange={(e) => setModuleName(e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()}
+                placeholder="모듈 이름"
+                value={moduleName}
+              />
+              <ActionButton
+                className="flex-none"
+                label="내 모듈로 저장"
+                onClick={() => {
+                  saveModule(moduleName || label, node)
+                  setModuleName('')
+                }}
+              />
+            </div>
+          </PanelSection>
+        </>
+      )}
     </PanelWrapper>
   )
 }

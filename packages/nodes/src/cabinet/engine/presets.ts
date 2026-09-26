@@ -154,8 +154,16 @@ const UPPER_DEPTH = 300
 /** Upper cabinets hang with their top on the tall-cabinet line. */
 const UPPER_ELEVATION = TALL_H - UPPER_H
 
-const TOE = { enabled: true, heightMm: TOE_H, setbackMm: 20 }
-const NO_TOE = { enabled: false, heightMm: TOE_H, setbackMm: 20 }
+const FRAME_WIDTH = { enabled: false, leftMm: 0, rightMm: 0 }
+const TOE = {
+  enabled: true,
+  heightMm: TOE_H,
+  setbackMm: 20,
+  offsetMm: 0,
+  gapMm: 0,
+  widthAdjust: FRAME_WIDTH,
+}
+const NO_TOE = { ...TOE, enabled: false }
 const REVEAL = { top: 1.5, bottom: 1.5, side: 1.5, between: 3 }
 /** Upper-cabinet doors are H + 5 + 28: 5 above the carcass, 28 below as a finger pull. */
 const UPPER_REVEAL = { top: -5, bottom: -28, side: 1.5, between: 3 }

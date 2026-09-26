@@ -182,13 +182,16 @@ describe('cabinet → panel machining', () => {
     const single = panel(cabinetBoringPanels(preset('lower-sink-cabinet'), 's'), '도어')
     const cups = single.borings.filter((b) => b.type === 'hinge-cup')
     // Left-hinged single door seen from its inner face: cups on the right.
+    // mmmcraft anchors the hinges on the side panel: 120 above the body
+    // bottom (the door runs 5 below it → 125 up the leaf) and, for a sink
+    // cabinet, 300 below the body top (the door stops 20 short → 280).
     expect(cups.map((b) => [b.x, b.y])).toEqual([
-      [single.width - 22.5, single.height - 120],
-      [single.width - 22.5, 120],
+      [single.width - 22.5, single.height - 125],
+      [single.width - 22.5, 280],
     ])
     expect(xy(single, 'door-fixing-screw').slice(0, 2)).toEqual([
-      [single.width - 32, single.height - 97.5],
-      [single.width - 32, single.height - 142.5],
+      [single.width - 32, single.height - 102.5],
+      [single.width - 32, single.height - 147.5],
     ])
     // A pair: mmmcraft mirrors the left leaf, so both carry cups at X = 22.5.
     const pair = cabinetBoringPanels(preset('dual-2drawer-hanging'), 'd')

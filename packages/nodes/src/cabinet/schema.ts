@@ -18,6 +18,13 @@ import { z } from 'zod'
  *  scene API boundary. */
 const HexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/)
 
+/** mmmcraft 폭확장 of the 걸레받이 / 상단몰딩 strips (mm, + widens). */
+const FrameWidthAdjust = z.object({
+  enabled: z.boolean().default(false),
+  leftMm: z.number().min(-500).max(500).default(0),
+  rightMm: z.number().min(-500).max(500).default(0),
+})
+
 export const CabinetFamily = z.enum(['tall', 'base', 'upper'])
 export type CabinetFamily = z.infer<typeof CabinetFamily>
 
@@ -32,10 +39,19 @@ export const CellContent = z.discriminatedUnion('type', [
     type: z.literal('shelves'),
     count: z.number().int().min(0).max(12).default(2),
     kind: z.enum(['dowel', 'fixed']).default('dowel'),
+    /** mmmcraft 칸 내경: shelf centres (mm above the compartment floor),
+     *  one per shelf. Absent (or the wrong length) = evenly spaced. */
+    positionsMm: z.array(z.number()).optional(),
+    /** mmmcraft 다보보링 추가: extra pin holes 32 mm apart above and below
+     *  each movable shelf. */
+    extraDowels: z.number().int().min(1).max(20).optional(),
   }),
   z.object({
     type: z.literal('hanging'),
     rod: z.enum(['rod', 'pants']).default('rod'),
+    /** mmmcraft 옷봉선반: a fixed shelf this far (mm) below the compartment
+     *  top, the rod hanging under it. Absent = rod on the top panel. */
+    shelfTopGapMm: z.number().min(0).max(2000).optional(),
   }),
   z.object({
     type: z.literal('drawers'),
@@ -66,6 +82,9 @@ export const CellFront = z.object({
   /** `auto` = two leaves when the front is wider than 600 mm. */
   leaves: z.enum(['auto', '1', '2']).default('auto'),
   hinge: z.enum(['auto', 'left', 'right']).default('auto'),
+  /** mmmcraft 경첩 위치 변경: hinge heights on the side panel, mm from the
+   *  carcass body bottom. Absent = the automatic layout. */
+  hingesMm: z.array(z.number()).optional(),
 })
 export type CellFront = z.infer<typeof CellFront>
 
@@ -120,6 +139,9 @@ export const CabinetNode = BaseNode.extend({
   position: z.tuple([z.number(), z.number(), z.number()]).default([0, 0, 0]),
   rotation: z.tuple([z.number(), z.number(), z.number()]).default([0, 0, 0]),
 
+  /** Catalog preset this cabinet was placed from (mmmcraft moduleId); 속성
+   *  이식 only copies the interior between cabinets of the same preset. */
+  presetId: z.string().optional(),
   family: CabinetFamily.default('tall'),
   variant: CabinetVariant.default('standard'),
 
@@ -138,14 +160,126 @@ export const CabinetNode = BaseNode.extend({
       enabled: z.boolean().default(true),
       heightMm: z.number().min(30).max(200).default(65),
       setbackMm: z.number().min(0).max(120).default(20),
+      /** mmmcraft 걸레받이 옵셋: + pushes the board back (inward). */
+      offsetMm: z.number().min(-200).max(200).default(0),
+      /** mmmcraft 걸레받이 갭: cut from the bottom, the top line stays. */
+      gapMm: z.number().min(0).max(199).default(0),
+      widthAdjust: FrameWidthAdjust.default({ enabled: false, leftMm: 0, rightMm: 0 }),
     })
-    .default({ enabled: true, heightMm: 65, setbackMm: 20 }),
+    .default({
+      enabled: true,
+      heightMm: 65,
+      setbackMm: 20,
+      offsetMm: 0,
+      gapMm: 0,
+      widthAdjust: { enabled: false, leftMm: 0, rightMm: 0 },
+    }),
+
+  /** mmmcraft 상단몰딩 (tall and upper cabinets): a PET strip on the carcass
+   *  top, flush with the carcass front. Off unless switched on. */
+  topMoulding: z
+    .object({
+      enabled: z.boolean().default(false),
+      heightMm: z.number().min(0).max(9999).default(30),
+      /** + pushes the moulding back (inward). */
+      offsetMm: z.number().min(-200).max(200).default(0),
+      /** Cut from the top (ceiling side). */
+      gapMm: z.number().min(0).max(2000).default(0),
+      widthAdjust: FrameWidthAdjust.default({ enabled: false, leftMm: 0, rightMm: 0 }),
+    })
+    .default({
+      enabled: false,
+      heightMm: 30,
+      offsetMm: 0,
+      gapMm: 0,
+      widthAdjust: { enabled: false, leftMm: 0, rightMm: 0 },
+    }),
+
+  /** mmmcraft 뒷벽 이격: gap between the back and the wall (mm). The panel
+   *  moves the cabinet by the positive part; upper cabinets ignore it. */
+  backWallGapMm: z.number().min(-500).max(500).default(0),
+  /** mmmcraft 뒤고정 / 앞고정: which face stays put when the depth changes. */
+  depthAnchor: z.enum(['back', 'front']).default('back'),
 
   /** Finished end panels (EP, 18 PET) on the outside of each side. They sit
    *  inside `widthMm`: the carcass narrows so the overall size is kept. */
   endPanels: z
     .object({ left: z.boolean().default(false), right: z.boolean().default(false) })
     .default({ left: false, right: false }),
+  /** mmmcraft 엔드패널 options. `null` gaps follow the 상단몰딩 / 걸레받이
+   *  (the EP runs alongside them); offsets extend the EP forward / back. */
+  endPanelOptions: z
+    .object({
+      /** 내치: inside the width (the carcass narrows); 외치: added outside. */
+      mode: z.enum(['inside', 'outside']).default('inside'),
+      thicknessMm: z.number().min(10).max(200).default(18),
+      topGapMm: z.number().min(-500).max(500).nullable().default(null),
+      bottomGapMm: z.number().min(-500).max(500).nullable().default(null),
+      leftFrontMm: z.number().min(-580).max(1180).default(0),
+      leftBackMm: z.number().min(-580).max(1180).default(0),
+      rightFrontMm: z.number().min(-580).max(1180).default(0),
+      rightBackMm: z.number().min(-580).max(1180).default(0),
+    })
+    .default({
+      mode: 'inside',
+      thicknessMm: 18,
+      topGapMm: null,
+      bottomGapMm: null,
+      leftFrontMm: 0,
+      leftBackMm: 0,
+      rightFrontMm: 0,
+      rightBackMm: 0,
+    }),
+  /** Upper cabinets: 하부 EP under the body (전면갭 insets from the front,
+   *  후면갭 from the back — stored negative, mmmcraft default −35). */
+  bottomEndPanel: z
+    .object({
+      enabled: z.boolean().default(false),
+      frontGapMm: z.number().min(-580).max(200).default(0),
+      backGapMm: z.number().min(-580).max(0).default(-35),
+    })
+    .default({ enabled: false, frontGapMm: 0, backGapMm: -35 }),
+  /** Base cabinets: 상부 EP on the body (instead of a stone top), with an
+   *  optional 뒷턱 at its back edge. */
+  topEndPanel: z
+    .object({
+      enabled: z.boolean().default(false),
+      frontOffsetMm: z.number().min(-580).max(200).default(20),
+      backOffsetMm: z.number().min(-580).max(200).default(0),
+      backLip: z
+        .object({
+          heightMm: z.number().min(1).max(2000).default(100),
+          thicknessMm: z.number().min(1).max(100).default(18),
+        })
+        .nullable()
+        .default(null),
+    })
+    .default({ enabled: false, frontOffsetMm: 20, backOffsetMm: 0, backLip: null }),
+  /** Base cabinets: 인조대리석 상판 (0 = none) with an optional 뒷턱. */
+  stoneTop: z
+    .object({
+      thicknessMm: z.union([z.literal(0), z.literal(10), z.literal(20), z.literal(30)]).default(0),
+      frontMm: z.number().min(-200).max(200).default(0),
+      backMm: z.number().min(-200).max(200).default(0),
+      leftMm: z.number().min(-200).max(200).default(0),
+      rightMm: z.number().min(-200).max(200).default(0),
+      backLip: z
+        .object({
+          thicknessMm: z.union([z.literal(10), z.literal(20), z.literal(30)]),
+          heightMm: z.number().min(1).max(2000).default(100),
+        })
+        .nullable()
+        .default(null),
+    })
+    .default({ thicknessMm: 0, frontMm: 0, backMm: 0, leftMm: 0, rightMm: 0, backLip: null }),
+  /** Upper cabinets: 상판 따내기, a 140 deep notch at a back corner of the top. */
+  topNotch: z
+    .object({
+      widthMm: z.union([z.literal(340), z.literal(680)]),
+      side: z.enum(['left', 'right']).default('right'),
+    })
+    .nullable()
+    .default(null),
 
   /** Front reveals (mm). Positive = the front stops short of the carcass edge,
    *  negative = it overhangs (e.g. an upper cabinet's finger-pull lip). */
@@ -158,6 +292,15 @@ export const CabinetNode = BaseNode.extend({
       between: z.number().min(0).max(20).default(3),
     })
     .default({ top: 1.5, bottom: 1.5, side: 1.5, between: 3 }),
+
+  /** mmmcraft 도어 확장/축소 (+ widens, − narrows) on the side away from the
+   *  hinge; `mm` −1.5 is the unadjusted width. */
+  doorWidthAdjust: z
+    .object({
+      enabled: z.boolean().default(false),
+      mm: z.number().min(-500).max(500).default(-1.5),
+    })
+    .default({ enabled: false, mm: -1.5 }),
 
   interior: CabinetCell.default({
     id: 'root',
@@ -193,10 +336,32 @@ export const CabinetNode = BaseNode.extend({
     )
     .default([]),
 
+  /** 패널 목록: panel names left out of the cut list / MPR / DXF. */
+  panelExclusions: z.array(z.string()).default([]),
+  /** 패널 목록 보링숨김: door names whose hinge borings are left out. */
+  hingeBoringExclusions: z.array(z.string()).default([]),
+  /** 패널 목록 결 방향 overrides by panel name. */
+  panelGrain: z.record(z.string(), z.enum(['horizontal', 'vertical'])).default({}),
+
   bodyColor: HexColor.default('#f1ede4'),
   frontColor: HexColor.default('#e4ddd0'),
 })
 export type CabinetNode = z.infer<typeof CabinetNode>
+
+const resolved = new WeakMap<object, CabinetNode>()
+/**
+ * Scene nodes are stored as saved, so a cabinet saved before a field existed
+ * lacks it. Fill the schema defaults (cached per node object; the raw node
+ * if it does not parse) before reading it.
+ */
+export function resolveCabinetNode(node: CabinetNode): CabinetNode {
+  const hit = resolved.get(node)
+  if (hit) return hit
+  const parsed = CabinetNode.safeParse(node)
+  const out = parsed.success ? ({ ...node, ...parsed.data } as CabinetNode) : node
+  resolved.set(node, out)
+  return out
+}
 
 export const CountertopCutout = z.object({
   id: z.string(),

@@ -112,7 +112,7 @@ function cabinetOnRun(
   const preset = getCabinetPreset(presetId)
   if (!preset) throw new Error(`unknown cabinet preset ${presetId}`)
   const spec = instantiateSpec(preset.spec())
-  const node = CabinetNode.parse({ ...spec, name: preset.label, widthMm })
+  const node = CabinetNode.parse({ ...spec, name: preset.label, widthMm, presetId: preset.id })
   const [x, z] = placeOnRun(run, offsetMm, widthMm, node.depthMm)
   return { ...node, position: [x, preset.elevationMm * MM, z], rotation: [0, run.rotationY, 0] }
 }
