@@ -159,6 +159,24 @@ export {
 } from './store/use-live-node-overrides'
 export { default as useLiveTransforms, type LiveTransform } from './store/use-live-transforms'
 export { clearSceneHistory, default as useScene } from './store/use-scene'
+export {
+  cadSectionPoints,
+  DOMUS_150,
+  defaultHiddenHingeHeightsMm,
+  HIDDEN_DOOR_CAD,
+  HIDDEN_DOOR_MAX_DEGREES,
+  HIDDEN_HANDLE,
+  HIDDEN_JAMB_PROFILE,
+  HIDDEN_LEAF,
+  type HiddenDoorModel,
+  type HiddenSectionRow,
+  hiddenDoorError,
+  hiddenDoorFrontPanels,
+  hiddenDoorModel,
+  hiddenDoorSections,
+  hiddenLeafOutline,
+  type SectionPoint,
+} from './systems/door/hidden-door'
 export { resolveElevatorDispatchTarget } from './systems/elevator/elevator-dispatch'
 export {
   type ElevatorDoorSide,

@@ -61,6 +61,15 @@ const roofFallbackPoint = new Vector3()
 type HostKind = 'wall' | 'roof' | null
 
 /**
+ * mmmcraft: a door placed on a 목상 / 떡가베 wall is a 히든도어; moving back
+ * onto a plain wall restores a hinged door.
+ */
+function doorTypeForWall(wall: WallNode, current: DoorNode['doorType']): DoorNode['doorType'] {
+  if (wall.construction) return 'hidden'
+  return current === 'hidden' ? 'hinged' : current
+}
+
+/**
  * Door tool — places DoorNodes on walls and on roof-segment wall faces
  * (the generated base walls under a roof, including coplanar gable ends).
  * Doors always sit at floor level (clampedY = height/2 — segment base for
@@ -276,6 +285,7 @@ const DoorTool: React.FC = () => {
           position: [clampedX, clampedY, 0],
           rotation: [0, itemRotation, 0],
           side,
+          doorType: doorTypeForWall(wall, draftRef.current.doorType),
         })
         markHostDirty(wall.id)
       } else {
@@ -285,6 +295,7 @@ const DoorTool: React.FC = () => {
           side,
           parentId: wall.id,
           wallId: wall.id,
+          doorType: doorTypeForWall(wall, draftRef.current.doorType),
           // The draft may arrive from a roof-segment face hover.
           roofSegmentId: undefined,
           roofFace: undefined,
@@ -355,7 +366,7 @@ const DoorTool: React.FC = () => {
         width: draft.width,
         height: draft.height,
         doorCategory: draft.doorCategory,
-        doorType: draft.doorType,
+        doorType: doorTypeForWall(wall, draft.doorType),
         leafCount: draft.leafCount,
         operationState: draft.operationState,
         slideDirection: draft.slideDirection,

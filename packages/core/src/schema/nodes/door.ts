@@ -30,6 +30,9 @@ export const DoorType = z.enum([
   'garage-sectional',
   'garage-rollup',
   'garage-tiltup',
+  // mmmcraft 히든도어: CAD jamb / header sections, 45T leaf and three Domus
+  // 150 hidden hinges; only on a 목상 / 떡가베 wall (wall.construction).
+  'hidden',
 ])
 export const DoorTrackStyle = z.enum(['none', 'visible', 'pocket', 'overhead'])
 
@@ -68,6 +71,8 @@ export const DoorNode = BaseNode.extend({
   doorType: DoorType.default('hinged'),
   leafCount: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).default(1),
   operationState: z.number().min(0).max(1).default(0),
+  // Hidden door: hinge centres from the leaf bottom (m), exactly three.
+  hiddenHingeHeights: z.array(z.number()).length(3).optional(),
   slideDirection: z.enum(['left', 'right']).default('left'),
   trackStyle: DoorTrackStyle.default('none'),
   garagePanelCount: z.number().int().min(1).max(12).default(4),

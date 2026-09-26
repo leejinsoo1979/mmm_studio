@@ -7,6 +7,7 @@ import {
   getDoorRenderOpenAmount,
   getEffectiveNode,
   getWallThickness,
+  hiddenDoorError,
   type SceneMaterial,
   type SceneMaterialId,
   sceneRegistry,
@@ -30,6 +31,7 @@ import {
 } from '../../lib/materials'
 import useViewer from '../../store/use-viewer'
 import { getOpeningCutoutProxyDepth } from '../wall/opening-cutout-geometry'
+import { addHiddenDoor } from './hidden-door-geometry'
 
 // Invisible material for root mesh — used as selection hitbox only
 const hitboxMaterial = new THREE.MeshBasicMaterial({ visible: false })
@@ -2351,6 +2353,22 @@ function updateDoorMesh(rawNode: DoorNode, mesh: THREE.Mesh) {
   const clampedSwingAngle = Math.max(0, Math.min(Math.PI / 2, swingAngle))
 
   if (openingKind === 'opening') {
+    syncDoorCutout(node, mesh)
+    return
+  }
+
+  if (doorType === 'hidden') {
+    const wall = node.parentId ? useScene.getState().nodes[node.parentId as AnyNodeId] : undefined
+    // An invalid hidden door (plain wall, too small…) keeps only its opening;
+    // the panel and the plan show mmmcraft's message.
+    if (wall?.type === 'wall' && !hiddenDoorError(node, wall as WallNode)) {
+      // The finished face (wall.construction.side) orients a hidden door, not
+      // the door's own front/back flip, so build in the wall's frame.
+      const frame = new THREE.Group()
+      frame.rotation.y = -node.rotation[1]
+      mesh.add(frame)
+      addHiddenDoor(frame, node, wall as WallNode, clampedSwingAngle, currentShading)
+    }
     syncDoorCutout(node, mesh)
     return
   }

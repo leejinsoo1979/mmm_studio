@@ -1,9 +1,14 @@
-import type {
-  DoorNode,
-  FloorplanGeometry,
-  FloorplanPoint,
-  GeometryContext,
-  WallNode,
+import {
+  type DoorNode,
+  type FloorplanGeometry,
+  type FloorplanPoint,
+  type GeometryContext,
+  hiddenDoorError,
+  hiddenDoorModel,
+  hiddenDoorSections,
+  hiddenLeafOutline,
+  type WallNode,
+  wallLeftNormal,
 } from '@pascal-app/core'
 import { buildOpeningPlacementDimensions } from '../shared/opening-placement-dimensions'
 
@@ -204,7 +209,9 @@ export function buildDoorFloorplan(node: DoorNode, ctx: GeometryContext): Floorp
   // (mirrors the 3D system, which renders only the cutout for openings).
   const isOpening = node.openingKind === 'opening'
 
-  if (isOpening) {
+  if (node.doorType === 'hidden') {
+    children.push(...hiddenDoorSymbol(node, wall, isSelected))
+  } else if (isOpening) {
     // Open doorway — a frameless gap in the wall. No leaf, arc, or panel;
     // the cleared footprint above is the whole symbol.
   } else if (isFolding && width > 1e-3) {
@@ -723,6 +730,107 @@ export function buildDoorFloorplan(node: DoorNode, ctx: GeometryContext): Floorp
   }
 
   return { kind: 'group', children }
+}
+
+const HIDDEN_FILL = { timber: '#bd9969', frame: '#bdb8b0', finish: '#ede5d6' } as const
+
+/**
+ * mmmcraft `HiddenDoor2D`: the true plan sections of both jambs, the 45T
+ * leaf turned to its open angle with the Domus hinges and handles, and the
+ * swing arc. An invalid hidden door is drawn as a red outline instead.
+ */
+function hiddenDoorSymbol(node: DoorNode, wall: WallNode, selected: boolean): FloorplanGeometry[] {
+  const [sx, sz] = wall.start
+  const len = Math.hypot(wall.end[0] - sx, wall.end[1] - sz)
+  const u: [number, number] = [(wall.end[0] - sx) / len, (wall.end[1] - sz) / len]
+  const n = wallLeftNormal(wall)
+  const c = node.position[0]
+  // (x along the wall from the door centre, offset along the left normal), mm → plan.
+  const plan = (xMm: number, offsetMm: number): FloorplanPoint => [
+    sx + u[0] * (c + xMm / 1000) + n[0] * (offsetMm / 1000),
+    sz + u[1] * (c + xMm / 1000) + n[1] * (offsetMm / 1000),
+  ]
+  const stroke = selected ? '#7464ff' : '#536078'
+  const line = { stroke, strokeWidth: 1, vectorEffect: 'non-scaling-stroke' as const }
+  const error = hiddenDoorError(node, wall)
+  if (error) {
+    const half = node.width * 500
+    const t = (wall.thickness ?? 0.1) * 500
+    return [
+      {
+        kind: 'polygon',
+        points: [plan(-half, -t), plan(half, -t), plan(half, t), plan(-half, t)],
+        fill: 'none',
+        stroke: '#c13b4c',
+        strokeWidth: 1.5,
+        vectorEffect: 'non-scaling-stroke',
+      },
+    ]
+  }
+  const m = hiddenDoorModel(node, wall, (node.swingAngle ?? 0) / (Math.PI / 2))
+  const out: FloorplanGeometry[] = []
+  for (const side of [-1, 1]) {
+    for (const row of hiddenDoorSections(m)) {
+      out.push({
+        kind: 'polygon',
+        points: row.points.map((p) => plan(side * (m.widthMm / 2 - p.x), m.offset(p.y))),
+        fill: HIDDEN_FILL[row.material],
+        ...line,
+      })
+    }
+  }
+  // Leaf and handles rotate about the hinge (x, offset) by the open angle;
+  // plan rotation is the wall-local one mapped through (u, n).
+  const cos = Math.cos(m.angle)
+  const sin = Math.sin(m.angle)
+  const hingeOffset = m.hingeOffset
+  const turn = (x: number, offset: number): FloorplanPoint => {
+    const dx = x - m.hingeX
+    const dz = -(offset - hingeOffset) // wall-local z = −offset
+    const rx = dx * cos + dz * sin
+    const rz = -dx * sin + dz * cos
+    return plan(m.hingeX + rx, hingeOffset - rz)
+  }
+  out.push({
+    kind: 'polygon',
+    points: hiddenLeafOutline(m).map((p) => turn(p.x, m.offset(p.y))),
+    fill: HIDDEN_FILL.frame,
+    ...line,
+  })
+  // Swing arc: from the closed free edge to the fully open leaf.
+  const w = m.leafWidth
+  const closedTip = plan(m.hingeX + m.handed * w, hingeOffset)
+  // Fully open, the free edge points into the wall's depth (away from the finish).
+  const depthDir = m.construction.side === 'left' ? -1 : 1
+  const openTip = plan(m.hingeX, hingeOffset + depthDir * w)
+  const r = w / 1000
+  out.push({
+    kind: 'path',
+    d: `M ${closedTip[0]} ${closedTip[1]} A ${r} ${r} 0 0 ${arcSweep(closedTip, openTip, plan(m.hingeX, hingeOffset))} ${openTip[0]} ${openTip[1]}`,
+    fill: 'none',
+    stroke: '#6b7280',
+    strokeWidth: 1.2,
+    strokeDasharray: '8 5',
+    vectorEffect: 'non-scaling-stroke',
+  })
+  const hinge = plan(m.hingeX, hingeOffset)
+  out.push({
+    kind: 'line',
+    x1: hinge[0],
+    y1: hinge[1],
+    x2: openTip[0],
+    y2: openTip[1],
+    stroke: '#6b7280',
+    strokeWidth: 1.5,
+    vectorEffect: 'non-scaling-stroke',
+  })
+  return out
+}
+
+/** SVG sweep flag for an arc from `a` to `b` around `centre` taking the short way. */
+function arcSweep(a: FloorplanPoint, b: FloorplanPoint, centre: FloorplanPoint): 0 | 1 {
+  const cross = (a[0] - centre[0]) * (b[1] - centre[1]) - (a[1] - centre[1]) * (b[0] - centre[0])
+  return cross > 0 ? 1 : 0
 }
 
 /**

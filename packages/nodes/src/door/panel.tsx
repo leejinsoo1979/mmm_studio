@@ -1,6 +1,19 @@
 'use client'
 
-import { type AnyNode, type AnyNodeId, DoorNode, useInteractive, useScene } from '@pascal-app/core'
+import {
+  type AnyNode,
+  type AnyNodeId,
+  DOMUS_150,
+  DoorNode,
+  defaultHiddenHingeHeightsMm,
+  HIDDEN_DOOR_CAD,
+  HIDDEN_DOOR_MAX_DEGREES,
+  hiddenDoorError,
+  normalizeWallConstruction,
+  useInteractive,
+  useScene,
+  type WallNode,
+} from '@pascal-app/core'
 import {
   ActionButton,
   ActionGroup,
@@ -26,6 +39,8 @@ const doorTypeOptions = [
   { label: 'Pocket', value: 'pocket', available: true },
   { label: 'Barn', value: 'barn', available: true },
   { label: 'Sliding', value: 'sliding', available: true },
+  // Available only on a 목상 / 떡가베 wall (see `hostConstruction` below).
+  { label: '히든도어', value: 'hidden', available: true },
 ] satisfies {
   label: string
   value: DoorNode['doorType']
@@ -102,6 +117,7 @@ const defaultDoorDimensions: Record<DoorNode['doorType'], { width: number; heigh
   'garage-sectional': { width: 2.7, height: 2.4 },
   'garage-rollup': { width: 2.7, height: 2.4 },
   'garage-tiltup': { width: 2.7, height: 2.4 },
+  hidden: { width: 0.9, height: 2.1 },
 }
 
 const defaultDoorSegmentsByType: Record<DoorNode['doorType'], DoorNode['segments']> = {
@@ -115,6 +131,7 @@ const defaultDoorSegmentsByType: Record<DoorNode['doorType'], DoorNode['segments
   'garage-sectional': foldingDoorSegments,
   'garage-rollup': foldingDoorSegments,
   'garage-tiltup': foldingDoorSegments,
+  hidden: hingedDoorSegments,
 }
 
 function isSameDoorValue(current: unknown, next: unknown): boolean {
@@ -146,6 +163,10 @@ export default function DoorPanel() {
   const node = useScene((s) =>
     selectedId ? (s.nodes[selectedId as AnyNode['id']] as DoorNode | undefined) : undefined,
   )
+  const hostWall = useScene((s) => {
+    const parent = node?.parentId ? s.nodes[node.parentId as AnyNodeId] : undefined
+    return parent?.type === 'wall' ? (parent as WallNode) : undefined
+  })
 
   // Panel slider-drag fix recipe (plans/editor-node-registry.md). Without
   // it, the 29+ SliderControls in this panel would loop on drag.
@@ -326,6 +347,15 @@ export default function DoorPanel() {
   const isSectionalGarageDoor = doorType === 'garage-sectional'
   const isRollupGarageDoor = doorType === 'garage-rollup'
   const isTiltupGarageDoor = doorType === 'garage-tiltup'
+  const isHiddenDoor = doorType === 'hidden'
+  const hostConstruction = normalizeWallConstruction(hostWall?.construction)
+  const hiddenError = isHiddenDoor ? hiddenDoorError(node, hostWall) : null
+  const hiddenLeafHeightMm = hostConstruction
+    ? node.height * 1000 - HIDDEN_DOOR_CAD[hostConstruction.kind].headerInset
+    : 0
+  const hiddenHinges =
+    node.hiddenHingeHeights?.map((v) => Math.round(v * 10000) / 10) ??
+    defaultHiddenHingeHeightsMm(hiddenLeafHeightMm)
   const isCutoutOnly = isOpening
   const typeMode = isCutoutOnly ? 'opening' : isGarageDoor ? 'garage' : 'door'
   const supportsHingeSide = doorType === 'hinged'
@@ -338,13 +368,13 @@ export default function DoorPanel() {
     (isSectionalGarageDoor || isRollupGarageDoor || isTiltupGarageDoor) && !isCutoutOnly
   const showOpeningShapeSection = isCutoutOnly
   const showDoorShapeSection = !isCutoutOnly && supportsTopShape
-  const showFrameSection = !isCutoutOnly
-  const showContentPaddingSection = !isCutoutOnly && !isGarageDoor
+  const showFrameSection = !isCutoutOnly && !isHiddenDoor
+  const showContentPaddingSection = !isCutoutOnly && !isGarageDoor && !isHiddenDoor
   const showSwingSection = isSwingDoor
   const showThresholdSection = isSwingDoor
   const showHandleSection = isSwingDoor
   const showHardwareSection = isSwingDoor
-  const showSegmentsSection = !isCutoutOnly && !isGarageDoor
+  const showSegmentsSection = !isCutoutOnly && !isGarageDoor && !isHiddenDoor
   const maxDoorWidth = isGarageDoor ? 6 : 3
 
   const setOpeningTopRadius = (index: number, value: number, commit = false) => {
@@ -379,6 +409,21 @@ export default function DoorPanel() {
               contentPadding: [0.045, 0.055],
             }
           : {}),
+      }
+    }
+
+    if (nextDoorType === 'hidden') {
+      // mmmcraft: choosing 히든도어 closes the leaf and clears the flip.
+      return {
+        doorCategory: 'interior',
+        doorType: nextDoorType,
+        leafCount: 1,
+        ...dimensionUpdates,
+        openingShape: 'rectangle',
+        threshold: false,
+        handle: false,
+        swingAngle: 0,
+        segments,
       }
     }
 
@@ -557,7 +602,10 @@ export default function DoorPanel() {
         </div>
         {!isOpening && (
           <div className="grid grid-cols-2 gap-2 px-1 pt-1">
-            {(isGarageDoor ? garageDoorTypeOptions : doorTypeOptions).map((option) => {
+            {(isGarageDoor
+              ? garageDoorTypeOptions
+              : doorTypeOptions.filter((o) => o.value !== 'hidden' || hostConstruction)
+            ).map((option) => {
               const isSelected = doorType === option.value
               return (
                 <button
@@ -981,6 +1029,69 @@ export default function DoorPanel() {
                 unit="m"
                 value={Math.round(node.contentPadding[1] * 1000) / 1000}
               />
+            </PanelSection>
+          )}
+
+          {isHiddenDoor && (
+            <PanelSection title="히든경첩 설정">
+              <div className="flex flex-col gap-2 px-1 pb-1 text-xs">
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  {DOMUS_150.label} · 3개 / 열림은 0–90° 근사 미리보기입니다. 앞뒤 대칭은 연결 벽의
+                  마감 방향과 그 벽의 히든도어를 함께 뒤집습니다.
+                </p>
+                <SegmentedControl
+                  onChange={(v) => handleUpdate({ hingesSide: v })}
+                  options={[
+                    { label: '경첩 왼쪽', value: 'left' },
+                    { label: '경첩 오른쪽', value: 'right' },
+                  ]}
+                  value={node.hingesSide}
+                />
+                <ActionButton
+                  label="앞뒤 대칭"
+                  onClick={() => {
+                    if (!(hostWall && hostConstruction)) return
+                    useScene.getState().updateNode(hostWall.id as AnyNodeId, {
+                      construction: {
+                        ...hostConstruction,
+                        side: hostConstruction.side === 'left' ? 'right' : 'left',
+                      },
+                    })
+                  }}
+                />
+                <SliderControl
+                  label={`열림 / ${HIDDEN_DOOR_MAX_DEGREES}°`}
+                  max={HIDDEN_DOOR_MAX_DEGREES}
+                  min={0}
+                  onChange={(v) => handleUpdate({ swingAngle: (v * Math.PI) / 180 })}
+                  precision={0}
+                  step={1}
+                  unit="°"
+                  value={Math.round(((node.swingAngle ?? 0) * 180) / Math.PI)}
+                />
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  경첩 표시 위치 · 문짝 아래 기준 / 초기 위치는 화면 배치용이며 시공 위치는 별도
+                  확인해 주세요.
+                </p>
+                {hiddenHinges.map((value, i) => (
+                  <SliderControl
+                    key={i}
+                    label={`경첩 ${i + 1} 위치`}
+                    max={Math.max(DOMUS_150.length, Math.round(hiddenLeafHeightMm))}
+                    min={0}
+                    onChange={(v) => {
+                      const next = [...hiddenHinges]
+                      next[i] = v
+                      handleUpdate({ hiddenHingeHeights: next.map((mm) => mm / 1000) })
+                    }}
+                    precision={0}
+                    step={1}
+                    unit="mm"
+                    value={Math.round(value)}
+                  />
+                ))}
+                {hiddenError && <p className="text-red-400">{hiddenError}</p>}
+              </div>
             </PanelSection>
           )}
 
