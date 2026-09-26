@@ -13,11 +13,14 @@ import {
   downloadCabinetsDxf,
   downloadCabinetsMpr,
   downloadTextFile,
+  placePresetInSlot,
   useCabinetBrush,
   useMyCabinetModules,
+  useSlotMode,
 } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useState } from 'react'
+import { FurnitureSlotSection } from './furniture-slot-section'
 
 const GROUPS: { id: CabinetPreset['group']; label: string }[] = [
   { id: 'wardrobe', label: '옷장' },
@@ -35,10 +38,12 @@ function PresetTile({
   preset,
   active,
   onPick,
+  onDoublePick,
 }: {
   preset: CabinetPreset
   active: boolean
   onPick: () => void
+  onDoublePick: () => void
 }) {
   const size = useMemo(() => {
     const spec = preset.spec()
@@ -52,6 +57,7 @@ function PresetTile({
           : 'border-[#3a3a3a] bg-[#242424] hover:border-[#5a5a5a]'
       }`}
       onClick={onPick}
+      onDoubleClick={onDoublePick}
       title={preset.description}
       type="button"
     >
@@ -109,6 +115,22 @@ export function FurnitureTab() {
   )
 
   const placing = tool === 'cabinet'
+  const slotEnabled = useSlotMode((s) => s.enabled)
+
+  // mmmcraft: double-clicking a module places it straight into the first
+  // free slot of the reference wall (the single click's free placement is
+  // dropped again).
+  const placeInSlot = (presetId: string) => {
+    if (!slotEnabled) return
+    useEditor.getState().setTool(null)
+    useEditor.getState().setMode('select')
+    const result = placePresetInSlot(presetId)
+    if ('error' in result) setMessage(result.error)
+    else {
+      setMessage(null)
+      useViewer.getState().setSelection({ selectedIds: [result.id as AnyNodeId] })
+    }
+  }
 
   return (
     <div className="flex h-full flex-col overflow-y-auto bg-[#1b1b1b] px-3 pb-6 text-[#efefef]">
@@ -120,7 +142,9 @@ export function FurnitureTab() {
         </p>
       </div>
 
-      <section className="mt-2 rounded-xl border border-[#343434] bg-[#202020] p-3">
+      <FurnitureSlotSection selectedWall={selectedWall} />
+
+      <section className="mt-4 rounded-xl border border-[#343434] bg-[#202020] p-3">
         <h3 className="font-semibold text-sm">벽에 자동 배치</h3>
         <p className="mt-1 text-[#9a9a9a] text-xs">
           {selectedWall
@@ -193,6 +217,7 @@ export function FurnitureTab() {
               <PresetTile
                 active={placing && brush.kind === 'preset' && brush.presetId === preset.id}
                 key={preset.id}
+                onDoublePick={() => placeInSlot(preset.id)}
                 onPick={() => startPlacing({ kind: 'preset', presetId: preset.id })}
                 preset={preset}
               />

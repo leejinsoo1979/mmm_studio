@@ -142,6 +142,7 @@ export {
   cabinetHardwareRows,
   cabinetHingeBorings,
   cabinetPanelRows,
+  columnCountLimits,
   countertopDefinition,
   createKitchenOnWall,
   createWardrobesOnWall,
@@ -150,8 +151,13 @@ export {
   downloadCabinetsMpr,
   downloadTextFile,
   type MyCabinetModule,
+  placePresetInSlot,
+  type SlotGuide,
+  selectSlotWall,
+  slotGuideFor,
   useCabinetBrush,
   useMyCabinetModules,
+  useSlotMode,
   wallRun,
 } from './cabinet'
 export { ceilingDefinition } from './ceiling'

@@ -184,6 +184,8 @@ export const cabinetDefinition: NodeDefinition<typeof CabinetNode> = {
   },
 
   preview: () => import('./preview'),
+  // mmmcraft Room slot guides on the reference wall while 슬롯 생성 is on.
+  system: { module: () => import('./slot-guides') },
   tool: () => import('./tool'),
   toolHints: [
     { key: 'Left click', label: 'Place cabinet (snaps to walls)' },
