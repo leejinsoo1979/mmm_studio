@@ -13,11 +13,27 @@ import { WindowNode } from './window'
  * the plan; `studSpacing` (mm) repeats the 30 mm timber studs. Absent =
  * 일반 벽. `thickness` always includes the finish build-up.
  */
+/** Finish sheets for the material takeoff (see WALL_SHEETS). */
+export const WallSheetId = z.enum([
+  'gypsum-9.5',
+  'gypsum-12.5',
+  'gypsum-water-9.5',
+  'gypsum-water-12.5',
+  'gypsum-fire-9.5',
+  'gypsum-fire-12.5',
+  'mdf-9',
+])
+export type WallSheetId = z.infer<typeof WallSheetId>
+
 export const WallConstruction = z.object({
-  kind: z.enum(['timber', 'bonded']),
+  /** 목상 (timber battens), 경량 (light-gauge steel studs) or 떡가베. */
+  kind: z.enum(['timber', 'steel', 'bonded']),
   side: z.enum(['left', 'right']).default('left'),
   bothFaces: z.literal(true).optional(),
   studSpacing: z.number().min(30).optional(),
+  /** Takeoff sheets: 1P against the framing, 2P the finished face. Absent =
+   *  the kind's default. */
+  sheets: z.object({ p1: WallSheetId.optional(), p2: WallSheetId.optional() }).optional(),
 })
 export type WallConstruction = z.infer<typeof WallConstruction>
 

@@ -4,7 +4,11 @@ import {
   constructionBuildUpMm,
   normalizeWallConstruction,
   WALL_CONSTRUCTION_KINDS,
+  WALL_FRAMING,
+  WALL_SHEETS,
   type WallConstruction,
+  type WallSheetId,
+  wallSheetsFor,
 } from '@pascal-app/core'
 import { SegmentedControl } from '@pascal-app/editor'
 import { useEffect, useState } from 'react'
@@ -35,15 +39,17 @@ export function WallConstructionFields({
               : {
                   kind: next,
                   side: value?.side ?? 'left',
-                  ...(next === 'timber' && value?.studSpacing
+                  ...(next !== 'bonded' && value?.studSpacing
                     ? { studSpacing: value.studSpacing }
                     : {}),
+                  ...(value?.sheets ? { sheets: value.sheets } : {}),
                 },
           )
         }
         options={[
           { label: '일반 벽', value: 'plain' },
           { label: '목상', value: 'timber' },
+          { label: '경량', value: 'steel' },
           { label: '떡가베', value: 'bonded' },
         ]}
         value={kind}
@@ -61,8 +67,10 @@ export function WallConstructionFields({
             ]}
             value={value.side}
           />
-          {value.kind === 'timber' && (
+          {value.kind !== 'bonded' && (
             <StudSpacingField
+              label={value.kind === 'steel' ? '스터드 간격' : '목상 간격'}
+              placeholder={`산출 기본 ${WALL_FRAMING[value.kind].spacingMm}mm`}
               onChange={(studSpacing) => {
                 const { studSpacing: _old, ...rest } = value
                 set(studSpacing === undefined ? rest : { ...rest, studSpacing })
@@ -75,18 +83,60 @@ export function WallConstructionFields({
             {constructionBuildUpMm(value).toFixed(2)} mm ·{' '}
             {value.kind === 'bonded'
               ? '양면 각각 석고 2PLY (앞면 2겹 · 뒷면 2겹)'
-              : '마감판 1P + 2P'}
+              : `${WALL_FRAMING[value.kind].label} + 마감판 1P + 2P`}
           </p>
+          <SheetSelect
+            label="1P (골조 쪽)"
+            onChange={(p1) => set({ ...value, sheets: { ...value.sheets, p1 } })}
+            value={wallSheetsFor(value).p1}
+          />
+          <SheetSelect
+            label="2P (마감면)"
+            onChange={(p2) => set({ ...value, sheets: { ...value.sheets, p2 } })}
+            value={wallSheetsFor(value).p2}
+          />
         </>
       )}
     </div>
   )
 }
 
-function StudSpacingField({
+/** Takeoff sheet for one finish layer (석고보드 3×6 / MDF 4×8). */
+function SheetSelect({
+  label,
   value,
   onChange,
 }: {
+  label: string
+  value: WallSheetId
+  onChange: (next: WallSheetId) => void
+}) {
+  return (
+    <label className="flex h-9 items-center justify-between gap-2 rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm">
+      <span className="shrink-0 whitespace-nowrap text-muted-foreground">{label}</span>
+      <select
+        className="min-w-0 bg-transparent text-right text-foreground text-xs outline-none"
+        onChange={(e) => onChange(e.target.value as WallSheetId)}
+        value={value}
+      >
+        {(Object.keys(WALL_SHEETS) as WallSheetId[]).map((id) => (
+          <option key={id} value={id}>
+            {WALL_SHEETS[id].label} {WALL_SHEETS[id].widthMm}×{WALL_SHEETS[id].heightMm}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+function StudSpacingField({
+  label,
+  placeholder,
+  value,
+  onChange,
+}: {
+  label: string
+  placeholder: string
   value: number | undefined
   onChange: (next: number | undefined) => void
 }) {
@@ -106,7 +156,7 @@ function StudSpacingField({
   }
   return (
     <label className="mt-1 flex h-9 items-center justify-between gap-2 rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm">
-      <span className="shrink-0 whitespace-nowrap text-muted-foreground">목상 간격</span>
+      <span className="shrink-0 whitespace-nowrap text-muted-foreground">{label}</span>
       <span className="flex min-w-0 items-center gap-1">
         <input
           className="w-full min-w-0 bg-transparent text-right text-foreground outline-none placeholder:text-[10px]"
@@ -117,7 +167,7 @@ function StudSpacingField({
             e.stopPropagation()
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
           }}
-          placeholder="간격 지정 전에는 문 주변만 표시"
+          placeholder={placeholder}
           value={draft}
         />
         <span className="text-muted-foreground text-xs">mm</span>

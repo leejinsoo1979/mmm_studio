@@ -348,7 +348,12 @@ export default function DoorPanel() {
   const isRollupGarageDoor = doorType === 'garage-rollup'
   const isTiltupGarageDoor = doorType === 'garage-tiltup'
   const isHiddenDoor = doorType === 'hidden'
-  const hostConstruction = normalizeWallConstruction(hostWall?.construction)
+  // Hidden doors: 목상 / 떡가베 walls only (mmmcraft has no 경량 section).
+  const normalizedHost = normalizeWallConstruction(hostWall?.construction)
+  const hostConstruction =
+    normalizedHost && normalizedHost.kind !== 'steel'
+      ? { ...normalizedHost, kind: normalizedHost.kind }
+      : undefined
   const hiddenError = isHiddenDoor ? hiddenDoorError(node, hostWall) : null
   const hiddenLeafHeightMm = hostConstruction
     ? node.height * 1000 - HIDDEN_DOOR_CAD[hostConstruction.kind].headerInset

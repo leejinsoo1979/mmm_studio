@@ -10,8 +10,13 @@ import type { WallConstruction, WallNode } from '../../schema'
 export const CAD_BOARD_BACK_MM = 18.00773151634348
 export const CAD_STUD_SIZE_MM = 30
 
+/** 경량 50형 C-stud web depth. */
+export const STEEL_STUD_DEPTH_MM = 50
+
 export const WALL_CONSTRUCTION_KINDS = {
   timber: { label: '목상', buildUpMm: 58.00773151634348 },
+  /** The same 1P + 2P board zone as 목상, on a 50 mm steel stud. */
+  steel: { label: '경량', buildUpMm: CAD_BOARD_BACK_MM + STEEL_STUD_DEPTH_MM },
   bonded: { label: '떡가베', buildUpMm: 29 },
 } as const
 

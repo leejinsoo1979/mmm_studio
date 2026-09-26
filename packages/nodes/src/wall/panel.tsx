@@ -31,6 +31,7 @@ import { useViewer } from '@pascal-app/viewer'
 import { Spline } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { WallConstructionFields } from './construction-fields'
+import { WallTakeoffSection } from './takeoff-section'
 
 export default function WallPanel() {
   const selectedId = useViewer((s) => s.selection.selectedIds[0])
@@ -233,6 +234,12 @@ export default function WallPanel() {
         <WallConstructionFields onChange={applyConstruction} value={node.construction} />
         {constructionError && <p className="text-red-400 text-xs">{constructionError}</p>}
       </PanelSection>
+
+      {node.construction && (
+        <PanelSection title="자재 산출">
+          <WallTakeoffSection wall={node} />
+        </PanelSection>
+      )}
 
       {!hasWallChildrenBlockingCurve && (
         <PanelSection title="Actions">

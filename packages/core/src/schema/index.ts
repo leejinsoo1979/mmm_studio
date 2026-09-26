@@ -194,6 +194,7 @@ export {
   getWallSurfaceMaterialSignature,
   WALL_SLOT_DEFAULT,
   WallConstruction,
+  WallSheetId,
   WallNode,
 } from './nodes/wall'
 export { WindowNode, WindowType } from './nodes/window'

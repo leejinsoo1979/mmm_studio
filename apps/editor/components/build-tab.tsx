@@ -2,7 +2,12 @@
 
 import { type AssetInput, nodeRegistry } from '@pascal-app/core'
 import { triggerSFX, useEditor } from '@pascal-app/editor'
-import { useLiquidLineToolOptions, WallConstructionFields } from '@pascal-app/nodes'
+import {
+  LevelTakeoffSummary,
+  useLiquidLineToolOptions,
+  WallConstructionFields,
+} from '@pascal-app/nodes'
+import { useViewer } from '@pascal-app/viewer'
 import { ChevronLeft, Search } from 'lucide-react'
 import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
@@ -315,6 +320,17 @@ function NewWallConstruction() {
   )
 }
 
+/** Level-wide 자재 산출 of the 목상 / 경량 / 떡가베 walls. */
+function LevelWallTakeoff() {
+  const levelId = useViewer((s) => s.selection.levelId)
+  return (
+    <div className="mt-3 rounded-xl border border-[#343434] bg-[#202020] p-3">
+      <div className="mb-2 text-[#9a9a9a] text-xs">벽 마감 자재 산출 (현재 층)</div>
+      <LevelTakeoffSummary levelId={levelId ?? null} />
+    </div>
+  )
+}
+
 export function BuildTab() {
   const activeTool = useEditor((s) => s.tool)
   const wallPlacementMode = useEditor((s) => s.toolDefaults.wall?.placementMode)
@@ -447,7 +463,12 @@ export function BuildTab() {
                   />
                 ))}
               </div>
-              {section.id === 'walls' && <NewWallConstruction />}
+              {section.id === 'walls' && (
+                <>
+                  <NewWallConstruction />
+                  <LevelWallTakeoff />
+                </>
+              )}
             </Section>
           ))}
 

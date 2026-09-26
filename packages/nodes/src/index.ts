@@ -197,6 +197,11 @@ export { spawnDefinition } from './spawn'
 export { stairDefinition } from './stair'
 export { stairSegmentDefinition } from './stair-segment'
 export { turbineVentDefinition } from './turbine-vent'
-export { WallConstructionFields, wallDefinition } from './wall'
+export {
+  LevelTakeoffSummary,
+  WallConstructionFields,
+  WallTakeoffSection,
+  wallDefinition,
+} from './wall'
 export { windowDefinition } from './window'
 export { zoneDefinition } from './zone'

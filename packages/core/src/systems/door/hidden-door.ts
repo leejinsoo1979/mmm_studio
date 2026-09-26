@@ -127,7 +127,8 @@ export function defaultHiddenHingeHeightsMm(leafHeightMm: number): number[] {
 /** mmmcraft's validation, message for message; null when the door is valid. */
 export function hiddenDoorError(door: HiddenDoor, wall: HostWall | undefined): string | null {
   const c = normalizeWallConstruction(wall?.construction)
-  if (!wall || !c) return '히든도어는 목상 또는 떡가베 벽에 배치해 주세요.'
+  // mmmcraft's CAD sections exist for 목상 and 떡가베 only.
+  if (!wall || !c || c.kind === 'steel') return '히든도어는 목상 또는 떡가베 벽에 배치해 주세요.'
   const T = (wall.thickness ?? 0.1) * 1000
   const width = door.width * 1000 - 2 * HIDDEN_LEAF.sideInset
   const height = door.height * 1000 - HIDDEN_DOOR_CAD[c.kind].headerInset
@@ -163,7 +164,10 @@ export function hiddenDoorError(door: HiddenDoor, wall: HostWall | undefined): s
  * from the finished face only; `amount` is 0…1 of the 90° preview swing.
  */
 export function hiddenDoorModel(door: HiddenDoor, wall: HostWall, amount: number) {
-  const c = normalizeWallConstruction(wall.construction) as WallConstruction
+  // Only called once hiddenDoorError passed: a 목상 or 떡가베 wall.
+  const c = normalizeWallConstruction(wall.construction) as WallConstruction & {
+    kind: 'timber' | 'bonded'
+  }
   const cad = HIDDEN_DOOR_CAD[c.kind]
   const T = (wall.thickness ?? 0.1) * 1000
   const width = door.width * 1000 - 2 * HIDDEN_LEAF.sideInset

@@ -237,6 +237,7 @@ export {
   constructionBuildUpMm,
   finishDepthToOffsetMm,
   normalizeWallConstruction,
+  STEEL_STUD_DEPTH_MM,
   timberStudCentresMm,
   WALL_CONSTRUCTION_KINDS,
   type WallConstructionLayer,
@@ -293,6 +294,23 @@ export {
   type WallMoveLinkedWallTargetPlan,
   type WallPlanPoint,
 } from './systems/wall/wall-move'
+export {
+  type FaceTakeoff,
+  type FramingTakeoff,
+  facePieces,
+  faceTakeoff,
+  framingTakeoff,
+  levelWallTakeoff,
+  sheetsForPieces,
+  summarizeTakeoff,
+  type TakeoffSummary,
+  takeoffCsv,
+  WALL_FRAMING,
+  WALL_SHEETS,
+  type WallSheet,
+  wallOpenings,
+  wallSheetsFor,
+} from './systems/wall/wall-takeoff'
 export {
   DEFAULT_LX_WINDOW_SELECTION,
   isPublishedVentSize,

@@ -65,7 +65,7 @@ type HostKind = 'wall' | 'roof' | null
  * onto a plain wall restores a hinged door.
  */
 function doorTypeForWall(wall: WallNode, current: DoorNode['doorType']): DoorNode['doorType'] {
-  if (wall.construction) return 'hidden'
+  if (wall.construction && wall.construction.kind !== 'steel') return 'hidden'
   return current === 'hidden' ? 'hinged' : current
 }
 
