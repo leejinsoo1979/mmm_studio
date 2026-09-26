@@ -1,6 +1,10 @@
 import type { NodeDefinition } from '@pascal-app/core'
 import { buildWallFloorplan, computeWallFloorplanLevelData } from './floorplan'
-import { wallCurveAffordance, wallMoveEndpointAffordance } from './floorplan-affordances'
+import {
+  wallCurveAffordance,
+  wallMoveAffordance,
+  wallMoveEndpointAffordance,
+} from './floorplan-affordances'
 import { wallFloorplanMoveTarget } from './floorplan-move'
 import { wallFloorplanSiblingOverrides } from './floorplan-overrides'
 import { wallPaint } from './paint'
@@ -110,6 +114,7 @@ export const wallDefinition: NodeDefinition<typeof WallNode> = {
   // same legacy `MoveWallEndpointTool` flow, reachable from both the
   // R3F canvas and the floor-plan SVG.
   floorplanAffordances: {
+    move: wallMoveAffordance,
     'move-endpoint': wallMoveEndpointAffordance,
     curve: wallCurveAffordance,
   },

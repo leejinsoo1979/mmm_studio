@@ -7,12 +7,17 @@ import {
   WallNode as WallSchema,
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
+import type { SnappingMode } from '../../../lib/snapping-mode'
 import useEditor from '../../../store/use-editor'
 import useInteractionScope from '../../../store/use-interaction-scope'
 import {
+  commitWallDraftSegment,
   createWallOnCurrentLevel,
+  createWallSegmentsOnCurrentLevel,
   inferOrthogonalWallPoint,
+  resolveWallDraftPoint,
   snapWallDraftPointDetailed,
+  wallDraftChainEnds,
 } from './wall-drafting'
 import type { WallPlanPoint } from './wall-snap-geometry'
 
@@ -110,6 +115,17 @@ describe('createWallOnCurrentLevel', () => {
     ).toBe(true)
   })
 
+  test('a split commit is a single undo step that restores the host wall', () => {
+    useScene.temporal.getState().clear()
+    createWallOnCurrentLevel([2, 2], [2, 0])
+    expect(useScene.temporal.getState().pastStates).toHaveLength(1)
+
+    useScene.temporal.getState().undo()
+    expect(levelWalls().map((wall) => [wall.id, wall.start, wall.end])).toEqual([
+      ['wall_a', [0, 0], [4, 0]],
+    ])
+  })
+
   test('exact duplicate segment is rejected', () => {
     expect(createWallOnCurrentLevel([0, 0], [4, 0])).toBeNull()
     expect(levelWalls()).toHaveLength(1)
@@ -143,5 +159,127 @@ describe('inferOrthogonalWallPoint', () => {
 
   test('Shift forces the nearest orthogonal axis', () => {
     expect(inferOrthogonalWallPoint([1, 1], [3, 3], true)).toEqual([3, 1])
+  })
+})
+
+function levelNodesOfType(type: string) {
+  return Object.values(useScene.getState().nodes).filter((node) => node?.type === type)
+}
+
+function historySteps() {
+  return useScene.temporal.getState().pastStates.length
+}
+
+function undo() {
+  useScene.temporal.getState().undo()
+}
+
+describe('wall draft commit', () => {
+  function useWallSnapping(mode: SnappingMode) {
+    useEditor.getState().setSnappingMode('wall', mode)
+    useEditor.getState().setGridSnapStep(0.5)
+    // A reshaping-endpoint scope resolves to the 'wall' snap context without
+    // needing the node registry (not loaded in this package's tests).
+    useInteractionScope
+      .getState()
+      .begin({ kind: 'reshaping', nodeId: 'wall_a', reshape: 'endpoint' })
+  }
+
+  beforeEach(() => {
+    useViewer.setState({
+      selection: { buildingId: 'building_test', levelId: LEVEL_ID, zoneId: null, selectedIds: [] },
+    } as never)
+    useEditor.getState().setContinuation('wall', 'room')
+    seedLevel([makeWall([0, 0], [4, 0], 'wall_a')])
+    useScene.temporal.getState().clear()
+  })
+
+  test.each([
+    ['grid', [0.5, 0.5]],
+    ['off', [0.6, 0.3]],
+    ['lines', [0, 0]],
+  ] as const)('%s: the committed end is the previewed end', (mode, expected) => {
+    useWallSnapping(mode)
+    const preview = resolveWallDraftPoint({ point: [0.6, 0.3], walls: levelWalls(), start: [2, 2] })
+    const wall = commitWallDraftSegment([2, 2], preview.point)
+
+    expect(preview.point).toEqual([...expected])
+    expect(wall?.end).toEqual(preview.point)
+    expect(levelWalls()).toHaveLength(2)
+  })
+
+  test('a T-junction commit (split + new wall) is one undo step', () => {
+    useWallSnapping('lines')
+    const preview = resolveWallDraftPoint({
+      point: [2.05, 0.12],
+      walls: levelWalls(),
+      start: [2, 2],
+    })
+    commitWallDraftSegment([2, 2], preview.point)
+
+    expect(preview.point).toEqual([2, 0])
+    expect(levelWalls()).toHaveLength(3)
+    expect(historySteps()).toBe(1)
+
+    undo()
+    expect(levelWalls().map((wall) => [wall.id, wall.start, wall.end])).toEqual([
+      ['wall_a', [0, 0], [4, 0]],
+    ])
+  })
+
+  test('closing a room creates its floor and ceiling in the same undo step', () => {
+    useWallSnapping('grid')
+    const corners: [number, number][] = [
+      [0, 0],
+      [0, 3],
+      [4, 3],
+      [4, 0],
+    ]
+    let last = null
+    for (let index = 1; index < corners.length; index += 1) {
+      last = commitWallDraftSegment(corners[index - 1]!, corners[index]!)
+    }
+    expect(last && wallDraftChainEnds(last, [0, 0])).toBe(true)
+    expect(levelNodesOfType('slab')).toHaveLength(1)
+    expect(levelNodesOfType('ceiling')).toHaveLength(1)
+    const stepsBeforeLastUndo = historySteps()
+
+    undo()
+    expect(historySteps()).toBe(stepsBeforeLastUndo - 1)
+    expect(levelWalls()).toHaveLength(3)
+    expect(levelNodesOfType('slab')).toHaveLength(0)
+    expect(levelNodesOfType('ceiling')).toHaveLength(0)
+  })
+
+  test('an open chain continues unless single-wall continuation is set', () => {
+    useWallSnapping('grid')
+    const wall = commitWallDraftSegment([0, 2], [3, 2])!
+    expect(wallDraftChainEnds(wall, [0, 2])).toBe(false)
+    useEditor.getState().setContinuation('wall', 'single')
+    expect(wallDraftChainEnds(wall, [0, 2])).toBe(true)
+  })
+
+  test('segments are created exactly as given in one undo step, skipping duplicates', () => {
+    useWallSnapping('lines')
+    const created = createWallSegmentsOnCurrentLevel([
+      [
+        [0.013, 0.004],
+        [0.013, 2.5],
+      ],
+      [
+        [0, 0],
+        [4, 0],
+      ],
+    ])
+
+    expect(created.map((wall) => [wall.start, wall.end])).toEqual([
+      [
+        [0.013, 0.004],
+        [0.013, 2.5],
+      ],
+    ])
+    expect(historySteps()).toBe(1)
+    undo()
+    expect(levelWalls()).toHaveLength(1)
   })
 })

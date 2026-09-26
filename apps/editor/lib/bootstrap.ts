@@ -6,7 +6,7 @@ import {
   registerNode,
   setPluginDiscovery,
 } from '@pascal-app/core'
-import { builtinPlugin } from '@pascal-app/nodes'
+import { builtinPlugin, cabinetPlugin } from '@pascal-app/nodes'
 import { treesNodesPlugin } from '@pascal-app/plugin-trees'
 
 // Idempotency guards: HMR can reload this module, but `registerNode`
@@ -36,7 +36,9 @@ function isDev(): boolean {
 function loadBuiltinsSync(): void {
   if (builtinsLoaded) return
   builtinsLoaded = true
-  for (const def of builtinPlugin.nodes ?? []) {
+  // Cabinet kinds register with the built-ins so a scene holding cabinets
+  // renders on its first pass (discovered plugins load a tick later).
+  for (const def of [...(builtinPlugin.nodes ?? []), ...(cabinetPlugin.nodes ?? [])]) {
     // Skip kinds the registry already has. The module-closure flag
     // above resets on HMR, but the registry singleton (in @pascal-app/core)
     // persists — without this guard we'd throw on the first duplicate.

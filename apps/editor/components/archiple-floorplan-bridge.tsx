@@ -1,11 +1,15 @@
 'use client'
 
-import { createWallOnCurrentLevel } from '@pascal-app/editor'
+import { createWallSegmentsOnCurrentLevel } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { Check, DoorOpen, MousePointer2, PenLine, Square, X } from 'lucide-react'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ToolType } from './archiple2d/core/types/EditorState'
 import FloorplanCanvas from './archiple2d/floorplan/FloorplanCanvas'
+
+// Archiple works in millimetres (FloorplanCanvas config); MMM plan points are
+// building-local metres. Archiple x / y map to plan x / z.
+const ARCHIPLE_MM_PER_PLAN_UNIT = 1000
 
 type ArchipleExportData = {
   points?: Array<{ id: string; x: number; y: number }>
@@ -44,16 +48,32 @@ function ArchipleCanvasStage({ onExit }: { onExit: () => void }) {
   const [tool, setTool] = useState<ToolType>(ToolType.WALL)
   const [data, setData] = useState<ArchipleExportData | null>(null)
 
+  // Esc in the canvas cancels the draft and switches its tool to Select
+  // (KeyboardController); keep the tool bar in step so picking Wall re-arms it.
+  useEffect(() => {
+    const onToolChanged = (event: Event) =>
+      setTool((event as CustomEvent<{ tool: ToolType }>).detail.tool)
+    window.addEventListener('tool-changed', onToolChanged)
+    return () => window.removeEventListener('tool-changed', onToolChanged)
+  }, [])
+
+  // Apply keeps its explicit trigger: the drawing reaches the MMM level only
+  // here, exactly as drawn (no re-snapping), as one undo step.
   const applyToMmm = useCallback(() => {
     if (!useViewer.getState().selection.levelId || !data?.points || !data?.walls) return
 
     const pointById = new Map(data.points.map((point) => [point.id, point]))
+    const toPlan = (point: { x: number; y: number }): [number, number] => [
+      point.x / ARCHIPLE_MM_PER_PLAN_UNIT,
+      point.y / ARCHIPLE_MM_PER_PLAN_UNIT,
+    ]
+    const segments: [[number, number], [number, number]][] = []
     for (const wall of data.walls) {
       const start = pointById.get(wall.startPointId)
       const end = pointById.get(wall.endPointId)
-      if (!(start && end)) continue
-      createWallOnCurrentLevel([start.x / 1000, start.y / 1000], [end.x / 1000, end.y / 1000])
+      if (start && end) segments.push([toPlan(start), toPlan(end)])
     }
+    createWallSegmentsOnCurrentLevel(segments)
   }, [data])
 
   return (
@@ -101,7 +121,9 @@ function ArchipleCanvasStage({ onExit }: { onExit: () => void }) {
           </ToolButton>
         </aside>
 
-        <div className="min-w-0 flex-1 bg-white">
+        {/* `relative`: the canvas container is absolutely positioned and would
+            otherwise cover the header and tool bar. */}
+        <div className="relative min-w-0 flex-1 bg-white">
           <FloorplanCanvas
             activeTool={tool}
             onDataChange={(nextData) => setData(nextData)}

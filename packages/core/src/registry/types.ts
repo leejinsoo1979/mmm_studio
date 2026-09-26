@@ -421,6 +421,8 @@ export type FloorplanGeometry =
       y2: number
       affordance: string
       payload: unknown
+      /** Hover cursor over the hit area. Default `'pointer'`. */
+      cursor?: string
     }
   /**
    * "Grab to move" handle drawn at a node's centroid — the orange dot

@@ -1,31 +1,22 @@
 import {
   type AnyNode,
-  type AnyNodeId,
-  type CeilingNode,
   calculateLevelMiters,
   collectAlignmentAnchors,
-  detectSpacesForLevel,
   emitter,
   type GridEvent,
   getWallMiterBoundaryPoints,
   type LevelNode,
   type Point2D,
-  pauseSceneHistory,
-  planAutoCeilingsForLevel,
-  planAutoSlabsForLevel,
-  projectAutoSlabsForPlan,
   resolveAlignment,
   resolveBuildingForLevel,
-  resumeSceneHistory,
-  type SlabNode,
   useScene,
   type WallMiterData,
   type WallNode,
-  wallClosesRoom,
 } from '@pascal-app/core'
 import {
   CursorSphere,
-  createWallOnCurrentLevel,
+  commitWallDraftSegment,
+  createRectangleRoomOnCurrentLevel,
   EDITOR_LAYER,
   formatAngleRadians,
   formatLinearMeasurement,
@@ -33,12 +24,12 @@ import {
   getAngleToSegmentReference,
   getRectangleRoomCenterlineCorners,
   getSegmentAngleReferenceAtPoint,
-  inferOrthogonalWallPoint,
   isAlignmentGuideActive,
-  isAngleSnapActive,
+  isFloorplanInputEvent,
   isMagneticSnapActive,
   type LinearUnit,
   markToolCancelConsumed,
+  resolveWallDraftPoint,
   type SegmentAngleReference,
   snapWallDraftPointDetailed,
   triggerSFX,
@@ -47,8 +38,8 @@ import {
   useSegmentDraftChain,
   useWallSnapIndicator,
   WALL_CONNECT_SNAP_RADIUS,
-  WALL_JOIN_SNAP_RADIUS,
   type WallPlanPoint,
+  wallDraftChainEnds,
 } from '@pascal-app/editor'
 import { getSceneTheme, useViewer } from '@pascal-app/viewer'
 import { Html } from '@react-three/drei'
@@ -173,13 +164,6 @@ function getLockedOrthogonalAxis(start: WallPlanPoint, end: WallPlanPoint): 'x' 
   if (dz < 1e-6) return 'x'
   if (dx < 1e-6) return 'z'
   return null
-}
-
-function isWithinWallJoinSnapRadius(point: WallPlanPoint, vertex: Vector3) {
-  const dx = point[0] - vertex.x
-  const dz = point[1] - vertex.z
-
-  return dx * dx + dz * dz <= WALL_JOIN_SNAP_RADIUS * WALL_JOIN_SNAP_RADIUS
 }
 
 function getNearestAxisAngleLabel(
@@ -517,76 +501,6 @@ function getCurrentLevelWalls(): WallNode[] {
   return getLevelWalls(currentLevelId ?? null, nodes)
 }
 
-function getLevelSlabs(levelId: string, nodes: Record<string, AnyNode>): SlabNode[] {
-  return Object.values(nodes).filter(
-    (entry): entry is SlabNode => entry?.type === 'slab' && (entry.parentId ?? null) === levelId,
-  )
-}
-
-function getLevelCeilings(levelId: string, nodes: Record<string, AnyNode>): CeilingNode[] {
-  return Object.values(nodes).filter(
-    (entry): entry is CeilingNode =>
-      entry?.type === 'ceiling' && (entry.parentId ?? null) === levelId,
-  )
-}
-
-function flushAutoSurfacesForCurrentLevel() {
-  const levelId = useViewer.getState().selection.levelId
-  if (!levelId) return
-
-  const sceneState = useScene.getState()
-  const levelWalls = getLevelWalls(levelId, sceneState.nodes)
-  const { roomPolygons } = detectSpacesForLevel(levelId, levelWalls)
-  const existingSlabs = getLevelSlabs(levelId, sceneState.nodes)
-  const slabPlan = planAutoSlabsForLevel(roomPolygons, existingSlabs)
-  const ceilingPlan = planAutoCeilingsForLevel(
-    roomPolygons,
-    getLevelCeilings(levelId, sceneState.nodes),
-    {
-      walls: levelWalls,
-      slabs: projectAutoSlabsForPlan(existingSlabs, slabPlan),
-    },
-  )
-
-  const update = [
-    ...slabPlan.update.map((entry) => ({
-      id: entry.id as AnyNodeId,
-      data: entry.data,
-    })),
-    ...ceilingPlan.update.map((entry) => ({
-      id: entry.id as AnyNodeId,
-      data: entry.data,
-    })),
-  ]
-  const create = [
-    ...slabPlan.create.map((slab) => ({
-      node: slab,
-      parentId: levelId as AnyNodeId,
-    })),
-    ...ceilingPlan.create.map((ceiling) => ({
-      node: ceiling,
-      parentId: levelId as AnyNodeId,
-    })),
-  ]
-  const deleteIds = [
-    ...slabPlan.delete.map((id) => id as AnyNodeId),
-    ...ceilingPlan.delete.map((id) => id as AnyNodeId),
-  ]
-
-  if (update.length === 0 && create.length === 0 && deleteIds.length === 0) return
-
-  pauseSceneHistory(useScene)
-  try {
-    sceneState.applyNodeChanges({
-      update,
-      create,
-      delete: deleteIds,
-    })
-  } finally {
-    resumeSceneHistory(useScene)
-  }
-}
-
 // Walls on the level directly beneath the active one. Levels share the same
 // local XZ origin (they only differ in world Y), so these walls live in the
 // identical coordinate frame and can be fed straight into the snap pipeline —
@@ -724,49 +638,53 @@ export const WallTool: React.FC = () => {
       useSegmentDraftChain.getState().clear('wall')
     }
 
+    // Pointer sample of the last 3D move, reused by a click on the same spot
+    // (see `onGridClick`).
+    let lastMove: { clientX: number; clientY: number; point: WallPlanPoint } | null = null
+    let gridY = 0
+
+    const resolveDraftPoint = (point: WallPlanPoint, shiftKey: boolean): WallPlanPoint => {
+      const drafting = buildingState.current === 1
+      const resolved = resolveWallDraftPoint({
+        point,
+        // Walls on the floor below are extra snap references (align with the
+        // level beneath); the commit only ever touches the active level.
+        walls: [...getCurrentLevelWalls(), ...getBelowLevelWalls()],
+        start: drafting ? [startingPoint.current.x, startingPoint.current.z] : null,
+        forceOrthogonal: drafting && shiftKey,
+        align: alignPoint,
+      })
+      if (resolved.snap || resolved.orthogonal) useAlignmentGuides.getState().clear()
+      // Stand the magnetic beacon on a wall corner / wall point lock.
+      useWallSnapIndicator
+        .getState()
+        .set(
+          resolved.snap
+            ? { x: resolved.point[0], z: resolved.point[1], kind: resolved.snap }
+            : null,
+        )
+      return resolved.point
+    }
+
     const onGridMove = (event: GridEvent) => {
       if (!(cursorRef.current && wallPreviewRef.current)) return
 
       const walls = getCurrentLevelWalls()
-      // Add walls on the floor below as extra snap references so the new wall
-      // can align with the level beneath it. Kept separate from `walls` so the
-      // measurement HUD only reports against the active level.
-      const snapWalls = [...walls, ...getBelowLevelWalls()]
       const localPoint: WallPlanPoint = [event.localPosition[0], event.localPosition[2]]
-      // Snapping is governed entirely by the snapping mode (grid / lines /
-      // angles / off). `'off'` is the bypass — there is no Shift hold-to-bypass.
-      const angleLocked = buildingState.current === 1 && isAngleSnapActive()
-      const draftStart: WallPlanPoint = [startingPoint.current.x, startingPoint.current.z]
-      const orthogonalInput =
-        buildingState.current === 1
-          ? inferOrthogonalWallPoint(draftStart, localPoint, event.nativeEvent.shiftKey)
-          : localPoint
-      const snapResult = snapWallDraftPointDetailed({
-        point: orthogonalInput,
-        walls: snapWalls,
-        start: angleLocked ? draftStart : undefined,
-        angleSnap: angleLocked,
-        magnetic: isMagneticSnapActive(),
-      })
-      gridPosition = alignPoint(snapResult.point, { applySnap: !angleLocked })
-      const orthogonalInferred =
-        orthogonalInput[0] !== localPoint[0] || orthogonalInput[1] !== localPoint[1]
-      // Magnetic attachment to real wall geometry wins. Otherwise preserve
-      // the architectural horizontal/vertical inference after grid/alignment
-      // processing so the preview and the committed endpoint are exactly 90°.
-      if (buildingState.current === 1 && !snapResult.snap && orthogonalInferred) {
-        gridPosition = inferOrthogonalWallPoint(draftStart, gridPosition, true)
-        useAlignmentGuides.getState().clear()
+      gridY = event.localPosition[1]
+      // Floor-plan input is already resolved by the floor plan, which also
+      // publishes its guides / beacon — mirror the point as-is.
+      if (isFloorplanInputEvent(event.nativeEvent)) {
+        gridPosition = localPoint
+        lastMove = null
+      } else {
+        gridPosition = resolveDraftPoint(localPoint, event.nativeEvent.shiftKey)
+        lastMove = {
+          clientX: event.nativeEvent.clientX,
+          clientY: event.nativeEvent.clientY,
+          point: localPoint,
+        }
       }
-      // Stand the magnetic beacon at the endpoint when it locked onto an
-      // existing wall corner / wall point; clear it for plain grid/angle moves.
-      useWallSnapIndicator
-        .getState()
-        .set(
-          snapResult.snap
-            ? { x: gridPosition[0], z: gridPosition[1], kind: snapResult.snap }
-            : null,
-        )
 
       if (buildingState.current === 1) {
         const snappedLocal = gridPosition
@@ -821,31 +739,34 @@ export const WallTool: React.FC = () => {
 
     const onGridClick = (event: GridEvent) => {
       if (!wallPreviewRef.current) return
+      // The floor plan commits the clicks it receives; this tool mirrors that
+      // draft through `useSegmentDraftChain` instead of committing it again.
+      if (isFloorplanInputEvent(event.nativeEvent)) return
 
       if (buildingState.current === 1 && event.nativeEvent.detail >= 2) {
         stopDrafting()
         return
       }
 
-      const walls = getCurrentLevelWalls()
-      const snapWalls = [...walls, ...getBelowLevelWalls()]
-      const localClick: WallPlanPoint = [event.localPosition[0], event.localPosition[2]]
+      // Resolve from the preview's own pointer sample when the click lands on
+      // it, so the click commits the endpoint the preview showed.
+      const { clientX, clientY } = event.nativeEvent
+      const input: WallPlanPoint =
+        lastMove &&
+        Math.abs(lastMove.clientX - clientX) <= 1 &&
+        Math.abs(lastMove.clientY - clientY) <= 1
+          ? lastMove.point
+          : [event.localPosition[0], event.localPosition[2]]
+      const point = resolveDraftPoint(input, event.nativeEvent.shiftKey)
 
       if (buildingState.current === 0) {
-        const snappedStart = alignPoint(
-          snapWallDraftPointDetailed({
-            point: localClick,
-            walls: snapWalls,
-            magnetic: isMagneticSnapActive(),
-          }).point,
-        )
-        gridPosition = snappedStart
-        startingPoint.current.set(snappedStart[0], event.localPosition[1], snappedStart[1])
+        gridPosition = point
+        startingPoint.current.set(point[0], event.localPosition[1], point[1])
         chainFirstVertex.current = startingPoint.current.clone()
         endingPoint.current.copy(startingPoint.current)
         buildingState.current = 1
         setAxisGuide({
-          origin: snappedStart,
+          origin: point,
           y: event.localPosition[1],
           lockedAxis: null,
           angleLabel: null,
@@ -859,29 +780,8 @@ export const WallTool: React.FC = () => {
         // first frame after click. Leaving it false until the next
         // `onGridMove` writes a real BoxGeometry skips that frame.
         setDraftMeasurement(null)
-      } else if (buildingState.current === 1) {
-        const angleLocked = isAngleSnapActive()
-        const draftStart: WallPlanPoint = [startingPoint.current.x, startingPoint.current.z]
-        const orthogonalInput = inferOrthogonalWallPoint(
-          draftStart,
-          localClick,
-          event.nativeEvent.shiftKey,
-        )
-        const snapResult = snapWallDraftPointDetailed({
-          point: orthogonalInput,
-          walls: snapWalls,
-          start: angleLocked ? draftStart : undefined,
-          angleSnap: angleLocked,
-          magnetic: isMagneticSnapActive(),
-        })
-        let snappedEnd = alignPoint(snapResult.point, { applySnap: !angleLocked })
-        const orthogonalInferred =
-          orthogonalInput[0] !== localClick[0] || orthogonalInput[1] !== localClick[1]
-        if (!snapResult.snap && orthogonalInferred) {
-          snappedEnd = inferOrthogonalWallPoint(draftStart, snappedEnd, true)
-          useAlignmentGuides.getState().clear()
-        }
-        commitSegmentTo(snappedEnd, event.localPosition[1])
+      } else {
+        commitSegmentTo(point, event.localPosition[1])
       }
     }
 
@@ -893,12 +793,11 @@ export const WallTool: React.FC = () => {
       const dz = snappedEnd[1] - startingPoint.current.z
       if (dx * dx + dz * dz < 0.01 * 0.01) return
       // Both start and end are building-local ✓
-      const createdWall = createWallOnCurrentLevel(
+      const createdWall = commitWallDraftSegment(
         [startingPoint.current.x, startingPoint.current.z],
         snappedEnd,
       )
       if (!createdWall) return
-      flushAutoSurfacesForCurrentLevel()
       clearTypedLength()
 
       // The new segment is now a real node — make it an alignment target
@@ -907,28 +806,15 @@ export const WallTool: React.FC = () => {
       useAlignmentGuides.getState().clear()
       useWallSnapIndicator.getState().clear()
 
-      if (useEditor.getState().getContinuation('wall') === 'single') {
-        stopDrafting()
-        return
-      }
-
-      const closedToChainStart =
-        chainFirstVertex.current &&
-        isWithinWallJoinSnapRadius(createdWall.end, chainFirstVertex.current)
-
-      // Auto-close also fires when the segment seals a room against the
-      // existing wall network (e.g. a bay closed onto the middle of another
-      // wall), not just when the chain loops back to its own start. Shares the
-      // room graph with auto slab/ceiling detection so the two never disagree.
-      if (closedToChainStart || wallClosesRoom(getCurrentLevelWalls(), createdWall)) {
+      const chainFirst = chainFirstVertex.current
+      if (wallDraftChainEnds(createdWall, chainFirst ? [chainFirst.x, chainFirst.z] : null)) {
         stopDrafting()
         return
       }
 
       const nextStart = createdWall.end
-      // Publish the resolved chain start so the 2D floor-plan draft
-      // chains its next segment from the same point (its own snap
-      // pipeline can resolve a slightly different endpoint).
+      // Publish the chain start so the 2D floor-plan draft chains its next
+      // segment from the committed endpoint.
       useSegmentDraftChain.getState().setChainStart('wall', [nextStart[0], nextStart[1]])
       startingPoint.current.set(nextStart[0], baseY, nextStart[1])
       endingPoint.current.copy(startingPoint.current)
@@ -1014,12 +900,39 @@ export const WallTool: React.FC = () => {
       }
     }
 
+    // Mirror the draft the floor plan owns: it publishes its open draft start
+    // (and `null` when the draft ends), so split view shows the segment in 3D
+    // and typed-length entry continues from the same start.
+    const unsubscribeChain = useSegmentDraftChain.subscribe((state, prevState) => {
+      if (state.wall === prevState.wall) return
+      if (!state.wall) {
+        if (buildingState.current === 1) stopDrafting()
+        return
+      }
+      const [x, z] = state.wall
+      if (
+        buildingState.current === 1 &&
+        startingPoint.current.x === x &&
+        startingPoint.current.z === z
+      ) {
+        return
+      }
+      if (buildingState.current === 0) chainFirstVertex.current = new Vector3(x, gridY, z)
+      startingPoint.current.set(x, gridY, z)
+      endingPoint.current.copy(startingPoint.current)
+      buildingState.current = 1
+      if (wallPreviewRef.current) wallPreviewRef.current.visible = false
+      setAxisGuide({ origin: [x, z], y: gridY, lockedAxis: null, angleLabel: null })
+      setDraftMeasurement(null)
+    })
+
     emitter.on('grid:move', onGridMove)
     emitter.on('grid:click', onGridClick)
     emitter.on('tool:cancel', onCancel)
     window.addEventListener('keydown', onKeyDown, { capture: true })
 
     return () => {
+      unsubscribeChain()
       emitter.off('grid:move', onGridMove)
       emitter.off('grid:click', onGridClick)
       emitter.off('tool:cancel', onCancel)
@@ -1199,13 +1112,16 @@ const RectangleRoomTool: React.FC = () => {
       setStart(null)
       setEnd(null)
     }
+    // The floor plan owns (and previews) the rectangles drawn in it.
     const onMove = (event: GridEvent) => {
+      if (isFloorplanInputEvent(event.nativeEvent)) return
       const point = snap(event)
       endRef.current = point
       setEnd(point)
       cursorRef.current?.position.set(point[0], event.localPosition[1], point[1])
     }
     const onClick = (event: GridEvent) => {
+      if (isFloorplanInputEvent(event.nativeEvent)) return
       const point = snap(event)
       if (!startRef.current) {
         startRef.current = point
@@ -1217,38 +1133,7 @@ const RectangleRoomTool: React.FC = () => {
       }
       const first = startRef.current
       if (Math.abs(point[0] - first[0]) < 0.01 || Math.abs(point[1] - first[1]) < 0.01) return
-      const corners = getRectangleRoomCenterlineCorners(first, point, thickness)
-      pauseSceneHistory(useScene)
-      try {
-        for (let index = 0; index < corners.length; index += 1) {
-          createWallOnCurrentLevel(corners[index]!, corners[(index + 1) % corners.length]!, {
-            preserveExactEndpoints: true,
-          })
-        }
-        flushAutoSurfacesForCurrentLevel()
-      } finally {
-        resumeSceneHistory(useScene)
-      }
-      // The space-detection sync skips store events while scene history is
-      // paused, so the batched room commit above never receives its walls'
-      // interior/exterior side tags — and cutaway mode needs them to hide
-      // camera-facing walls. Apply the side classification explicitly here,
-      // like the per-segment draw flow gets from the sync.
-      const levelId = useViewer.getState().selection.levelId
-      if (levelId) {
-        const { wallUpdates } = detectSpacesForLevel(levelId, getCurrentLevelWalls())
-        const sideUpdates = wallUpdates.filter(
-          (update) => update.frontSide !== 'unknown' || update.backSide !== 'unknown',
-        )
-        if (sideUpdates.length > 0) {
-          useScene.getState().updateNodes(
-            sideUpdates.map((update) => ({
-              id: update.wallId as AnyNodeId,
-              data: { frontSide: update.frontSide, backSide: update.backSide },
-            })),
-          )
-        }
-      }
+      createRectangleRoomOnCurrentLevel(first, point, thickness)
       clear()
     }
     const onCancel = () => {

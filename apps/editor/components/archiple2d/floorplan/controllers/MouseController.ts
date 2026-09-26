@@ -34,22 +34,23 @@ export class MouseController {
    * Setup mouse event listeners
    */
   private setupEventListeners(): void {
-    this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
-    this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
-    this.canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
-    this.canvas.addEventListener('contextmenu', this.handleContextMenu.bind(this));
-    this.canvas.addEventListener('mouseleave', this.handleMouseLeave.bind(this));
+    this.canvas.addEventListener('mousedown', this.handleMouseDown);
+    this.canvas.addEventListener('mousemove', this.handleMouseMove);
+    this.canvas.addEventListener('mouseup', this.handleMouseUp);
+    this.canvas.addEventListener('contextmenu', this.handleContextMenu);
+    this.canvas.addEventListener('mouseleave', this.handleMouseLeave);
   }
 
   /**
-   * Remove event listeners (cleanup)
+   * Remove event listeners (cleanup). The handlers are bound once as fields,
+   * so the references removed here are exactly the ones that were added.
    */
   dispose(): void {
-    this.canvas.removeEventListener('mousedown', this.handleMouseDown.bind(this));
-    this.canvas.removeEventListener('mousemove', this.handleMouseMove.bind(this));
-    this.canvas.removeEventListener('mouseup', this.handleMouseUp.bind(this));
-    this.canvas.removeEventListener('contextmenu', this.handleContextMenu.bind(this));
-    this.canvas.removeEventListener('mouseleave', this.handleMouseLeave.bind(this));
+    this.canvas.removeEventListener('mousedown', this.handleMouseDown);
+    this.canvas.removeEventListener('mousemove', this.handleMouseMove);
+    this.canvas.removeEventListener('mouseup', this.handleMouseUp);
+    this.canvas.removeEventListener('contextmenu', this.handleContextMenu);
+    this.canvas.removeEventListener('mouseleave', this.handleMouseLeave);
   }
 
   /**
@@ -72,7 +73,7 @@ export class MouseController {
   /**
    * Handle mouse down
    */
-  private handleMouseDown(event: MouseEvent): void {
+  private handleMouseDown = (event: MouseEvent): void => {
     const position = this.getCanvasPosition(event);
     this.toolManager.handleMouseDown(position, event);
 
@@ -83,7 +84,7 @@ export class MouseController {
   /**
    * Handle mouse move
    */
-  private handleMouseMove(event: MouseEvent): void {
+  private handleMouseMove = (event: MouseEvent): void => {
     const position = this.getCanvasPosition(event);
     this.toolManager.handleMouseMove(position, event);
 
@@ -94,7 +95,7 @@ export class MouseController {
   /**
    * Handle mouse up
    */
-  private handleMouseUp(event: MouseEvent): void {
+  private handleMouseUp = (event: MouseEvent): void => {
     const position = this.getCanvasPosition(event);
     this.toolManager.handleMouseUp(position, event);
 
@@ -105,7 +106,7 @@ export class MouseController {
   /**
    * Handle context menu (right-click)
    */
-  private handleContextMenu(event: MouseEvent): void {
+  private handleContextMenu = (event: MouseEvent): void => {
     event.preventDefault();
 
     // Right-click is used to finish wall chains
@@ -116,7 +117,7 @@ export class MouseController {
   /**
    * Handle mouse leave
    */
-  private handleMouseLeave(_event: MouseEvent): void {
+  private handleMouseLeave = (_event: MouseEvent): void => {
     // Reset cursor
     this.canvas.style.cursor = 'default';
   }

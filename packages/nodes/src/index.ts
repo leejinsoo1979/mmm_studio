@@ -1,6 +1,7 @@
 import type { AnyNodeDefinition, Plugin } from '@pascal-app/core'
 import { boxVentDefinition } from './box-vent'
 import { buildingDefinition } from './building'
+import { cabinetDefinition, countertopDefinition } from './cabinet'
 import { ceilingDefinition } from './ceiling'
 import { chimneyDefinition } from './chimney'
 import { columnDefinition } from './column'
@@ -113,8 +114,46 @@ export const builtinPlugin: Plugin = {
   ],
 }
 
+/**
+ * Built-in wardrobe / kitchen cabinets (`cabinet`, `countertop`). A separate
+ * plugin rather than part of `builtinPlugin`: their schemas live here, not in
+ * core's `AnyNode` union, exactly like an external node pack.
+ */
+export const cabinetPlugin: Plugin = {
+  id: 'mmm:cabinet',
+  apiVersion: 1,
+  nodes: [
+    cabinetDefinition as unknown as AnyNodeDefinition,
+    countertopDefinition as unknown as AnyNodeDefinition,
+  ],
+}
+
 export { boxVentDefinition } from './box-vent'
 export { buildingDefinition } from './building'
+export {
+  buildCabinetParts,
+  CABINET_PRESETS,
+  type CabinetBrush,
+  CabinetNode,
+  type CabinetPreset,
+  type CabinetSpec,
+  CountertopNode,
+  cabinetDefinition,
+  cabinetHardwareRows,
+  cabinetHingeBorings,
+  cabinetPanelRows,
+  countertopDefinition,
+  createKitchenOnWall,
+  createWardrobesOnWall,
+  cutlistCsv,
+  downloadCabinetsDxf,
+  downloadCabinetsMpr,
+  downloadTextFile,
+  type MyCabinetModule,
+  useCabinetBrush,
+  useMyCabinetModules,
+  wallRun,
+} from './cabinet'
 export { ceilingDefinition } from './ceiling'
 export { chimneyDefinition } from './chimney'
 export { columnDefinition } from './column'

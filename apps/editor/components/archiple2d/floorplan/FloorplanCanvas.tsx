@@ -146,7 +146,6 @@ const FloorplanCanvas = ({
   const wallSplitServiceRef = useRef<WallSplitService | null>(null);
   const mouseControllerRef = useRef<MouseController | null>(null);
   const keyboardControllerRef = useRef<KeyboardController | null>(null);
-  const isCleanedUpRef = useRef<boolean>(false); // Guard against double cleanup
 
   // Layers
   const backgroundLayerRef = useRef<BackgroundImageLayer | null>(null);
@@ -166,6 +165,15 @@ const FloorplanCanvas = ({
 
     // Notify parent that canvas is ready
     onCanvasReady?.(canvas);
+
+    // Every bus subscription made here is dropped on cleanup: the bus and the
+    // SceneManager are singletons, so a leftover handler would keep acting on
+    // the shared drawing after this canvas is gone (and double up when the
+    // floor plan is opened again).
+    const unsubscribers: Array<() => void> = [];
+    const listen = (event: string, callback: (data: any) => void) => {
+      unsubscribers.push(eventBus.on(event, callback));
+    };
 
     // 1. Initialize SceneManager
     // Units: mm (millimeters) - 모든 내부 좌표는 mm 단위
@@ -367,14 +375,14 @@ const FloorplanCanvas = ({
     };
 
     // Listen to floorplan events
-    eventBus.on(FloorEvents.POINT_ADDED, () => {
+    listen(FloorEvents.POINT_ADDED, () => {
       try {
         updateLayers();
       } catch (e) {
         console.error('[FloorplanCanvas] Error in updateLayers:', e);
       }
     });
-    eventBus.on(FloorEvents.POINT_MOVED, () => {
+    listen(FloorEvents.POINT_MOVED, () => {
       const points = sceneManager.objectManager.getAllPoints();
       const walls = sceneManager.objectManager.getAllWalls();
 
@@ -409,21 +417,21 @@ const FloorplanCanvas = ({
         onDataChange(babylonData);
       }
     });
-    eventBus.on(FloorEvents.POINT_UPDATED, () => {
+    listen(FloorEvents.POINT_UPDATED, () => {
       try {
         updateLayers();
       } catch (e) {
         console.error('[FloorplanCanvas] Error in updateLayers:', e);
       }
     });
-    eventBus.on(FloorEvents.DOOR_MODIFIED, () => {
+    listen(FloorEvents.DOOR_MODIFIED, () => {
       try {
         updateLayers();
       } catch (e) {
         console.error('[FloorplanCanvas] Error in updateLayers:', e);
       }
     });
-    eventBus.on(FloorEvents.WALL_ADDED, () => {
+    listen(FloorEvents.WALL_ADDED, () => {
 
       // Split walls at T-junctions and wall-wall intersections before updating layers
       const points = sceneManager.objectManager.getAllPoints();
@@ -485,88 +493,88 @@ const FloorplanCanvas = ({
 
       updateLayers();
     });
-    eventBus.on(FloorEvents.ROOM_DETECTED, updateLayers);
+    listen(FloorEvents.ROOM_DETECTED, updateLayers);
 
     // Camera reset event
-    eventBus.on(EditorEvents.CAMERA_RESET, () => {
+    listen(EditorEvents.CAMERA_RESET, () => {
       const camera = renderer.getCamera();
       camera.reset();
     });
 
     // Point selection/hover events
-    eventBus.on(FloorEvents.POINT_SELECTED, (data: any) => {
+    listen(FloorEvents.POINT_SELECTED, (data: any) => {
       pointLayer.setSelectedPoints([data.point.id]);
       wallLayer.setSelectedWall(null); // Clear wall selection when point selected
     });
 
-    eventBus.on(FloorEvents.POINT_HOVERED, (data: any) => {
+    listen(FloorEvents.POINT_HOVERED, (data: any) => {
       pointLayer.setHoveredPoint(data.point.id);
     });
 
-    eventBus.on(FloorEvents.POINT_SELECTION_CLEARED, () => {
+    listen(FloorEvents.POINT_SELECTION_CLEARED, () => {
       pointLayer.setSelectedPoints([]);
       wallLayer.setSelectedWall(null); // Also clear wall selection
     });
 
     // Wall selection events
-    eventBus.on(FloorEvents.WALL_SELECTED, (data: any) => {
+    listen(FloorEvents.WALL_SELECTED, (data: any) => {
       wallLayer.setSelectedWall(data.wall.id);
       pointLayer.setSelectedPoints([]); // Clear point selection when wall selected
     });
 
     // Wall hover events
-    eventBus.on(FloorEvents.WALL_HOVERED, (data: any) => {
+    listen(FloorEvents.WALL_HOVERED, (data: any) => {
       wallLayer.setHoveredWall(data.wall.id);
     });
 
-    eventBus.on(FloorEvents.WALL_HOVER_CLEARED, () => {
+    listen(FloorEvents.WALL_HOVER_CLEARED, () => {
       wallLayer.setHoveredWall(null);
     });
 
-    eventBus.on(FloorEvents.POINT_HOVER_CLEARED, () => {
+    listen(FloorEvents.POINT_HOVER_CLEARED, () => {
       pointLayer.setHoveredPoint(null);
     });
 
     // Wall preview
-    eventBus.on(FloorEvents.WALL_PREVIEW_UPDATED, (data: any) => {
+    listen(FloorEvents.WALL_PREVIEW_UPDATED, (data: any) => {
       wallLayer.setPreviewWall(data.start, data.end);
     });
 
-    eventBus.on(FloorEvents.WALL_PREVIEW_CLEARED, () => {
+    listen(FloorEvents.WALL_PREVIEW_CLEARED, () => {
       wallLayer.setPreviewWall(null, null);
     });
 
     // Multi-wall preview (for L/U shape wall dragging)
-    eventBus.on(FloorEvents.MULTI_WALL_PREVIEW_UPDATED, (data: any) => {
+    listen(FloorEvents.MULTI_WALL_PREVIEW_UPDATED, (data: any) => {
       wallLayer.setMultiPreviewWalls(data.walls);
     });
 
-    eventBus.on(FloorEvents.MULTI_WALL_PREVIEW_CLEARED, () => {
+    listen(FloorEvents.MULTI_WALL_PREVIEW_CLEARED, () => {
       wallLayer.setMultiPreviewWalls(null);
     });
 
     // Snap indicator
-    eventBus.on(FloorEvents.SNAP_POINT_UPDATED, (data: any) => {
+    listen(FloorEvents.SNAP_POINT_UPDATED, (data: any) => {
       pointLayer.setSnapPoint(data.point);
     });
 
     // Angle guide indicator
-    eventBus.on(FloorEvents.ANGLE_GUIDE_UPDATED, (data: any) => {
+    listen(FloorEvents.ANGLE_GUIDE_UPDATED, (data: any) => {
       guideLayer.setAngleGuide(data.from, data.angle);
     });
 
     // Grid snap indicator
-    eventBus.on(FloorEvents.GRID_SNAP_UPDATED, (data: any) => {
+    listen(FloorEvents.GRID_SNAP_UPDATED, (data: any) => {
       guideLayer.setGridSnapPoint(data.point);
     });
 
     // Wall preview with guides
-    eventBus.on(FloorEvents.WALL_PREVIEW_UPDATED, (data: any) => {
+    listen(FloorEvents.WALL_PREVIEW_UPDATED, (data: any) => {
       // Show distance measurement
       guideLayer.setDistanceMeasurement(data.start, data.end);
     });
 
-    eventBus.on(FloorEvents.WALL_PREVIEW_CLEARED, () => {
+    listen(FloorEvents.WALL_PREVIEW_CLEARED, () => {
       guideLayer.setDistanceMeasurement(null, null);
       guideLayer.setAngleGuide(null, null);
       guideLayer.setGridSnapPoint(null);
@@ -574,87 +582,87 @@ const FloorplanCanvas = ({
     });
 
     // Distance measurement events
-    eventBus.on(FloorEvents.DISTANCE_MEASUREMENT_UPDATED, (data: any) => {
+    listen(FloorEvents.DISTANCE_MEASUREMENT_UPDATED, (data: any) => {
       guideLayer.setDistanceMeasurement(data.from, data.to);
     });
 
-    eventBus.on(FloorEvents.DISTANCE_MEASUREMENT_CLEARED, () => {
+    listen(FloorEvents.DISTANCE_MEASUREMENT_CLEARED, () => {
       guideLayer.setDistanceMeasurement(null, null);
     });
 
     // Angle measurement events
-    eventBus.on(FloorEvents.ANGLE_MEASUREMENT_UPDATED, (data: any) => {
+    listen(FloorEvents.ANGLE_MEASUREMENT_UPDATED, (data: any) => {
       guideLayer.setAngleMeasurement(data.point, data.angle);
     });
 
-    eventBus.on(FloorEvents.ANGLE_MEASUREMENT_CLEARED, () => {
+    listen(FloorEvents.ANGLE_MEASUREMENT_CLEARED, () => {
       guideLayer.setAngleMeasurement(null, null);
     });
 
     // Rectangle preview
-    eventBus.on(FloorEvents.RECTANGLE_PREVIEW_UPDATED, (data: any) => {
+    listen(FloorEvents.RECTANGLE_PREVIEW_UPDATED, (data: any) => {
       guideLayer.setRectanglePreview(data.corners);
     });
 
-    eventBus.on(FloorEvents.RECTANGLE_PREVIEW_CLEARED, () => {
+    listen(FloorEvents.RECTANGLE_PREVIEW_CLEARED, () => {
       guideLayer.setRectanglePreview(null);
     });
 
     // Vertical/Horizontal guide lines for rectangle alignment
-    eventBus.on(FloorEvents.VERTICAL_GUIDE_UPDATED, (data: any) => {
+    listen(FloorEvents.VERTICAL_GUIDE_UPDATED, (data: any) => {
       guideLayer.setVerticalGuide(data.x, data.fromY, data.toY);
     });
 
-    eventBus.on(FloorEvents.VERTICAL_GUIDE_CLEARED, () => {
+    listen(FloorEvents.VERTICAL_GUIDE_CLEARED, () => {
       guideLayer.clearVerticalGuide();
     });
 
-    eventBus.on(FloorEvents.HORIZONTAL_GUIDE_UPDATED, (data: any) => {
+    listen(FloorEvents.HORIZONTAL_GUIDE_UPDATED, (data: any) => {
       guideLayer.setHorizontalGuide(data.y, data.fromX, data.toX);
     });
 
-    eventBus.on(FloorEvents.HORIZONTAL_GUIDE_CLEARED, () => {
+    listen(FloorEvents.HORIZONTAL_GUIDE_CLEARED, () => {
       guideLayer.clearHorizontalGuide();
     });
 
     // Door preview events
-    eventBus.on(FloorEvents.DOOR_PREVIEW_UPDATED, (data: any) => {
+    listen(FloorEvents.DOOR_PREVIEW_UPDATED, (data: any) => {
       doorLayer.setPreview(data);
     });
 
-    eventBus.on(FloorEvents.DOOR_PREVIEW_CLEARED, () => {
+    listen(FloorEvents.DOOR_PREVIEW_CLEARED, () => {
       doorLayer.clearPreview();
     });
 
     // Door add/remove events
-    eventBus.on(FloorEvents.DOOR_ADDED, () => {
+    listen(FloorEvents.DOOR_ADDED, () => {
       updateLayers();
     });
 
-    eventBus.on(FloorEvents.DOOR_REMOVED, () => {
+    listen(FloorEvents.DOOR_REMOVED, () => {
       updateLayers();
     });
 
     // Window preview events
-    eventBus.on(FloorEvents.WINDOW_PREVIEW_UPDATED, (data: any) => {
+    listen(FloorEvents.WINDOW_PREVIEW_UPDATED, (data: any) => {
       windowLayer.setPreview(data);
     });
 
-    eventBus.on(FloorEvents.WINDOW_PREVIEW_CLEARED, () => {
+    listen(FloorEvents.WINDOW_PREVIEW_CLEARED, () => {
       windowLayer.clearPreview();
     });
 
     // Window add/remove events
-    eventBus.on(FloorEvents.WINDOW_ADDED, () => {
+    listen(FloorEvents.WINDOW_ADDED, () => {
       updateLayers();
     });
 
-    eventBus.on(FloorEvents.WINDOW_REMOVED, () => {
+    listen(FloorEvents.WINDOW_REMOVED, () => {
       updateLayers();
     });
 
     // Wall added event - just update layers, NO automatic room detection
-    eventBus.on(FloorEvents.WALL_ADDED, () => {
+    listen(FloorEvents.WALL_ADDED, () => {
       updateLayers();
     });
 
@@ -717,15 +725,15 @@ const FloorplanCanvas = ({
 
     // Listen to wall events for automatic detection
     // Room detection on wall changes
-    eventBus.on(FloorEvents.WALL_ADDED, detectRooms);
-    eventBus.on(FloorEvents.WALL_REMOVED, () => {
+    listen(FloorEvents.WALL_ADDED, detectRooms);
+    listen(FloorEvents.WALL_REMOVED, () => {
       detectRooms();
       updateLayers(); // Update 3D when walls are removed (e.g., during splitting)
     });
-    eventBus.on(FloorEvents.WALL_MODIFIED, detectRooms);
+    listen(FloorEvents.WALL_MODIFIED, detectRooms);
 
     // Also detect on point moves (geometry changes)
-    eventBus.on(FloorEvents.POINT_UPDATED, detectRooms);
+    listen(FloorEvents.POINT_UPDATED, detectRooms);
 
     // Initial detection
     detectRooms();
@@ -845,68 +853,28 @@ const FloorplanCanvas = ({
       });
     };
 
-    eventBus.on(EditorEvents.SELECTION_CHANGED, handleSelectionChanged);
-    eventBus.on(EditorEvents.VIEWPORT_CHANGED, handleViewportChanged);
+    listen(EditorEvents.SELECTION_CHANGED, handleSelectionChanged);
+    listen(EditorEvents.VIEWPORT_CHANGED, handleViewportChanged);
     // Also update on door modified (e.g. undo/redo or drag)
-    eventBus.on(FloorEvents.DOOR_MODIFIED, handleViewportChanged);
-    eventBus.on(FloorEvents.DOOR_ADDED, handleSelectionChanged); // In case tool selects it
+    listen(FloorEvents.DOOR_MODIFIED, handleViewportChanged);
+    listen(FloorEvents.DOOR_ADDED, handleSelectionChanged); // In case tool selects it
 
     // Cleanup
     return () => {
-
-      // Add cleanup guard to prevent double cleanup
-      if (isCleanedUpRef.current) {
-        return;
-      }
-
+      window.removeEventListener('resize', handleResize);
+      // Drops any open draft (it was never added to the drawing).
+      toolManager.getActiveTool()?.deactivate();
+      mouseController.dispose();
+      keyboardController.dispose();
+      for (const unsubscribe of unsubscribers) unsubscribe();
       try {
-        window.removeEventListener('resize', handleResize);
-
-        // Stop renderer safely
-        if (renderer) {
-          try {
-            renderer.stop();
-            renderer.dispose();
-          } catch (e) {
-            console.warn('[FloorplanCanvas] Renderer cleanup warning:', e);
-          }
-        }
-
-        // Remove event listeners safely
-        try {
-          eventBus.off(EditorEvents.SELECTION_CHANGED, handleSelectionChanged);
-          eventBus.off(EditorEvents.VIEWPORT_CHANGED, handleViewportChanged);
-          eventBus.off(FloorEvents.DOOR_MODIFIED, handleViewportChanged);
-          eventBus.off(FloorEvents.DOOR_ADDED, handleSelectionChanged);
-        } catch (e) {
-          console.warn('[FloorplanCanvas] Event cleanup warning:', e);
-        }
-
-        // Dispose controllers safely
-        try {
-          if (mouseController) mouseController.dispose();
-          if (keyboardController) keyboardController.dispose();
-        } catch (e) {
-          console.warn('[FloorplanCanvas] Controller cleanup warning:', e);
-        }
-
-        // Clear event listeners
-        try {
-          eventBus.off(FloorEvents.POINT_ADDED, updateLayers);
-          eventBus.off(FloorEvents.WALL_ADDED, updateLayers);
-          eventBus.off(FloorEvents.ROOM_DETECTED, updateLayers);
-        } catch (e) {
-          console.warn('[FloorplanCanvas] Event listener cleanup warning:', e);
-        }
-
-        isCleanedUpRef.current = true;
-      } catch (error) {
-        console.error('[FloorplanCanvas] Cleanup error:', error);
+        renderer.stop();
+        renderer.dispose();
+      } catch (e) {
+        console.warn('[FloorplanCanvas] Renderer cleanup warning:', e);
       }
-
-      // DO NOT reset SceneManager singleton - it should persist across re-renders
-      // Only clear on actual page navigation/unmount
-      // SceneManager.resetInstance();
+      // The SceneManager singleton (the drawing and its history) is kept on
+      // purpose so the floor plan reopens with the same content.
     };
   }, []);
 

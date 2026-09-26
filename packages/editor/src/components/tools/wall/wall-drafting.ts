@@ -7,19 +7,25 @@ import {
   getScaledDimensions,
   type ItemNode,
   pauseSceneHistory,
+  planAutoCeilingsForLevel,
   planAutoSlabsForLevel,
+  projectAutoSlabsForPlan,
   resumeSceneHistory,
-  type SlabNode,
   snapPointAlongAngleRay,
   useScene,
   type WallNode,
   WallNode as WallSchema,
   type WindowNode,
+  wallClosesRoom,
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 import { resolveSnapFlags } from '../../../lib/snapping-mode'
-import useEditor, { getActiveSnappingMode, isMagneticSnapActive } from '../../../store/use-editor'
+import useEditor, {
+  getActiveSnappingMode,
+  isAngleSnapActive,
+  isMagneticSnapActive,
+} from '../../../store/use-editor'
 import {
   distanceSquared,
   findWallSnapTarget,
@@ -51,6 +57,10 @@ export const WALL_MIN_LENGTH = 0.01
 // sliver segment a hair longer than `WALL_MIN_LENGTH` that no snap radius
 // can ever target again.
 const WALL_SPLIT_ENDPOINT_EPSILON = 0.02
+// Endpoints that already went through `resolveWallDraftPoint` had the join
+// applied (and shown in the preview); on commit they may only split a wall
+// they lie on, never be pulled somewhere the preview didn't show.
+const WALL_RESOLVED_JOIN_TOLERANCE = 1e-6
 
 type WallSplitIntersection = {
   /** `null` = snap-only outcome: resolve to `point` but split no wall. */
@@ -153,21 +163,18 @@ function pointsEqual(a: WallPlanPoint, b: WallPlanPoint, tolerance = 1e-6): bool
 function findWallIntersection(
   point: WallPlanPoint,
   walls: WallNode[],
-  ignoreWallIds?: string[],
+  radius = WALL_JOIN_SNAP_RADIUS,
 ): WallSplitIntersection | null {
-  const ignore = new Set(ignoreWallIds ?? [])
   let best: WallSplitIntersection | null = null
   let bestDistanceSquared = Number.POSITIVE_INFINITY
 
   for (const wall of walls) {
-    if (ignore.has(wall.id)) continue
-
     const projected = projectPointOntoWall(point, wall)
     if (!projected) continue
 
     const candidateDistanceSquared = distanceSquared(point, projected)
     if (
-      candidateDistanceSquared > WALL_JOIN_SNAP_RADIUS * WALL_JOIN_SNAP_RADIUS ||
+      candidateDistanceSquared > radius * radius ||
       candidateDistanceSquared >= bestDistanceSquared
     ) {
       continue
@@ -322,24 +329,31 @@ function buildAttachmentMigrationPlan(
   return updates
 }
 
-function splitWallIfNeeded(
+/**
+ * The node changes of one wall commit, applied with a single
+ * `applyNodeChanges` so the commit is one undo step. `nodes` / `walls` are the
+ * scene and the level's walls as they will be after the pending changes, so a
+ * second split (both endpoints on one host wall) sees the first one.
+ */
+type WallCommitChanges = {
+  nodes: ReturnType<typeof useScene.getState>['nodes']
+  walls: WallNode[]
+  create: { node: AnyNode; parentId?: AnyNodeId }[]
+  update: { id: AnyNodeId; data: Partial<AnyNode> }[]
+  delete: AnyNodeId[]
+}
+
+function planWallSplit(
   intersection: WallSplitIntersection | null,
-  walls: WallNode[],
-  nodes: ReturnType<typeof useScene.getState>['nodes'],
-  createNodes: ReturnType<typeof useScene.getState>['createNodes'],
-  updateNodes: ReturnType<typeof useScene.getState>['updateNodes'],
-  deleteNode: ReturnType<typeof useScene.getState>['deleteNode'],
-): { walls: WallNode[]; point: WallPlanPoint } | null {
+  changes: WallCommitChanges,
+): WallPlanPoint | null {
   if (!intersection) return null
+  const { nodes } = changes
 
-  if (!intersection.wallId) {
-    return { walls, point: intersection.point }
-  }
-
-  const wallToSplit = walls.find((wall) => wall.id === intersection.wallId)
-  if (!wallToSplit) {
-    return { walls, point: intersection.point }
-  }
+  const wallToSplit = intersection.wallId
+    ? changes.walls.find((wall) => wall.id === intersection.wallId)
+    : undefined
+  if (!wallToSplit) return intersection.point
 
   const [first, second] = splitWallAtPoint(wallToSplit, intersection.point)
   const attachmentUpdates = buildAttachmentMigrationPlan(
@@ -351,22 +365,55 @@ function splitWallIfNeeded(
   )
 
   if (wallHasAttachments(wallToSplit, nodes) && !attachmentUpdates) {
-    return { walls, point: intersection.point }
+    return intersection.point
   }
 
-  createNodes([
-    { node: first, parentId: wallToSplit.parentId as AnyNodeId | undefined },
-    { node: second, parentId: wallToSplit.parentId as AnyNodeId | undefined },
-  ])
-  if (attachmentUpdates && attachmentUpdates.length > 0) {
-    updateNodes(attachmentUpdates)
+  const migrated = attachmentUpdates ?? []
+  // `applyNodeChanges` runs updates before creates, so a re-parented
+  // attachment can't be appended to its not-yet-created wall there — the new
+  // walls carry their children from the start instead.
+  const childrenOf = (wallId: string) =>
+    migrated
+      .filter((update) => (update.data as { parentId?: string }).parentId === wallId)
+      .map((update) => update.id) as WallNode['children']
+  const firstWall = { ...first, children: childrenOf(first.id) }
+  const secondWall = { ...second, children: childrenOf(second.id) }
+  const parentId = wallToSplit.parentId as AnyNodeId | undefined
+  const pendingIndex = changes.create.findIndex(({ node }) => node.id === wallToSplit.id)
+  if (pendingIndex >= 0) {
+    changes.create.splice(pendingIndex, 1)
+  } else {
+    changes.delete.push(wallToSplit.id as AnyNodeId)
   }
-  deleteNode(wallToSplit.id as AnyNodeId)
+  changes.create.push({ node: firstWall, parentId }, { node: secondWall, parentId })
+  changes.update.push(...migrated)
+  changes.walls = [
+    ...changes.walls.filter((wall) => wall.id !== wallToSplit.id),
+    firstWall,
+    secondWall,
+  ]
+  changes.nodes = { ...nodes, [firstWall.id]: firstWall, [secondWall.id]: secondWall }
+  delete changes.nodes[wallToSplit.id as AnyNodeId]
+  for (const { id, data } of migrated) {
+    changes.nodes[id] = { ...changes.nodes[id], ...data } as AnyNode
+  }
 
-  return {
-    walls: [...walls.filter((wall) => wall.id !== wallToSplit.id), first, second],
-    point: intersection.point,
-  }
+  return intersection.point
+}
+
+/**
+ * Where a committed endpoint lands after the corner-join / wall-split rule
+ * (`createWallOnCurrentLevel` in a magnetic context). Previewing through this
+ * keeps the drafted endpoint identical to the committed one.
+ */
+function resolveWallJoinPoint(
+  point: WallPlanPoint,
+  walls: WallNode[],
+  radius?: number,
+): { point: WallPlanPoint; snap: 'endpoint' | 'wall' } | null {
+  const intersection = findWallIntersection(point, walls, radius)
+  if (!intersection) return null
+  return { point: intersection.point, snap: intersection.wallId ? 'wall' : 'endpoint' }
 }
 
 type SnapWallDraftArgs = {
@@ -466,26 +513,101 @@ export function snapWallDraftPoint(args: SnapWallDraftArgs): WallPlanPoint {
   return snapWallDraftPointDetailed(args).point
 }
 
+export type ResolvedWallDraftPoint = WallDraftSnapResult & {
+  /** The horizontal / vertical inference locked the segment to an axis. */
+  orthogonal: boolean
+}
+
+/**
+ * The single wall-draft point pipeline — the live preview and the click commit
+ * of the 2D floor plan and the 3D wall tool all resolve their cursor through
+ * this, so the same cursor under the same snapping mode always yields the same
+ * endpoint: orthogonal inference → mode snap (grid / angle / magnetic) →
+ * alignment → orthogonal re-lock → the commit-time corner join.
+ *
+ * `point` is the raw building-local cursor. `align` applies (and publishes)
+ * the caller's alignment guides; it only moves the point when `applySnap`.
+ */
+export function resolveWallDraftPoint({
+  point,
+  walls,
+  start,
+  forceOrthogonal = false,
+  align,
+}: {
+  point: WallPlanPoint
+  walls: WallNode[]
+  start: WallPlanPoint | null
+  forceOrthogonal?: boolean
+  align?: (point: WallPlanPoint, options: { applySnap: boolean }) => WallPlanPoint
+}): ResolvedWallDraftPoint {
+  const magnetic = isMagneticSnapActive()
+  const angleSnap = start !== null && !forceOrthogonal && isAngleSnapActive()
+  const input = start ? inferOrthogonalWallPoint(start, point, forceOrthogonal) : point
+  const inferred = input[0] !== point[0] || input[1] !== point[1]
+  const snapped = snapWallDraftPointDetailed({
+    point: input,
+    walls,
+    start: start ?? undefined,
+    angleSnap,
+    magnetic,
+  })
+  if (snapped.snap) {
+    // Already on existing geometry: only the commit's corner rule can still
+    // move it (a point on a wall right next to its corner commits there).
+    const corner = magnetic
+      ? resolveWallJoinPoint(snapped.point, walls, WALL_RESOLVED_JOIN_TOLERANCE)
+      : null
+    return { ...(corner ?? snapped), orthogonal: false }
+  }
+
+  let resolved = align ? align(snapped.point, { applySnap: magnetic && !angleSnap }) : snapped.point
+  const orthogonal = start !== null && (forceOrthogonal || inferred)
+  if (start && orthogonal) resolved = inferOrthogonalWallPoint(start, resolved, true)
+
+  const join = magnetic ? resolveWallJoinPoint(resolved, walls) : null
+  if (join) return { ...join, orthogonal: false }
+  return { point: resolved, snap: null, orthogonal }
+}
+
 export function isSegmentLongEnough(start: WallPlanPoint, end: WallPlanPoint): boolean {
   return distanceSquared(start, end) >= WALL_MIN_LENGTH * WALL_MIN_LENGTH
 }
 
+/**
+ * Creates a wall (splitting the walls its endpoints land on) as ONE scene
+ * change, so the commit and its split are a single undo step.
+ *
+ * `resolvedEndpoints`: the endpoints already went through
+ * `resolveWallDraftPoint`, so they are committed exactly where they were
+ * previewed — a wall is only split where an endpoint lies on it.
+ */
 export function createWallOnCurrentLevel(
   start: WallPlanPoint,
   end: WallPlanPoint,
-  options?: { preserveExactEndpoints?: boolean },
+  options?: {
+    preserveExactEndpoints?: boolean
+    resolvedEndpoints?: boolean
+    /** Extra wall fields for the created segment (e.g. an arc's `curveOffset`). */
+    props?: Partial<WallNode>
+  },
 ): WallNode | null {
   const currentLevelId = useViewer.getState().selection.levelId
-  const { createNode, createNodes, deleteNode, nodes } = useScene.getState()
-  const { updateNodes } = useScene.getState()
+  const { applyNodeChanges, nodes } = useScene.getState()
 
   if (!(currentLevelId && isSegmentLongEnough(start, end))) {
     return null
   }
 
-  let workingWalls = Object.values(nodes).filter(
-    (node): node is WallNode => node?.type === 'wall' && node.parentId === currentLevelId,
-  )
+  const changes: WallCommitChanges = {
+    nodes,
+    walls: Object.values(nodes).filter(
+      (node): node is WallNode => node?.type === 'wall' && node.parentId === currentLevelId,
+    ),
+    create: [],
+    update: [],
+    delete: [],
+  }
 
   let resolvedStart = start
   let resolvedEnd = end
@@ -495,39 +617,20 @@ export function createWallOnCurrentLevel(
   // this gate `'off'` (and `'angles'`) still snapped the committed endpoint to
   // existing wall geometry — the residual snap the draft path no longer does.
   if (isMagneticSnapActive() && !options?.preserveExactEndpoints) {
-    const endIntersection = findWallIntersection(resolvedEnd, workingWalls)
-    const splitEnd = splitWallIfNeeded(
-      endIntersection,
-      workingWalls,
-      nodes,
-      createNodes,
-      updateNodes,
-      deleteNode,
-    )
-    if (splitEnd) {
-      workingWalls = splitEnd.walls
-      resolvedEnd = splitEnd.point
-    }
-
-    const startIntersection = findWallIntersection(resolvedStart, workingWalls)
-    const splitStart = splitWallIfNeeded(
-      startIntersection,
-      workingWalls,
-      nodes,
-      createNodes,
-      updateNodes,
-      deleteNode,
-    )
-    if (splitStart) {
-      workingWalls = splitStart.walls
-      resolvedStart = splitStart.point
-    }
+    const radius = options?.resolvedEndpoints ? WALL_RESOLVED_JOIN_TOLERANCE : undefined
+    resolvedEnd =
+      planWallSplit(findWallIntersection(resolvedEnd, changes.walls, radius), changes) ??
+      resolvedEnd
+    resolvedStart =
+      planWallSplit(findWallIntersection(resolvedStart, changes.walls, radius), changes) ??
+      resolvedStart
   }
 
   if (!isSegmentLongEnough(resolvedStart, resolvedEnd) || pointsEqual(resolvedStart, resolvedEnd)) {
     return null
   }
 
+  const workingWalls = changes.walls
   const duplicateWall = workingWalls.some(
     (wall) =>
       (pointsEqual(wall.start, resolvedStart) && pointsEqual(wall.end, resolvedEnd)) ||
@@ -544,38 +647,148 @@ export function createWallOnCurrentLevel(
   const defaults = useEditor.getState().toolDefaults.wall ?? {}
   const wall = WallSchema.parse({
     ...defaults,
+    ...options?.props,
     name: `Wall ${wallCount + 1}`,
     start: resolvedStart,
     end: resolvedEnd,
   })
 
-  createNode(wall, currentLevelId)
+  changes.create.push({ node: wall, parentId: currentLevelId as AnyNodeId })
+  applyNodeChanges({ create: changes.create, update: changes.update, delete: changes.delete })
   sfxEmitter.emit('sfx:structure-build')
 
   return wall
 }
 
-export function flushAutoFloorForCurrentLevel(): void {
+/**
+ * Reconciles the level's auto slabs / ceilings with its closed rooms. Runs
+ * with history paused so it folds into the wall commit that preceded it —
+ * undoing the wall also removes the floor and ceiling it produced.
+ */
+export function flushAutoSurfacesForCurrentLevel(): void {
   const levelId = useViewer.getState().selection.levelId
   if (!levelId) return
   const scene = useScene.getState()
-  const walls = Object.values(scene.nodes).filter(
-    (node): node is WallNode => node?.type === 'wall' && node.parentId === levelId,
-  )
-  const slabs = Object.values(scene.nodes).filter(
-    (node): node is SlabNode => node?.type === 'slab' && node.parentId === levelId,
-  )
+  const onLevel = <T extends AnyNode['type']>(type: T) =>
+    Object.values(scene.nodes).filter(
+      (node): node is Extract<AnyNode, { type: T }> =>
+        node?.type === type && (node.parentId ?? null) === levelId,
+    )
+  const walls = onLevel('wall')
+  const slabs = onLevel('slab')
   const { roomPolygons } = detectSpacesForLevel(levelId, walls)
-  const plan = planAutoSlabsForLevel(roomPolygons, slabs)
-  if (plan.create.length === 0 && plan.update.length === 0 && plan.delete.length === 0) return
+  const slabPlan = planAutoSlabsForLevel(roomPolygons, slabs)
+  const ceilingPlan = planAutoCeilingsForLevel(roomPolygons, onLevel('ceiling'), {
+    walls,
+    slabs: projectAutoSlabsForPlan(slabs, slabPlan),
+  })
+  const create = [...slabPlan.create, ...ceilingPlan.create].map((node) => ({
+    node,
+    parentId: levelId as AnyNodeId,
+  }))
+  const update = [...slabPlan.update, ...ceilingPlan.update].map((entry) => ({
+    id: entry.id as AnyNodeId,
+    data: entry.data,
+  }))
+  const deleteIds = [...slabPlan.delete, ...ceilingPlan.delete].map((id) => id as AnyNodeId)
+  if (create.length === 0 && update.length === 0 && deleteIds.length === 0) return
+
   pauseSceneHistory(useScene)
   try {
-    scene.applyNodeChanges({
-      create: plan.create.map((node) => ({ node, parentId: levelId as AnyNodeId })),
-      update: plan.update.map((entry) => ({ id: entry.id as AnyNodeId, data: entry.data })),
-      delete: plan.delete.map((id) => id as AnyNodeId),
-    })
+    scene.applyNodeChanges({ create, update, delete: deleteIds })
   } finally {
     resumeSceneHistory(useScene)
   }
+}
+
+/**
+ * Commits one drafted segment whose endpoints came from
+ * `resolveWallDraftPoint`: the wall (with any split) plus the auto floor /
+ * ceiling it closes, as a single undo step. Shared by the 2D floor plan and
+ * the 3D wall tool so a segment commits identically from either view.
+ */
+export function commitWallDraftSegment(
+  start: WallPlanPoint,
+  end: WallPlanPoint,
+  props?: Partial<WallNode>,
+): WallNode | null {
+  const wall = createWallOnCurrentLevel(start, end, { resolvedEndpoints: true, props })
+  if (wall) flushAutoSurfacesForCurrentLevel()
+  return wall
+}
+
+/**
+ * Creates the given segments on the current level exactly as given (no
+ * snapping or splitting), plus the auto floor / ceiling they close, as one
+ * undo step. Segments duplicating an existing wall are skipped.
+ */
+export function createWallSegmentsOnCurrentLevel(
+  segments: [WallPlanPoint, WallPlanPoint][],
+): WallNode[] {
+  const levelId = useViewer.getState().selection.levelId
+  if (!levelId) return []
+  const { applyNodeChanges, nodes } = useScene.getState()
+  const existing: Pick<WallNode, 'start' | 'end'>[] = Object.values(nodes).filter(
+    (node): node is WallNode => node?.type === 'wall' && node.parentId === levelId,
+  )
+  const defaults = useEditor.getState().toolDefaults.wall ?? {}
+  let wallCount = Object.values(nodes).filter((node) => node.type === 'wall').length
+  const walls: WallNode[] = []
+  for (const [start, end] of segments) {
+    if (!isSegmentLongEnough(start, end)) continue
+    const duplicate = existing.some(
+      (wall) =>
+        (pointsEqual(wall.start, start) && pointsEqual(wall.end, end)) ||
+        (pointsEqual(wall.start, end) && pointsEqual(wall.end, start)),
+    )
+    if (duplicate) continue
+    wallCount += 1
+    const wall = WallSchema.parse({ ...defaults, name: `Wall ${wallCount}`, start, end })
+    walls.push(wall)
+    existing.push(wall)
+  }
+  if (walls.length === 0) return []
+
+  applyNodeChanges({ create: walls.map((node) => ({ node, parentId: levelId as AnyNodeId })) })
+  sfxEmitter.emit('sfx:structure-build')
+  flushAutoSurfacesForCurrentLevel()
+  return walls
+}
+
+/**
+ * Creates a rectangle room's four walls (centerlines around the drafted inner
+ * corners) and the auto floor / ceiling they close, as one undo step.
+ */
+export function createRectangleRoomOnCurrentLevel(
+  innerStart: WallPlanPoint,
+  innerEnd: WallPlanPoint,
+  thickness: number,
+): WallNode[] {
+  const corners = getRectangleRoomCenterlineCorners(innerStart, innerEnd, thickness)
+  return createWallSegmentsOnCurrentLevel(
+    corners.map((corner, index) => [corner, corners[(index + 1) % corners.length]!]),
+  )
+}
+
+/**
+ * Whether a chained wall draft ends after committing `wall`: single-wall
+ * continuation, the chain looped back to its first vertex, or the segment
+ * sealed a room against the existing walls.
+ */
+export function wallDraftChainEnds(
+  wall: WallNode,
+  chainFirstVertex: WallPlanPoint | null,
+): boolean {
+  if (useEditor.getState().getContinuation('wall') === 'single') return true
+  if (
+    chainFirstVertex &&
+    distanceSquared(wall.end, chainFirstVertex) <= WALL_JOIN_SNAP_RADIUS * WALL_JOIN_SNAP_RADIUS
+  ) {
+    return true
+  }
+  const levelId = useViewer.getState().selection.levelId
+  const levelWalls = Object.values(useScene.getState().nodes).filter(
+    (node): node is WallNode => node?.type === 'wall' && node.parentId === levelId,
+  )
+  return wallClosesRoom(levelWalls, wall)
 }
