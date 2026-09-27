@@ -1,6 +1,6 @@
 'use client'
 
-import { type ReactNode, useCallback, useEffect, useRef } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useRef } from 'react'
 import { useIsMobile } from '../../hooks/use-mobile'
 import useEditor from '../../store/use-editor'
 import { useUiHidden } from '../../store/use-ui-hidden'
@@ -14,6 +14,8 @@ const SIDEBAR_DEFAULT_WIDTH = 304
 const SIDEBAR_MAX_WIDTH = 800
 const SIDEBAR_COLLAPSE_THRESHOLD = 220
 const RAIL_WIDTH = 48
+/** inZOI: the build panel floats over the full-screen scene, inset by this much. */
+const PANEL_MARGIN = 12
 
 // ── Left column: resizable panel with tab bar ────────────────────────────────
 
@@ -96,7 +98,7 @@ function LeftColumn({
   useEffect(() => {
     const handlePointerMove = (e: PointerEvent) => {
       if (!isResizing.current) return
-      const newWidth = e.clientX - RAIL_WIDTH
+      const newWidth = e.clientX - PANEL_MARGIN - RAIL_WIDTH
       if (newWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
         setIsCollapsed(true)
       } else {
@@ -119,7 +121,7 @@ function LeftColumn({
   }, [setWidth, setIsCollapsed, setIsDragging])
 
   return (
-    <div className="relative z-10 flex h-full flex-shrink-0 bg-sidebar text-sidebar-foreground">
+    <div className="relative flex min-h-0 flex-1 bg-sidebar text-sidebar-foreground">
       <IconRail
         activeTab={activePanel}
         collapsed={isCollapsed}
@@ -168,17 +170,13 @@ function RightColumn({
   stageOverlay?: ReactNode
 }) {
   return (
-    <div
-      className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
-      style={{
-        borderTopLeftRadius: 16,
-        clipPath: 'inset(0 0 0 0 round 16px 0 0 0)',
-        boxShadow: '-4px -2px 16px rgba(0, 0, 0, 0.08), -1px 0 4px rgba(0, 0, 0, 0.04)',
-      }}
-    >
+    <div className="absolute inset-0 flex flex-col overflow-hidden">
       {/* Viewer toolbar */}
       {(toolbarLeft || toolbarRight) && (
-        <div className="pointer-events-none absolute top-3 right-3 left-3 z-20 flex items-center justify-between gap-2">
+        <div
+          className="pointer-events-none absolute top-3 right-3 z-20 flex items-center justify-between gap-2"
+          style={{ left: 'calc(var(--viewer-left-inset, 0px) + 12px)' }}
+        >
           <div className="pointer-events-auto flex items-center gap-2">{toolbarLeft}</div>
           <div className="pointer-events-auto flex items-center gap-2">{toolbarRight}</div>
         </div>
@@ -232,6 +230,8 @@ export function EditorLayoutV2({
   const isCaptureMode = useEditor((s) => s.isCaptureMode)
   const uiHidden = useUiHidden((s) => s.hidden)
   const hideChrome = isCaptureMode || uiHidden
+  const sidebarWidth = useSidebarStore((s) => s.width)
+  const sidebarCollapsed = useSidebarStore((s) => s.isCollapsed)
   const isMobile = useIsMobile()
 
   if (isMobile) {
@@ -249,20 +249,18 @@ export function EditorLayoutV2({
     )
   }
 
-  return (
-    <div className="flex h-full w-full flex-col bg-sidebar text-foreground">
-      {/* Top navbar */}
-      {!uiHidden && navbarSlot}
+  const showPanel = !hideChrome && sidebarTabs.length > 0
+  const leftInset = showPanel
+    ? PANEL_MARGIN + RAIL_WIDTH + (sidebarCollapsed ? 0 : sidebarWidth)
+    : 0
 
-      {/* Main content: left column + right column */}
-      <div className="flex min-h-0 flex-1">
-        {!hideChrome && sidebarTabs.length > 0 && (
-          <LeftColumn
-            renderTabContent={renderTabContent}
-            sidebarOverlay={sidebarOverlay}
-            tabs={sidebarTabs}
-          />
-        )}
+  return (
+    <div
+      className="relative h-full w-full overflow-hidden bg-sidebar text-foreground"
+      style={{ '--viewer-left-inset': `${leftInset}px` } as CSSProperties}
+    >
+      {/* Full-screen scene; the build panel floats over it (inZOI). */}
+      <div className="absolute inset-0">
         <RightColumn
           overlays={uiHidden ? undefined : overlays}
           stageOverlay={stageOverlay}
@@ -272,6 +270,24 @@ export function EditorLayoutV2({
           {viewerContent}
         </RightColumn>
       </div>
+      {showPanel && (
+        <div
+          className="absolute z-40 flex flex-col overflow-hidden rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5"
+          style={{
+            top: PANEL_MARGIN,
+            bottom: PANEL_MARGIN,
+            left: PANEL_MARGIN,
+            width: leftInset - PANEL_MARGIN,
+          }}
+        >
+          {!sidebarCollapsed && navbarSlot}
+          <LeftColumn
+            renderTabContent={renderTabContent}
+            sidebarOverlay={sidebarOverlay}
+            tabs={sidebarTabs}
+          />
+        </div>
+      )}
     </div>
   )
 }

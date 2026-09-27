@@ -40,9 +40,9 @@ export function CabinetDoorControls() {
 
   return (
     <div
-      className="pointer-events-auto fixed left-3 z-40 flex items-center gap-1 rounded-full bg-white/95 p-1 text-neutral-700 shadow-[0_4px_16px_rgba(0,0,0,0.2)] backdrop-blur-md"
+      className="pointer-events-auto fixed z-40 flex items-center gap-1 rounded-full bg-white/95 p-1 text-neutral-700 shadow-[0_4px_16px_rgba(0,0,0,0.2)] backdrop-blur-md"
       // Bottom-left, clear of the action menu that floats over a selection.
-      style={{ bottom: 72 }}
+      style={{ bottom: 72, left: 'calc(var(--viewer-left-inset, 0px) + 12px)' }}
     >
       <button
         className="flex items-center gap-1.5 rounded-full px-3 py-1 font-medium text-xs transition-colors hover:bg-neutral-100"

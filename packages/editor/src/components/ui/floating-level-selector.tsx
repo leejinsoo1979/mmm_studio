@@ -510,7 +510,10 @@ export function FloatingLevelSelector() {
 
   return (
     <>
-      <div className="pointer-events-auto absolute top-14 left-3 z-20">
+      <div
+        className="pointer-events-auto absolute top-14 z-20"
+        style={{ left: 'calc(var(--viewer-left-inset, 0px) + 12px)' }}
+      >
         <div className="relative">
           {/* Floating + at top edge */}
           {!draggingLevelId && (

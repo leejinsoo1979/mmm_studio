@@ -1,5 +1,5 @@
 import { useScene } from '@pascal-app/core'
-import { Camera } from 'lucide-react'
+import { Camera, ChevronLeft } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
@@ -57,60 +57,55 @@ export function EditorHeader({ sceneId, sceneName, onRename }: EditorHeaderProps
     )
   }
 
+  // inZOI "‹ Go Back | Customize Architecture": a slim row on top of the
+  // floating build panel instead of a full-width web header.
   return (
-    <header className="relative flex h-12 shrink-0 items-center justify-between bg-sidebar px-4">
-      <div className="flex min-w-0 items-center">
-        <Link aria-label="MMM Studio home" className="flex shrink-0 items-center gap-2.5" href="/">
-          <Image
-            alt=""
-            aria-hidden="true"
-            className="h-[13px] w-auto"
-            height={23}
-            src="/mmmlogo.svg"
-            width={71}
-          />
-          <span className="whitespace-nowrap font-[family-name:var(--font-barlow)] text-[17px] text-foreground tracking-[0.08em]">
-            mmm studio
-          </span>
-        </Link>
-      </div>
-      <div className="absolute left-1/2 w-[36%] max-w-md -translate-x-1/2">
-        <input
-          aria-label="Project name"
-          className="h-8 w-full rounded-md border border-transparent bg-transparent px-2 text-center font-medium text-foreground/90 text-sm outline-none transition hover:border-border/60 hover:bg-background/30 focus:border-border focus:bg-background/70 disabled:opacity-60"
-          disabled={isSaving}
-          maxLength={200}
-          onBlur={() => void commitName()}
-          onChange={(event) => setDraftName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') event.currentTarget.blur()
-            if (event.key === 'Escape') {
-              setDraftName(sceneName)
-              event.currentTarget.blur()
-            }
-          }}
-          ref={inputRef}
-          value={draftName}
+    <header className="flex h-11 shrink-0 items-center gap-1 border-border border-b bg-white px-2">
+      <Link
+        aria-label="대시보드로 돌아가기"
+        className="flex h-8 shrink-0 items-center gap-0.5 rounded-md pr-2 pl-1 text-neutral-600 text-xs hover:bg-neutral-100 hover:text-neutral-900"
+        href="/dashboard"
+        title="대시보드"
+      >
+        <ChevronLeft className="h-4 w-4" />
+        <Image
+          alt=""
+          aria-hidden="true"
+          className="h-[11px] w-auto"
+          height={23}
+          src="/mmmlogo.svg"
+          width={71}
         />
-      </div>
-      <div className="flex items-center gap-2">
-        <button
-          className="flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-3 py-1.5 font-medium text-xs hover:bg-accent/40"
-          onClick={saveCamera}
-          title={`저장된 시점 ${experience.cameras.length}개`}
-          type="button"
-        >
-          <Camera className="h-3.5 w-3.5" />
-          시점 저장
-        </button>
-        <ExportCenter sceneId={sceneId} sceneName={sceneName} />
-        <Link
-          className="rounded-md border border-border bg-background/60 px-3 py-1.5 font-medium text-xs hover:bg-accent/40"
-          href="/dashboard"
-        >
-          대시보드
-        </Link>
-      </div>
+      </Link>
+      <span className="h-4 w-px shrink-0 bg-neutral-300" />
+      <input
+        aria-label="프로젝트 이름"
+        className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 font-semibold text-[13px] text-neutral-800 outline-none transition hover:border-border/60 focus:border-border focus:bg-white disabled:opacity-60"
+        disabled={isSaving}
+        maxLength={200}
+        onBlur={() => void commitName()}
+        onChange={(event) => setDraftName(event.target.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation()
+          if (event.key === 'Enter') event.currentTarget.blur()
+          if (event.key === 'Escape') {
+            setDraftName(sceneName)
+            event.currentTarget.blur()
+          }
+        }}
+        ref={inputRef}
+        value={draftName}
+      />
+      <button
+        aria-label="시점 저장"
+        className="flex size-8 shrink-0 items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
+        onClick={saveCamera}
+        title={`시점 저장 (저장된 시점 ${experience.cameras.length}개)`}
+        type="button"
+      >
+        <Camera className="h-4 w-4" />
+      </button>
+      <ExportCenter sceneId={sceneId} sceneName={sceneName} />
     </header>
   )
 }

@@ -95,11 +95,11 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
   return (
     <>
       <button
-        className="rounded-md bg-foreground px-3 py-1.5 font-semibold text-background text-xs hover:opacity-85"
+        className="shrink-0 rounded-md bg-neutral-900 px-2.5 py-1.5 font-semibold text-white text-xs hover:opacity-85"
         onClick={() => setOpen(true)}
         type="button"
       >
-        내보내기 · 발주
+        내보내기
       </button>
       {open && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-black/60 p-4 backdrop-blur-sm">
