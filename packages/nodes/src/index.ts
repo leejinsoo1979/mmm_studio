@@ -158,6 +158,7 @@ export {
   downloadTextFile,
   type MyCabinetModule,
   placePresetInSlot,
+  resolveCabinetNode,
   type SlotGuide,
   selectSlotWall,
   slotGuideFor,

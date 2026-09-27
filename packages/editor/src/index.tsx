@@ -97,6 +97,7 @@ export {
   snapToHalf,
   snapUpToGridStep,
   stripTransient,
+  turnRotation,
 } from './components/tools/item/placement-math'
 export type { PlacementState } from './components/tools/item/placement-types'
 // Item placement / move primitives. Re-exported here so the registry-driven
@@ -338,7 +339,7 @@ export { clearRoofDuplicateMetadata, duplicateRoofSubtree } from './lib/roof-dup
 export { hasRoofFaceChildOverlap, type RoofWallHit, resolveRoofWallHit } from './lib/roof-wall-hit'
 export type { SceneGraph } from './lib/scene'
 export { applySceneGraphToEditor } from './lib/scene'
-export { triggerSFX } from './lib/sfx-bus'
+export { emitDeleteSFX, triggerSFX } from './lib/sfx-bus'
 export {
   clearSlabSnapFeedback,
   resolveSlabPlanPointSnap,

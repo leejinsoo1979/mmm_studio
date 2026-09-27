@@ -62,6 +62,7 @@ import { FurnitureTab } from './furniture-tab'
 import { LightingTab } from './lighting-tab'
 import { MaterialTab } from './material-tab'
 import { MaterialSurfaceInspector } from './material-surface-inspector'
+import { SelectionQuickBar } from './selection-quick-bar'
 import { CommunityViewerToolbarLeft, CommunityViewerToolbarRight } from './viewer-toolbar'
 import { getStudioAuthHeaders } from '@/lib/auth-client'
 import { CATALOG_ROOM_TREE, withMyModelTag, withRoomTags } from '@/lib/catalog-rooms'
@@ -1135,7 +1136,12 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
         onThumbnailCapture={handleThumb}
         projectId={meta.projectId ?? 'default'}
         sidebarTabs={SIDEBAR_TABS}
-        viewerBanner={<ArchipleFloorplanBridge />}
+        viewerBanner={
+          <>
+            <ArchipleFloorplanBridge />
+            <SelectionQuickBar />
+          </>
+        }
         viewerToolbarLeft={<CommunityViewerToolbarLeft />}
         viewerToolbarRight={<CommunityViewerToolbarRight />}
       />

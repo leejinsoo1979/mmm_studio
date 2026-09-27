@@ -11,7 +11,7 @@ export { CABINET_PRESETS, type CabinetPreset, type CabinetSpec } from './engine/
 export { columnCountLimits } from './engine/slots'
 export { createKitchenOnWall, createWardrobesOnWall, wallRun } from './kitchen'
 export { type MyCabinetModule, useMyCabinetModules } from './my-modules'
-export { CabinetNode, CountertopNode } from './schema'
+export { CabinetNode, CountertopNode, resolveCabinetNode } from './schema'
 export {
   placePresetInSlot,
   type SlotGuide,
