@@ -236,7 +236,7 @@ function normalizePersistedViewerState(value: unknown): PersistedViewerState {
     shadows: typeof state.shadows === 'boolean' ? state.shadows : true,
     unit: normalizeViewerUnit(state.unit),
     levelMode: pickString<ViewerState['levelMode']>(state.levelMode, LEVEL_MODES, 'stacked'),
-    wallMode: pickString<ViewerState['wallMode']>(state.wallMode, WALL_MODES, 'up'),
+    wallMode: pickString<ViewerState['wallMode']>(state.wallMode, WALL_MODES, 'cutaway'),
     projectPreferences: normalizeProjectPreferences(state.projectPreferences),
   }
 }
@@ -301,7 +301,7 @@ const useViewer = create<ViewerState>()(
       levelMode: 'stacked',
       setLevelMode: (mode) => set({ levelMode: mode }),
 
-      wallMode: 'up',
+      wallMode: 'cutaway',
       setWallMode: (mode) => set({ wallMode: mode }),
 
       showScans: true,
@@ -416,16 +416,20 @@ const useViewer = create<ViewerState>()(
     }),
     {
       name: 'viewer-preferences',
-      version: 2,
+      version: 3,
       migrate: (persistedState, version) => {
-        if (version >= 2 || !persistedState || typeof persistedState !== 'object') {
+        if (version >= 3 || !persistedState || typeof persistedState !== 'object') {
           return persistedState
         }
 
         const state = persistedState as Record<string, unknown>
         return {
           ...state,
-          unit: state.unit === 'metric' ? 'millimeter' : state.unit,
+          unit: version < 2 && state.unit === 'metric' ? 'millimeter' : state.unit,
+          // v3: building views open with the walls cut away (inZOI) — move
+          // the old full-height default over once.
+          wallMode:
+            state.wallMode === 'up' || state.wallMode === undefined ? 'cutaway' : state.wallMode,
         }
       },
       merge: (persistedState, currentState) => ({
