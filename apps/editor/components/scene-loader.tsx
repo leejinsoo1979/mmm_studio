@@ -19,6 +19,7 @@ import {
   type SidebarTab,
   useEditor,
 } from '@pascal-app/editor'
+import { CATALOG_ITEMS } from '@pascal-app/editor/catalog'
 import TreesPanel from '@pascal-app/plugin-trees/panel'
 import {
   Archive,
@@ -63,6 +64,7 @@ import { MaterialTab } from './material-tab'
 import { MaterialSurfaceInspector } from './material-surface-inspector'
 import { CommunityViewerToolbarLeft, CommunityViewerToolbarRight } from './viewer-toolbar'
 import { getStudioAuthHeaders } from '@/lib/auth-client'
+import { CATALOG_ROOM_TREE, withMyModelTag, withRoomTags } from '@/lib/catalog-rooms'
 
 export interface SceneMeta {
   id: string
@@ -668,6 +670,9 @@ async function createLocalGlbItem(file: File): Promise<AssetInput> {
   }
 }
 
+const ROOM_TAGGED_CATALOG = withRoomTags(CATALOG_ITEMS)
+
+/** Left-rail asset catalog, browsed inZOI-style: room tabs, then kinds. */
 function AssetTab() {
   const [localItems, setLocalItems] = useState<AssetInput[]>([])
   const [uploading, setUploading] = useState(false)
@@ -706,12 +711,14 @@ function AssetTab() {
         customCategories={[
           {
             id: 'nature',
-            label: 'Nature',
+            label: '자연 (나무·꽃·풀)',
             iconSrc: '/icons/tree.webp',
             content: <TreesPanel />,
           },
         ]}
-        extraItems={localItems}
+        extraItems={withMyModelTag(localItems)}
+        functionTree={CATALOG_ROOM_TREE}
+        items={ROOM_TAGGED_CATALOG}
         leadingTile={
           <button
             className="group relative flex min-h-[122px] flex-col gap-1.5 rounded-xl border border-dashed border-[#555] bg-[#242424] p-1.5 text-left transition-colors hover:border-[#7779ff] hover:bg-[#2b2b32]"

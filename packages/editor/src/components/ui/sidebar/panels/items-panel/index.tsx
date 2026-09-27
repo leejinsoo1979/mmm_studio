@@ -72,12 +72,14 @@ export function ItemsPanel({
   if (functionTree && functionTree.length > 0) {
     return (
       <FunctionTreePanel
+        customCategories={customCategories}
         emptyState={emptyState}
         functionTree={functionTree}
         items={extraItems.length > 0 ? [...extraItems, ...(items ?? [])] : items}
         leadingTile={leadingTile}
         onSearchChange={onSearchChange}
         searchResults={searchResults}
+        showSourceFilter={showSourceFilter}
       />
     )
   }

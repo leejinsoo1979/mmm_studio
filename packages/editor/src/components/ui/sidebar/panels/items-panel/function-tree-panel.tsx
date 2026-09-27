@@ -7,6 +7,7 @@ import { useMemo, useState } from 'react'
 import { triggerSFX } from '../../../../../lib/sfx-bus'
 import { cn } from '../../../../../lib/utils'
 import { ItemCatalog } from '../../../item-catalog/item-catalog'
+import type { ItemsPanelCustomCategory } from '.'
 import {
   TooltipContent,
   TooltipProvider,
@@ -56,6 +57,8 @@ export function FunctionTreePanel({
   searchResults,
   leadingTile,
   emptyState,
+  customCategories = [],
+  showSourceFilter = true,
 }: {
   functionTree: FunctionTreeNode[]
   items?: AssetInput[]
@@ -63,12 +66,20 @@ export function FunctionTreePanel({
   searchResults?: AssetInput[] | null
   leadingTile?: React.ReactNode
   emptyState?: React.ReactNode
+  /** Host-owned tabs after the tree roots, rendering their own content. */
+  customCategories?: ItemsPanelCustomCategory[]
+  /** Library / Community / Mine chips; off shows every source. */
+  showSourceFilter?: boolean
 }) {
   const [activeRootSlug, setActiveRootSlug] = useState<string | null>(
     functionTree[0]?.slug ?? null,
   )
   const [activeChildSlug, setActiveChildSlug] = useState<string | null>(null)
-  const [activeSource, setActiveSource] = useState<AssetInput['source'] | null>('library')
+  const [activeCustomId, setActiveCustomId] = useState<string | null>(null)
+  const [activeSource, setActiveSource] = useState<AssetInput['source'] | null>(
+    showSourceFilter ? 'library' : null,
+  )
+  const activeCustom = customCategories.find((category) => category.id === activeCustomId)
   const [search, setSearch] = useState('')
 
   const isServerSearch = onSearchChange !== undefined
@@ -101,6 +112,33 @@ export function FunctionTreePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, activeNode, activeSource])
 
+  // Without a server search the query filters the whole catalog locally, by
+  // name, tags and the tree node names the item sits under.
+  const nodeNames = useMemo(() => {
+    const names = new Map<string, string>()
+    const walk = (node: FunctionTreeNode, parent: string) => {
+      const name = `${parent} ${node.name}`.trim()
+      names.set(node.slug, name)
+      for (const child of node.children) walk(child, name)
+    }
+    for (const root of functionTree) walk(root, '')
+    return names
+  }, [functionTree])
+  const localSearchItems = useMemo(() => {
+    if (isServerSearch || !search.trim()) return null
+    const query = search.trim().toLowerCase()
+    return (items ?? []).filter((item) => {
+      if (!matchesSource(item)) return false
+      const haystack = [
+        item.name,
+        ...(item.tags ?? []),
+        ...itemFunctionSlugs(item).map((slug) => nodeNames.get(slug) ?? ''),
+      ]
+      return haystack.some((text) => text.toLowerCase().includes(query))
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isServerSearch, search, items, nodeNames, activeSource])
+
   const searchItems = useMemo(() => {
     if (!(isServerSearch && search && searchResults)) return null
     return activeSource ? searchResults.filter(matchesSource) : searchResults
@@ -108,6 +146,7 @@ export function FunctionTreePanel({
   }, [isServerSearch, search, searchResults, activeSource])
 
   function selectRoot(slug: string) {
+    setActiveCustomId(null)
     setActiveRootSlug(slug)
     setActiveChildSlug(null)
     setSearch('')
@@ -122,7 +161,7 @@ export function FunctionTreePanel({
       <TooltipProvider delayDuration={0} disableHoverableContent>
         <div className="grid shrink-0 grid-cols-5 gap-1.5 border-border/70 border-b p-2">
           {functionTree.map((root) => {
-            const isActive = activeRoot?.slug === root.slug
+            const isActive = !activeCustom && activeRoot?.slug === root.slug
             return (
               <TooltipRoot key={root.slug}>
                 <TooltipTrigger asChild>
@@ -149,8 +188,8 @@ export function FunctionTreePanel({
                         width={28}
                       />
                     ) : (
-                      <span className="font-semibold text-muted-foreground text-xs uppercase">
-                        {root.name.slice(0, 2)}
+                      <span className="px-0.5 text-center font-semibold text-[11px] text-muted-foreground leading-tight">
+                        {root.name}
                       </span>
                     )}
                   </button>
@@ -161,103 +200,149 @@ export function FunctionTreePanel({
               </TooltipRoot>
             )
           })}
+          {customCategories.map((category) => (
+            <TooltipRoot key={category.id}>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn(
+                    'relative flex aspect-square items-center justify-center rounded-xl transition-all duration-200',
+                    activeCustomId === category.id
+                      ? 'bg-primary/10 ring-1 ring-primary/50'
+                      : 'bg-muted/40 opacity-70 grayscale hover:bg-muted hover:opacity-100 hover:grayscale-0',
+                  )}
+                  onClick={() => {
+                    triggerSFX('sfx:menu-click')
+                    setActiveCustomId(category.id)
+                  }}
+                  onMouseEnter={() => triggerSFX('sfx:menu-hover')}
+                  type="button"
+                >
+                  <NextImage
+                    alt={category.label}
+                    className="size-7 object-contain"
+                    height={28}
+                    src={category.iconSrc}
+                    width={28}
+                  />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="icon-grid-tooltip pointer-events-none" side="top">
+                {category.label}
+              </TooltipContent>
+            </TooltipRoot>
+          ))}
         </div>
       </TooltipProvider>
 
-      {/* Search + source filter */}
-      <div className="flex shrink-0 flex-col gap-2 border-border/70 border-b p-2">
-        <div className="flex items-center gap-1.5">
-          <input
-            className="w-1/2 min-w-0 shrink-0 rounded-lg bg-muted px-2.5 py-1.5 text-xs placeholder:text-muted-foreground focus:outline-none"
-            onChange={(e) => {
-              setSearch(e.target.value)
-              onSearchChange?.(e.target.value)
-            }}
-            placeholder="Search..."
-            type="text"
-            value={search}
-          />
-          <div className="flex w-1/2 min-w-0 shrink-0 rounded-lg bg-muted p-0.5">
-            {SOURCE_CHIPS.map((chip) => {
-              const isActive = activeSource === chip.id
-              return (
-                <button
-                  className={cn(
-                    'min-w-0 flex-1 truncate rounded-md px-1 py-1 text-center font-medium text-[10px] transition-colors',
-                    isActive
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                  key={chip.id}
-                  onClick={() => setActiveSource(isActive ? null : chip.id)}
-                  type="button"
-                >
-                  {chip.label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* Child nodes of the active root as a secondary chip row */}
-        {!search && activeRoot && activeRoot.children.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            <button
-              className={cn(
-                'cursor-pointer rounded-md px-2 py-0.5 font-medium text-xs transition-colors',
-                activeChildSlug === null
-                  ? 'bg-violet-500 text-white'
-                  : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground',
+      {activeCustom ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">{activeCustom.content}</div>
+      ) : (
+        <>
+          {/* Search + source filter */}
+          <div className="flex shrink-0 flex-col gap-2 border-border/70 border-b p-2">
+            <div className="flex items-center gap-1.5">
+              <input
+                className={cn(
+                  'min-w-0 shrink-0 rounded-lg bg-muted px-2.5 py-1.5 text-xs placeholder:text-muted-foreground focus:outline-none',
+                  showSourceFilter ? 'w-1/2' : 'w-full',
+                )}
+                onChange={(e) => {
+                  setSearch(e.target.value)
+                  onSearchChange?.(e.target.value)
+                }}
+                placeholder="Search..."
+                type="text"
+                value={search}
+              />
+              {showSourceFilter && (
+                <div className="flex w-1/2 min-w-0 shrink-0 rounded-lg bg-muted p-0.5">
+                  {SOURCE_CHIPS.map((chip) => {
+                    const isActive = activeSource === chip.id
+                    return (
+                      <button
+                        className={cn(
+                          'min-w-0 flex-1 truncate rounded-md px-1 py-1 text-center font-medium text-[10px] transition-colors',
+                          isActive
+                            ? 'bg-background text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
+                        key={chip.id}
+                        onClick={() => setActiveSource(isActive ? null : chip.id)}
+                        type="button"
+                      >
+                        {chip.label}
+                      </button>
+                    )
+                  })}
+                </div>
               )}
-              onClick={() => setActiveChildSlug(null)}
-              type="button"
-            >
-              All
-            </button>
-            {activeRoot.children.map((child) => {
-              const isActive = activeChildSlug === child.slug
-              return (
+            </div>
+
+            {/* Child nodes of the active root as a secondary chip row */}
+            {!search && activeRoot && activeRoot.children.length > 0 && (
+              <div className="flex flex-wrap gap-1">
                 <button
                   className={cn(
-                    'cursor-pointer rounded-md px-2 py-0.5 font-medium text-xs capitalize transition-colors',
-                    isActive
+                    'cursor-pointer rounded-md px-2 py-0.5 font-medium text-xs transition-colors',
+                    activeChildSlug === null
                       ? 'bg-violet-500 text-white'
                       : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground',
                   )}
-                  key={child.slug}
-                  onClick={() => setActiveChildSlug(isActive ? null : child.slug)}
+                  onClick={() => setActiveChildSlug(null)}
                   type="button"
                 >
-                  {child.name}
+                  All
                 </button>
-              )
-            })}
+                {activeRoot.children.map((child) => {
+                  const isActive = activeChildSlug === child.slug
+                  return (
+                    <button
+                      className={cn(
+                        'cursor-pointer rounded-md px-2 py-0.5 font-medium text-xs capitalize transition-colors',
+                        isActive
+                          ? 'bg-violet-500 text-white'
+                          : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground',
+                      )}
+                      key={child.slug}
+                      onClick={() => setActiveChildSlug(isActive ? null : child.slug)}
+                      type="button"
+                    >
+                      {child.name}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      {/* Item grid */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {isSearchPending ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="size-5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground" />
+          {/* Item grid */}
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            {isSearchPending ? (
+              <div className="flex h-full items-center justify-center">
+                <div className="size-5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground" />
+              </div>
+            ) : isServerSearch && search && searchResults?.length === 0 ? (
+              (emptyState ?? (
+                <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
+                  No results for &ldquo;{search}&rdquo;
+                </div>
+              ))
+            ) : (
+              <ItemCatalog
+                category={'furnish' as never}
+                emptyState={emptyState}
+                key={activeNode?.slug ?? 'all'}
+                leadingTile={leadingTile}
+                overrideItems={
+                  isServerSearch && search
+                    ? (searchItems ?? undefined)
+                    : (localSearchItems ?? treeItems)
+                }
+              />
+            )}
           </div>
-        ) : isServerSearch && search && searchResults?.length === 0 ? (
-          (emptyState ?? (
-            <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
-              No results for &ldquo;{search}&rdquo;
-            </div>
-          ))
-        ) : (
-          <ItemCatalog
-            category={'furnish' as never}
-            emptyState={emptyState}
-            key={activeNode?.slug ?? 'all'}
-            leadingTile={leadingTile}
-            overrideItems={isServerSearch && search ? (searchItems ?? undefined) : treeItems}
-          />
-        )}
-      </div>
+        </>
+      )}
     </div>
   )
 }
