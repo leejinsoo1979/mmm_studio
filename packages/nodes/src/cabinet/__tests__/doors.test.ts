@@ -99,9 +99,9 @@ describe('도어설치 / 도어제거', () => {
     expect(useCabinetDoors.getState().open).toBe(false)
   })
 
-  test('a scene that already has doors hung gives new cabinets doors', () => {
+  test('doors hung in the saved scene do not give new cabinets doors', () => {
     put(cabinet())
-    expect(newCabinetHasDoor()).toBe(true)
+    expect(newCabinetHasDoor()).toBe(false)
   })
 
   test('a cabinet saved before 도어설치 existed shows doors but new ones stay bare', () => {

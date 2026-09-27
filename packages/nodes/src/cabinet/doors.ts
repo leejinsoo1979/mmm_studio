@@ -4,8 +4,8 @@ import { type CabinetNode, resolveCabinetNode } from './schema'
 
 /**
  * mmmcraft 도어설치: modules are placed as bare carcasses and the doors are
- * hung afterwards, on every module at once. Once doors are on, modules placed
- * later come with doors too. Open / closed is a view state: all doors at
+ * hung afterwards, on every module at once. Modules placed after 도어설치 in
+ * the same session come with doors too. Open / closed is a view state: all doors at
  * once, or one cabinet at a time (walking through in first person).
  * Neither is saved; `hasDoor` on each cabinet is.
  */
@@ -41,16 +41,13 @@ export function anyCabinetHasDoor(nodes: Record<string, AnyNode>): boolean {
 }
 
 /**
- * Whether a cabinet placed now comes with its doors hung: after 도어설치, or
- * when the scene has doors hung by 도어설치. A cabinet saved before doors
- * were hung separately shows its doors but doesn't count, so placing next to
- * it still gives a bare carcass.
+ * Whether a cabinet placed now comes with its doors hung: only after
+ * 도어설치 in this session (until 도어제거). Cabinets already in the scene
+ * never make a new one come with doors, so placing is always bare unless
+ * doors are being hung right now.
  */
 export function newCabinetHasDoor(): boolean {
-  if (useCabinetDoors.getState().installIntent) return true
-  return Object.values(useScene.getState().nodes).some(
-    (n) => (n.type as string) === 'cabinet' && (n as { hasDoor?: boolean }).hasDoor === true,
-  )
+  return useCabinetDoors.getState().installIntent
 }
 
 /** 도어설치 / 도어제거 on every cabinet in the scene, as one undo step. */
