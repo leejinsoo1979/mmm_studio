@@ -38,9 +38,10 @@ const tempTarget = new Vector3()
 const syncTarget = new Vector3()
 const syncSpherical = new Spherical()
 const keyboardPanSpherical = new Spherical()
-// inZOI's build view: high (about 55°) and from a corner, looking down into
-// the rooms rather than at the front walls.
-const DEFAULT_CAMERA_POSITION = [10, 20, 10] as const
+// inZOI's build view: high (about 57°), looking down into the rooms rather
+// than at the front walls. Square to the plan, since the floor plan turns
+// with the camera's azimuth.
+const DEFAULT_CAMERA_POSITION = [0, 20, 13] as const
 const DEFAULT_MAX_POLAR_ANGLE = Math.PI / 2 - 0.1
 const DEBUG_MAX_POLAR_ANGLE = Math.PI - 0.05
 const NAVIGATION_SYNC_POSITION_EPSILON = 0.001
@@ -1165,11 +1166,10 @@ export const CustomCameraControls = () => {
       // Use the longer horizontal extent to size the orbit radius so the whole
       // footprint sits in view regardless of aspect ratio.
       const maxExtent = Math.max(w, d)
-      // Same corner, high-angle framing as the default pose.
+      // Same high-angle framing as the default pose.
       const horizontal = Math.max(maxExtent, 11)
-      const offset = horizontal / Math.SQRT2
       clearPendingFloorplanNavigationPose()
-      controls.current.setLookAt(cx + offset, horizontal * 1.4, cz + offset, cx, 0, cz, true)
+      controls.current.setLookAt(cx, horizontal * 1.5, cz + horizontal, cx, 0, cz, true)
     }
 
     emitter.on('camera-controls:capture', handleNodeCapture)
