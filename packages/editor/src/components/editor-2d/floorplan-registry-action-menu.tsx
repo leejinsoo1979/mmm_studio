@@ -14,6 +14,14 @@ import {
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import {
+  canCurveWall,
+  canSplitWall,
+  flipDoorSwing,
+  flipOpeningHinge,
+  splitWall,
+  startWallCurve,
+} from '../../lib/selection-actions'
 import { sfxEmitter } from '../../lib/sfx-bus'
 import useEditor from '../../store/use-editor'
 import { useMovingNode } from '../../store/use-interaction-scope'
@@ -139,6 +147,9 @@ export function FloorplanRegistryActionMenu() {
   const canDuplicate = def.capabilities.duplicable !== false
   const canDelete = def.capabilities.deletable !== false
   const canAddHole = node.type === 'slab' || node.type === 'ceiling'
+  const wall = node.type === 'wall' ? node : null
+  const opening = node.type === 'door' || node.type === 'window' ? node : null
+  const nodes = useScene.getState().nodes
 
   const handleMove = () => {
     sfxEmitter.emit('sfx:item-pick')
@@ -234,11 +245,19 @@ export function FloorplanRegistryActionMenu() {
     >
       <NodeActionMenu
         onAddHole={canAddHole ? handleAddHole : undefined}
+        onCurve={
+          wall && canSplitWall(wall) && canCurveWall(wall, nodes)
+            ? () => startWallCurve(wall)
+            : undefined
+        }
         onDelete={canDelete ? handleDelete : undefined}
         onDuplicate={canDuplicate ? handleDuplicate : undefined}
+        onFlipHinge={opening ? () => flipOpeningHinge(opening) : undefined}
+        onFlipSwing={node.type === 'door' ? () => flipDoorSwing(node) : undefined}
         onMove={canMove ? handleMove : undefined}
         onPointerDown={(event) => event.stopPropagation()}
         onPointerUp={(event) => event.stopPropagation()}
+        onSplit={wall && canSplitWall(wall) ? () => splitWall(wall) : undefined}
       />
     </div>,
     document.body,

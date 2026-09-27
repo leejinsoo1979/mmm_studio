@@ -42,6 +42,12 @@ import { resolveOverlayPolicy } from '../../lib/interaction/overlay-policy'
 import { curveReshapeScope, holeEditScope } from '../../lib/interaction/scope'
 import type { LinearUnit } from '../../lib/measurements'
 import { duplicateRoofSubtree } from '../../lib/roof-duplication'
+import {
+  canSplitWall,
+  flipDoorSwing,
+  flipOpeningHinge,
+  splitWall,
+} from '../../lib/selection-actions'
 import { emitDeleteSFX, sfxEmitter } from '../../lib/sfx-bus'
 import { duplicateStairSubtree } from '../../lib/stair-duplication'
 import useEditor from '../../store/use-editor'
@@ -752,7 +758,16 @@ export function FloatingActionMenu() {
                 node && isRegistryMovable(node.type) ? handleMove : undefined
               }
               onDelete={handleDelete}
+              onFlipHinge={
+                node?.type === 'door' || node?.type === 'window'
+                  ? () => flipOpeningHinge(node)
+                  : undefined
+              }
+              onFlipSwing={node?.type === 'door' ? () => flipDoorSwing(node) : undefined}
               onFocus={handleFocus}
+              onSplit={
+                node?.type === 'wall' && canSplitWall(node) ? () => splitWall(node) : undefined
+              }
               onPaint={node && canPaintNode?.(node) ? handlePaint : undefined}
               onRotate={canRotate ? handleRotate : undefined}
               onDuplicate={

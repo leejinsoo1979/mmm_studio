@@ -1,7 +1,19 @@
 'use client'
 
 import { Icon } from '@iconify/react'
-import { Copy, Focus, Move, Paintbrush, RotateCw, Search, Spline, Trash2 } from 'lucide-react'
+import {
+  Copy,
+  FlipHorizontal2,
+  FlipVertical2,
+  Focus,
+  Move,
+  Paintbrush,
+  RotateCw,
+  Scissors,
+  Search,
+  Spline,
+  Trash2,
+} from 'lucide-react'
 import type { MouseEventHandler, PointerEventHandler, ReactNode } from 'react'
 
 type NodeActionMenuProps = {
@@ -14,6 +26,10 @@ type NodeActionMenuProps = {
   onRotate?: MouseEventHandler<HTMLButtonElement>
   onPaint?: MouseEventHandler<HTMLButtonElement>
   onFocus?: MouseEventHandler<HTMLButtonElement>
+  /** mmmcraft 벽 분절 / 좌우대칭 / 상하반전. */
+  onSplit?: MouseEventHandler<HTMLButtonElement>
+  onFlipHinge?: MouseEventHandler<HTMLButtonElement>
+  onFlipSwing?: MouseEventHandler<HTMLButtonElement>
   onPointerDown?: PointerEventHandler<HTMLDivElement>
   onPointerUp?: PointerEventHandler<HTMLDivElement>
   onPointerEnter?: PointerEventHandler<HTMLDivElement>
@@ -59,6 +75,9 @@ export function NodeActionMenu({
   onRotate,
   onPaint,
   onFocus,
+  onSplit,
+  onFlipHinge,
+  onFlipSwing,
   onPointerDown,
   onPointerUp,
   onPointerEnter,
@@ -85,6 +104,21 @@ export function NodeActionMenu({
       {onCurve && (
         <MenuButton label="곡선" onClick={onCurve}>
           <Spline className="h-[18px] w-[18px]" />
+        </MenuButton>
+      )}
+      {onSplit && (
+        <MenuButton label="벽 분절 (가운데서 나누기)" onClick={onSplit}>
+          <Scissors className="h-[18px] w-[18px]" />
+        </MenuButton>
+      )}
+      {onFlipHinge && (
+        <MenuButton label="좌우대칭 (경첩 방향)" onClick={onFlipHinge}>
+          <FlipHorizontal2 className="h-[18px] w-[18px]" />
+        </MenuButton>
+      )}
+      {onFlipSwing && (
+        <MenuButton label="상하반전 (여는 방향)" onClick={onFlipSwing}>
+          <FlipVertical2 className="h-[18px] w-[18px]" />
         </MenuButton>
       )}
       {onPaint && (

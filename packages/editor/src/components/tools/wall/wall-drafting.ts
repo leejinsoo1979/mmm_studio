@@ -403,6 +403,35 @@ function planWallSplit(
 }
 
 /**
+ * mmmcraft 벽 분절: split a straight wall in two at its midpoint, carrying its
+ * doors / windows onto the half they sit on, as one undo step. Returns false
+ * (and changes nothing) for a curved wall or when an opening spans the
+ * midpoint.
+ */
+export function splitWallAtMidpoint(wallId: AnyNodeId): boolean {
+  const nodes = useScene.getState().nodes
+  const wall = nodes[wallId]
+  if (wall?.type !== 'wall' || (wall.curveOffset ?? 0) !== 0) return false
+  const walls = Object.values(nodes).filter(
+    (node): node is WallNode => node.type === 'wall' && node.parentId === wall.parentId,
+  )
+  const changes: WallCommitChanges = { nodes, walls, create: [], update: [], delete: [] }
+  const midpoint: WallPlanPoint = [
+    (wall.start[0] + wall.end[0]) / 2,
+    (wall.start[1] + wall.end[1]) / 2,
+  ]
+  planWallSplit({ wallId: wall.id, point: midpoint }, changes)
+  if (changes.create.length === 0) return false
+  useScene.getState().applyNodeChanges({
+    create: changes.create,
+    update: changes.update,
+    delete: changes.delete,
+  })
+  sfxEmitter.emit('sfx:structure-build')
+  return true
+}
+
+/**
  * Where a committed endpoint lands after the corner-join / wall-split rule
  * (`createWallOnCurrentLevel` in a magnetic context). Previewing through this
  * keeps the drafted endpoint identical to the committed one.
