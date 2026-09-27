@@ -70,7 +70,7 @@ export function PresetButtons({ node }: { node: CabinetNode }) {
       </p>
       {message && <p className="text-[#9a9cff] text-[11px] leading-snug">{message}</p>}
       {picking && (
-        <div className="flex flex-col gap-1 rounded-lg border border-border/50 bg-[#232326] p-2 text-xs">
+        <div className="flex flex-col gap-1 rounded-lg border border-border/50 bg-card p-2 text-xs">
           <strong>속성 이식 — {label}</strong>
           <p className={note}>
             적용할 그룹을 선택하세요. 가구 폭/위치는 항상 제외됩니다. 현재 가구에 의미 없는 그룹은

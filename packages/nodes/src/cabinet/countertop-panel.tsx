@@ -35,7 +35,7 @@ function NumberRow({
     if (clamped !== value) onCommit(clamped)
   }
   return (
-    <label className="flex h-9 items-center justify-between rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm">
+    <label className="flex h-9 items-center justify-between rounded-lg border border-border/50 bg-muted px-3 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className="flex items-center gap-1">
         <input
@@ -133,7 +133,7 @@ export default function CountertopPanel() {
           onCommit={(mm) => update({ position: [node.position[0], mm / 1000, node.position[2]] })}
           value={Math.round(node.position[1] * 1000)}
         />
-        <label className="flex h-9 items-center justify-between rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm">
+        <label className="flex h-9 items-center justify-between rounded-lg border border-border/50 bg-muted px-3 text-sm">
           <span className="text-muted-foreground">색상</span>
           <input
             onChange={(e) => update({ color: e.target.value })}

@@ -110,18 +110,18 @@ function ToolGrid({ entries }: { entries: ToolEntry[] }) {
           activeTool === e.tool && (!e.defaults || activeDefaults === JSON.stringify(e.defaults))
         return (
           <button
-            className={`group rounded-xl border p-3 text-left transition ${selected ? 'border-[#7779ff] bg-[#7779ff]/12' : 'border-[#383838] bg-[#222] hover:border-[#555] hover:bg-[#282828]'}`}
+            className={`group rounded-xl border p-3 text-left transition ${selected ? 'border-[#7779ff] bg-[#7779ff]/12' : 'border-border bg-card hover:border-border hover:bg-muted'}`}
             key={e.id}
             onClick={() => activate(e)}
             type="button"
           >
             <span
-              className={`grid h-9 w-9 place-items-center rounded-lg ${selected ? 'bg-[#7779ff] text-white' : 'bg-[#303030] text-[#d4d4d4]'}`}
+              className={`grid h-9 w-9 place-items-center rounded-lg ${selected ? 'bg-[#7779ff] text-white' : 'bg-muted text-foreground'}`}
             >
               <Icon className="h-4 w-4" />
             </span>
             <span className="mt-2 block font-semibold text-sm">{e.label}</span>
-            <span className="mt-0.5 block text-[#858585] text-[11px]">{e.detail}</span>
+            <span className="mt-0.5 block text-muted-foreground text-[11px]">{e.detail}</span>
           </button>
         )
       })}
@@ -132,7 +132,7 @@ function ToolGrid({ entries }: { entries: ToolEntry[] }) {
 function Toggle({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
   return (
     <button
-      className={`rounded-md border px-2 py-1 text-[11px] ${on ? 'border-[#ffd166]/70 bg-[#ffd166]/15 text-[#ffe39a]' : 'border-[#3a3a3a] bg-[#262626] text-[#9a9a9a]'}`}
+      className={`rounded-md border px-2 py-1 text-[11px] ${on ? 'border-[#ffd166]/70 bg-[#ffd166]/15 text-[#ffe39a]' : 'border-border bg-card text-muted-foreground'}`}
       onClick={onClick}
       type="button"
     >
@@ -159,14 +159,14 @@ function WiringSimulation() {
     useScene.getState().updateNode(id as AnyNode['id'], patch as Partial<AnyNode>)
   if (panels.length === 0 && switches.length === 0) {
     return (
-      <p className="text-[#777] text-[11px] leading-5">
+      <p className="text-muted-foreground/70 text-[11px] leading-5">
         분전반과 스위치를 설치하고 배선하면 여기서 차단기와 스위치를 켜고 끌 수 있습니다.
       </p>
     )
   }
   return (
     <div className="flex flex-col gap-3 text-xs">
-      <div className="text-[#9a9a9a]">
+      <div className="text-muted-foreground">
         배선된 조명 {wired.length}개 중 {lit.length}개 켜짐
       </div>
       {panels.map((p) => (
@@ -192,7 +192,7 @@ function WiringSimulation() {
         <div className="flex flex-col gap-1.5" key={s.id}>
           <div className="flex justify-between">
             <span className="font-semibold">{s.name ?? '스위치'}</span>
-            <span className="text-[#777]">
+            <span className="text-muted-foreground/70">
               {state.switches.get(s.id)?.live ? '전원 있음' : '전원 없음'}
             </span>
           </div>
@@ -215,7 +215,7 @@ function WiringSimulation() {
         </div>
       ))}
       {state.issues.length > 0 && (
-        <ul className="flex flex-col gap-1 rounded-lg border border-[#6b4b2a] bg-[#2a2118] p-2 text-[#f5c48a]">
+        <ul className="flex flex-col gap-1 rounded-lg border border-[#6b4b2a] bg-card p-2 text-[#f5c48a]">
           {state.issues.map((i) => (
             <li key={i}>{i}</li>
           ))}
@@ -227,29 +227,29 @@ function WiringSimulation() {
 
 export function LightingTab() {
   return (
-    <div className="flex h-full flex-col overflow-y-auto bg-[#1b1b1b] text-[#efefef]">
-      <div className="border-[#343434] border-b px-6 py-6">
-        <p className="text-[#8a8a8a] text-[10px] uppercase tracking-[0.16em]">Real-time</p>
+    <div className="flex h-full flex-col overflow-y-auto bg-sidebar text-foreground">
+      <div className="border-border border-b px-6 py-6">
+        <p className="text-muted-foreground text-[10px] uppercase tracking-[0.16em]">Real-time</p>
         <h1 className="mt-1 font-bold text-3xl tracking-[-0.03em]">Lighting</h1>
-        <p className="mt-2 text-[#9b9b9b] text-xs leading-5">
+        <p className="mt-2 text-muted-foreground text-xs leading-5">
           조명을 고른 뒤 바닥(천장등은 천장 아래)을 클릭해 배치합니다. 배치·배선 도구는 3D 또는
           분할(Split) 화면에서 동작합니다.
         </p>
       </div>
       <div className="flex flex-col gap-2 p-4">
-        <div className="text-[#9a9a9a] text-xs">조명</div>
+        <div className="text-muted-foreground text-xs">조명</div>
         <ToolGrid entries={LIGHTS} />
       </div>
-      <div className="flex flex-col gap-2 border-[#343434] border-t p-4">
-        <div className="text-[#9a9a9a] text-xs">스위치 · 분전반 · 배선</div>
+      <div className="flex flex-col gap-2 border-border border-t p-4">
+        <div className="text-muted-foreground text-xs">스위치 · 분전반 · 배선</div>
         <ToolGrid entries={WIRING} />
-        <p className="text-[#777] text-[11px] leading-5">
+        <p className="text-muted-foreground/70 text-[11px] leading-5">
           배선: 분전반 회로 → 스위치 L, 스위치 각 구 → 조명, 조명 → 조명(병렬) 순서로 단자를 두 번
           클릭해 연결합니다.
         </p>
       </div>
-      <div className="flex flex-col gap-2 border-[#343434] border-t p-4">
-        <div className="text-[#9a9a9a] text-xs">배선 시뮬레이션</div>
+      <div className="flex flex-col gap-2 border-border border-t p-4">
+        <div className="text-muted-foreground text-xs">배선 시뮬레이션</div>
         <WiringSimulation />
       </div>
     </div>

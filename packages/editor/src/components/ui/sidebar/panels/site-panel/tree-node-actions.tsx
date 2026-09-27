@@ -55,7 +55,7 @@ export const TreeNodeActions = memo(function TreeNodeActions({ nodeId }: TreeNod
   return (
     <div className="flex items-center gap-0.5">
       <button
-        className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
+        className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-foreground/10"
         onClick={toggleVisibility}
         title={isVisible ? 'Hide' : 'Show'}
       >
@@ -65,7 +65,7 @@ export const TreeNodeActions = memo(function TreeNodeActions({ nodeId }: TreeNod
       <Popover onOpenChange={setOpen} open={open}>
         <PopoverTrigger asChild>
           <button
-            className="relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
+            className="relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-foreground/10"
             onClick={(e) => e.stopPropagation()}
             title="Camera snapshot"
           >

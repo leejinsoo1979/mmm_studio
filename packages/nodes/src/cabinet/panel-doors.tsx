@@ -32,7 +32,7 @@ function GapInput({
   return (
     <span className="flex items-center gap-1">
       <input
-        className="w-14 rounded border border-border/50 bg-[#2C2C2E] px-1.5 py-1 text-right text-xs outline-none disabled:opacity-40"
+        className="w-14 rounded border border-border/50 bg-muted px-1.5 py-1 text-right text-xs outline-none disabled:opacity-40"
         disabled={disabled}
         inputMode="numeric"
         onBlur={commit}

@@ -171,7 +171,7 @@ export function NumberInput({
         ) : (
           <div
             className={
-              'z-10 min-w-0 flex-1 cursor-text truncate px-2 py-1.5 text-right font-medium font-mono text-foreground text-sm tabular-nums tracking-tight transition-colors hover:bg-black/5 dark:hover:bg-white/5'
+              'z-10 min-w-0 flex-1 cursor-text truncate px-2 py-1.5 text-right font-medium font-mono text-foreground text-sm tabular-nums tracking-tight transition-colors hover:bg-black/5 dark:hover:bg-foreground/5'
             }
             onClick={handleValueClick}
           >

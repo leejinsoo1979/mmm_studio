@@ -132,8 +132,8 @@ export function ControlModes() {
               'group text-muted-foreground',
               !(isImageMode || isActive) && c.color,
               !isImageMode && isActive && c.activeColor,
-              isImageMode && isActive && 'bg-white/10 hover:bg-white/10',
-              isImageMode && !isActive && 'hover:bg-white/5',
+              isImageMode && isActive && 'bg-foreground/10 hover:bg-foreground/10',
+              isImageMode && !isActive && 'hover:bg-foreground/5',
             )}
             key={c.id}
             label={c.label}

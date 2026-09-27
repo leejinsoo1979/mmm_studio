@@ -138,7 +138,7 @@ export function LevelTakeoffSummary({ levelId }: { levelId: string | null }) {
         </div>
       ))}
       <button
-        className="mt-1 h-8 rounded-lg border border-border/50 bg-[#2C2C2E] text-xs hover:bg-[#3e3e3e]"
+        className="mt-1 h-8 rounded-lg border border-border/50 bg-muted text-xs hover:bg-accent"
         onClick={() => download('벽마감-자재산출.csv', takeoffCsv(faces, label))}
         type="button"
       >

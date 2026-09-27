@@ -33,7 +33,7 @@ function ToolButton({
       className={`flex h-8 w-8 items-center justify-center rounded-md border transition ${
         active
           ? 'border-[#7567ff] bg-[#7567ff] text-white'
-          : 'border-white/10 bg-[#242424] text-neutral-300 hover:bg-[#303030] hover:text-white'
+          : 'border-foreground/10 bg-card text-muted-foreground hover:bg-muted hover:text-foreground'
       }`}
       onClick={onClick}
       title={label}
@@ -77,11 +77,13 @@ function ArchipleCanvasStage({ onExit }: { onExit: () => void }) {
   }, [data])
 
   return (
-    <section className="pointer-events-auto absolute inset-0 z-40 flex flex-col bg-[#111]">
-      <header className="flex h-10 shrink-0 items-center justify-between border-white/10 border-b bg-[#181818] px-3">
-        <div className="flex items-center gap-2 text-neutral-300">
-          <span className="font-semibold text-white text-xs">Archiple 2D Floorplan</span>
-          <span className="text-[11px]">original engine · mm coordinates · right-click finishes wall chain</span>
+    <section className="pointer-events-auto absolute inset-0 z-40 flex flex-col bg-sidebar">
+      <header className="flex h-10 shrink-0 items-center justify-between border-foreground/10 border-b bg-sidebar px-3">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <span className="font-semibold text-foreground text-xs">Archiple 2D Floorplan</span>
+          <span className="text-[11px]">
+            original engine · mm coordinates · right-click finishes wall chain
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -92,7 +94,7 @@ function ArchipleCanvasStage({ onExit }: { onExit: () => void }) {
             Apply to MMM
           </button>
           <button
-            className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-300 hover:bg-white/10 hover:text-white"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
             onClick={onExit}
             type="button"
           >
@@ -102,21 +104,41 @@ function ArchipleCanvasStage({ onExit }: { onExit: () => void }) {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-12 shrink-0 flex-col items-center gap-2 border-white/10 border-r bg-[#202020] py-3">
-          <ToolButton active={tool === ToolType.SELECT} label="Select" onClick={() => setTool(ToolType.SELECT)}>
+        <aside className="flex w-12 shrink-0 flex-col items-center gap-2 border-foreground/10 border-r bg-card py-3">
+          <ToolButton
+            active={tool === ToolType.SELECT}
+            label="Select"
+            onClick={() => setTool(ToolType.SELECT)}
+          >
             <MousePointer2 className="h-4 w-4" />
           </ToolButton>
-          <ToolButton active={tool === ToolType.WALL} label="Wall" onClick={() => setTool(ToolType.WALL)}>
+          <ToolButton
+            active={tool === ToolType.WALL}
+            label="Wall"
+            onClick={() => setTool(ToolType.WALL)}
+          >
             <PenLine className="h-4 w-4" />
           </ToolButton>
-          <ToolButton active={tool === ToolType.RECTANGLE} label="Room" onClick={() => setTool(ToolType.RECTANGLE)}>
+          <ToolButton
+            active={tool === ToolType.RECTANGLE}
+            label="Room"
+            onClick={() => setTool(ToolType.RECTANGLE)}
+          >
             <Square className="h-4 w-4" />
           </ToolButton>
-          <div className="my-1 h-px w-7 bg-white/10" />
-          <ToolButton active={tool === ToolType.DOOR} label="Door" onClick={() => setTool(ToolType.DOOR)}>
+          <div className="my-1 h-px w-7 bg-foreground/10" />
+          <ToolButton
+            active={tool === ToolType.DOOR}
+            label="Door"
+            onClick={() => setTool(ToolType.DOOR)}
+          >
             <DoorOpen className="h-4 w-4" />
           </ToolButton>
-          <ToolButton active={tool === ToolType.WINDOW} label="Window" onClick={() => setTool(ToolType.WINDOW)}>
+          <ToolButton
+            active={tool === ToolType.WINDOW}
+            label="Window"
+            onClick={() => setTool(ToolType.WINDOW)}
+          >
             <Check className="h-4 w-4" />
           </ToolButton>
         </aside>
@@ -147,7 +169,7 @@ export function ArchipleFloorplanBridge() {
         className={`pointer-events-auto absolute bottom-5 left-5 z-50 rounded-full border px-3 py-2 font-semibold text-xs shadow-xl backdrop-blur transition ${
           open
             ? 'border-[#7567ff]/70 bg-[#7567ff] text-white hover:bg-[#6658f2]'
-            : 'border-white/10 bg-[#171717]/95 text-white hover:bg-[#252525]'
+            : 'border-foreground/10 bg-white/95 text-neutral-800 hover:bg-white'
         }`}
         onClick={() => setOpen((value) => !value)}
         type="button"

@@ -14,7 +14,7 @@ export function ToggleControl({ label, checked, onChange, className }: ToggleCon
   return (
     <div
       className={cn(
-        'group flex h-10 w-full cursor-pointer items-center justify-between rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm transition-colors hover:bg-[#3e3e3e]',
+        'group flex h-10 w-full cursor-pointer items-center justify-between rounded-lg border border-border/50 bg-muted px-3 text-sm transition-colors hover:bg-accent',
         className,
       )}
       onClick={() => onChange(!checked)}

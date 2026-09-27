@@ -52,9 +52,7 @@ function PresetTile({
   return (
     <button
       className={`flex flex-col gap-1 rounded-xl border p-1.5 text-left transition-colors ${
-        active
-          ? 'border-[#7779ff] bg-[#26263a]'
-          : 'border-[#3a3a3a] bg-[#242424] hover:border-[#5a5a5a]'
+        active ? 'border-[#7779ff] bg-muted' : 'border-border bg-card hover:border-border'
       }`}
       onClick={onPick}
       onDoubleClick={onDoublePick}
@@ -65,13 +63,15 @@ function PresetTile({
         {preset.thumbnail ? (
           <img alt={preset.label} className="h-full w-full object-contain" src={preset.thumbnail} />
         ) : (
-          <span className="px-2 text-center font-medium text-[#555] text-[11px]">
+          <span className="px-2 text-center font-medium text-muted-foreground/70 text-[11px]">
             {preset.label}
           </span>
         )}
       </div>
-      <span className="truncate px-0.5 font-medium text-[11px] text-[#e2e2e2]">{preset.label}</span>
-      <span className="truncate px-0.5 text-[10px] text-[#8d8d8d]">{size}</span>
+      <span className="truncate px-0.5 font-medium text-[11px] text-foreground">
+        {preset.label}
+      </span>
+      <span className="truncate px-0.5 text-[10px] text-muted-foreground">{size}</span>
     </button>
   )
 }
@@ -133,10 +133,10 @@ export function FurnitureTab() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto bg-[#1b1b1b] px-3 pb-6 text-[#efefef]">
-      <div className="sticky top-0 z-10 bg-[#1b1b1b] pt-4 pb-2">
+    <div className="flex h-full flex-col overflow-y-auto bg-sidebar px-3 pb-6 text-foreground">
+      <div className="sticky top-0 z-10 bg-sidebar pt-4 pb-2">
         <h2 className="font-bold text-xl">가구 설계</h2>
-        <p className="mt-1 text-[#9a9a9a] text-xs">
+        <p className="mt-1 text-muted-foreground text-xs">
           모듈을 고른 뒤 벽 가까이 클릭하면 벽에 붙어 배치됩니다. 배치한 가구를 선택하면 오른쪽
           패널에서 칸·서랍·도어를 편집합니다.
         </p>
@@ -144,9 +144,9 @@ export function FurnitureTab() {
 
       <FurnitureSlotSection selectedWall={selectedWall} />
 
-      <section className="mt-4 rounded-xl border border-[#343434] bg-[#202020] p-3">
+      <section className="mt-4 rounded-xl border border-border bg-card p-3">
         <h3 className="font-semibold text-sm">벽에 자동 배치</h3>
-        <p className="mt-1 text-[#9a9a9a] text-xs">
+        <p className="mt-1 text-muted-foreground text-xs">
           {selectedWall
             ? '선택한 벽의 방 안쪽 면을 따라 배치합니다.'
             : '먼저 도면에서 벽을 하나 선택하세요.'}
@@ -177,7 +177,7 @@ export function FurnitureTab() {
         </button>
         <div className="mt-2 flex gap-1.5">
           <select
-            className="h-9 min-w-0 flex-1 rounded-lg border border-[#3a3a3a] bg-[#2C2C2E] px-2 text-xs"
+            className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-muted px-2 text-xs"
             onChange={(e) => setWardrobePreset(e.target.value)}
             value={wardrobePreset}
           >
@@ -190,7 +190,7 @@ export function FurnitureTab() {
             )}
           </select>
           <button
-            className="h-9 rounded-lg border border-[#3a3a3a] bg-[#2C2C2E] px-3 text-xs hover:bg-[#3e3e3e] disabled:opacity-40"
+            className="h-9 rounded-lg border border-border bg-muted px-3 text-xs hover:bg-accent disabled:opacity-40"
             disabled={!selectedWall}
             onClick={() => {
               if (!selectedWall) return
@@ -211,7 +211,7 @@ export function FurnitureTab() {
 
       {GROUPS.map((group) => (
         <section className="mt-4" key={group.id}>
-          <h3 className="mb-2 font-semibold text-[#cfcfcf] text-sm">{group.label}</h3>
+          <h3 className="mb-2 font-semibold text-foreground text-sm">{group.label}</h3>
           <div className="grid grid-cols-3 gap-2">
             {CABINET_PRESETS.filter((p) => p.group === group.id).map((preset) => (
               <PresetTile
@@ -224,10 +224,10 @@ export function FurnitureTab() {
             ))}
             {group.id === 'kitchen-base' && (
               <button
-                className={`flex min-h-[122px] flex-col items-center justify-center gap-1 rounded-xl border p-1.5 text-[11px] text-[#e2e2e2] ${
+                className={`flex min-h-[122px] flex-col items-center justify-center gap-1 rounded-xl border p-1.5 text-[11px] text-foreground ${
                   tool === ('countertop')
-                    ? 'border-[#7779ff] bg-[#26263a]'
-                    : 'border-[#3a3a3a] bg-[#242424] hover:border-[#5a5a5a]'
+                    ? 'border-[#7779ff] bg-muted'
+                    : 'border-border bg-card hover:border-border'
                 }`}
                 onClick={() => {
                   useEditor.getState().setMode('build')
@@ -243,16 +243,16 @@ export function FurnitureTab() {
       ))}
 
       <section className="mt-4">
-        <h3 className="mb-2 font-semibold text-[#cfcfcf] text-sm">내 모듈</h3>
+        <h3 className="mb-2 font-semibold text-foreground text-sm">내 모듈</h3>
         {modules.length === 0 ? (
-          <p className="text-[#8d8d8d] text-xs">
+          <p className="text-muted-foreground text-xs">
             가구를 선택하고 오른쪽 패널 “제작 정보”에서 “내 모듈로 저장”을 누르면 여기에 모입니다.
           </p>
         ) : (
           <div className="flex flex-col gap-1.5">
             {modules.map((m) => (
               <div
-                className="flex items-center gap-2 rounded-lg border border-[#343434] bg-[#222] p-1.5"
+                className="flex items-center gap-2 rounded-lg border border-border bg-card p-1.5"
                 key={m.id}
               >
                 <button
@@ -268,7 +268,7 @@ export function FurnitureTab() {
                   type="button"
                 >
                   <div className="truncate text-xs">{m.label}</div>
-                  <div className="text-[#8d8d8d] text-[10px]">
+                  <div className="text-muted-foreground text-[10px]">
                     {m.spec.widthMm}×{m.spec.heightMm}×{m.spec.depthMm}
                   </div>
                 </button>
@@ -285,14 +285,14 @@ export function FurnitureTab() {
         )}
       </section>
 
-      <section className="mt-4 rounded-xl border border-[#343434] bg-[#202020] p-3">
+      <section className="mt-4 rounded-xl border border-border bg-card p-3">
         <h3 className="font-semibold text-sm">재단목록 · 가공</h3>
-        <p className="mt-1 text-[#9a9a9a] text-xs">
+        <p className="mt-1 text-muted-foreground text-xs">
           장면의 가구 {cabinets.length}개의 판재를 CSV, 보링 MPR(가공 비활성 미리보기), DXF로
           내려받습니다.
         </p>
         <button
-          className="mt-2 h-9 w-full rounded-lg border border-[#3a3a3a] bg-[#2C2C2E] text-sm hover:bg-[#3e3e3e] disabled:opacity-40"
+          className="mt-2 h-9 w-full rounded-lg border border-border bg-muted text-sm hover:bg-accent disabled:opacity-40"
           disabled={cabinets.length === 0}
           onClick={() => downloadTextFile('재단목록.csv', cutlistCsv(labeled))}
           type="button"
@@ -301,7 +301,7 @@ export function FurnitureTab() {
         </button>
         <div className="mt-1.5 flex gap-1.5">
           <button
-            className="h-9 flex-1 rounded-lg border border-[#3a3a3a] bg-[#2C2C2E] text-sm hover:bg-[#3e3e3e] disabled:opacity-40"
+            className="h-9 flex-1 rounded-lg border border-border bg-muted text-sm hover:bg-accent disabled:opacity-40"
             disabled={cabinets.length === 0}
             onClick={() => downloadCabinetsMpr('전체', labeled)}
             type="button"
@@ -309,7 +309,7 @@ export function FurnitureTab() {
             MPR 미리보기
           </button>
           <button
-            className="h-9 flex-1 rounded-lg border border-[#3a3a3a] bg-[#2C2C2E] text-sm hover:bg-[#3e3e3e] disabled:opacity-40"
+            className="h-9 flex-1 rounded-lg border border-border bg-muted text-sm hover:bg-accent disabled:opacity-40"
             disabled={cabinets.length === 0}
             onClick={() => downloadCabinetsDxf('전체', labeled)}
             type="button"

@@ -18,7 +18,7 @@ export function SegmentedControl<T extends string>({
   return (
     <div
       className={cn(
-        'flex h-9 w-full items-center rounded-lg border border-border/50 bg-[#2C2C2E] p-[3px]',
+        'flex h-9 w-full items-center rounded-lg border border-border/50 bg-muted p-[3px]',
         className,
       )}
     >
@@ -29,8 +29,8 @@ export function SegmentedControl<T extends string>({
             className={cn(
               'relative flex h-full flex-1 items-center justify-center rounded-md font-medium text-xs transition-all duration-200',
               isSelected
-                ? 'bg-[#3e3e3e] text-foreground shadow-sm ring-1 ring-border/50'
-                : 'text-muted-foreground hover:bg-white/5 hover:text-foreground',
+                ? 'bg-accent text-foreground shadow-sm ring-1 ring-border/50'
+                : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
             )}
             key={option.value}
             onClick={() => onChange(option.value)}

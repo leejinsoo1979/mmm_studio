@@ -103,17 +103,19 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
       </button>
       {open && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-white/10 bg-[#171a18] text-white shadow-2xl">
-            <header className="flex items-start justify-between border-white/8 border-b px-6 py-5">
+          <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-foreground/10 bg-sidebar text-foreground shadow-2xl">
+            <header className="flex items-start justify-between border-foreground/8 border-b px-6 py-5">
               <div>
-                <p className="text-white/45 text-[10px] uppercase tracking-[0.18em]">Play export</p>
+                <p className="text-foreground/45 text-[10px] uppercase tracking-[0.18em]">
+                  Play export
+                </p>
                 <h2 className="mt-1 font-semibold text-xl">Publish {sceneName}</h2>
-                <p className="mt-1 text-white/55 text-sm">
+                <p className="mt-1 text-foreground/55 text-sm">
                   Editor tools are excluded from every output.
                 </p>
               </div>
               <button
-                className="rounded-lg p-2 text-white/55 hover:bg-white/8 hover:text-white"
+                className="rounded-lg p-2 text-foreground/55 hover:bg-foreground/8 hover:text-foreground"
                 onClick={() => setOpen(false)}
                 type="button"
               >
@@ -121,12 +123,12 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
               </button>
             </header>
             <div className="grid gap-4 p-6 md:grid-cols-3">
-              <section className="rounded-2xl border border-white/9 bg-white/[0.035] p-5">
+              <section className="rounded-2xl border border-foreground/9 bg-foreground/[0.035] p-5">
                 <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-400/12 text-emerald-300">
                   <Globe2 className="h-5 w-5" />
                 </span>
                 <h3 className="mt-5 font-semibold text-lg">Web Publish</h3>
-                <p className="mt-2 min-h-12 text-white/55 text-sm leading-6">
+                <p className="mt-2 min-h-12 text-foreground/55 text-sm leading-6">
                   Create a shareable Play link with configurator and walkthrough controls.
                 </p>
                 {published ? (
@@ -134,7 +136,7 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
                     <p className="truncate text-emerald-300 text-xs">{published.playUrl}</p>
                     <div className="mt-3 flex gap-2">
                       <button
-                        className="flex items-center gap-1.5 rounded-lg bg-white/8 px-3 py-2 text-xs"
+                        className="flex items-center gap-1.5 rounded-lg bg-foreground/8 px-3 py-2 text-xs"
                         onClick={() => navigator.clipboard.writeText(published.playUrl)}
                         type="button"
                       >
@@ -166,12 +168,12 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
                   </button>
                 )}
               </section>
-              <section className="rounded-2xl border border-white/9 bg-white/[0.035] p-5">
+              <section className="rounded-2xl border border-foreground/9 bg-foreground/[0.035] p-5">
                 <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-400/12 text-blue-300">
                   <MonitorUp className="h-5 w-5" />
                 </span>
                 <h3 className="mt-5 font-semibold text-lg">macOS Runtime</h3>
-                <p className="mt-2 min-h-12 text-white/55 text-sm leading-6">
+                <p className="mt-2 min-h-12 text-foreground/55 text-sm leading-6">
                   Build an offline Play application containing the scene and project assets.
                 </p>
                 <button
@@ -191,12 +193,12 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
                   <p className="mt-3 text-amber-200/80 text-xs leading-5">{buildMessage}</p>
                 )}
               </section>
-              <section className="rounded-2xl border border-white/9 bg-white/[0.035] p-5">
+              <section className="rounded-2xl border border-foreground/9 bg-foreground/[0.035] p-5">
                 <span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-400/12 text-violet-300">
                   <Laptop className="h-5 w-5" />
                 </span>
                 <h3 className="mt-5 font-semibold text-lg">Windows Runtime</h3>
-                <p className="mt-2 min-h-12 text-white/55 text-sm leading-6">
+                <p className="mt-2 min-h-12 text-foreground/55 text-sm leading-6">
                   Build a standalone Windows Play executable with the same configurator runtime.
                 </p>
                 <button

@@ -34,7 +34,7 @@ export function MmField({
     if (clamped !== value) onCommit(clamped)
   }
   return (
-    <label className="flex h-9 items-center justify-between gap-2 rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm">
+    <label className="flex h-9 items-center justify-between gap-2 rounded-lg border border-border/50 bg-muted px-3 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className="flex items-center gap-1">
         <input
@@ -70,7 +70,7 @@ export function ColorField({
   onCommit: (v: string) => void
 }) {
   return (
-    <label className="flex h-9 items-center justify-between rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm">
+    <label className="flex h-9 items-center justify-between rounded-lg border border-border/50 bg-muted px-3 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <input
         className="h-6 w-10 cursor-pointer rounded border-0 bg-transparent"
@@ -107,7 +107,7 @@ export function HeightsField({
     if (parsed.join(', ') !== text) onCommit(parsed)
   }
   return (
-    <label className="flex flex-col gap-1 rounded-lg border border-border/50 bg-[#2C2C2E] px-3 py-2 text-sm">
+    <label className="flex flex-col gap-1 rounded-lg border border-border/50 bg-muted px-3 py-2 text-sm">
       <span className="text-muted-foreground text-xs">{label}</span>
       <input
         className="bg-transparent text-foreground outline-none"

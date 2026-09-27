@@ -105,7 +105,7 @@ export function CollectionsPopover({ nodeId, collectionIds, children }: Collecti
             </span>
           </div>
           <button
-            className="flex items-center gap-1 rounded-md px-2 py-1 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+            className="flex items-center gap-1 rounded-md px-2 py-1 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
             onClick={() => {
               setShowCreateInput((v) => !v)
               setCreateName('')
@@ -119,7 +119,7 @@ export function CollectionsPopover({ nodeId, collectionIds, children }: Collecti
 
         {/* Create input */}
         {showCreateInput && (
-          <div className="flex items-center gap-1.5 border-border/50 border-b bg-white/5 px-3 py-2">
+          <div className="flex items-center gap-1.5 border-border/50 border-b bg-foreground/5 px-3 py-2">
             <input
               autoFocus
               className="min-w-0 flex-1 rounded-md border border-border/50 bg-background/50 px-2 py-1 text-foreground text-xs outline-none placeholder:text-muted-foreground/60 focus:border-ring focus:ring-1 focus:ring-ring/30"
@@ -143,7 +143,7 @@ export function CollectionsPopover({ nodeId, collectionIds, children }: Collecti
               <Check className="h-3.5 w-3.5" />
             </button>
             <button
-              className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/10"
+              className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10"
               onClick={() => {
                 setShowCreateInput(false)
                 setCreateName('')
@@ -193,7 +193,7 @@ export function CollectionsPopover({ nodeId, collectionIds, children }: Collecti
                           Delete
                         </button>
                         <button
-                          className="rounded-md px-2 py-0.5 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-white/10"
+                          className="rounded-md px-2 py-0.5 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-foreground/10"
                           onClick={() => setDeletingId(null)}
                           type="button"
                         >
@@ -226,7 +226,7 @@ export function CollectionsPopover({ nodeId, collectionIds, children }: Collecti
                         <Check className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/10"
+                        className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10"
                         onClick={() => setRenamingId(null)}
                         type="button"
                       >
@@ -238,7 +238,7 @@ export function CollectionsPopover({ nodeId, collectionIds, children }: Collecti
 
                 return (
                   <li key={collection.id}>
-                    <div className="group flex items-center gap-2 px-3 py-2 transition-colors hover:bg-white/5">
+                    <div className="group flex items-center gap-2 px-3 py-2 transition-colors hover:bg-foreground/5">
                       {/* Color dot — click to pick color */}
                       <ColorDot
                         color={collection.color ?? '#6366f1'}
@@ -293,7 +293,7 @@ export function CollectionsPopover({ nodeId, collectionIds, children }: Collecti
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button
-                            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-colors hover:bg-white/10 hover:text-foreground group-hover:opacity-100"
+                            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-colors hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100"
                             type="button"
                           >
                             <MoreHorizontal className="h-3.5 w-3.5" />

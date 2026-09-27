@@ -54,7 +54,7 @@ export function ShelfSettings({
         <span className="text-muted-foreground">선반 갯수 (칸 높이 {Math.round(innerH)}mm)</span>
         <span className="flex items-center gap-1">
           <button
-            className="h-7 w-7 rounded border border-border/50 bg-[#2C2C2E] disabled:opacity-40"
+            className="h-7 w-7 rounded border border-border/50 bg-muted disabled:opacity-40"
             disabled={n <= 0}
             onClick={() => setCount(n - 1)}
             type="button"
@@ -63,7 +63,7 @@ export function ShelfSettings({
           </button>
           <span className="w-6 text-center tabular-nums">{n}</span>
           <button
-            className="h-7 w-7 rounded border border-border/50 bg-[#2C2C2E] disabled:opacity-40"
+            className="h-7 w-7 rounded border border-border/50 bg-muted disabled:opacity-40"
             disabled={n >= 10}
             onClick={() => setCount(n + 1)}
             type="button"

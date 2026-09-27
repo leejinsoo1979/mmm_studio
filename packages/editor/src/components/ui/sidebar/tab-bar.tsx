@@ -67,7 +67,7 @@ interface IconRailProps {
 export function IconRail({ tabs, activeTab, collapsed, onIconClick }: IconRailProps) {
   return (
     <TooltipProvider delayDuration={0} disableHoverableContent>
-      <div className="flex h-full w-12 shrink-0 flex-col justify-between border-[#3a3a3a] border-r bg-[#292929]">
+      <div className="flex h-full w-12 shrink-0 flex-col justify-between border-border border-r bg-muted">
         <div className="flex flex-col">
           {tabs.map((tab) => {
             const showActive = activeTab === tab.id && !collapsed
@@ -76,10 +76,10 @@ export function IconRail({ tabs, activeTab, collapsed, onIconClick }: IconRailPr
                 <TooltipTrigger asChild>
                   <button
                     className={cn(
-                      'group flex h-11 w-full items-center justify-center border-[#383838] border-b text-[#b8b8b8] transition-all duration-200 [&_svg]:h-[22px] [&_svg]:w-[22px] [&_svg]:stroke-[1.9] [&_svg]:transition-colors [&_img]:transition-[opacity,filter] [&_img]:duration-200',
+                      'group flex h-11 w-full items-center justify-center border-border border-b text-muted-foreground transition-all duration-200 [&_svg]:h-[22px] [&_svg]:w-[22px] [&_svg]:stroke-[1.9] [&_svg]:transition-colors [&_img]:transition-[opacity,filter] [&_img]:duration-200',
                       showActive
-                        ? 'bg-[#303036] text-[#7779ff] [&_img]:opacity-100 [&_img]:grayscale-0'
-                        : 'hover:bg-[#303030] hover:text-[#e5e5e5] [&_img]:opacity-55 [&_img]:grayscale hover:[&_img]:opacity-100 hover:[&_img]:grayscale-0',
+                        ? 'bg-muted text-[#7779ff] [&_img]:opacity-100 [&_img]:grayscale-0'
+                        : 'hover:bg-muted hover:text-foreground [&_img]:opacity-55 [&_img]:grayscale hover:[&_img]:opacity-100 hover:[&_img]:grayscale-0',
                     )}
                     onClick={() => {
                       triggerSFX('sfx:menu-click')

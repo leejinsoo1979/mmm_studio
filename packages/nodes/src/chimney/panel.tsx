@@ -540,7 +540,7 @@ export default function ChimneyPanel() {
                   'flex min-h-12 items-center rounded-lg border px-3 py-2.5 text-left text-xs transition-colors',
                   isSelected
                     ? 'border-orange-400/60 bg-orange-400/10 text-foreground'
-                    : 'border-border/50 bg-[#2C2C2E] text-muted-foreground hover:bg-[#3e3e3e] hover:text-foreground',
+                    : 'border-border/50 bg-muted text-muted-foreground hover:bg-accent hover:text-foreground',
                 )}
                 key={option.value}
                 onClick={() => setChimneyType(option.value)}

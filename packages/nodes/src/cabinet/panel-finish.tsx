@@ -37,7 +37,7 @@ function AutoGapField({
         <MmField label={label} max={500} min={-500} onCommit={onCommit} value={value} />
       </div>
       <button
-        className="h-9 rounded-lg border border-border/50 bg-[#2C2C2E] px-2 text-xs hover:bg-[#3e3e3e] disabled:opacity-40"
+        className="h-9 rounded-lg border border-border/50 bg-muted px-2 text-xs hover:bg-accent disabled:opacity-40"
         disabled={auto}
         onClick={() => onCommit(null)}
         type="button"

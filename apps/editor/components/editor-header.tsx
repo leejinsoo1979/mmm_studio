@@ -64,7 +64,7 @@ export function EditorHeader({ sceneId, sceneName, onRename }: EditorHeaderProps
           <Image
             alt=""
             aria-hidden="true"
-            className="h-[13px] w-auto invert"
+            className="h-[13px] w-auto"
             height={23}
             src="/mmmlogo.svg"
             width={71}

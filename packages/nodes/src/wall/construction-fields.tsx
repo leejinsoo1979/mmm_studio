@@ -112,7 +112,7 @@ function SheetSelect({
   onChange: (next: WallSheetId) => void
 }) {
   return (
-    <label className="flex h-9 items-center justify-between gap-2 rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm">
+    <label className="flex h-9 items-center justify-between gap-2 rounded-lg border border-border/50 bg-muted px-3 text-sm">
       <span className="shrink-0 whitespace-nowrap text-muted-foreground">{label}</span>
       <select
         className="min-w-0 bg-transparent text-right text-foreground text-xs outline-none"
@@ -155,7 +155,7 @@ function StudSpacingField({
     if (parsed !== value) onChange(parsed)
   }
   return (
-    <label className="mt-1 flex h-9 items-center justify-between gap-2 rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm">
+    <label className="mt-1 flex h-9 items-center justify-between gap-2 rounded-lg border border-border/50 bg-muted px-3 text-sm">
       <span className="shrink-0 whitespace-nowrap text-muted-foreground">{label}</span>
       <span className="flex min-w-0 items-center gap-1">
         <input

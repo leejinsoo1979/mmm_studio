@@ -33,7 +33,7 @@ export default function ElectricPanelPanel() {
           return (
             <div className="flex items-center gap-1.5" key={c.id}>
               <input
-                className="h-10 min-w-0 flex-1 rounded-lg border border-border/50 bg-[#2C2C2E] px-2 text-sm outline-none"
+                className="h-10 min-w-0 flex-1 rounded-lg border border-border/50 bg-muted px-2 text-sm outline-none"
                 onChange={(e) =>
                   setCircuits(
                     node.circuits.map((x) => (x.id === c.id ? { ...x, name: e.target.value } : x)),

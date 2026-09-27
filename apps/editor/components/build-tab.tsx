@@ -289,12 +289,12 @@ function BuildTile({
       <TooltipTrigger asChild>
         <button
           className={cn(
-            'group flex h-[86px] min-w-0 flex-col items-center justify-center gap-2 rounded-md border border-[#444] bg-[#1f1f1f] px-1.5 text-center transition-all duration-200',
+            'group flex h-[86px] min-w-0 flex-col items-center justify-center gap-2 rounded-md border border-border bg-card px-1.5 text-center transition-all duration-200',
             active
-              ? 'border-[#7779ff] bg-[#26263b] text-white shadow-[0_0_0_1px_rgba(119,121,255,0.35)]'
-              : 'text-[#bebebe] hover:border-[#666] hover:bg-[#252525] hover:text-white',
+              ? 'border-[#7779ff] bg-[#eceeff] text-[#3c3fc4] shadow-[0_0_0_1px_rgba(119,121,255,0.35)]'
+              : 'text-muted-foreground hover:border-[#666] hover:bg-card hover:text-foreground',
             disabled &&
-              'cursor-not-allowed opacity-60 hover:border-[#444] hover:bg-[#1f1f1f] hover:text-[#bebebe]',
+              'cursor-not-allowed opacity-60 hover:border-border hover:bg-card hover:text-muted-foreground',
           )}
           disabled={disabled}
           onClick={onClick}
@@ -325,8 +325,8 @@ function BuildTile({
 
 function Section({ children, title }: { children: React.ReactNode; title: string }) {
   return (
-    <section className="border-[#343434] border-b px-4 py-5">
-      <h2 className="mb-4 font-bold text-[#f0f0f0] text-[17px] leading-none">{title}</h2>
+    <section className="border-border border-b px-4 py-5">
+      <h2 className="mb-4 font-bold text-foreground text-[17px] leading-none">{title}</h2>
       {children}
     </section>
   )
@@ -338,8 +338,8 @@ function NewWallConstruction() {
   const construction = useWallDrawingDefaults((s) => s.construction)
   const setConstruction = useWallDrawingDefaults((s) => s.setConstruction)
   return (
-    <div className="mt-4 rounded-xl border border-[#343434] bg-[#202020] p-3">
-      <div className="mb-2 text-[#9a9a9a] text-xs">새로 그릴 벽 · 벽체 두께 100 mm 기준</div>
+    <div className="mt-4 rounded-xl border border-border bg-card p-3">
+      <div className="mb-2 text-muted-foreground text-xs">새로 그릴 벽 · 벽체 두께 100 mm 기준</div>
       <WallConstructionFields onChange={setConstruction} value={construction} />
       <NewWallHeight />
     </div>
@@ -353,10 +353,10 @@ function NewWallHeight() {
   const setHeight = useWallDrawingDefaults((s) => s.setHeight)
   const row = (label: string, heights: number[]) => (
     <div className="flex items-center gap-1.5">
-      <span className="w-10 shrink-0 text-[#9a9a9a] text-xs">{label}</span>
+      <span className="w-10 shrink-0 text-muted-foreground text-xs">{label}</span>
       {heights.map((h) => (
         <button
-          className={`flex-1 rounded-md py-1 text-xs tabular-nums transition-colors ${height === h ? 'bg-[#5b5bd6] text-white' : 'bg-[#2b2b2b] text-[#d0d0d0] hover:bg-[#363636]'}`}
+          className={`flex-1 rounded-md py-1 text-xs tabular-nums transition-colors ${height === h ? 'bg-[#5b5bd6] text-white' : 'bg-muted text-foreground hover:bg-accent'}`}
           key={h}
           onClick={() => {
             triggerSFX('sfx:menu-click')
@@ -371,7 +371,7 @@ function NewWallHeight() {
   )
   return (
     <div className="mt-3 flex flex-col gap-1.5">
-      <div className="text-[#9a9a9a] text-xs">
+      <div className="text-muted-foreground text-xs">
         벽 높이 ·{' '}
         {height === undefined ? `기본 ${DEFAULT_WALL_HEIGHT} m` : `${height.toFixed(1)} m`}
       </div>
@@ -385,8 +385,8 @@ function NewWallHeight() {
 function LevelWallTakeoff() {
   const levelId = useViewer((s) => s.selection.levelId)
   return (
-    <div className="mt-3 rounded-xl border border-[#343434] bg-[#202020] p-3">
-      <div className="mb-2 text-[#9a9a9a] text-xs">벽 마감 자재 산출 (현재 층)</div>
+    <div className="mt-3 rounded-xl border border-border bg-card p-3">
+      <div className="mb-2 text-muted-foreground text-xs">벽 마감 자재 산출 (현재 층)</div>
       <LevelTakeoffSummary levelId={levelId ?? null} />
     </div>
   )
@@ -491,20 +491,20 @@ export function BuildTab() {
   }, [])
 
   return (
-    <div className="flex h-full flex-col bg-[#1b1b1b] text-[#efefef]">
-      <div className="flex h-16 shrink-0 items-center justify-between border-[#343434] border-b px-4">
+    <div className="flex h-full flex-col bg-sidebar text-foreground">
+      <div className="flex h-16 shrink-0 items-center justify-between border-border border-b px-4">
         <h1 className="font-bold text-[20px] tracking-normal">Create Room</h1>
-        <div className="flex items-center gap-3 text-[#c9c9c9]">
+        <div className="flex items-center gap-3 text-muted-foreground">
           <button
             aria-label="Search"
-            className="rounded-full p-1 transition-colors hover:text-white"
+            className="rounded-full p-1 transition-colors hover:text-foreground"
             type="button"
           >
             <Search className="h-5 w-5 stroke-[1.9]" />
           </button>
           <button
             aria-label="Back"
-            className="rounded-full p-1 transition-colors hover:text-white"
+            className="rounded-full p-1 transition-colors hover:text-foreground"
             type="button"
           >
             <ChevronLeft className="h-5 w-5 stroke-[2.4]" />
@@ -624,8 +624,8 @@ export function BuildTab() {
                 <div className="mt-4">
                   <button
                     className={cn(
-                      'flex w-full items-center justify-between rounded-md border border-[#444] px-3 py-2 text-left text-xs transition-colors',
-                      follow ? 'bg-[#26263b] text-white' : 'bg-[#202020] text-[#c9c9c9]',
+                      'flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-left text-xs transition-colors',
+                      follow ? 'bg-[#eceeff] text-[#3c3fc4]' : 'bg-card text-muted-foreground',
                     )}
                     onClick={() => {
                       triggerSFX('sfx:menu-click')
@@ -634,7 +634,7 @@ export function BuildTab() {
                     type="button"
                   >
                     <span>Follow lineset</span>
-                    <span className="text-[#8f8f8f] text-xs">{follow ? 'On' : 'Off'}</span>
+                    <span className="text-muted-foreground text-xs">{follow ? 'On' : 'Off'}</span>
                   </button>
                 </div>
               ) : null}
@@ -660,8 +660,8 @@ function ActionButton({
   return (
     <button
       className={cn(
-        'flex items-center gap-2 rounded-md border border-[#444] px-2.5 py-2 text-left text-xs transition-colors',
-        active ? 'bg-[#26263b] text-white' : 'bg-[#202020] text-[#c9c9c9] hover:bg-[#252525]',
+        'flex items-center gap-2 rounded-md border border-border px-2.5 py-2 text-left text-xs transition-colors',
+        active ? 'bg-[#eceeff] text-[#3c3fc4]' : 'bg-card text-muted-foreground hover:bg-card',
       )}
       onClick={() => {
         triggerSFX('sfx:menu-click')

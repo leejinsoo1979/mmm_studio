@@ -32,12 +32,12 @@ export function FurnitureSlotSection({ selectedWall }: { selectedWall: WallNode 
   const limits = columnCountLimits(internal)
 
   return (
-    <section className="mt-2 rounded-xl border border-[#343434] bg-[#202020] p-3">
+    <section className="mt-2 rounded-xl border border-border bg-card p-3">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-sm">슬롯 가이드</h3>
         <button
           className={`h-7 rounded-lg px-3 font-medium text-xs ${
-            slot.enabled ? 'bg-[#7564ed] text-white' : 'border border-[#3a3a3a] bg-[#2C2C2E]'
+            slot.enabled ? 'bg-[#7564ed] text-white' : 'border border-border bg-muted'
           }`}
           onClick={() => {
             setMessage(null)
@@ -49,11 +49,11 @@ export function FurnitureSlotSection({ selectedWall }: { selectedWall: WallNode 
         </button>
       </div>
       {!slot.enabled ? (
-        <p className="mt-1 text-[#9a9a9a] text-xs">
+        <p className="mt-1 text-muted-foreground text-xs">
           슬롯 생성을 켜면 벽마다 배치 기준을 정할 수 있습니다.
         </p>
       ) : !guide ? (
-        <p className="mt-1 text-[#9a9a9a] text-xs">벽을 클릭해 기준 벽을 정하세요.</p>
+        <p className="mt-1 text-muted-foreground text-xs">벽을 클릭해 기준 벽을 정하세요.</p>
       ) : (
         <div className="mt-2 flex flex-col gap-2 text-xs">
           <p className="text-[#d7d7ff]">
@@ -63,7 +63,7 @@ export function FurnitureSlotSection({ selectedWall }: { selectedWall: WallNode 
           </p>
           {guide.segments.length > 1 && (
             <select
-              className="h-8 rounded-lg border border-[#3a3a3a] bg-[#2C2C2E] px-2"
+              className="h-8 rounded-lg border border-border bg-muted px-2"
               onChange={(e) => slot.setSegment(Number(e.target.value))}
               value={guide.segment}
             >
@@ -75,7 +75,7 @@ export function FurnitureSlotSection({ selectedWall }: { selectedWall: WallNode 
             </select>
           )}
           <div className="flex items-center gap-2">
-            <span className="w-14 text-[#9a9a9a]">칸 수</span>
+            <span className="w-14 text-muted-foreground">칸 수</span>
             <input
               className="flex-1"
               max={limits.max}
@@ -86,7 +86,7 @@ export function FurnitureSlotSection({ selectedWall }: { selectedWall: WallNode 
             />
             <span className="w-6 text-right tabular-nums">{guide.layout.columnCount}</span>
             <button
-              className="rounded border border-[#3a3a3a] px-1.5 py-0.5 disabled:opacity-40"
+              className="rounded border border-border px-1.5 py-0.5 disabled:opacity-40"
               disabled={slot.columnCount === null}
               onClick={() => slot.setColumnCount(null)}
               type="button"
@@ -95,13 +95,11 @@ export function FurnitureSlotSection({ selectedWall }: { selectedWall: WallNode 
             </button>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-14 text-[#9a9a9a]">프레임</span>
+            <span className="w-14 text-muted-foreground">프레임</span>
             {(['surround', 'no-surround'] as const).map((mode) => (
               <button
                 className={`h-7 flex-1 rounded-lg border ${
-                  slot.frameMode === mode
-                    ? 'border-[#7564ed] bg-[#26263a]'
-                    : 'border-[#3a3a3a] bg-[#2C2C2E]'
+                  slot.frameMode === mode ? 'border-[#7564ed] bg-muted' : 'border-border bg-muted'
                 }`}
                 key={mode}
                 onClick={() => slot.setFrameMode(mode)}
@@ -111,7 +109,7 @@ export function FurnitureSlotSection({ selectedWall }: { selectedWall: WallNode 
               </button>
             ))}
           </div>
-          <p className="text-[#9a9a9a]">
+          <p className="text-muted-foreground">
             {guide.layout.columnCount}칸 × {fmt(guide.layout.slots[0]?.width ?? 0)} mm · 좌{' '}
             {fmt(guide.layout.leftMm)} / 우 {fmt(guide.layout.rightMm)} mm. 모듈을 더블클릭하면 첫
             빈 슬롯에 놓입니다.

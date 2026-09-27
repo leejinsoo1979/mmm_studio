@@ -708,7 +708,7 @@ function AssetTab() {
   }
 
   return (
-    <div className="h-full bg-[#1b1b1b] text-[#efefef]">
+    <div className="h-full bg-sidebar text-foreground">
       <ItemsPanel
         customCategories={[
           {
@@ -723,7 +723,7 @@ function AssetTab() {
         items={ROOM_TAGGED_CATALOG}
         leadingTile={
           <button
-            className="group relative flex min-h-[122px] flex-col gap-1.5 rounded-xl border border-dashed border-[#555] bg-[#242424] p-1.5 text-left transition-colors hover:border-[#7779ff] hover:bg-[#2b2b32]"
+            className="group relative flex min-h-[122px] flex-col gap-1.5 rounded-xl border border-dashed border-border bg-card p-1.5 text-left transition-colors hover:border-[#7779ff] hover:bg-muted"
             disabled={uploading}
             onClick={() => inputRef.current?.click()}
             type="button"
@@ -735,7 +735,7 @@ function AssetTab() {
                 <Upload className="h-7 w-7" />
               )}
             </div>
-            <span className="truncate px-0.5 font-medium text-[11px] text-[#d8d8d8]">
+            <span className="truncate px-0.5 font-medium text-[11px] text-foreground">
               {uploading ? 'Importing...' : 'Import GLB'}
             </span>
             <input
@@ -751,7 +751,7 @@ function AssetTab() {
         showTagFilters={false}
       />
       {uploadError && (
-        <div className="border-[#343434] border-t bg-[#251b1b] px-3 py-2 text-[#ff9a9a] text-xs">
+        <div className="border-border border-t bg-card px-3 py-2 text-[#ff9a9a] text-xs">
           {uploadError}
         </div>
       )}
@@ -761,14 +761,14 @@ function AssetTab() {
 
 function CategoryPanel({ title }: { title: string }) {
   return (
-    <div className="flex h-full flex-col bg-[#1b1b1b] text-[#efefef]">
-      <div className="flex h-[124px] shrink-0 items-center border-[#343434] border-b px-8">
+    <div className="flex h-full flex-col bg-sidebar text-foreground">
+      <div className="flex h-[124px] shrink-0 items-center border-border border-b px-8">
         <h1 className="font-bold text-[32px] tracking-[-0.02em]">{title}</h1>
       </div>
       <div className="flex flex-1 items-center justify-center px-8 text-center">
-        <div className="max-w-[320px] rounded-[10px] border border-[#444] bg-[#202020] px-6 py-8 text-[#bdbdbd]">
+        <div className="max-w-[320px] rounded-[10px] border border-border bg-card px-6 py-8 text-muted-foreground">
           <Brush className="mx-auto mb-4 h-9 w-9 text-[#7779ff]" />
-          <p className="font-semibold text-lg text-[#f0f0f0]">{title}</p>
+          <p className="font-semibold text-lg text-foreground">{title}</p>
           <p className="mt-2 text-sm">This category is ready for its tools.</p>
         </div>
       </div>

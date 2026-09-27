@@ -83,7 +83,7 @@ function Elevation({
   const ownerRect = owner ? build.frontRects.find((f) => f.id === owner.id)?.rect : undefined
   const selectedRect = selectedId ? build.cellRects.get(selectedId) : undefined
   return (
-    <svg className="w-full rounded-lg border border-border/50 bg-[#1f1f22]" role="img" viewBox={vb}>
+    <svg className="w-full rounded-lg border border-border/50 bg-card" role="img" viewBox={vb}>
       <title>정면도</title>
       {build.parts
         .filter((p) =>
@@ -316,7 +316,7 @@ function CellEditor({
             />
           </div>
           <button
-            className="h-9 rounded-lg border border-border/50 bg-[#2C2C2E] px-2 text-xs hover:bg-[#3e3e3e] disabled:opacity-40"
+            className="h-9 rounded-lg border border-border/50 bg-muted px-2 text-xs hover:bg-accent disabled:opacity-40"
             disabled={fixedSize == null}
             onClick={() => onTree(setCellSize(root, cellId, null))}
             type="button"
@@ -549,7 +549,7 @@ export default function CabinetPanel() {
           <PanelListTab build={build} node={node} update={update} />
           <PanelSection title="제작 출력">
             {build.issues.length > 0 && (
-              <ul className="flex flex-col gap-1 rounded-lg border border-[#6b4b2a] bg-[#2a2118] p-2 text-[#f5c48a] text-xs">
+              <ul className="flex flex-col gap-1 rounded-lg border border-[#6b4b2a] bg-card p-2 text-[#f5c48a] text-xs">
                 {build.issues.map((issue) => (
                   <li key={issue}>{issue}</li>
                 ))}
@@ -710,7 +710,7 @@ export default function CabinetPanel() {
           <PanelSection defaultExpanded={false} title="내 모듈">
             <div className="flex gap-1.5">
               <input
-                className="h-9 min-w-0 flex-1 rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm outline-none"
+                className="h-9 min-w-0 flex-1 rounded-lg border border-border/50 bg-muted px-3 text-sm outline-none"
                 onChange={(e) => setModuleName(e.target.value)}
                 onKeyDown={(e) => e.stopPropagation()}
                 placeholder="모듈 이름"

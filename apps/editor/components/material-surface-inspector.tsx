@@ -118,7 +118,7 @@ function InspectorSlider({
   const progress = ((value - min) / (max - min)) * 100
   return (
     <div className="grid grid-cols-[88px_minmax(0,1fr)_64px] items-center gap-3 py-2.5">
-      <span className="text-[#b5b5b5] text-xs">{label}</span>
+      <span className="text-muted-foreground text-xs">{label}</span>
       <input
         className="h-1.5 w-full cursor-pointer appearance-none rounded-full accent-[#7567ff] [&::-moz-range-progress]:h-1.5 [&::-moz-range-progress]:rounded-full [&::-moz-range-progress]:bg-[#7567ff] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:mt-[-5px] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
         max={max}
@@ -132,7 +132,7 @@ function InspectorSlider({
         value={value}
       />
       <input
-        className="h-8 w-full rounded-md border border-white/5 bg-[#242424] px-2 text-right text-[#aaa] text-xs outline-none focus:border-[#7567ff]/60"
+        className="h-8 w-full rounded-md border border-foreground/5 bg-card px-2 text-right text-muted-foreground text-xs outline-none focus:border-[#7567ff]/60"
         max={max}
         min={min}
         onChange={(event) => {
@@ -175,17 +175,17 @@ function InspectorMaterialEditor({
   const colorControl = (label: string, field: 'color' | 'emissiveColor', fallback: string) => {
     const color = properties[field] ?? fallback
     return (
-      <div className="mb-3 flex items-center justify-between border-white/8 border-b pb-3">
-        <span className="text-[#b5b5b5] text-xs">{label}</span>
+      <div className="mb-3 flex items-center justify-between border-foreground/8 border-b pb-3">
+        <span className="text-muted-foreground text-xs">{label}</span>
         <div className="flex items-center gap-2">
           <input
-            className="h-8 w-8 cursor-pointer rounded-md border border-white/10 bg-transparent p-0"
+            className="h-8 w-8 cursor-pointer rounded-md border border-foreground/10 bg-transparent p-0"
             onChange={(event) => update({ [field]: event.target.value })}
             type="color"
             value={color}
           />
           <input
-            className="h-8 w-24 rounded-md border border-white/5 bg-[#242424] px-2 text-[#aaa] text-xs uppercase outline-none"
+            className="h-8 w-24 rounded-md border border-foreground/5 bg-card px-2 text-muted-foreground text-xs uppercase outline-none"
             onChange={(event) => update({ [field]: event.target.value })}
             value={color}
           />
@@ -198,10 +198,10 @@ function InspectorMaterialEditor({
     label: string,
     field: 'url' | 'normalUrl' | 'roughnessUrl' | 'metalnessUrl' | 'emissiveUrl' | 'aoUrl',
   ) => (
-    <label className="mb-3 block text-[#b5b5b5] text-xs">
+    <label className="mb-3 block text-muted-foreground text-xs">
       <span className="mb-1.5 block">{label}</span>
       <input
-        className="h-9 w-full rounded-md border border-white/5 bg-[#242424] px-3 text-[#aaa] text-xs outline-none focus:border-[#7567ff]/60"
+        className="h-9 w-full rounded-md border border-foreground/5 bg-card px-3 text-muted-foreground text-xs outline-none focus:border-[#7567ff]/60"
         disabled={!value.texture}
         onChange={(event) => updateTexture({ [field]: event.target.value || undefined })}
         placeholder={value.texture ? 'Texture URL' : 'Base Color 맵을 먼저 적용하세요'}
@@ -214,14 +214,14 @@ function InspectorMaterialEditor({
     <div className="flex min-h-full flex-col">
       <div className="flex-1">
         {(activeTab === '일반' || activeTab === '맵') && value.texture?.url ? (
-          <div className="mb-3 flex items-center justify-between border-white/8 border-b pb-3">
-            <span className="text-[#b5b5b5] text-xs">Base Color</span>
-            <div className="flex min-w-0 items-center gap-2 rounded-md bg-[#242424] p-1.5 pr-3">
+          <div className="mb-3 flex items-center justify-between border-foreground/8 border-b pb-3">
+            <span className="text-muted-foreground text-xs">Base Color</span>
+            <div className="flex min-w-0 items-center gap-2 rounded-md bg-card p-1.5 pr-3">
               <span
                 className="h-8 w-10 shrink-0 rounded bg-cover bg-center"
                 style={{ backgroundImage: `url("${value.texture.url}")` }}
               />
-              <span className="max-w-36 truncate text-[#999] text-[11px]">
+              <span className="max-w-36 truncate text-muted-foreground text-[11px]">
                 {value.texture.url.split('/').pop()}
               </span>
             </div>
@@ -379,7 +379,7 @@ function InspectorMaterialEditor({
         ) : null}
       </div>
       <button
-        className="mt-6 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-white/10 text-[#bbb] text-sm transition hover:bg-white/5 hover:text-white"
+        className="mt-6 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-foreground/10 text-muted-foreground text-sm transition hover:bg-foreground/5 hover:text-foreground"
         onClick={() => onChange(structuredClone(initialValue.current))}
         type="button"
       >
@@ -582,15 +582,17 @@ export function MaterialSurfaceInspector() {
   }
 
   return createPortal(
-    <aside className="fixed top-16 right-4 bottom-4 z-[70] flex w-[360px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#191919]/95 text-[#efefef] shadow-2xl backdrop-blur-xl">
-      <header className="flex items-center justify-between border-white/10 border-b px-5 py-4">
+    <aside className="fixed top-16 right-4 bottom-4 z-[70] flex w-[360px] flex-col overflow-hidden rounded-2xl border border-foreground/10 bg-sidebar/95 text-foreground shadow-2xl backdrop-blur-xl">
+      <header className="flex items-center justify-between border-foreground/10 border-b px-5 py-4">
         <div>
-          <p className="text-[#858585] text-[10px] uppercase tracking-[0.16em]">Surface editor</p>
+          <p className="text-muted-foreground text-[10px] uppercase tracking-[0.16em]">
+            Surface editor
+          </p>
           <h2 className="mt-1 font-semibold text-lg">Material properties</h2>
         </div>
         <button
           aria-label="Close material properties"
-          className="grid h-9 w-9 place-items-center rounded-lg text-[#aaa] transition hover:bg-white/10 hover:text-white"
+          className="grid h-9 w-9 place-items-center rounded-lg text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground"
           onClick={() => useEditor.getState().setSelectedMaterialTarget(null)}
           type="button"
         >
@@ -598,10 +600,10 @@ export function MaterialSurfaceInspector() {
         </button>
       </header>
 
-      <div className="border-white/10 border-b px-5 py-4">
+      <div className="border-foreground/10 border-b px-5 py-4">
         <div className="flex items-center gap-3">
           <span
-            className="h-12 w-12 shrink-0 rounded-full border border-white/15 bg-cover bg-center shadow-inner"
+            className="h-12 w-12 shrink-0 rounded-full border border-foreground/15 bg-cover bg-center shadow-inner"
             style={{
               backgroundColor: editableMaterial?.properties?.color ?? '#777777',
               backgroundImage: editableMaterial?.texture?.url
@@ -613,7 +615,7 @@ export function MaterialSurfaceInspector() {
             <p className="truncate font-medium">
               {sceneMaterial?.name ?? selectedNode.name ?? 'Material'}
             </p>
-            <p className="mt-0.5 text-[#858585] text-xs">
+            <p className="mt-0.5 text-muted-foreground text-xs">
               {selectedNode.type} · {target.role}
             </p>
           </div>
@@ -621,12 +623,12 @@ export function MaterialSurfaceInspector() {
       </div>
 
       <nav
-        className="flex shrink-0 overflow-x-auto border-white/10 border-b px-4"
+        className="flex shrink-0 overflow-x-auto border-foreground/10 border-b px-4"
         aria-label="Material properties"
       >
         {MATERIAL_TABS.map((tab) => (
           <button
-            className={`relative h-11 shrink-0 px-2.5 text-xs transition ${activeTab === tab ? 'text-[#8175ff]' : 'text-[#888] hover:text-[#bbb]'}`}
+            className={`relative h-11 shrink-0 px-2.5 text-xs transition ${activeTab === tab ? 'text-[#8175ff]' : 'text-muted-foreground hover:text-muted-foreground'}`}
             key={tab}
             onClick={() => setActiveTab(tab)}
             type="button"
@@ -648,16 +650,16 @@ export function MaterialSurfaceInspector() {
             value={editableMaterial}
           />
         ) : (
-          <p className="text-[#888] text-sm">이 표면에 적용된 재질이 없습니다.</p>
+          <p className="text-muted-foreground text-sm">이 표면에 적용된 재질이 없습니다.</p>
         )}
       </div>
-      <footer className="border-white/10 border-t p-4">
+      <footer className="border-foreground/10 border-t p-4">
         {currentConfigurator ? (
-          <div className="mb-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
+          <div className="mb-3 rounded-xl border border-foreground/8 bg-foreground/[0.025] p-3">
             <div className="flex items-center gap-2">
               <input
                 aria-label="Configurator group name"
-                className="h-8 min-w-0 flex-1 rounded-md bg-white/5 px-2 text-xs outline-none focus:ring-1 focus:ring-[#7567ff]"
+                className="h-8 min-w-0 flex-1 rounded-md bg-foreground/5 px-2 text-xs outline-none focus:ring-1 focus:ring-[#7567ff]"
                 onChange={(event) =>
                   updateConfigurator((group) => ({ ...group, label: event.target.value }))
                 }
@@ -680,7 +682,7 @@ export function MaterialSurfaceInspector() {
                 >
                   <button
                     aria-label="Set default option"
-                    className={`grid h-6 w-6 place-items-center rounded-full border ${currentConfigurator.defaultOptionId === option.id ? 'border-[#7567ff] bg-[#7567ff]' : 'border-white/15 text-transparent'}`}
+                    className={`grid h-6 w-6 place-items-center rounded-full border ${currentConfigurator.defaultOptionId === option.id ? 'border-[#7567ff] bg-[#7567ff]' : 'border-foreground/15 text-transparent'}`}
                     onClick={() =>
                       updateConfigurator((group) => ({ ...group, defaultOptionId: option.id }))
                     }
@@ -703,7 +705,7 @@ export function MaterialSurfaceInspector() {
                   />
                   <button
                     aria-label="Delete option"
-                    className="p-1 text-white/35 hover:text-red-300"
+                    className="p-1 text-foreground/35 hover:text-red-300"
                     onClick={() =>
                       updateConfigurator((group) => {
                         const options = group.options.filter((entry) => entry.id !== option.id)

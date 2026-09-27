@@ -20,7 +20,7 @@ export function OnOffButton({
       className={`flex h-10 flex-1 flex-col items-center justify-center rounded-lg border text-xs transition-colors ${
         on
           ? 'border-[#ffd166]/70 bg-[#ffd166]/15 text-foreground'
-          : 'border-border/50 bg-[#2C2C2E] text-muted-foreground hover:bg-[#3e3e3e]'
+          : 'border-border/50 bg-muted text-muted-foreground hover:bg-accent'
       }`}
       onClick={onToggle}
       type="button"

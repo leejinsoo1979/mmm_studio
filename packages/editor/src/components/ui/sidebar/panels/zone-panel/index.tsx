@@ -51,8 +51,8 @@ function ZoneItem({ zone }: { zone: ZoneNode }) {
       className={cn(
         'group/row mx-1 mb-0.5 flex h-8 cursor-pointer select-none items-center rounded-lg border px-2 text-sm transition-all duration-200',
         isSelected
-          ? 'border-neutral-200/60 bg-white text-foreground shadow-elevation-0 ring-1 ring-white/50 ring-inset dark:border-border/50 dark:bg-accent/50 dark:ring-white/10'
-          : 'border-transparent text-muted-foreground hover:border-neutral-200/50 hover:bg-white/40 hover:text-foreground dark:hover:border-border/40 dark:hover:bg-accent/30',
+          ? 'border-neutral-200/60 bg-white text-foreground shadow-elevation-0 ring-1 ring-foreground/50 ring-inset dark:border-border/50 dark:bg-accent/50 dark:ring-foreground/10'
+          : 'border-transparent text-muted-foreground hover:border-neutral-200/50 hover:bg-foreground/40 hover:text-foreground dark:hover:border-border/40 dark:hover:bg-accent/30',
       )}
       onClick={handleClick}
     >
@@ -65,7 +65,7 @@ function ZoneItem({ zone }: { zone: ZoneNode }) {
       <Popover onOpenChange={setCameraPopoverOpen} open={cameraPopoverOpen}>
         <PopoverTrigger asChild>
           <button
-            className="relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-black/5 hover:text-foreground group-hover/row:opacity-100 dark:hover:bg-white/10"
+            className="relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-black/5 hover:text-foreground group-hover/row:opacity-100 dark:hover:bg-foreground/10"
             onClick={(e) => e.stopPropagation()}
             title="Camera snapshot"
           >
@@ -123,7 +123,7 @@ function ZoneItem({ zone }: { zone: ZoneNode }) {
         </PopoverContent>
       </Popover>
       <button
-        className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-black/5 hover:text-foreground group-hover/row:opacity-100 dark:hover:bg-white/10"
+        className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-black/5 hover:text-foreground group-hover/row:opacity-100 dark:hover:bg-foreground/10"
         onClick={handleDelete}
       >
         <Trash2 className="h-3 w-3" />

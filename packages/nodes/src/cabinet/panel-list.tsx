@@ -84,7 +84,7 @@ export function PanelListTab({
             const hidden = node.hingeBoringExclusions.includes(p.name)
             return (
               <div
-                className={`flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-white/5 ${included ? '' : 'opacity-50'}`}
+                className={`flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-foreground/5 ${included ? '' : 'opacity-50'}`}
                 key={p.id}
               >
                 <input

@@ -54,7 +54,7 @@ export function SnapTargetBadge({
   return (
     <span
       className={cn(
-        'flex items-center justify-center bg-black/65 ring-1 ring-white/20',
+        'flex items-center justify-center bg-black/65 ring-1 ring-foreground/20',
         SNAP_TARGET_BADGE_SIZE_CLASSES[size],
         className,
       )}

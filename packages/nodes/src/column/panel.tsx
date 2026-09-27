@@ -23,7 +23,7 @@ import { Move, Trash2 } from 'lucide-react'
 import { useCallback } from 'react'
 
 const SELECT_CLASS =
-  'h-10 w-full rounded-lg border border-border/50 bg-[#2C2C2E] px-3 text-sm text-foreground outline-none transition-colors hover:bg-[#3e3e3e] focus:ring-1 focus:ring-border'
+  'h-10 w-full rounded-lg border border-border/50 bg-muted px-3 text-sm text-foreground outline-none transition-colors hover:bg-accent focus:ring-1 focus:ring-border'
 
 const COLUMN_PRESET_OPTIONS = Object.entries(COLUMN_PRESETS).map(([value, preset]) => ({
   value: value as ColumnPresetId,
@@ -346,7 +346,7 @@ export default function ColumnPanel() {
                   'flex min-h-12 items-center rounded-lg border px-3 py-2.5 text-left text-xs transition-colors',
                   isSelected
                     ? 'border-orange-400/60 bg-orange-400/10 text-foreground'
-                    : 'border-border/50 bg-[#2C2C2E] text-muted-foreground hover:bg-[#3e3e3e] hover:text-foreground',
+                    : 'border-border/50 bg-muted text-muted-foreground hover:bg-accent hover:text-foreground',
                 )}
                 key={option.value}
                 onClick={() => {
@@ -479,7 +479,7 @@ export default function ColumnPanel() {
                       'group flex flex-col items-center justify-center gap-1.5 rounded-lg border py-2.5 transition-all',
                       isSelected
                         ? 'border-orange-400/60 bg-orange-400/10 text-foreground shadow-[0_0_0_1px_rgba(251,146,60,0.25)_inset]'
-                        : 'border-border/50 bg-[#2C2C2E] text-muted-foreground hover:border-border hover:bg-[#3e3e3e] hover:text-foreground',
+                        : 'border-border/50 bg-muted text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground',
                     )}
                     key={option.value}
                     onClick={() => handleUpdate({ crossSection: option.value })}
