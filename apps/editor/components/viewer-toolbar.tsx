@@ -36,6 +36,7 @@ import {
   Gem,
   Grid2X2,
   Magnet,
+  Moon,
   Palette,
   PenLine,
   Ruler,
@@ -686,16 +687,69 @@ export function CommunityViewerToolbarLeft() {
   )
 }
 
+/** Theme shown for each part of the day; daytime keeps the user's theme. */
+function themeForTime(time: number): 'night' | 'twilight' | null {
+  if (time < 5.5 || time >= 19.5) return 'night'
+  if (time < 7 || time >= 18) return 'twilight'
+  return null
+}
+
+let dayTheme = 'studio'
+
+/**
+ * inZOI's sun ↔ moon slider: drags the time of day (the sun position) and
+ * brings in the twilight / night themes after dusk, restoring the daytime
+ * theme at dawn.
+ */
+function TimeOfDaySlider() {
+  const sunTime = useViewer((s) => s.sunTime)
+  const setTime = (time: number) => {
+    const viewer = useViewer.getState()
+    if (
+      !themeForTime(viewer.sunTime) &&
+      viewer.sceneTheme !== 'night' &&
+      viewer.sceneTheme !== 'twilight'
+    )
+      dayTheme = viewer.sceneTheme
+    viewer.setSunTime(time)
+    viewer.setSceneTheme(themeForTime(time) ?? dayTheme)
+  }
+  const hh = Math.floor(sunTime)
+  const mm = Math.round((sunTime - hh) * 60)
+  return (
+    <div
+      className="flex h-8 items-center gap-2 rounded-xl border border-border bg-background/90 px-2.5 shadow-2xl backdrop-blur-md"
+      onKeyDown={(event) => event.stopPropagation()}
+      title={`시간대 ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`}
+    >
+      <SunMedium className="h-4 w-4 shrink-0 text-amber-400" />
+      <Slider
+        aria-label="시간대"
+        className="w-28"
+        max={24}
+        min={0}
+        onValueChange={([next]) => next !== undefined && setTime(next)}
+        step={0.25}
+        value={[sunTime]}
+      />
+      <Moon className="h-4 w-4 shrink-0 text-indigo-300" />
+    </div>
+  )
+}
+
 export function CommunityViewerToolbarRight() {
   return (
-    <div className={TOOLBAR_CONTAINER}>
-      <LevelModeToggle />
-      <WallModeToggle />
-      <div className="my-1.5 w-px bg-border/50" />
-      <DisplayMenu />
-      <div className="my-1.5 w-px bg-border/50" />
-      <WalkthroughButton />
-      <PreviewButton />
+    <div className="flex items-center gap-2">
+      <TimeOfDaySlider />
+      <div className={TOOLBAR_CONTAINER}>
+        <LevelModeToggle />
+        <WallModeToggle />
+        <div className="my-1.5 w-px bg-border/50" />
+        <DisplayMenu />
+        <div className="my-1.5 w-px bg-border/50" />
+        <WalkthroughButton />
+        <PreviewButton />
+      </div>
     </div>
   )
 }
