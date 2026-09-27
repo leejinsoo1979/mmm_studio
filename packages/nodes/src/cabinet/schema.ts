@@ -302,6 +302,11 @@ export const CabinetNode = BaseNode.extend({
     })
     .default({ enabled: false, mm: -1.5 }),
 
+  /** mmmcraft 도어설치: the doors are hung. Cabinets are placed without them
+   *  and get them later (see `doors.ts`); a cabinet saved before this field
+   *  existed keeps its doors. Drawer fronts are part of the module. */
+  hasDoor: z.boolean().default(true),
+
   interior: CabinetCell.default({
     id: 'root',
     kind: 'leaf',

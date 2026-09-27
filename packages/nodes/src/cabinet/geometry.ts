@@ -39,12 +39,36 @@ export function buildCabinetGeometry(
     appliance: createDefaultMaterial(APPLIANCE_COLOR, 0.4, shading),
     stone: createDefaultMaterial(STONE_COLOR, 0.35, shading),
   }
-  for (const part of parts) group.add(partMesh(node, part, materials[part.finish]))
-  for (const child of group.children) {
+  for (const part of parts) {
+    const mesh = partMesh(node, part, materials[part.finish])
+    group.add(part.role === 'door' && part.hinge ? doorPivot(node, part, mesh) : mesh)
+  }
+  group.traverse((child) => {
     child.castShadow = true
     child.receiveShadow = true
-  }
+  })
   return group
+}
+
+/**
+ * A hinged door hangs from a pivot on its hinge edge, midway through the
+ * leaf, so it can swing open: about Y for side hinges, about X for a flap.
+ * `userData.cabinetDoorHinge` marks the pivot for the swing system.
+ */
+function doorPivot(node: CabinetNode, part: CabinetPart, mesh: Mesh): Group {
+  const b = part.box
+  const pivot = new Group()
+  pivot.name = `cabinet-door-pivot-${part.id}`
+  pivot.userData.cabinetDoorHinge = part.hinge
+  const z = (b.z + b.d / 2 - node.depthMm / 2) * MM
+  if (part.hinge === 'top') pivot.position.set(0, (b.y + b.h) * MM, z)
+  else {
+    const x = part.hinge === 'left' ? b.x : b.x + b.w
+    pivot.position.set((x - node.widthMm / 2) * MM, 0, z)
+  }
+  mesh.position.sub(pivot.position)
+  pivot.add(mesh)
+  return pivot
 }
 
 /** Cabinet-local mm box → centred metres in the node's frame (origin at the

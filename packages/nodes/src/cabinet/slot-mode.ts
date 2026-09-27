@@ -6,6 +6,7 @@ import {
   type WallNode,
 } from '@pascal-app/core'
 import { create } from 'zustand'
+import { newCabinetHasDoor } from './doors'
 import { getCabinetPreset, instantiateSpec } from './engine/presets'
 import {
   firstFreeSlot,
@@ -242,7 +243,11 @@ export function placePresetInSlot(presetId: string): { id: string } | { error: s
   if (!guide) return { error: '기준 벽을 먼저 선택해 주세요.' }
   const preset = getCabinetPreset(presetId)
   if (!preset) return { error: '모듈을 찾을 수 없습니다.' }
-  const spec = CabinetNode.parse({ ...instantiateSpec(preset.spec()), presetId: preset.id })
+  const spec = CabinetNode.parse({
+    ...instantiateSpec(preset.spec()),
+    presetId: preset.id,
+    hasDoor: newCabinetHasDoor(),
+  })
   const needed = preset.id.startsWith('dual-') ? 2 : 1
   const cabinets = levelCabinets(guide.run.levelId, nodes)
   const start = firstFreeSlot(

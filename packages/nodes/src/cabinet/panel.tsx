@@ -11,6 +11,7 @@ import {
 } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { setAllCabinetDoors } from './doors'
 import { downloadCabinetsDxf, downloadCabinetsMpr, downloadTextFile } from './download'
 import { cabinetHardwareRows, cutlistCsv } from './engine/cutlist'
 import { buildCabinetParts, type CabinetBuild } from './engine/parts'
@@ -661,8 +662,20 @@ export default function CabinetPanel() {
           <TopMouldingSection node={node} update={update} />
           <ToeKickSection node={node} update={update} />
 
-          <DoorSettingsSection node={node} update={update} />
-          <DoorSizeSection build={build} node={node} update={update} />
+          {node.hasDoor ? (
+            <>
+              <DoorSettingsSection node={node} update={update} />
+              <DoorSizeSection build={build} node={node} update={update} />
+            </>
+          ) : (
+            <PanelSection title="도어">
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                도어는 아직 달지 않았습니다. 가구를 모두 배치한 뒤 화면 위의 도어설치로 모든 가구에
+                한 번에 답니다. 내부 구성의 도어 종류·경첩 설정은 그때 적용됩니다.
+              </p>
+              <ActionButton label="지금 도어설치" onClick={() => setAllCabinetDoors(true)} />
+            </PanelSection>
+          )}
 
           <PanelSection title="내부 구성">
             <Elevation build={build} node={node} onSelect={setCellId} selectedId={cellId} />

@@ -191,6 +191,8 @@ export function buildCabinetParts(raw: CabinetNode): CabinetBuild {
   const parts: CabinetPart[] = []
   const issues: string[] = []
   const push = (part: Omit<CabinetPart, 'isPanel'> & { isPanel?: boolean }) => {
+    // Doors not hung yet are neither drawn nor cut.
+    if (part.role === 'door' && !node.hasDoor) return
     parts.push({
       isPanel:
         part.material === 'PB' ||

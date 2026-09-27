@@ -20,6 +20,7 @@ import {
   useEditor,
 } from '@pascal-app/editor'
 import { CATALOG_ITEMS } from '@pascal-app/editor/catalog'
+import { CabinetDoorControls } from '@pascal-app/nodes'
 import TreesPanel from '@pascal-app/plugin-trees/panel'
 import {
   Archive,
@@ -1139,6 +1140,7 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
         viewerBanner={
           <>
             <ArchipleFloorplanBridge />
+            <CabinetDoorControls />
             <MaterialPalette />
           </>
         }

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { newCabinetHasDoor } from './doors'
 import { type CabinetSpec, getCabinetPreset, instantiateSpec } from './engine/presets'
 import { CabinetNode } from './schema'
 
@@ -26,7 +27,11 @@ export const useCabinetBrush = create<CabinetBrushState>((set) => ({
 export function cabinetFromBrush(brush: CabinetBrush): { node: CabinetNode; elevationMm: number } {
   if (brush.kind === 'custom') {
     return {
-      node: CabinetNode.parse({ ...instantiateSpec(brush.spec), name: brush.label }),
+      node: CabinetNode.parse({
+        ...instantiateSpec(brush.spec),
+        name: brush.label,
+        hasDoor: newCabinetHasDoor(),
+      }),
       elevationMm: brush.elevationMm,
     }
   }
@@ -37,6 +42,7 @@ export function cabinetFromBrush(brush: CabinetBrush): { node: CabinetNode; elev
       ...instantiateSpec(preset.spec()),
       name: preset.label,
       presetId: preset.id,
+      hasDoor: newCabinetHasDoor(),
     }),
     elevationMm: preset.elevationMm,
   }

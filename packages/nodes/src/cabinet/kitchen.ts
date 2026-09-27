@@ -6,6 +6,7 @@ import {
   useScene,
   type WallNode,
 } from '@pascal-app/core'
+import { newCabinetHasDoor } from './doors'
 import { getCabinetPreset, instantiateSpec } from './engine/presets'
 import { COUNTERTOP_DEPTH_MM } from './engine/rules'
 import { equalSlotWidths, planKitchenRun } from './engine/run'
@@ -112,7 +113,13 @@ function cabinetOnRun(
   const preset = getCabinetPreset(presetId)
   if (!preset) throw new Error(`unknown cabinet preset ${presetId}`)
   const spec = instantiateSpec(preset.spec())
-  const node = CabinetNode.parse({ ...spec, name: preset.label, widthMm, presetId: preset.id })
+  const node = CabinetNode.parse({
+    ...spec,
+    name: preset.label,
+    widthMm,
+    presetId: preset.id,
+    hasDoor: newCabinetHasDoor(),
+  })
   const [x, z] = placeOnRun(run, offsetMm, widthMm, node.depthMm)
   return { ...node, position: [x, preset.elevationMm * MM, z], rotation: [0, run.rotationY, 0] }
 }

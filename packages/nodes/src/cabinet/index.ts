@@ -1,4 +1,6 @@
 export { cabinetDefinition, countertopDefinition } from './definition'
+export { CabinetDoorControls } from './door-controls'
+export { setAllCabinetDoors, useCabinetDoors } from './doors'
 export { downloadCabinetsDxf, downloadCabinetsMpr, downloadTextFile } from './download'
 export {
   cabinetHardwareRows,
