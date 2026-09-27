@@ -48,6 +48,20 @@ const SURFACE_BY_KIND: Record<string, MaterialSurface> = {
   shelf: 'furniture',
 }
 
+const KIND_NAMES: Record<string, string> = {
+  wall: '벽',
+  slab: '바닥',
+  ceiling: '천장',
+  roof: '지붕',
+  'roof-segment': '지붕',
+  door: '문',
+  window: '창문',
+  fence: '울타리',
+  item: '가구',
+  shelf: '선반',
+  cabinet: '붙박이장',
+}
+
 const SLOT_LABELS: Record<string, string> = {
   interior: '안쪽 면',
   exterior: '바깥쪽 면',
@@ -233,7 +247,11 @@ export function MaterialPalette() {
   const targets = paintTargets(node)
   const target = targets.find((t) => t.key === targetKey) ?? targets[0]
   const def = nodeRegistry.get(node.type)
-  const name = (node as { name?: string }).name || def?.presentation?.label || node.type
+  const name =
+    (node as { name?: string }).name ||
+    KIND_NAMES[node.type] ||
+    def?.presentation?.label ||
+    node.type
   const all = SECTIONS.flatMap((section) => materialsFor(node, section))
   // A colour picked outside the palette (a cabinet's default hex) has no swatch.
   const current =
@@ -249,64 +267,71 @@ export function MaterialPalette() {
 
   return (
     <div
-      className="pointer-events-auto fixed bottom-4 left-1/2 z-50 flex w-[min(1100px,calc(100%-32px))] -translate-x-1/2 flex-col items-center gap-2 text-neutral-800 dark:text-neutral-100"
+      className="pointer-events-auto fixed bottom-[68px] z-50 flex items-end gap-3 text-neutral-800 dark:text-neutral-100"
       onPointerDown={(e) => e.stopPropagation()}
+      style={{ left: 'calc(var(--viewer-left-inset, 0px) + 12px)', right: 16 }}
     >
-      <div className="flex items-center gap-2 rounded-full bg-white/95 dark:bg-neutral-900/95 py-1 pr-1 pl-4 shadow-[0_6px_24px_rgba(0,0,0,0.25)]">
-        <span className="whitespace-nowrap text-neutral-500 dark:text-neutral-400 text-xs">
-          {hovered ? '미리보기' : '현재 재질'}
+      {/* inZOI: the object's name and its parts, as pills beside the palette. */}
+      <aside className="flex w-40 shrink-0 flex-col gap-2 pb-1">
+        <span className="truncate font-semibold text-[15px] text-neutral-800 [text-shadow:0_0_4px_rgba(255,255,255,0.95)]">
+          {name}
         </span>
-        <span
-          className="size-5 shrink-0 rounded-full border border-black/10 bg-neutral-200 dark:bg-neutral-700"
-          style={shown ? swatchStyle(shown) : undefined}
-        />
-        <span className="max-w-48 truncate font-medium text-xs">{shown?.label ?? '기본'}</span>
-        <button
-          aria-label="완료"
-          className="ml-2 flex size-8 items-center justify-center rounded-full bg-sky-500 text-white transition-colors hover:bg-sky-600"
-          onClick={close}
-          title="완료 (Esc)"
-          type="button"
-        >
-          <Check className="h-4 w-4" strokeWidth={3} />
-        </button>
-      </div>
-      <div className="flex w-full gap-4 rounded-2xl bg-white/95 dark:bg-neutral-900/95 p-3 shadow-[0_8px_32px_rgba(0,0,0,0.28)] backdrop-blur-md">
-        <aside className="flex w-36 shrink-0 flex-col gap-1 border-neutral-200 border-r pr-3">
-          <span className="truncate font-semibold text-sm">{name}</span>
-          <span className="mb-1 text-[11px] text-neutral-500 dark:text-neutral-400">칠할 부분</span>
-          {targets.map((t) => (
-            <button
-              className={`truncate rounded-lg px-2 py-1 text-left text-xs transition-colors ${t.key === target?.key ? 'bg-sky-100 font-medium text-sky-700' : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-white/10'}`}
-              key={t.key}
-              onClick={() => {
-                endPreview()
-                setTargetKey(t.key)
-              }}
-              type="button"
-            >
-              {t.label}
-            </button>
-          ))}
-          {targets.length === 0 && (
-            <span className="text-[11px] text-neutral-400">칠할 수 있는 부분이 없습니다</span>
-          )}
-        </aside>
-        <div className="flex min-w-0 flex-1 gap-5 overflow-x-auto pb-1">
+        {targets.map((t) => (
+          <button
+            className={`truncate rounded-xl px-3 py-2 text-left text-xs shadow-[0_2px_10px_rgba(0,0,0,0.12)] transition-colors ${
+              t.key === target?.key
+                ? 'bg-white font-semibold text-neutral-900 dark:bg-neutral-100'
+                : 'border border-white/80 bg-white/45 text-neutral-700 backdrop-blur-md hover:bg-white/70'
+            }`}
+            key={t.key}
+            onClick={() => {
+              endPreview()
+              setTargetKey(t.key)
+            }}
+            type="button"
+          >
+            {t.label}
+          </button>
+        ))}
+        {targets.length === 0 && (
+          <span className="text-[11px] text-neutral-500">칠할 수 있는 부분이 없습니다</span>
+        )}
+      </aside>
+      <div className="flex min-w-0 flex-1 flex-col items-center gap-2">
+        <div className="flex items-center gap-2 rounded-full bg-white/95 py-1 pr-1 pl-4 shadow-[0_6px_24px_rgba(0,0,0,0.2)] dark:bg-neutral-900/95">
+          <span className="whitespace-nowrap text-neutral-500 text-xs dark:text-neutral-400">
+            {hovered ? '미리보기' : '현재 재질'}
+          </span>
+          <span
+            className="size-5 shrink-0 rounded-full border border-black/10 bg-neutral-200 dark:bg-neutral-700"
+            style={shown ? swatchStyle(shown) : undefined}
+          />
+          <span className="max-w-48 truncate font-medium text-xs">{shown?.label ?? '기본'}</span>
+          <button
+            className="ml-2 flex h-8 items-center gap-1 rounded-full bg-sky-500 px-3 font-semibold text-white text-xs transition-colors hover:bg-sky-600"
+            onClick={close}
+            title="확인 (Esc)"
+            type="button"
+          >
+            <Check className="h-3.5 w-3.5" strokeWidth={3} />
+            확인
+          </button>
+        </div>
+        <div className="flex w-full divide-x divide-neutral-200 overflow-x-auto rounded-2xl bg-white/95 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.22)] backdrop-blur-md dark:divide-white/10 dark:bg-neutral-900/95">
           {target &&
             SECTIONS.map((section) => {
               const materials = materialsFor(node, section)
               if (materials.length === 0) return null
               return (
-                <section className="flex shrink-0 flex-col gap-1.5" key={section.title}>
-                  <h4 className="font-semibold text-neutral-600 dark:text-neutral-300 text-xs">
+                <section className="flex shrink-0 flex-col gap-2 px-4" key={section.title}>
+                  <h4 className="font-semibold text-[11px] text-neutral-600 dark:text-neutral-300">
                     {section.title}
                   </h4>
                   <div className="grid grid-flow-col grid-rows-3 gap-1.5">
                     {materials.map((material) => (
                       <button
                         aria-label={`${target.label} ${material.label}`}
-                        className={`size-8 shrink-0 rounded-full border transition-transform hover:scale-110 ${isCurrent(target, material) ? 'border-sky-500 ring-2 ring-sky-400' : 'border-black/10'}`}
+                        className={`size-9 shrink-0 rounded-full border shadow-sm transition-transform hover:scale-110 ${isCurrent(target, material) ? 'border-sky-500 ring-2 ring-sky-400' : 'border-black/10'}`}
                         key={material.id}
                         onClick={() => {
                           endPreview()
