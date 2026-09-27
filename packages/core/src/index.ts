@@ -183,14 +183,19 @@ export {
 export {
   STEP_DOOR_GAP_MM,
   STEP_DOOR_MAX_DEGREES,
+  STEP_DOOR_MIN_DEPTH_MM,
   STEP_DOOR_PRODUCTS,
+  STEP_DOOR_YERIM_STANDARD_DEPTHS_MM,
+  STEP_DOOR_YOUNGLIM_MAX_DEPTH_MM,
   type StepDoorBox,
   type StepDoorModel,
   stepDoorBoxes,
   stepDoorError,
   stepDoorLeafHeightMm,
+  stepDoorMinDepthMm,
   stepDoorModel,
   stepDoorPlacement,
+  stepDoorWallFinish,
   stepLeafPoint,
 } from './systems/door/step-door'
 export {

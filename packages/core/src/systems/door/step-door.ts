@@ -32,6 +32,11 @@ export const STEP_DOOR_PRODUCTS = {
 
 export const STEP_DOOR_GAP_MM = 3
 export const STEP_DOOR_MAX_DEGREES = 90
+export const STEP_DOOR_MIN_DEPTH_MM = 110
+/** 영림 frames are made to order between 110 and 240. */
+export const STEP_DOOR_YOUNGLIM_MAX_DEPTH_MM = 240
+/** 예림·인쇼 standard frame depths; others are made to order (mmmcraft docs). */
+export const STEP_DOOR_YERIM_STANDARD_DEPTHS_MM = [110, 140, 170, 200] as const
 
 const mm = (m: number) => Math.round(m * 10000) / 10
 
@@ -45,26 +50,57 @@ export function stepDoorLeafHeightMm(product: StepDoorProduct, installationMm: n
     : Math.max(2000, Math.min(preferred, installationMm - 203))
 }
 
+type FinishWall = Pick<WallNode, 'thickness' | 'bodyThickness'>
+
+/** The shallowest frame the wall allows: 110, or the wall as built when thicker. */
+export function stepDoorMinDepthMm(wall: FinishWall): number {
+  return Math.max(STEP_DOOR_MIN_DEPTH_MM, mm(wall.bodyThickness ?? wall.thickness ?? 0.1))
+}
+
 /**
- * mmmcraft placement: the frame runs floor to wall top, at least 110 deep
- * (the wall thickness when thicker).
+ * The step door frame is as deep as its wall is thick, so choosing a depth
+ * finishes the wall out flush with both frame faces. The thickness it had
+ * before is kept as `bodyThickness`.
  */
-export function stepDoorPlacement(
-  product: StepDoorProduct,
-  wall: Pick<WallNode, 'height' | 'thickness'>,
-): Pick<DoorNode, 'doorType' | 'height' | 'frameDepth' | 'stepDoor'> {
-  const height = wall.height ?? DEFAULT_WALL_HEIGHT
+export function stepDoorWallFinish(
+  wall: FinishWall,
+  depthMm: number,
+): Required<Pick<WallNode, 'thickness' | 'bodyThickness'>> {
   return {
-    doorType: 'step',
-    height,
-    frameDepth: Math.max(0.11, wall.thickness ?? 0.1),
-    stepDoor: { product, leafHeight: stepDoorLeafHeightMm(product, mm(height)) / 1000 },
+    thickness: Math.max(depthMm, stepDoorMinDepthMm(wall)) / 1000,
+    bodyThickness: wall.bodyThickness ?? wall.thickness ?? 0.1,
   }
 }
 
-type StepDoor = Pick<DoorNode, 'width' | 'height' | 'frameDepth' | 'hingesSide' | 'stepDoor'>
+/**
+ * mmmcraft placement: the frame runs floor to wall top, at least 110 deep.
+ * `wall` is the finish the host wall needs (null when already 110 or more).
+ */
+export function stepDoorPlacement(
+  product: StepDoorProduct,
+  wall: Pick<WallNode, 'height' | 'thickness' | 'bodyThickness'>,
+): {
+  door: Pick<DoorNode, 'doorType' | 'height' | 'stepDoor'>
+  wall: ReturnType<typeof stepDoorWallFinish> | null
+} {
+  const height = wall.height ?? DEFAULT_WALL_HEIGHT
+  return {
+    door: {
+      doorType: 'step',
+      height,
+      stepDoor: { product, leafHeight: stepDoorLeafHeightMm(product, mm(height)) / 1000 },
+    },
+    wall:
+      mm(wall.thickness ?? 0.1) < STEP_DOOR_MIN_DEPTH_MM
+        ? stepDoorWallFinish(wall, STEP_DOOR_MIN_DEPTH_MM)
+        : null,
+  }
+}
 
-function stepDimensions(door: StepDoor) {
+type StepDoor = Pick<DoorNode, 'width' | 'height' | 'hingesSide' | 'stepDoor'>
+type HostWall = Pick<WallNode, 'thickness'>
+
+function stepDimensions(door: StepDoor, wall: HostWall) {
   const selection = door.stepDoor
   if (!(selection && Object.hasOwn(STEP_DOOR_PRODUCTS, selection.product))) return null
   const product = STEP_DOOR_PRODUCTS[selection.product]
@@ -75,7 +111,7 @@ function stepDimensions(door: StepDoor) {
     product,
     widthMm: mm(door.width),
     heightMm,
-    depth: mm(door.frameDepth),
+    depth: mm(wall.thickness ?? 0.1),
     leafWidth: mm(door.width) - product.jamb * 2 - STEP_DOOR_GAP_MM * 2,
     leafHeight,
     headerHeight: heightMm - leafHeight - STEP_DOOR_GAP_MM,
@@ -83,14 +119,14 @@ function stepDimensions(door: StepDoor) {
 }
 
 /** mmmcraft's validation, message for message; null when the door is valid. */
-export function stepDoorError(door: StepDoor): string | null {
-  const d = stepDimensions(door)
+export function stepDoorError(door: StepDoor, wall: HostWall): string | null {
+  const d = stepDimensions(door, wall)
   if (!d) return '스텝도어 제품을 선택해 주세요.'
   const younglim = d.selection.product === 'younglim'
   if (
     ![d.leafWidth, d.leafHeight, d.depth, d.headerHeight].every(Number.isFinite) ||
-    d.depth < 110 ||
-    (younglim && d.depth > 240)
+    d.depth < STEP_DOOR_MIN_DEPTH_MM ||
+    (younglim && d.depth > STEP_DOOR_YOUNGLIM_MAX_DEPTH_MM)
   ) {
     return younglim
       ? '영림 스텝 문틀 깊이는 110~240mm로 설정해 주세요.'
@@ -132,9 +168,10 @@ export function stepDoorError(door: StepDoor): string | null {
  * header sit flush with the +z face (the side the door was placed from) and
  * the leaf swings out of that face; `amount` is 0…1 of the 90° swing.
  */
-export function stepDoorModel(door: StepDoor, amount: number) {
-  const d = stepDimensions(door)
-  if (!d || stepDoorError(door)) throw new Error(stepDoorError(door) ?? '')
+export function stepDoorModel(door: StepDoor, wall: HostWall, amount: number) {
+  const d = stepDimensions(door, wall)
+  const error = stepDoorError(door, wall)
+  if (!d || error) throw new Error(error ?? '')
   const handed = door.hingesSide === 'left' ? 1 : -1
   const clamped = Math.max(0, Math.min(1, amount))
   const { product, depth, leafWidth } = d

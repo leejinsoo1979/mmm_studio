@@ -12,7 +12,11 @@ import {
   normalizeWallConstruction,
   STEP_DOOR_MAX_DEGREES,
   STEP_DOOR_PRODUCTS,
+  STEP_DOOR_YERIM_STANDARD_DEPTHS_MM,
+  STEP_DOOR_YOUNGLIM_MAX_DEPTH_MM,
   stepDoorError,
+  stepDoorMinDepthMm,
+  stepDoorWallFinish,
   useInteractive,
   useScene,
   type WallNode,
@@ -357,8 +361,16 @@ export default function DoorPanel() {
   const isTiltupGarageDoor = doorType === 'garage-tiltup'
   const isHiddenDoor = doorType === 'hidden'
   const isStepDoor = doorType === 'step'
-  const stepError = isStepDoor ? stepDoorError(node) : null
+  const stepError = isStepDoor && hostWall ? stepDoorError(node, hostWall) : null
   const stepProduct = node.stepDoor ? STEP_DOOR_PRODUCTS[node.stepDoor.product] : undefined
+  // The step frame is as deep as the wall is thick: a depth finishes the wall.
+  const stepDepthMm = Math.round((hostWall?.thickness ?? 0.1) * 10000) / 10
+  const stepMinDepthMm = hostWall ? stepDoorMinDepthMm(hostWall) : 0
+  const stepBodyMm =
+    Math.round((hostWall?.bodyThickness ?? hostWall?.thickness ?? 0.1) * 10000) / 10
+  const setStepDepth = (depthMm: number) => {
+    if (hostWall) useScene.getState().updateNode(hostWall.id, stepDoorWallFinish(hostWall, depthMm))
+  }
   // Hidden doors: 목상 / 떡가베 walls only (mmmcraft has no 경량 section).
   const normalizedHost = normalizeWallConstruction(hostWall?.construction)
   const hostConstruction =
@@ -1169,11 +1181,44 @@ export default function DoorPanel() {
                     value={Math.round(node.stepDoor.leafHeight * 10000) / 10}
                   />
                 )}
+                <div className="text-[11px] text-muted-foreground">
+                  문틀 깊이 = 벽 마감 두께 (문틀 양면과 벽 마감면이 맞춰집니다)
+                </div>
+                {node.stepDoor.product === 'yerim-inshow' &&
+                  STEP_DOOR_YERIM_STANDARD_DEPTHS_MM.some((d) => d >= stepMinDepthMm) && (
+                    <SegmentedControl
+                      onChange={(v) => setStepDepth(Number(v))}
+                      options={STEP_DOOR_YERIM_STANDARD_DEPTHS_MM.filter(
+                        (d) => d >= stepMinDepthMm,
+                      ).map((d) => ({ label: `${d}`, value: String(d) }))}
+                      value={String(stepDepthMm)}
+                    />
+                  )}
                 <MmField
-                  label="문틀 깊이"
-                  onCommit={(v) => handleUpdate({ frameDepth: v / 1000 })}
-                  value={Math.round(node.frameDepth * 10000) / 10}
+                  label={node.stepDoor.product === 'yerim-inshow' ? '주문 깊이' : '문틀 깊이'}
+                  max={
+                    node.stepDoor.product === 'younglim'
+                      ? STEP_DOOR_YOUNGLIM_MAX_DEPTH_MM
+                      : undefined
+                  }
+                  min={stepMinDepthMm}
+                  onCommit={setStepDepth}
+                  value={stepDepthMm}
                 />
+                {stepDepthMm > stepBodyMm && (
+                  <p className="text-[11px] text-muted-foreground">
+                    벽 {stepBodyMm}mm → {stepDepthMm}mm로 마감. 벽보다 얇은 문틀은 고를 수 없습니다.
+                  </p>
+                )}
+                {node.stepDoor.product === 'yerim-inshow' &&
+                  !(STEP_DOOR_YERIM_STANDARD_DEPTHS_MM as readonly number[]).includes(
+                    stepDepthMm,
+                  ) && (
+                    <p className="text-amber-400">
+                      예림 표준 문틀(110/140/170/200)이 아닌 주문 치수입니다. 주문 제작 여부를
+                      확인해 주세요.
+                    </p>
+                  )}
                 {stepError && <p className="text-red-400">{stepError}</p>}
               </div>
             </PanelSection>

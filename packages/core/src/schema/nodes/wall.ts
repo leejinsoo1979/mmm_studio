@@ -59,6 +59,9 @@ export const WallNode = BaseNode.extend({
   // in a follow-up once migrated scenes are the norm.
   slots: z.record(z.string(), z.string()).optional(),
   thickness: z.number().optional(),
+  // The thickness (m) before the wall was finished out flush with a step
+  // door frame; the frame can't be made shallower than this.
+  bodyThickness: z.number().optional(),
   construction: WallConstruction.optional(),
   height: z.number().optional(),
   curveOffset: z.number().optional(),
@@ -72,6 +75,7 @@ export const WallNode = BaseNode.extend({
   dedent`
   Wall node - used to represent a wall in the building
   - thickness: thickness in meters (including any construction finish)
+  - bodyThickness: thickness before finishing out to a step door frame
   - construction: 목상 / 떡가베 construction; absent for a plain wall
   - height: height in meters
   - curveOffset: midpoint sagitta offset used to bend the wall into an arc

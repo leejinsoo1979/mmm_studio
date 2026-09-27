@@ -1,4 +1,10 @@
-import { type DoorNode, type StepDoorBox, stepDoorBoxes, stepDoorModel } from '@pascal-app/core'
+import {
+  type DoorNode,
+  type StepDoorBox,
+  stepDoorBoxes,
+  stepDoorModel,
+  type WallNode,
+} from '@pascal-app/core'
 import * as THREE from 'three'
 import { createDefaultMaterial, type RenderShading } from '../../lib/materials'
 
@@ -34,10 +40,11 @@ function addBox(parent: THREE.Object3D, b: StepDoorBox, yOffset: number, shading
 export function addStepDoor(
   parent: THREE.Object3D,
   node: DoorNode,
+  wall: WallNode,
   swingAngle: number,
   shading: RenderShading,
 ) {
-  const m = stepDoorModel(node, swingAngle / (Math.PI / 2))
+  const m = stepDoorModel(node, wall, swingAngle / (Math.PI / 2))
   const { fixed, leaf } = stepDoorBoxes(m)
   const bottom = -node.height / 2
   for (const b of fixed) addBox(parent, b, bottom, shading)

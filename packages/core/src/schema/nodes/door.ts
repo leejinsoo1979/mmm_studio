@@ -79,8 +79,8 @@ export const DoorNode = BaseNode.extend({
   // Hidden door: hinge centres from the leaf bottom (m), exactly three.
   hiddenHingeHeights: z.array(z.number()).length(3).optional(),
   // Step door: the product and the moving leaf's height (m, from the floor).
-  // `height` is the whole installation including the header; `frameDepth`
-  // the frame's depth across the wall.
+  // `height` is the whole installation including the header; the frame is
+  // as deep as the host wall's finished thickness.
   stepDoor: z.object({ product: StepDoorProduct, leafHeight: z.number() }).optional(),
   slideDirection: z.enum(['left', 'right']).default('left'),
   trackStyle: DoorTrackStyle.default('none'),

@@ -854,9 +854,9 @@ function stepDoorSymbol(node: DoorNode, wall: WallNode, selected: boolean): Floo
   ]
   const stroke = selected ? '#f97316' : '#536078'
   const line = { stroke, strokeWidth: 1, vectorEffect: 'non-scaling-stroke' as const }
-  if (stepDoorError(node)) {
+  if (stepDoorError(node, wall)) {
     const half = node.width * 500
-    const t = Math.max(node.frameDepth, wall.thickness ?? 0.1) * 500
+    const t = (wall.thickness ?? 0.1) * 500
     return [
       {
         kind: 'polygon',
@@ -868,7 +868,7 @@ function stepDoorSymbol(node: DoorNode, wall: WallNode, selected: boolean): Floo
       },
     ]
   }
-  const open = stepDoorModel(node, 1)
+  const open = stepDoorModel(node, wall, 1)
   const { fixed, leaf } = stepDoorBoxes(open)
   const rect = (b: StepDoorBox, map: (x: number, z: number) => FloorplanPoint) => {
     const [x0, x1] = [b.at[0] - b.size[0] / 2, b.at[0] + b.size[0] / 2]

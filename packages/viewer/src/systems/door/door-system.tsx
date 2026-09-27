@@ -125,6 +125,27 @@ export const DoorSystem = () => {
     }
   }, [sceneMaterials])
 
+  // Hidden and step doors are built from their host wall (thickness,
+  // construction), so editing the wall must rebuild them. Only an actual
+  // change counts: a door rebuild re-dirties its wall.
+  useEffect(
+    () =>
+      useScene.subscribe((state, prev) => {
+        if (state.nodes === prev.nodes) return
+        for (const node of Object.values(state.nodes)) {
+          if (node?.type !== 'door' || !node.parentId) continue
+          if (node.doorType !== 'hidden' && node.doorType !== 'step') continue
+          const wall = state.nodes[node.parentId as AnyNodeId]
+          const before = prev.nodes[node.parentId as AnyNodeId]
+          if (wall === before || wall?.type !== 'wall' || before?.type !== 'wall') continue
+          if (wall.thickness !== before.thickness || wall.construction !== before.construction) {
+            state.dirtyNodes.add(node.id as AnyNodeId)
+          }
+        }
+      }),
+    [],
+  )
+
   useFrame(() => {
     if (dirtyNodes.size === 0) return
     const frameJoineryMaterial = createSurfaceRoleMaterial('joinery', colorPreset)
@@ -2376,9 +2397,12 @@ function updateDoorMesh(rawNode: DoorNode, mesh: THREE.Mesh) {
   }
 
   if (doorType === 'step') {
+    const wall = node.parentId ? useScene.getState().nodes[node.parentId as AnyNodeId] : undefined
     // An invalid step door keeps only its opening; the panel and the plan
     // show mmmcraft's message.
-    if (!stepDoorError(node)) addStepDoor(mesh, node, clampedSwingAngle, currentShading)
+    if (wall?.type === 'wall' && !stepDoorError(node, wall as WallNode)) {
+      addStepDoor(mesh, node, wall as WallNode, clampedSwingAngle, currentShading)
+    }
     syncDoorCutout(node, mesh)
     return
   }
