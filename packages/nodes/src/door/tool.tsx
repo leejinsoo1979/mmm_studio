@@ -3,6 +3,7 @@ import {
   DoorNode,
   emitter,
   type GridEvent,
+  hiddenDoorError,
   isCurvedWall,
   type RoofEvent,
   type RoofNode,
@@ -83,6 +84,15 @@ function stepPatchFor(wall: WallNode) {
     | null
     | undefined
   return defaults?.stepProduct ? stepDoorPlacement(defaults.stepProduct, wall) : null
+}
+
+/**
+ * The 히든도어 tile seeds `toolDefaults.door.hidden`: only a 목상 / 떡가베
+ * wall can take it, so anywhere else the draft stays red and won't place.
+ */
+function hiddenTileError(door: DoorNode, wall: WallNode): string | null {
+  const defaults = useEditor.getState().toolDefaults.door as { hidden?: boolean } | null | undefined
+  return defaults?.hidden ? hiddenDoorError(door, wall) : null
 }
 
 /**
@@ -300,7 +310,10 @@ const DoorTool: React.FC = () => {
       const { clampedX, clampedY } = placement
       const valid =
         placement.valid &&
-        !(step && stepDoorError({ ...draftRef.current, ...step.door }, { ...wall, ...step.wall }))
+        !(
+          step && stepDoorError({ ...draftRef.current, ...step.door }, { ...wall, ...step.wall })
+        ) &&
+        !hiddenTileError(draftRef.current, wall)
 
       if (wall.id === draftRef.current.parentId) {
         useScene.getState().updateNode(draftRef.current.id, {
@@ -485,12 +498,14 @@ const DoorTool: React.FC = () => {
         isMagneticSnapActive(),
         draftRef.current.id,
       )
-      // A step door outside its product range cannot be placed.
+      // A step door outside its product range cannot be placed, nor a
+      // 히든도어 off a 목상 / 떡가베 wall.
       if (
         step &&
         stepDoorError({ ...draftRef.current, ...step.door }, { ...event.node, ...step.wall })
       )
         return
+      if (hiddenTileError(draftRef.current, event.node)) return
       // Alt force-places over a collision (the draft stays red as a warning).
       if (!valid && event.nativeEvent?.altKey !== true) return
 

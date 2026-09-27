@@ -117,6 +117,13 @@ const BUILD_SECTIONS: BuildSection[] = [
       { id: 'double-door', label: 'Double Door', iconSrc: '/icons/door.webp', kind: 'door' },
       { id: 'sliding-door', label: 'Sliding Door', iconSrc: '/icons/door.webp', kind: 'door' },
       {
+        id: 'hidden-door',
+        label: '히든도어 (목상·떡가베 벽)',
+        iconSrc: '/images/room-library/doors/hidden.jpg',
+        kind: 'door',
+        defaults: { hidden: true },
+      },
+      {
         id: 'step-door-yerim',
         label: '예림·인쇼 스텝도어',
         iconSrc: '/images/room-library/doors/step.jpg',
@@ -390,8 +397,8 @@ export function BuildTab() {
   const wallPlacementMode = useEditor((s) => s.toolDefaults.wall?.placementMode)
   const mode = useEditor((s) => s.mode)
   const selectedItem = useEditor((s) => s.selectedItem)
-  const doorStepProduct = useEditor(
-    (s) => (s.toolDefaults.door as { stepProduct?: string } | null | undefined)?.stepProduct,
+  const doorDefaults = useEditor(
+    (s) => s.toolDefaults.door as { stepProduct?: string; hidden?: boolean } | null | undefined,
   )
   const follow = useLiquidLineToolOptions((s) => s.follow)
   const toggleFollow = useLiquidLineToolOptions((s) => s.toggleFollow)
@@ -432,9 +439,15 @@ export function BuildTab() {
     if (type.id === 'wall-arc') return mode === 'build' && activeTool === 'wall-arc'
     if (type.id === 'wall')
       return mode === 'build' && activeTool === 'wall' && wallPlacementMode !== 'rectangle-room'
-    if (type.kind === 'door' && (type.id === 'door' || type.defaults?.stepProduct))
+    if (
+      type.kind === 'door' &&
+      (type.id === 'door' || type.defaults?.stepProduct || type.defaults?.hidden)
+    )
       return (
-        mode === 'build' && activeTool === 'door' && doorStepProduct === type.defaults?.stepProduct
+        mode === 'build' &&
+        activeTool === 'door' &&
+        doorDefaults?.stepProduct === type.defaults?.stepProduct &&
+        !!doorDefaults?.hidden === !!type.defaults?.hidden
       )
     return mode === 'build' && activeTool === type.kind && type.id === type.kind
   }
