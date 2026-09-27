@@ -48,8 +48,8 @@ function ToolButton({
       className={cn(
         'flex size-9 items-center justify-center rounded-full transition-colors disabled:pointer-events-none disabled:opacity-30',
         active
-          ? 'bg-neutral-800 text-white dark:bg-neutral-100 dark:text-neutral-900'
-          : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-900/[0.06] dark:hover:bg-white/10 hover:text-neutral-900 dark:hover:text-white',
+          ? 'bg-sky-300/80 text-sky-800 dark:bg-sky-400/40 dark:text-sky-100'
+          : 'text-neutral-600 hover:bg-neutral-900/[0.06] hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-white',
       )}
       disabled={disabled}
       onClick={() => {
@@ -105,7 +105,8 @@ export function InzoiToolbar() {
   }
 
   return (
-    <div className="flex items-center rounded-full border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 px-1.5 py-1 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md">
+    <div className="flex items-center gap-2">
+      <div className="flex items-center rounded-full border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 px-1.5 py-1 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md">
       <Group>
         <ToolButton
           active={showGrid}
@@ -167,11 +168,6 @@ export function InzoiToolbar() {
       </Group>
       <Divider />
       <Group>
-        <ToolButton disabled={!canUndo} icon={Undo2} label="되돌리기 (⌘Z)" onClick={runUndo} />
-        <ToolButton disabled={!canRedo} icon={Redo2} label="다시하기 (⇧⌘Z)" onClick={runRedo} />
-      </Group>
-      <Divider />
-      <Group>
         <ToolButton icon={ArrowUpToLine} label="위층 (Page Up)" onClick={() => stepLevel(1)} />
         <ToolButton
           icon={ArrowDownToLine}
@@ -196,6 +192,11 @@ export function InzoiToolbar() {
           />
         )}
       </Group>
+    </div>
+      <div className="flex items-center rounded-full border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 px-1.5 py-1 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md">
+        <ToolButton disabled={!canUndo} icon={Undo2} label="되돌리기 (⌘Z)" onClick={runUndo} />
+        <ToolButton disabled={!canRedo} icon={Redo2} label="다시하기 (⇧⌘Z)" onClick={runRedo} />
+      </div>
     </div>
   )
 }

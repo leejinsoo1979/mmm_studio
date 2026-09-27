@@ -62,52 +62,67 @@ export function EditorHeader({ sceneId, sceneName, onRename }: EditorHeaderProps
   // inZOI "‹ Go Back | Customize Architecture": a slim row on top of the
   // floating build panel instead of a full-width web header.
   return (
-    <header className="flex h-11 shrink-0 items-center gap-1 border-black/5 border-b px-2 dark:border-white/10">
-      <Link
-        aria-label="대시보드로 돌아가기"
-        className="flex h-8 shrink-0 items-center rounded-md px-1 text-neutral-600 dark:text-neutral-300 text-xs hover:bg-neutral-100 dark:hover:bg-white/10 hover:text-neutral-900 dark:hover:text-white"
-        href="/dashboard"
-        title="대시보드"
+    <>
+      <header className="flex h-11 items-center gap-2">
+        <Link
+          aria-label="대시보드로 돌아가기"
+          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/90 text-neutral-700 shadow-[0_2px_10px_rgba(0,0,0,0.15)] ring-1 ring-black/5 transition-colors hover:bg-white hover:text-neutral-900 dark:bg-neutral-900/90 dark:text-neutral-200 dark:ring-white/10 dark:hover:bg-neutral-800"
+          href="/dashboard"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </Link>
+        <Link
+          className="shrink-0 font-medium text-[15px] text-neutral-800 [text-shadow:0_0_4px_rgba(255,255,255,0.95)] hover:underline"
+          href="/dashboard"
+        >
+          돌아가기
+        </Link>
+        <span className="h-4 w-px shrink-0 bg-neutral-500/60" />
+        <input
+          aria-label="프로젝트 이름"
+          className="h-8 w-44 rounded-md border border-transparent bg-transparent px-1.5 font-medium text-[15px] text-neutral-800 outline-none transition [text-shadow:0_0_4px_rgba(255,255,255,0.95)] hover:border-black/10 focus:border-black/15 focus:bg-white/90 disabled:opacity-60"
+          disabled={isSaving}
+          maxLength={200}
+          onBlur={() => void commitName()}
+          onChange={(event) => setDraftName(event.target.value)}
+          onKeyDown={(event) => {
+            event.stopPropagation()
+            if (event.key === 'Enter') event.currentTarget.blur()
+            if (event.key === 'Escape') {
+              setDraftName(sceneName)
+              event.currentTarget.blur()
+            }
+          }}
+          ref={inputRef}
+          value={draftName}
+        />
+      </header>
+      {/* inZOI's 소지금 card: a strip under the build panel for the project actions. */}
+      <div
+        className="fixed bottom-3 left-3 z-40 flex h-[52px] items-center gap-2 rounded-2xl bg-white/80 px-3 shadow-[0_8px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5 backdrop-blur-xl dark:bg-neutral-900/80 dark:ring-white/10"
+        style={{ width: 'calc(var(--viewer-left-inset, 0px) - 12px)' }}
       >
-        <ChevronLeft className="h-4 w-4" />
-      </Link>
-      <input
-        aria-label="프로젝트 이름"
-        className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 font-semibold text-[13px] text-neutral-800 dark:text-neutral-100 outline-none transition hover:border-border/60 focus:border-border focus:bg-white disabled:opacity-60"
-        disabled={isSaving}
-        maxLength={200}
-        onBlur={() => void commitName()}
-        onChange={(event) => setDraftName(event.target.value)}
-        onKeyDown={(event) => {
-          event.stopPropagation()
-          if (event.key === 'Enter') event.currentTarget.blur()
-          if (event.key === 'Escape') {
-            setDraftName(sceneName)
-            event.currentTarget.blur()
-          }
-        }}
-        ref={inputRef}
-        value={draftName}
-      />
-      <button
-        aria-label="시점 저장"
-        className="flex size-8 shrink-0 items-center justify-center rounded-md text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-white/10 hover:text-neutral-900 dark:hover:text-white"
-        onClick={saveCamera}
-        title={`시점 저장 (저장된 시점 ${experience.cameras.length}개)`}
-        type="button"
-      >
-        <Camera className="h-4 w-4" />
-      </button>
-      <button
-        aria-label={uiTheme === 'dark' ? '밝은 화면' : '어두운 화면'}
-        className="flex size-8 shrink-0 items-center justify-center rounded-md text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-white/10 hover:text-neutral-900 dark:hover:text-white"
-        onClick={toggleUiTheme}
-        title={uiTheme === 'dark' ? '밝은 화면으로' : '어두운 화면으로'}
-        type="button"
-      >
-        {uiTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-      </button>
-      <ExportCenter sceneId={sceneId} sceneName={sceneName} />
-    </header>
+        <span className="mr-auto text-muted-foreground text-xs">프로젝트</span>
+        <button
+          aria-label="시점 저장"
+          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/90 text-neutral-700 shadow-[0_2px_10px_rgba(0,0,0,0.15)] ring-1 ring-black/5 transition-colors hover:bg-white hover:text-neutral-900 dark:bg-neutral-900/90 dark:text-neutral-200 dark:ring-white/10 dark:hover:bg-neutral-800"
+          onClick={saveCamera}
+          title={`시점 저장 (저장된 시점 ${experience.cameras.length}개)`}
+          type="button"
+        >
+          <Camera className="h-4 w-4" />
+        </button>
+        <button
+          aria-label={uiTheme === 'dark' ? '밝은 화면' : '어두운 화면'}
+          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/90 text-neutral-700 shadow-[0_2px_10px_rgba(0,0,0,0.15)] ring-1 ring-black/5 transition-colors hover:bg-white hover:text-neutral-900 dark:bg-neutral-900/90 dark:text-neutral-200 dark:ring-white/10 dark:hover:bg-neutral-800"
+          onClick={toggleUiTheme}
+          title={uiTheme === 'dark' ? '밝은 화면으로' : '어두운 화면으로'}
+          type="button"
+        >
+          {uiTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        </button>
+        <ExportCenter sceneId={sceneId} sceneName={sceneName} />
+      </div>
+    </>
   )
 }

@@ -10,11 +10,15 @@ import { IconTabRow, type SidebarTab } from '../ui/sidebar/tab-bar'
 import { EditorLayoutMobile } from './editor-layout-mobile'
 
 const SIDEBAR_MIN_WIDTH = 300
-const SIDEBAR_DEFAULT_WIDTH = 304
+const SIDEBAR_DEFAULT_WIDTH = 340
 const SIDEBAR_MAX_WIDTH = 800
 const SIDEBAR_COLLAPSE_THRESHOLD = 220
 /** inZOI: the build panel floats over the full-screen scene, inset by this much. */
 const PANEL_MARGIN = 12
+/** The panel starts below the "‹ 돌아가기 | 프로젝트" title row. */
+const PANEL_TOP = 64
+/** Room left under the panel for the navbar's bottom card (inZOI's 소지금). */
+const PANEL_BOTTOM = 72
 
 // ── Left column: resizable panel with tab bar ────────────────────────────────
 
@@ -171,13 +175,19 @@ function RightColumn({
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden">
       {/* Viewer toolbar */}
-      {(toolbarLeft || toolbarRight) && (
+      {/* inZOI top row: the tool bar sits centred (ActionMenu), view controls
+          at the right; the 3D / 2D switch moves to the bottom-left corner. */}
+      {toolbarRight && (
+        <div className="pointer-events-auto absolute top-3 right-3 z-20 flex h-11 items-center gap-2">
+          {toolbarRight}
+        </div>
+      )}
+      {toolbarLeft && (
         <div
-          className="pointer-events-none absolute top-3 right-3 z-20 flex items-center justify-between gap-2"
+          className="pointer-events-auto absolute bottom-5 z-20 flex items-center gap-2"
           style={{ left: 'calc(var(--viewer-left-inset, 0px) + 12px)' }}
         >
-          <div className="pointer-events-auto flex items-center gap-2">{toolbarLeft}</div>
-          <div className="pointer-events-auto flex items-center gap-2">{toolbarRight}</div>
+          {toolbarLeft}
         </div>
       )}
       {/* Canvas area */}
@@ -267,17 +277,24 @@ export function EditorLayoutV2({
           {viewerContent}
         </RightColumn>
       </div>
+      {showPanel && navbarSlot && (
+        <div
+          className="absolute z-40 flex h-11 items-center"
+          style={{ top: PANEL_MARGIN, left: PANEL_MARGIN }}
+        >
+          {navbarSlot}
+        </div>
+      )}
       {showPanel && (
         <div
-          className="absolute z-40 flex flex-col overflow-hidden rounded-2xl bg-white/75 shadow-[0_8px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5 backdrop-blur-xl dark:bg-neutral-900/75 dark:ring-white/10"
+          className="absolute z-40 flex flex-col overflow-hidden rounded-2xl bg-white/80 shadow-[0_8px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5 backdrop-blur-xl dark:bg-neutral-900/80 dark:ring-white/10"
           style={{
-            top: PANEL_MARGIN,
-            bottom: sidebarCollapsed ? undefined : PANEL_MARGIN,
+            top: PANEL_TOP,
+            bottom: sidebarCollapsed ? undefined : navbarSlot ? PANEL_BOTTOM : PANEL_MARGIN,
             left: PANEL_MARGIN,
             width: leftInset - PANEL_MARGIN,
           }}
         >
-          {navbarSlot}
           <LeftColumn
             renderTabContent={renderTabContent}
             sidebarOverlay={sidebarOverlay}

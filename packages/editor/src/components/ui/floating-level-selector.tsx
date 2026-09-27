@@ -511,7 +511,7 @@ export function FloatingLevelSelector() {
   return (
     <>
       <div
-        className="pointer-events-auto absolute top-14 z-20"
+        className="pointer-events-auto absolute top-4 z-20"
         style={{ left: 'calc(var(--viewer-left-inset, 0px) + 12px)' }}
       >
         <div className="relative">

@@ -109,7 +109,7 @@ export function IconRail({ tabs, activeTab, collapsed, onIconClick }: IconRailPr
 export function IconTabRow({ tabs, activeTab, collapsed, onIconClick }: IconRailProps) {
   return (
     <TooltipProvider delayDuration={0} disableHoverableContent>
-      <div className="flex h-10 shrink-0 items-stretch border-black/5 border-b px-1 dark:border-white/10">
+      <div className="flex h-12 shrink-0 items-center border-black/5 border-b px-1 dark:border-white/10">
         {tabs.map((tab) => {
           const showActive = activeTab === tab.id && !collapsed
           return (
@@ -118,12 +118,7 @@ export function IconTabRow({ tabs, activeTab, collapsed, onIconClick }: IconRail
                 <button
                   aria-label={tab.label}
                   aria-pressed={showActive}
-                  className={cn(
-                    'relative flex min-w-0 flex-1 items-center justify-center text-muted-foreground transition-colors [&_img]:h-[18px] [&_img]:w-[18px] [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.9]',
-                    showActive
-                      ? 'text-foreground after:absolute after:inset-x-1.5 after:bottom-0 after:h-0.5 after:rounded-full after:bg-foreground'
-                      : 'hover:text-foreground [&_img]:opacity-55 [&_img]:grayscale hover:[&_img]:opacity-100 hover:[&_img]:grayscale-0',
-                  )}
+                  className="group flex min-w-0 flex-1 items-center justify-center"
                   onClick={() => {
                     triggerSFX('sfx:menu-click')
                     onIconClick(tab.id)
@@ -131,7 +126,16 @@ export function IconTabRow({ tabs, activeTab, collapsed, onIconClick }: IconRail
                   onMouseEnter={() => triggerSFX('sfx:menu-hover')}
                   type="button"
                 >
-                  {tab.icon ?? tab.label.charAt(0)}
+                  <span
+                    className={cn(
+                      'flex size-8 items-center justify-center rounded-full transition-colors [&_img]:h-[18px] [&_img]:w-[18px] [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.9]',
+                      showActive
+                        ? 'bg-sky-300/80 text-sky-800 dark:bg-sky-400/40 dark:text-sky-100'
+                        : 'text-muted-foreground group-hover:bg-foreground/8 group-hover:text-foreground [&_img]:opacity-55 [&_img]:grayscale group-hover:[&_img]:opacity-100 group-hover:[&_img]:grayscale-0',
+                    )}
+                  >
+                    {tab.icon ?? tab.label.charAt(0)}
+                  </span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom">{tab.label}</TooltipContent>

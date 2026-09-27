@@ -432,10 +432,10 @@ function ViewerCanvasControlsHint({
   if (hasSelection) return null
 
   return (
-    <div className="pointer-events-none absolute top-14 right-3 z-40">
+    <div className="pointer-events-none absolute top-16 right-4 z-40">
       <section
         aria-label="카메라 조작 안내"
-        className="group pointer-events-auto relative flex flex-col gap-1.5 rounded-xl bg-white/90 dark:bg-neutral-900/90 px-3 py-2 text-neutral-700 dark:text-neutral-200 shadow-[0_4px_16px_rgba(0,0,0,0.18)] backdrop-blur-md"
+        className="group pointer-events-auto relative flex flex-col items-end gap-1.5 text-neutral-700 [text-shadow:0_0_4px_rgba(255,255,255,0.95)]"
       >
         {hints.map((hint) => (
           <div className="flex items-center gap-2" key={hint.action}>

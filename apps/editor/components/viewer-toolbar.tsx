@@ -50,10 +50,10 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from './toolbar-tooltip'
 
 const TOOLBAR_CONTAINER =
-  'inline-flex h-9 items-stretch overflow-hidden rounded-full border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 px-1 text-neutral-700 dark:text-neutral-200 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md'
+  'inline-flex h-11 items-center gap-0.5 overflow-hidden rounded-full border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 px-1.5 text-neutral-700 dark:text-neutral-200 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md'
 
 const TOOLBAR_BTN =
-  'flex w-9 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-foreground/8 hover:text-foreground dark:text-neutral-300'
+  'flex size-9 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-foreground/8 hover:text-foreground dark:text-neutral-300'
 
 function requestWalkthroughPointerLock() {
   const canvas = document.querySelector<HTMLCanvasElement>('[data-pascal-viewer-3d] canvas')
@@ -169,10 +169,10 @@ function ViewModeControl() {
               aria-label={mode.label}
               aria-pressed={isActive}
               className={cn(
-                'flex items-center justify-center gap-1.5 px-2.5 font-medium text-xs transition-colors',
+                'flex h-9 items-center justify-center gap-1.5 rounded-full px-3 font-medium text-xs transition-colors',
                 isActive
-                  ? 'bg-foreground/10 text-foreground'
-                  : 'text-muted-foreground/70 hover:bg-foreground/8 hover:text-muted-foreground',
+                  ? 'bg-sky-300/80 text-sky-800 dark:bg-sky-400/40 dark:text-sky-100'
+                  : 'text-neutral-600 hover:bg-foreground/8 hover:text-foreground dark:text-neutral-300',
               )}
               onClick={() => setViewMode(mode.id)}
               type="button"
@@ -671,7 +671,7 @@ function TimeOfDaySlider() {
   const mm = Math.round((sunTime - hh) * 60)
   return (
     <div
-      className="flex h-9 items-center gap-2 rounded-full border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 px-3 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md"
+      className="flex h-11 items-center gap-2 px-1"
       onKeyDown={(event) => event.stopPropagation()}
       title={`시간대 ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`}
     >
@@ -697,9 +697,9 @@ export function CommunityViewerToolbarRight() {
       <div className={TOOLBAR_CONTAINER}>
         <LevelModeToggle />
         <WallModeToggle />
-        <div className="my-1.5 w-px bg-border/50" />
+        <div className="mx-1 h-5 w-px bg-neutral-300/70 dark:bg-white/15" />
         <DisplayMenu />
-        <div className="my-1.5 w-px bg-border/50" />
+        <div className="mx-1 h-5 w-px bg-neutral-300/70 dark:bg-white/15" />
         <WalkthroughButton />
         <PreviewButton />
       </div>

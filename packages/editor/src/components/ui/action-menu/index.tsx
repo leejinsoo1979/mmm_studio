@@ -16,6 +16,11 @@ import { SecondaryToggles } from './view-toggles'
 // just above that strip instead of inside it.
 const MOBILE_BOTTOM_OFFSET = 24
 
+// Centre of the free strip between the floating build panel and the view
+// controls at the top right, so the bar never runs under either.
+const TOP_RIGHT_RESERVE = '300px'
+const DESKTOP_CENTER = `calc(var(--viewer-left-inset, 0px) + (100% - var(--viewer-left-inset, 0px) - ${TOP_RIGHT_RESERVE}) / 2)`
+
 export function ActionMenu({ className }: { className?: string }) {
   const isMobile = useIsMobile()
   const hasSelectionOnMobile = useViewer((s) => isMobile && s.selection.selectedIds.length > 0)
@@ -41,15 +46,15 @@ export function ActionMenu({ className }: { className?: string }) {
     <TooltipProvider>
       <motion.div
         className={cn(
-          'left-1/2 z-50 -translate-x-1/2',
+          'z-50 -translate-x-1/2',
           // inZOI keeps the build tools in a bar at the top centre.
-          isMobile ? 'absolute origin-bottom scale-90' : 'fixed top-14',
+          isMobile ? 'absolute left-1/2 origin-bottom scale-90' : 'fixed top-3',
           isMobile && 'rounded-2xl border border-border bg-background/90 shadow-2xl backdrop-blur-md',
           'transition-colors duration-200 ease-out',
           className,
         )}
         layout
-        style={isMobile ? { bottom: MOBILE_BOTTOM_OFFSET } : undefined}
+        style={isMobile ? { bottom: MOBILE_BOTTOM_OFFSET } : { left: DESKTOP_CENTER }}
         transition={transition}
       >
         {isMobile ? (

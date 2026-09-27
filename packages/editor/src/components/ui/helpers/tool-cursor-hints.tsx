@@ -66,7 +66,7 @@ export function ToolCursorHints({ hints }: { hints: ContextualShortcutHint[] }) 
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none fixed top-0 left-0 z-40 flex-col gap-1 rounded-lg bg-white/90 dark:bg-neutral-900/90 px-2.5 py-1.5 text-neutral-700 dark:text-neutral-200 shadow-[0_4px_14px_rgba(0,0,0,0.18)] backdrop-blur-sm"
+      className="pointer-events-none fixed top-0 left-0 z-40 flex-col gap-1 text-neutral-800 [text-shadow:0_0_4px_rgba(255,255,255,0.95),0_0_2px_rgba(255,255,255,0.95)]"
       ref={ref}
       style={{ display: 'none' }}
     >

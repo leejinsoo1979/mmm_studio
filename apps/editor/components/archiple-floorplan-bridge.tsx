@@ -166,7 +166,7 @@ export function ArchipleFloorplanBridge() {
   return (
     <div className="pointer-events-none absolute inset-0">
       <button
-        style={{ left: 'calc(var(--viewer-left-inset, 0px) + 20px)' }}
+        style={{ left: 'calc(var(--viewer-left-inset, 0px) + 236px)' }}
         className={`pointer-events-auto absolute bottom-5 z-50 rounded-full border px-3 py-2 font-semibold text-xs shadow-xl backdrop-blur transition ${
           open
             ? 'border-[#7567ff]/70 bg-[#7567ff] text-white hover:bg-[#6658f2]'
