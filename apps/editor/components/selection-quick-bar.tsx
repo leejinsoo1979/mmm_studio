@@ -3,6 +3,7 @@
 import {
   type AnyNode,
   type AnyNodeId,
+  emitter,
   getMaterialsForCategory,
   nodeRegistry,
   sceneRegistry,
@@ -19,7 +20,7 @@ import {
 } from '@pascal-app/editor'
 import { type CabinetNode, resolveCabinetNode } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
-import { Copy, RotateCcw, RotateCw, Trash2 } from 'lucide-react'
+import { Copy, Focus, RotateCcw, RotateCw, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 /**
@@ -246,6 +247,15 @@ export function SelectionQuickBar() {
           )}
           <button
             className={iconButton}
+            onClick={() => emitter.emit('camera-controls:focus', { nodeId: node.id })}
+            title="카메라를 이 오브젝트 중심으로 (더블클릭)"
+            type="button"
+          >
+            <Focus className="h-4 w-4" />
+            시점
+          </button>
+          <button
+            className={iconButton}
             disabled={def.capabilities.duplicable === false}
             onClick={() => duplicate(node)}
             title="복제"
@@ -267,8 +277,8 @@ export function SelectionQuickBar() {
         </div>
       </div>
       <div className="text-center text-[10px] text-muted-foreground">
-        {turnable ? 'R / T · 우클릭(배치 중) 45° 회전 · Alt + R / T 5° · ' : ''}Delete 삭제 · Esc
-        선택 해제
+        {turnable ? '클릭: 집기 · R / T · 우클릭 45° · Alt + R / T 5° · G 격자 · ' : ''}Delete 삭제
+        · Esc 선택 해제
       </div>
     </div>
   )

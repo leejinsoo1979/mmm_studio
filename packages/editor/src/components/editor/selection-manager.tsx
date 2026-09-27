@@ -131,6 +131,14 @@ interface SelectionStrategy {
 }
 
 const DIRECT_DRAG_THRESHOLD_PX = 4
+
+// inZOI-style furniture handling: the first click on a piece of furniture
+// picks it up (no select-first click). Dropping it again with a click on the
+// same spot (the pointer never really moved) leaves it where it was and just
+// selects it, so "click to select" can't nudge it onto the grid.
+const PICK_UP_ON_FIRST_CLICK_KINDS = new Set(['item', 'cabinet', 'countertop'])
+const IN_PLACE_DROP_PX = 6
+let inPlacePickup: { id: AnyNodeId; x: number; y: number } | null = null
 const DIRECT_ROTATE_EPSILON = 1e-6
 const DIRECT_ROTATE_RADIANS_PER_PIXEL = Math.PI / 180
 
@@ -1131,6 +1139,38 @@ export const SelectionManager = () => {
     }
   }, [isCurveReshape, mode, movingNode, setHoverHighlightMode])
 
+  // A pick-up dropped with a click on the spot it was picked up from cancels
+  // the move and selects the piece where it stood (see `inPlacePickup`).
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      if (!inPlacePickup) return
+      if (pointerDistancePx(event, inPlacePickup.x, inPlacePickup.y) > IN_PLACE_DROP_PX) {
+        inPlacePickup = null
+      }
+    }
+    const onPointerUp = (event: PointerEvent) => {
+      const pickup = inPlacePickup
+      if (!pickup || event.button !== 0) return
+      if (getMovingNode()?.id !== pickup.id) return
+      inPlacePickup = null
+      event.stopPropagation()
+      swallowNextClick()
+      emitter.emit('tool:cancel')
+      // A quick double click can land before the move tool has mounted to
+      // hear the cancel — end the move directly as well.
+      if (getMovingNode()) useEditor.getState().setMovingNode(null)
+      requestAnimationFrame(() => {
+        useViewer.getState().setSelection({ selectedIds: [pickup.id] })
+      })
+    }
+    window.addEventListener('pointermove', onPointerMove, true)
+    window.addEventListener('pointerup', onPointerUp, true)
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove, true)
+      window.removeEventListener('pointerup', onPointerUp, true)
+    }
+  }, [])
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Meta') modifierKeysRef.current.meta = true
@@ -1525,7 +1565,20 @@ export const SelectionManager = () => {
         const hasModifier = nativeEvent.shiftKey || isCommandModifier(nativeEvent)
         const isAlreadySole =
           selectedIdsBeforeRouting.length === 1 && selectedIdsBeforeRouting[0] === nodeToSelect.id
-        if (!hasModifier && isAlreadySole && !getMovingNode() && canDirectMoveNode(nodeToSelect)) {
+        const picksUpAtOnce = PICK_UP_ON_FIRST_CLICK_KINDS.has(nodeToSelect.type)
+        if (
+          !hasModifier &&
+          (isAlreadySole || picksUpAtOnce) &&
+          !getMovingNode() &&
+          canDirectMoveNode(nodeToSelect)
+        ) {
+          inPlacePickup = picksUpAtOnce
+            ? {
+                id: nodeToSelect.id as AnyNodeId,
+                x: nativeEvent.clientX,
+                y: nativeEvent.clientY,
+              }
+            : null
           sfxEmitter.emit('sfx:item-pick')
           useEditor.getState().setMovingNode(nodeToSelect as never)
           useViewer.getState().setSelection({ selectedIds: [] })
@@ -1643,6 +1696,13 @@ export const SelectionManager = () => {
 
     const onDoubleClick = (event: NodeEvent) => {
       let node = resolveSelectModeNodeTarget(event)
+
+      // inZOI: double-clicking furniture brings the camera round to it (the
+      // two clicks pick it up and drop it in place, leaving it selected).
+      if (PICK_UP_ON_FIRST_CLICK_KINDS.has(node.type)) {
+        emitter.emit('camera-controls:focus', { nodeId: node.id })
+        return
+      }
 
       const currentPhase = useEditor.getState().phase
 

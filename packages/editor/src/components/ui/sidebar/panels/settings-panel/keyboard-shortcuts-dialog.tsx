@@ -51,6 +51,7 @@ const SHORTCUT_CATEGORIES: ShortcutCategory[] = [
       { keys: ['Page Down'], action: '아래층으로 이동' },
       { keys: ['Home'], action: '벽 올리기 (낮게 → 컷어웨이 → 전체 높이)' },
       { keys: ['End'], action: '벽 내리기 (전체 높이 → 컷어웨이 → 낮게)' },
+      { keys: ['G'], action: '격자 켜기/끄기 (자유 배치)' },
       { keys: ['Cmd/Ctrl', 'B'], action: 'Toggle sidebar' },
     ],
   },

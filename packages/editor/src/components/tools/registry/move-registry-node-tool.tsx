@@ -613,7 +613,9 @@ export function MoveRegistryNodeTool({ node }: { node: AnyNode }) {
       }
 
       useAlignmentGuides.getState().clear()
-      if (isNew && committed) {
+      // A dropped node stays selected (like the item mover), so its panel
+      // and the settings bar are right there after the move.
+      if (committed) {
         useViewer.getState().setSelection({ selectedIds: [committedId] })
       }
 

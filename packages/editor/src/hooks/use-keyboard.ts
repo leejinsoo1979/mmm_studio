@@ -10,6 +10,7 @@ import {
   pasteEditorClipboardToLevel,
 } from '../lib/scene-clipboard'
 import { emitDeleteSFX, sfxEmitter } from '../lib/sfx-bus'
+import { defaultSnappingModeFor, type SnapContext, type SnappingMode } from '../lib/snapping-mode'
 import { toggleWindowOpenState } from '../lib/window-interaction'
 import useEditor, { getActiveContinuationContext, getActiveSnapContext } from '../store/use-editor'
 import useInteractionScope, { getMovingNode } from '../store/use-interaction-scope'
@@ -99,6 +100,8 @@ export const useKeyboard = ({
     // and is cleared the instant any other key fires, so chords like Ctrl+Z /
     // Ctrl+C never cycle.
     let ctrlTapClean = false
+    // G turns snapping off; the next G restores the mode it replaced.
+    const snapModeBeforeGridOff: Partial<Record<SnapContext, SnappingMode>> = {}
     // While setting a wall / fence direction, Shift held down is the 90° lock,
     // so only a quick clean tap (no pointer travel, no click, no other key)
     // cycles the snapping mode — on release. Timed by the events' own
@@ -295,6 +298,21 @@ export const useKeyboard = ({
         useEditor.getState().setPhase('structure')
         useEditor.getState().setStructureLayer('elements')
         useEditor.getState().setMode('material-paint')
+      } else if ((e.key === 'g' || e.key === 'G') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        // inZOI: G toggles the grid — free placement on / off for the active
+        // snapping context (furniture when nothing is being placed).
+        e.preventDefault()
+        const context = getActiveSnapContext() ?? 'item'
+        const editor = useEditor.getState()
+        const current = editor.snappingModeByContext[context]
+        if (current !== 'off') snapModeBeforeGridOff[context] = current
+        editor.setSnappingMode(
+          context,
+          current === 'off'
+            ? (snapModeBeforeGridOff[context] ?? defaultSnappingModeFor(context))
+            : 'off',
+        )
+        sfxEmitter.emit('sfx:grid-snap')
       } else if (e.key === 'c' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
         if (isVersionPreviewMode) return
         e.preventDefault()
