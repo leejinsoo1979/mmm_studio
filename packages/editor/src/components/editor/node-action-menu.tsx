@@ -1,8 +1,8 @@
 'use client'
 
 import { Icon } from '@iconify/react'
-import { Copy, Move, Search, Spline, Trash2 } from 'lucide-react'
-import type { MouseEventHandler, PointerEventHandler } from 'react'
+import { Copy, Focus, Move, Paintbrush, RotateCw, Search, Spline, Trash2 } from 'lucide-react'
+import type { MouseEventHandler, PointerEventHandler, ReactNode } from 'react'
 
 type NodeActionMenuProps = {
   onFind?: MouseEventHandler<HTMLButtonElement>
@@ -11,12 +11,44 @@ type NodeActionMenuProps = {
   onDuplicate?: MouseEventHandler<HTMLButtonElement>
   onMove?: MouseEventHandler<HTMLButtonElement>
   onCurve?: MouseEventHandler<HTMLButtonElement>
+  onRotate?: MouseEventHandler<HTMLButtonElement>
+  onPaint?: MouseEventHandler<HTMLButtonElement>
+  onFocus?: MouseEventHandler<HTMLButtonElement>
   onPointerDown?: PointerEventHandler<HTMLDivElement>
   onPointerUp?: PointerEventHandler<HTMLDivElement>
   onPointerEnter?: PointerEventHandler<HTMLDivElement>
   onPointerLeave?: PointerEventHandler<HTMLDivElement>
 }
 
+function MenuButton({
+  label,
+  onClick,
+  danger,
+  children,
+}: {
+  label: string
+  onClick: MouseEventHandler<HTMLButtonElement>
+  danger?: boolean
+  children: ReactNode
+}) {
+  return (
+    <button
+      aria-label={label}
+      className={
+        danger
+          ? 'tooltip-trigger flex size-9 items-center justify-center rounded-full text-red-500 transition-colors hover:bg-red-50'
+          : 'tooltip-trigger flex size-9 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900'
+      }
+      onClick={onClick}
+      title={label}
+      type="button"
+    >
+      {children}
+    </button>
+  )
+}
+
+/** inZOI-style white pill of actions floating above the selected object. */
 export function NodeActionMenu({
   onFind,
   onAddHole,
@@ -24,6 +56,9 @@ export function NodeActionMenu({
   onDuplicate,
   onMove,
   onCurve,
+  onRotate,
+  onPaint,
+  onFocus,
   onPointerDown,
   onPointerUp,
   onPointerEnter,
@@ -31,77 +66,56 @@ export function NodeActionMenu({
 }: NodeActionMenuProps) {
   return (
     <div
-      className="pointer-events-auto flex items-center gap-1 rounded-lg border border-border bg-background/95 p-1 shadow-xl backdrop-blur-md"
+      className="pointer-events-auto flex items-center gap-0.5 rounded-full bg-white/95 px-1.5 py-1 shadow-[0_6px_24px_rgba(0,0,0,0.28)] backdrop-blur-md"
       onPointerDown={onPointerDown}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
       onPointerUp={onPointerUp}
     >
-      {onFind && (
-        <button
-          aria-label="Find in catalog"
-          className="tooltip-trigger rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={onFind}
-          title="Find in catalog"
-          type="button"
-        >
-          <Search className="h-4 w-4" />
-        </button>
-      )}
       {onMove && (
-        <button
-          aria-label="Move"
-          className="tooltip-trigger rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={onMove}
-          title="Move"
-          type="button"
-        >
-          <Move className="h-4 w-4" />
-        </button>
+        <MenuButton label="이동" onClick={onMove}>
+          <Move className="h-[18px] w-[18px]" />
+        </MenuButton>
+      )}
+      {onRotate && (
+        <MenuButton label="45° 회전 (R)" onClick={onRotate}>
+          <RotateCw className="h-[18px] w-[18px]" />
+        </MenuButton>
       )}
       {onCurve && (
-        <button
-          aria-label="Curve"
-          className="tooltip-trigger rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={onCurve}
-          title="Curve"
-          type="button"
-        >
-          <Spline className="h-4 w-4" />
-        </button>
+        <MenuButton label="곡선" onClick={onCurve}>
+          <Spline className="h-[18px] w-[18px]" />
+        </MenuButton>
+      )}
+      {onPaint && (
+        <MenuButton label="색상·재질" onClick={onPaint}>
+          <Paintbrush className="h-[18px] w-[18px]" />
+        </MenuButton>
       )}
       {onDuplicate && (
-        <button
-          aria-label="Duplicate"
-          className="tooltip-trigger rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={onDuplicate}
-          title="Duplicate"
-          type="button"
-        >
-          <Copy className="h-4 w-4" />
-        </button>
+        <MenuButton label="복제" onClick={onDuplicate}>
+          <Copy className="h-[18px] w-[18px]" />
+        </MenuButton>
       )}
       {onAddHole && (
-        <button
-          aria-label="Cut Out"
-          className="tooltip-trigger rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={onAddHole}
-          title="Cut Out"
-          type="button"
-        >
-          <Icon height={16} icon="carbon:cut-out" width={16} />
-        </button>
+        <MenuButton label="구멍 내기" onClick={onAddHole}>
+          <Icon height={18} icon="carbon:cut-out" width={18} />
+        </MenuButton>
+      )}
+      {onFocus && (
+        <MenuButton label="시점 이동 (더블클릭)" onClick={onFocus}>
+          <Focus className="h-[18px] w-[18px]" />
+        </MenuButton>
+      )}
+      {onFind && (
+        <MenuButton label="카탈로그에서 찾기" onClick={onFind}>
+          <Search className="h-[18px] w-[18px]" />
+        </MenuButton>
       )}
       {onDelete && (
-        <button
-          aria-label="Delete"
-          className="tooltip-trigger rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-          onClick={onDelete}
-          title="Delete"
-          type="button"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
+        <MenuButton danger label="삭제" onClick={onDelete}>
+          <Trash2 className="h-[18px] w-[18px]" />
+        </MenuButton>
       )}
     </div>
   )

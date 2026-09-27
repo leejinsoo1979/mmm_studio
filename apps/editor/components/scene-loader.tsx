@@ -60,9 +60,9 @@ import { BuildTab } from './build-tab'
 import { EditorHeader } from './editor-header'
 import { FurnitureTab } from './furniture-tab'
 import { LightingTab } from './lighting-tab'
-import { MaterialTab } from './material-tab'
+import { MaterialPalette } from './material-palette'
 import { MaterialSurfaceInspector } from './material-surface-inspector'
-import { SelectionQuickBar } from './selection-quick-bar'
+import { MaterialTab } from './material-tab'
 import { CommunityViewerToolbarLeft, CommunityViewerToolbarRight } from './viewer-toolbar'
 import { getStudioAuthHeaders } from '@/lib/auth-client'
 import { CATALOG_ROOM_TREE, withMyModelTag, withRoomTags } from '@/lib/catalog-rooms'
@@ -1139,7 +1139,7 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
         viewerBanner={
           <>
             <ArchipleFloorplanBridge />
-            <SelectionQuickBar />
+            <MaterialPalette />
           </>
         }
         viewerToolbarLeft={<CommunityViewerToolbarLeft />}

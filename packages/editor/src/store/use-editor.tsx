@@ -340,6 +340,11 @@ type EditorState = {
   // persisted — it's a per-mount capability the host registers.
   canFindNode: boolean
   setCanFindNode: (canFind: boolean) => void
+  // Embedder capability: which selected nodes the host can recolour. Gates the
+  // action menu's paint button; the editor emits `selection:paint-node` and
+  // the host opens its own material palette.
+  canPaintNode: ((node: AnyNode) => boolean) | null
+  setCanPaintNode: (canPaint: ((node: AnyNode) => boolean) | null) => void
   selectedReferenceId: string | null
   setSelectedReferenceId: (id: string | null) => void
   // Guide id with an in-flight reference-scale measurement (line drawing or
@@ -1008,6 +1013,8 @@ const useEditor = create<EditorState>()(
       setPaintHover: (info) => set({ paintHover: info }),
       canFindNode: false,
       setCanFindNode: (canFind) => set({ canFindNode: canFind }),
+      canPaintNode: null,
+      setCanPaintNode: (canPaint) => set({ canPaintNode: canPaint }),
       selectedReferenceId: null,
       setSelectedReferenceId: (id) => set({ selectedReferenceId: id }),
       referenceScaleActiveGuideId: null,

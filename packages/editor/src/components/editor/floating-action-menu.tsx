@@ -50,6 +50,7 @@ import useInteractionScope, {
   useEndpointReshape,
   useIsCurveReshape,
 } from '../../store/use-interaction-scope'
+import { turnRotation } from '../tools/item/placement-math'
 import { formatMeasurement, MeasurementPill } from './measurement-pill'
 import { NodeActionMenu } from './node-action-menu'
 
@@ -91,7 +92,7 @@ const HOLE_TYPES = ['slab', 'ceiling']
 // clamped on both ends so it stays readable when zoomed way out and doesn't
 // dominate the screen when zoomed in close. Reference values are picked so
 // scale = 1 lands near the editor's default framing.
-const MIN_MENU_SCALE = 0.5
+const MIN_MENU_SCALE = 0.8
 // Cap at 1 so zooming in doesn't grow the menu past its default pixel size —
 // only zoom-out shrinks it (down to MIN_MENU_SCALE).
 const MAX_MENU_SCALE = 1
@@ -220,6 +221,7 @@ export function FloatingActionMenu() {
   const mode = useEditor((s) => s.mode)
   const isFloorplanHovered = useEditor((s) => s.isFloorplanHovered)
   const canFindNode = useEditor((s) => s.canFindNode)
+  const canPaintNode = useEditor((s) => s.canPaintNode)
   const endpointReshape = useEndpointReshape()
   const isCurveReshape = useIsCurveReshape()
   const setMovingNode = useEditor((s) => s.setMovingNode)
@@ -670,6 +672,49 @@ export function FloatingActionMenu() {
     [node],
   )
 
+  const canRotate =
+    !!node &&
+    node.type !== 'door' &&
+    node.type !== 'window' &&
+    !nodeRegistry.get(node.type)?.keyboardActions?.r &&
+    (typeof (node as { rotation?: unknown }).rotation === 'number' ||
+      Array.isArray((node as { rotation?: unknown }).rotation))
+
+  // Same 45° step as the R key.
+  const handleRotate = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      const rotation = (node as { rotation?: unknown } | null)?.rotation
+      if (!node) return
+      if (typeof rotation === 'number') {
+        updateNode(node.id, { rotation: turnRotation(rotation, 1, false) } as Partial<AnyNode>)
+      } else if (Array.isArray(rotation)) {
+        updateNode(node.id, {
+          rotation: [rotation[0], turnRotation(rotation[1], 1, false), rotation[2]],
+        } as Partial<AnyNode>)
+      } else return
+      sfxEmitter.emit('sfx:item-rotate')
+    },
+    [node, updateNode],
+  )
+
+  const handleFocus = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (node) emitter.emit('camera-controls:focus', { nodeId: node.id })
+    },
+    [node],
+  )
+
+  // The host owns the palette; the editor only signals which node to paint.
+  const handlePaint = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (node) emitter.emit('selection:paint-node' as never, node as never)
+    },
+    [node],
+  )
+
   if (
     !(selectedId && node && isValidType && !isFloorplanHovered && mode !== 'delete') ||
     endpointReshape ||
@@ -707,6 +752,9 @@ export function FloatingActionMenu() {
                 node && isRegistryMovable(node.type) ? handleMove : undefined
               }
               onDelete={handleDelete}
+              onFocus={handleFocus}
+              onPaint={node && canPaintNode?.(node) ? handlePaint : undefined}
+              onRotate={canRotate ? handleRotate : undefined}
               onDuplicate={
                 node &&
                 node.type !== 'spawn' &&

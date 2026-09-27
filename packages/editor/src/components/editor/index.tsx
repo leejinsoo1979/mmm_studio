@@ -48,7 +48,6 @@ import { HelperManager } from '../ui/helpers/helper-manager'
 import { PanelManager } from '../ui/panels/panel-manager'
 import { ErrorBoundary } from '../ui/primitives/error-boundary'
 import { useSidebarStore } from '../ui/primitives/sidebar'
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/primitives/tooltip'
 import { SceneLoader } from '../ui/scene-loader'
 import { AppSidebar } from '../ui/sidebar/app-sidebar'
 import type { ExtraPanel } from '../ui/sidebar/icon-rail'
@@ -347,54 +346,25 @@ function SelectionPersistenceManager({ enabled }: { enabled: boolean }) {
   return null
 }
 
-type ShortcutKey = {
-  value: string
-}
+type MouseButton = 'left' | 'right' | 'wheel'
 
 type CameraControlHint = {
+  button: MouseButton
+  gesture: string
   action: string
-  keys: ShortcutKey[]
-  alternativeKeys?: ShortcutKey[]
 }
 
 const EDITOR_CAMERA_CONTROL_HINTS: CameraControlHint[] = [
-  {
-    action: 'Pan',
-    keys: [{ value: 'Space' }, { value: 'Left click' }],
-    alternativeKeys: [{ value: 'Middle click' }],
-  },
-  { action: 'Rotate', keys: [{ value: 'Right click' }] },
-  { action: 'Zoom', keys: [{ value: 'Scroll' }] },
+  { button: 'right', gesture: '드래그', action: '카메라 회전' },
+  { button: 'wheel', gesture: '드래그', action: '화면 이동 (Space + 좌클릭, W A S D)' },
+  { button: 'wheel', gesture: '스크롤', action: '확대 · 축소' },
 ]
 
 const PREVIEW_CAMERA_CONTROL_HINTS: CameraControlHint[] = [
-  { action: 'Pan', keys: [{ value: 'Left click' }] },
-  { action: 'Rotate', keys: [{ value: 'Right click' }] },
-  { action: 'Zoom', keys: [{ value: 'Scroll' }] },
+  { button: 'left', gesture: '드래그', action: '화면 이동' },
+  { button: 'right', gesture: '드래그', action: '카메라 회전' },
+  { button: 'wheel', gesture: '스크롤', action: '확대 · 축소' },
 ]
-
-const CAMERA_SHORTCUT_KEY_META: Record<string, { icon?: string; label: string; text?: string }> = {
-  'Left click': {
-    icon: 'ph:mouse-left-click-fill',
-    label: 'Left click',
-  },
-  'Middle click': {
-    icon: 'qlementine-icons:mouse-middle-button-16',
-    label: 'Middle click',
-  },
-  'Right click': {
-    icon: 'ph:mouse-right-click-fill',
-    label: 'Right click',
-  },
-  Scroll: {
-    icon: 'qlementine-icons:mouse-middle-button-16',
-    label: 'Scroll wheel',
-  },
-  Space: {
-    icon: 'lucide:space',
-    label: 'Space',
-  },
-}
 
 function readCameraControlsHintDismissed(): boolean {
   if (typeof window === 'undefined') {
@@ -423,62 +393,30 @@ function writeCameraControlsHintDismissed(dismissed: boolean) {
   } catch {}
 }
 
-function InlineShortcutKey({ shortcutKey }: { shortcutKey: ShortcutKey }) {
-  const meta = CAMERA_SHORTCUT_KEY_META[shortcutKey.value]
-
-  if (meta?.icon) {
-    return (
-      <span
-        aria-label={meta.label}
-        className="inline-flex items-center text-foreground/90"
-        role="img"
-        title={meta.label}
-      >
-        <Icon aria-hidden="true" color="currentColor" height={16} icon={meta.icon} width={16} />
-        <span className="sr-only">{meta.label}</span>
-      </span>
-    )
-  }
-
+/** A mouse outline with the button in use filled in. */
+function MouseIcon({ button }: { button: MouseButton }) {
+  const fill = 'currentColor'
   return (
-    <span className="font-medium text-[11px] text-foreground/90">
-      {meta?.text ?? shortcutKey.value}
-    </span>
+    <svg aria-hidden="true" className="h-[22px] w-4 shrink-0" fill="none" viewBox="0 0 16 22">
+      <rect height="20" rx="7" stroke="currentColor" strokeWidth="1.5" width="14" x="1" y="1" />
+      <path d="M8 1v8M1.5 9h13" stroke="currentColor" strokeWidth="1.2" />
+      {button === 'left' ? <path d="M8 1.75H7A5.25 5.25 0 0 0 1.75 7v2H8z" fill={fill} /> : null}
+      {button === 'right' ? <path d="M8 1.75h1A5.25 5.25 0 0 1 14.25 7v2H8z" fill={fill} /> : null}
+      <rect
+        fill={button === 'wheel' ? fill : 'none'}
+        height="4.5"
+        rx="1.25"
+        stroke="currentColor"
+        strokeWidth="1"
+        width="2.5"
+        x="6.75"
+        y="3.5"
+      />
+    </svg>
   )
 }
 
-function ShortcutSequence({ keys }: { keys: ShortcutKey[] }) {
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      {keys.map((key, index) => (
-        <div className="flex items-center gap-1" key={`${key.value}-${index}`}>
-          {index > 0 ? <span className="text-[10px] text-muted-foreground/70">+</span> : null}
-          <InlineShortcutKey shortcutKey={key} />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function CameraControlHintItem({ hint }: { hint: CameraControlHint }) {
-  return (
-    <div className="flex min-w-0 flex-col items-center gap-1.5 px-4 text-center first:pl-0 last:pr-0">
-      <span className="font-medium text-[10px] text-muted-foreground/60 tracking-[0.03em]">
-        {hint.action}
-      </span>
-      <div className="flex flex-wrap items-center justify-center gap-1.5">
-        <ShortcutSequence keys={hint.keys} />
-        {hint.alternativeKeys ? (
-          <>
-            <span className="text-[10px] text-muted-foreground/40">/</span>
-            <ShortcutSequence keys={hint.alternativeKeys} />
-          </>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
+/** inZOI-style camera legend in the top-right corner of the canvas. */
 function ViewerCanvasControlsHint({
   isPreviewMode,
   onDismiss,
@@ -487,39 +425,33 @@ function ViewerCanvasControlsHint({
   onDismiss: () => void
 }) {
   const hints = isPreviewMode ? PREVIEW_CAMERA_CONTROL_HINTS : EDITOR_CAMERA_CONTROL_HINTS
+  const hasSelection = useViewer((s) => s.selection.selectedIds.length > 0)
+  if (hasSelection) return null
 
   return (
-    <div className="pointer-events-none absolute top-14 left-1/2 z-40 max-w-[calc(100%-2rem)] -translate-x-1/2">
+    <div className="pointer-events-none absolute top-14 right-3 z-40">
       <section
-        aria-label="Camera controls hint"
-        className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-border/35 bg-background/90 px-3.5 py-2.5 shadow-elevation-4 backdrop-blur-xl"
+        aria-label="카메라 조작 안내"
+        className="group pointer-events-auto relative flex flex-col gap-1.5 rounded-xl bg-white/90 px-3 py-2 text-neutral-700 shadow-[0_4px_16px_rgba(0,0,0,0.18)] backdrop-blur-md"
       >
-        <div className="grid min-w-0 flex-1 grid-cols-3 items-start divide-x divide-border/18">
-          {hints.map((hint) => (
-            <CameraControlHintItem hint={hint} key={hint.action} />
-          ))}
-        </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              aria-label="Dismiss camera controls hint"
-              className="flex h-5 shrink-0 items-center justify-center self-center border-border/18 border-l pl-3 text-muted-foreground/70 transition-colors hover:text-foreground"
-              onClick={onDismiss}
-              type="button"
-            >
-              <Icon
-                aria-hidden="true"
-                color="currentColor"
-                height={14}
-                icon="lucide:x"
-                width={14}
-              />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" sideOffset={8}>
-            Dismiss
-          </TooltipContent>
-        </Tooltip>
+        {hints.map((hint) => (
+          <div className="flex items-center gap-2" key={`${hint.button}-${hint.action}`}>
+            <MouseIcon button={hint.button} />
+            <span className="rounded bg-neutral-200 px-1.5 py-px font-semibold text-[10px] text-neutral-700">
+              {hint.gesture}
+            </span>
+            <span className="whitespace-nowrap font-medium text-xs">{hint.action}</span>
+          </div>
+        ))}
+        <button
+          aria-label="카메라 조작 안내 닫기"
+          className="-left-2 -top-2 absolute flex size-5 items-center justify-center rounded-full bg-neutral-700 text-white opacity-0 shadow transition-opacity hover:bg-neutral-900 group-hover:opacity-100"
+          onClick={onDismiss}
+          title="닫기"
+          type="button"
+        >
+          <Icon aria-hidden="true" color="currentColor" height={12} icon="lucide:x" width={12} />
+        </button>
       </section>
     </div>
   )
