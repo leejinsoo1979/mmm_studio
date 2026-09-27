@@ -1772,6 +1772,12 @@ export type ParametricDescriptor<N> = {
   ) => Array<{ id: AnyNodeId; data: Partial<AnyNode> }>
   customPanel?: () => Promise<{ default: ComponentType<{ node: N }> }>
   /**
+   * Lazy panel shown when several nodes of this kind are selected together;
+   * it edits every selected node at once (mmmcraft's bulk wall settings).
+   * Without it a multi-selection shows no inspector.
+   */
+  multiPanel?: () => Promise<{ default: ComponentType }>
+  /**
    * Extra buttons rendered in the inspector's Actions section
    * (below Move/Delete). Lets a kind declare "do this thing to the
    * current node" affordances without escaping to a full custom

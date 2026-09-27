@@ -159,12 +159,12 @@ export default function WallPanel() {
     <PanelWrapper
       icon="/icons/wall.webp"
       onClose={handleClose}
-      title={node.name || 'Wall'}
+      title={node.name || '벽'}
       width={280}
     >
-      <PanelSection title="Dimensions">
+      <PanelSection title="치수">
         <SliderControl
-          label="Length"
+          label="길이"
           max={metersToLinearUnit(20, unit)}
           min={metersToLinearUnit(0.1, unit)}
           onChange={(value) =>
@@ -178,7 +178,7 @@ export default function WallPanel() {
           value={displayLength}
         />
         <SliderControl
-          label="Height"
+          label="높이"
           max={metersToLinearUnit(6, unit)}
           min={metersToLinearUnit(0.1, unit)}
           onChange={(v) =>
@@ -192,7 +192,7 @@ export default function WallPanel() {
           value={Math.round(displayHeight * 100) / 100}
         />
         <SliderControl
-          label={node.construction ? '벽체 두께' : 'Thickness'}
+          label={node.construction ? '벽체 두께' : '벽 두께'}
           max={metersToLinearUnit(1, unit)}
           min={metersToLinearUnit(0.05, unit)}
           onChange={(v) =>
@@ -208,7 +208,7 @@ export default function WallPanel() {
         />
         {!hasWallChildrenBlockingCurve && (
           <SliderControl
-            label="Curve"
+            label="곡선"
             max={Math.max(metersToLinearUnit(0.01, unit), displayMaxCurveOffset)}
             min={-Math.max(metersToLinearUnit(0.01, unit), displayMaxCurveOffset)}
             onChange={(v) =>
@@ -242,11 +242,11 @@ export default function WallPanel() {
       )}
 
       {!hasWallChildrenBlockingCurve && (
-        <PanelSection title="Actions">
+        <PanelSection title="동작">
           <ActionGroup>
             <ActionButton
               icon={<Spline className="h-3.5 w-3.5" />}
-              label="Curve"
+              label="곡선"
               onClick={handleCurve}
             />
           </ActionGroup>

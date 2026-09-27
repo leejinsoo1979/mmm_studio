@@ -272,6 +272,18 @@ function renderIcon(ref: IconRef | undefined): React.ReactNode | undefined {
 // re-invoked across renders.
 const customPanelCache = new WeakMap<() => Promise<unknown>, ComponentType>()
 
+/** A kind's `parametrics.multiPanel` for a selection of several nodes of that kind. */
+export function MultiSelectInspector({ type }: { type: string }) {
+  const loader = nodeRegistry.get(type)?.parametrics?.multiPanel
+  if (!loader) return null
+  const Panel = resolveCustomPanel(loader)
+  return (
+    <Suspense fallback={null}>
+      <Panel />
+    </Suspense>
+  )
+}
+
 function resolveCustomPanel(loader: () => Promise<{ default: ComponentType<any> }>): ComponentType {
   const cached = customPanelCache.get(loader)
   if (cached) return cached

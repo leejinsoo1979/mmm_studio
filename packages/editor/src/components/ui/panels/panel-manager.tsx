@@ -29,7 +29,7 @@ import useEditor from '../../../store/use-editor'
 import { MobilePanelSheet } from './mobile-panel-sheet'
 import { MobileSelectionBar } from './mobile-selection-bar'
 import { getNodeDisplay } from './node-display'
-import { ParametricInspector } from './parametric-inspector'
+import { MultiSelectInspector, ParametricInspector } from './parametric-inspector'
 import { ReferencePanel } from './reference-panel'
 
 type MovableNode =
@@ -180,6 +180,12 @@ export function PanelManager({ inspectorFooter }: { inspectorFooter?: React.Reac
     const id = selectedIds[0]
     return id ? (s.nodes[id as AnyNodeId]?.type ?? null) : null
   })
+  // Several nodes of one kind → that kind's bulk panel, if it has one.
+  const multiSelectType = useScene((s) => {
+    if (selectedIds.length < 2) return null
+    const types = new Set(selectedIds.map((id) => s.nodes[id as AnyNodeId]?.type))
+    return types.size === 1 ? ([...types][0] ?? null) : null
+  })
   const selectedNode = useScene((s) => {
     if (selectedIds.length !== 1) return null
     const id = selectedIds[0]
@@ -214,6 +220,8 @@ export function PanelManager({ inspectorFooter }: { inspectorFooter?: React.Reac
       />
     )
   }
+
+  if (multiSelectType) return <MultiSelectInspector type={multiSelectType} />
 
   return panelForType(selectedNodeType, inspectorFooter)
 }

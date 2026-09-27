@@ -1,6 +1,6 @@
 'use client'
 
-import { type AssetInput, nodeRegistry } from '@pascal-app/core'
+import { type AssetInput, constructionBuildUpMm, nodeRegistry } from '@pascal-app/core'
 import { triggerSFX, useEditor } from '@pascal-app/editor'
 import {
   LevelTakeoffSummary,
@@ -415,8 +415,74 @@ function NewWallConstruction() {
   const setConstruction = useWallDrawingDefaults((s) => s.setConstruction)
   return (
     <div className="rounded-lg bg-white dark:bg-neutral-900 p-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
-      <div className="mb-2 text-muted-foreground text-xs">새로 그릴 벽 · 벽체 두께 100 mm 기준</div>
+      <div className="mb-2 text-muted-foreground text-xs">새로 그릴 벽</div>
+      <NewWallThickness />
       <WallConstructionFields onChange={setConstruction} value={construction} />
+    </div>
+  )
+}
+
+const CORE_THICKNESS_PRESETS_MM = [100, 150, 200]
+
+/** mmmcraft 벽 두께 / 벽체 두께 (mm) for new walls; finishes add on top. */
+function NewWallThickness() {
+  const construction = useWallDrawingDefaults((s) => s.construction)
+  const coreThickness = useWallDrawingDefaults((s) => s.coreThickness)
+  const setCoreThickness = useWallDrawingDefaults((s) => s.setCoreThickness)
+  const coreMm = Math.round(coreThickness * 1000)
+  const [draft, setDraft] = useState(String(coreMm))
+  useEffect(() => setDraft(String(coreMm)), [coreMm])
+  const commit = () => {
+    const mm = Number(draft)
+    if (Number.isFinite(mm) && mm >= 30 && mm <= 1000) setCoreThickness(mm / 1000)
+    else setDraft(String(coreMm))
+  }
+  const buildUpMm = constructionBuildUpMm(construction)
+  return (
+    <div className="mb-3 flex flex-col gap-1.5">
+      <div className="flex items-center gap-1.5">
+        <span className="w-14 shrink-0 text-muted-foreground text-xs">
+          {construction ? '벽체 두께' : '벽 두께'}
+        </span>
+        {CORE_THICKNESS_PRESETS_MM.map((mm) => (
+          <button
+            className={cn(
+              'rounded-md px-2 py-1 text-xs tabular-nums transition-colors',
+              coreMm === mm
+                ? 'bg-neutral-800 text-white dark:bg-neutral-100 dark:text-neutral-900'
+                : 'bg-muted text-foreground hover:bg-accent',
+            )}
+            key={mm}
+            onClick={() => {
+              triggerSFX('sfx:menu-click')
+              setCoreThickness(mm / 1000)
+            }}
+            type="button"
+          >
+            {mm}
+          </button>
+        ))}
+        <label className="ml-auto flex items-center gap-1 rounded-md bg-muted px-1.5 py-1 text-xs">
+          <input
+            aria-label="새 벽 두께 (mm)"
+            className="w-10 bg-transparent text-right tabular-nums outline-none"
+            inputMode="numeric"
+            onBlur={commit}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+            }}
+            value={draft}
+          />
+          <span className="text-muted-foreground">mm</span>
+        </label>
+      </div>
+      {buildUpMm > 0 && (
+        <div className="text-[11px] text-muted-foreground">
+          마감 포함 {Number((coreMm + buildUpMm).toFixed(2))} mm
+        </div>
+      )}
     </div>
   )
 }

@@ -30,4 +30,5 @@ export const wallParametrics: ParametricDescriptor<WallNode> = {
   // attached item lives on the wall. The auto-inspector can't express
   // "derived" or "conditionally visible" yet — kept as a custom panel.
   customPanel: () => import('./panel'),
+  multiPanel: () => import('./multi-panel'),
 }
