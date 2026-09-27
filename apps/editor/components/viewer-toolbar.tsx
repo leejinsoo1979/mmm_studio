@@ -12,7 +12,6 @@ import {
   DropdownMenuTrigger,
   Slider,
   useEditor,
-  useSidebarStore,
   type ViewMode,
 } from '@pascal-app/editor'
 import {
@@ -25,8 +24,6 @@ import {
 import {
   Box,
   Check,
-  ChevronsLeft,
-  ChevronsRight,
   Columns2,
   Contrast,
   Eye,
@@ -56,7 +53,7 @@ const TOOLBAR_CONTAINER =
   'inline-flex h-9 items-stretch overflow-hidden rounded-full border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 px-1 text-neutral-700 dark:text-neutral-200 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md'
 
 const TOOLBAR_BTN =
-  'flex w-8 items-center justify-center text-muted-foreground/80 transition-colors hover:bg-foreground/8 hover:text-foreground/90'
+  'flex w-9 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-foreground/8 hover:text-foreground dark:text-neutral-300'
 
 function requestWalkthroughPointerLock() {
   const canvas = document.querySelector<HTMLCanvasElement>('[data-pascal-viewer-3d] canvas')
@@ -190,34 +187,6 @@ function ViewModeControl() {
   )
 }
 
-function CollapseSidebarButton() {
-  const isCollapsed = useSidebarStore((state) => state.isCollapsed)
-  const setIsCollapsed = useSidebarStore((state) => state.setIsCollapsed)
-
-  const toggle = useCallback(() => {
-    setIsCollapsed(!isCollapsed)
-  }, [isCollapsed, setIsCollapsed])
-
-  return (
-    <div className={TOOLBAR_CONTAINER}>
-      <ToolbarTooltip label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-        <button
-          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className={TOOLBAR_BTN}
-          onClick={toggle}
-          type="button"
-        >
-          {isCollapsed ? (
-            <ChevronsRight className="h-4 w-4" />
-          ) : (
-            <ChevronsLeft className="h-4 w-4" />
-          )}
-        </button>
-      </ToolbarTooltip>
-    </div>
-  )
-}
-
 function LevelModeToggle() {
   const levelMode = useViewer((state) => state.levelMode)
   const setLevelMode = useViewer((state) => state.setLevelMode)
@@ -239,11 +208,8 @@ function LevelModeToggle() {
   return (
     <ToolbarTooltip label={label}>
       <button
-        className={cn(
-          TOOLBAR_BTN,
-          'w-auto gap-1.5 px-2.5',
-          !isDefault && 'bg-foreground/10 text-foreground/90',
-        )}
+        aria-label={label}
+        className={cn(TOOLBAR_BTN, !isDefault && 'bg-foreground/10 text-foreground/90')}
         onClick={cycle}
         type="button"
       >
@@ -254,7 +220,6 @@ function LevelModeToggle() {
         ) : (
           <IconifyIcon height={14} icon="charm:stack-push" width={14} />
         )}
-        <span className="font-medium text-xs">{levelModeLabels[levelMode] ?? '층 쌓기'}</span>
       </button>
     </ToolbarTooltip>
   )
@@ -274,18 +239,12 @@ function WallModeToggle() {
   return (
     <ToolbarTooltip label={`벽 보기: ${config.label}`}>
       <button
-        className={cn(
-          TOOLBAR_BTN,
-          'w-auto gap-1.5 px-2.5',
-          wallMode !== 'cutaway'
-            ? 'bg-foreground/10'
-            : 'opacity-60 grayscale hover:opacity-100 hover:grayscale-0',
-        )}
+        aria-label={`벽 보기: ${config.label}`}
+        className={cn(TOOLBAR_BTN, wallMode !== 'cutaway' && 'bg-foreground/10')}
         onClick={cycle}
         type="button"
       >
         <Image alt="" className="h-4 w-4 object-contain" height={16} src={config.icon} width={16} />
-        <span className="font-medium text-xs">{config.label}</span>
       </button>
     </ToolbarTooltip>
   )
@@ -406,11 +365,10 @@ function DisplayMenu() {
         <DropdownMenuTrigger asChild>
           <button
             aria-label="보기 설정"
-            className={cn(TOOLBAR_BTN, 'w-auto gap-1.5 px-2.5 text-foreground/90')}
+            className={cn(TOOLBAR_BTN, 'text-foreground/90')}
             type="button"
           >
-            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" />
-            <span className="font-medium text-xs">보기 설정</span>
+            <SlidersHorizontal className="h-4 w-4 shrink-0" />
           </button>
         </DropdownMenuTrigger>
       </ToolbarTooltip>
@@ -667,24 +625,19 @@ function PreviewButton() {
   return (
     <ToolbarTooltip label="미리보기">
       <button
-        className="flex items-center gap-1.5 px-2.5 font-medium text-muted-foreground/80 text-xs transition-colors hover:bg-foreground/8 hover:text-foreground/90"
+        aria-label="미리보기"
+        className={TOOLBAR_BTN}
         onClick={() => useEditor.getState().setPreviewMode(true)}
         type="button"
       >
-        <Eye className="h-3.5 w-3.5 shrink-0" />
-        <span>미리보기</span>
+        <Eye className="h-4 w-4 shrink-0" />
       </button>
     </ToolbarTooltip>
   )
 }
 
 export function CommunityViewerToolbarLeft() {
-  return (
-    <>
-      <CollapseSidebarButton />
-      <ViewModeControl />
-    </>
-  )
+  return <ViewModeControl />
 }
 
 /** Theme shown for each part of the day; daytime keeps the user's theme. */

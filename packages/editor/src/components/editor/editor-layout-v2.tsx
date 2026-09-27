@@ -6,14 +6,13 @@ import useEditor from '../../store/use-editor'
 import { useUiHidden } from '../../store/use-ui-hidden'
 
 import { useSidebarStore } from '../ui/primitives/sidebar'
-import { IconRail, type SidebarTab } from '../ui/sidebar/tab-bar'
+import { IconTabRow, type SidebarTab } from '../ui/sidebar/tab-bar'
 import { EditorLayoutMobile } from './editor-layout-mobile'
 
 const SIDEBAR_MIN_WIDTH = 300
 const SIDEBAR_DEFAULT_WIDTH = 304
 const SIDEBAR_MAX_WIDTH = 800
 const SIDEBAR_COLLAPSE_THRESHOLD = 220
-const RAIL_WIDTH = 48
 /** inZOI: the build panel floats over the full-screen scene, inset by this much. */
 const PANEL_MARGIN = 12
 
@@ -98,7 +97,7 @@ function LeftColumn({
   useEffect(() => {
     const handlePointerMove = (e: PointerEvent) => {
       if (!isResizing.current) return
-      const newWidth = e.clientX - PANEL_MARGIN - RAIL_WIDTH
+      const newWidth = e.clientX - PANEL_MARGIN
       if (newWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
         setIsCollapsed(true)
       } else {
@@ -121,8 +120,8 @@ function LeftColumn({
   }, [setWidth, setIsCollapsed, setIsDragging])
 
   return (
-    <div className="relative flex min-h-0 flex-1 bg-sidebar text-sidebar-foreground">
-      <IconRail
+    <div className="relative flex min-h-0 flex-1 flex-col text-sidebar-foreground">
+      <IconTabRow
         activeTab={activePanel}
         collapsed={isCollapsed}
         onIconClick={handleRailClick}
@@ -130,7 +129,7 @@ function LeftColumn({
       />
       {!isCollapsed && (
         <div
-          className="relative flex h-full flex-col"
+          className="relative flex min-h-0 flex-1 flex-col"
           style={{
             width,
             transition: isDragging ? 'none' : 'width 150ms ease',
@@ -250,9 +249,7 @@ export function EditorLayoutV2({
   }
 
   const showPanel = !hideChrome && sidebarTabs.length > 0
-  const leftInset = showPanel
-    ? PANEL_MARGIN + RAIL_WIDTH + (sidebarCollapsed ? 0 : sidebarWidth)
-    : 0
+  const leftInset = showPanel ? PANEL_MARGIN + Math.max(sidebarWidth, SIDEBAR_MIN_WIDTH) : 0
 
   return (
     <div
@@ -272,15 +269,15 @@ export function EditorLayoutV2({
       </div>
       {showPanel && (
         <div
-          className="absolute z-40 flex flex-col overflow-hidden rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5"
+          className="absolute z-40 flex flex-col overflow-hidden rounded-2xl bg-white/75 shadow-[0_8px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5 backdrop-blur-xl dark:bg-neutral-900/75 dark:ring-white/10"
           style={{
             top: PANEL_MARGIN,
-            bottom: PANEL_MARGIN,
+            bottom: sidebarCollapsed ? undefined : PANEL_MARGIN,
             left: PANEL_MARGIN,
             width: leftInset - PANEL_MARGIN,
           }}
         >
-          {!sidebarCollapsed && navbarSlot}
+          {navbarSlot}
           <LeftColumn
             renderTabContent={renderTabContent}
             sidebarOverlay={sidebarOverlay}

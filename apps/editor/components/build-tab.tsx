@@ -8,7 +8,7 @@ import {
   WallConstructionFields,
 } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
-import { Check, Search, X } from 'lucide-react'
+import { Check, type LucideIcon, Minus, Search, Spline, Square, X } from 'lucide-react'
 import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -99,8 +99,8 @@ const BUILD_SECTIONS: BuildSection[] = [
     id: 'walls',
     title: '그리기 방식',
     items: [
-      { id: 'wall', label: '직선 벽 그리기', iconSrc: '/icons/wall.webp', kind: 'wall' },
-      { id: 'wall-arc', label: '곡선 벽 그리기', iconSrc: '/icons/wallcut.webp', kind: 'wall' },
+      { id: 'wall', label: '직선', iconSrc: '/icons/wall.webp', kind: 'wall' },
+      { id: 'wall-arc', label: '곡선', iconSrc: '/icons/wallcut.webp', kind: 'wall' },
       {
         id: 'custom-room',
         label: '사각형 방',
@@ -113,9 +113,24 @@ const BUILD_SECTIONS: BuildSection[] = [
     id: 'door',
     title: '문',
     items: [
-      { id: 'door', label: '여닫이문', iconSrc: '/icons/door.webp', kind: 'door' },
-      { id: 'double-door', label: '양개문', iconSrc: '/icons/door.webp', kind: 'door' },
-      { id: 'sliding-door', label: '미닫이문', iconSrc: '/icons/door.webp', kind: 'door' },
+      {
+        id: 'door',
+        label: '여닫이문',
+        iconSrc: '/images/room-library/doors/hinged.jpg',
+        kind: 'door',
+      },
+      {
+        id: 'double-door',
+        label: '양개문',
+        iconSrc: '/images/room-library/doors/hinged.jpg',
+        kind: 'door',
+      },
+      {
+        id: 'sliding-door',
+        label: '미닫이문',
+        iconSrc: '/images/room-library/doors/sliding.jpg',
+        kind: 'door',
+      },
       {
         id: 'hidden-door',
         label: '히든도어 (목상·떡가베 벽)',
@@ -137,35 +152,60 @@ const BUILD_SECTIONS: BuildSection[] = [
         kind: 'door',
         defaults: { stepProduct: 'younglim' },
       },
-      { id: 'door1-glb', label: 'Door1 GLB', iconSrc: '/icons/door.webp', asset: DOOR1_ASSET },
+      {
+        id: 'door1-glb',
+        label: 'Door1 GLB',
+        iconSrc: '/images/room-library/doors/hinged.jpg',
+        asset: DOOR1_ASSET,
+      },
     ],
   },
   {
     id: 'window',
     title: '창문',
     items: [
-      { id: 'window', label: '단창', iconSrc: '/icons/window.webp', kind: 'window' },
-      { id: 'dual-window', label: '쌍창', iconSrc: '/icons/window.webp', kind: 'window' },
+      {
+        id: 'window',
+        label: '단창',
+        iconSrc: '/images/room-library/windows/fixed.jpg',
+        kind: 'window',
+      },
+      {
+        id: 'dual-window',
+        label: '쌍창',
+        iconSrc: '/images/room-library/windows/sliding.jpg',
+        kind: 'window',
+      },
       {
         id: 'unequal-double-window',
         label: '비대칭 쌍창',
-        iconSrc: '/icons/window.webp',
+        iconSrc: '/images/room-library/windows/sliding.jpg',
         kind: 'window',
       },
       {
         id: 'corner-bay-window',
         label: '코너 돌출창',
-        iconSrc: '/icons/window.webp',
+        iconSrc: '/images/room-library/windows/fixed.jpg',
         kind: 'window',
       },
       {
         id: 'corner-window',
         label: '코너창',
-        iconSrc: '/icons/window.webp',
+        iconSrc: '/images/room-library/windows/fixed.jpg',
         kind: 'window',
       },
-      { id: 'bay-window', label: '돌출창', iconSrc: '/icons/window.webp', kind: 'window' },
-      { id: 'arc-window', label: '아치창', iconSrc: '/icons/window.webp', kind: 'window' },
+      {
+        id: 'bay-window',
+        label: '돌출창',
+        iconSrc: '/images/room-library/windows/fixed.jpg',
+        kind: 'window',
+      },
+      {
+        id: 'arc-window',
+        label: '아치창',
+        iconSrc: '/images/room-library/windows/fixed.jpg',
+        kind: 'window',
+      },
     ],
   },
   {
@@ -304,20 +344,31 @@ function BuildTile({
           onMouseEnter={() => triggerSFX('sfx:menu-hover')}
           type="button"
         >
-          <Image
-            alt=""
-            aria-hidden
-            className="h-[58%] w-[58%] object-contain transition-transform duration-150 group-hover:scale-105"
-            height={48}
-            src={item.iconSrc}
-            width={48}
-          />
+          {isPhoto(item.iconSrc) ? (
+            <Image
+              alt=""
+              aria-hidden
+              className="object-cover transition-transform duration-200 group-hover:scale-105"
+              fill
+              sizes="80px"
+              src={item.iconSrc}
+            />
+          ) : (
+            <Image
+              alt=""
+              aria-hidden
+              className="mb-3 h-[50%] w-[50%] object-contain transition-transform duration-150 group-hover:scale-105"
+              height={48}
+              src={item.iconSrc}
+              width={48}
+            />
+          )}
           {caption ? (
-            <span className="absolute bottom-1.5 left-1.5 font-semibold text-[11px] text-neutral-600 dark:text-neutral-300 tabular-nums">
+            <span className="absolute bottom-1 left-1.5 font-bold text-[11px] text-neutral-700 tabular-nums [text-shadow:0_0_3px_#fff,0_0_3px_#fff]">
               {caption}
             </span>
           ) : (
-            <span className="absolute inset-x-1 bottom-1 truncate text-center text-[9.5px] text-neutral-500 dark:text-neutral-400 leading-tight">
+            <span className="absolute inset-x-0 bottom-0 line-clamp-2 bg-gradient-to-t from-white/95 via-white/85 to-white/0 px-1 pt-2 pb-1 text-center font-medium text-[9.5px] text-neutral-700 leading-[1.15] dark:from-neutral-900/95 dark:via-neutral-900/85 dark:to-neutral-900/0 dark:text-neutral-200">
               {item.label}
             </span>
           )}
@@ -335,6 +386,8 @@ function BuildTile({
   )
 }
 
+const isPhoto = (src: string) => src.endsWith('.jpg')
+
 /** inZOI catalog group: grey header bar over a 4-up grid of square cards. */
 function Section({ children, title }: { children: React.ReactNode; title: string }) {
   return (
@@ -348,6 +401,12 @@ function Section({ children, title }: { children: React.ReactNode; title: string
 }
 
 const CARD_GRID = 'grid grid-cols-4 gap-1.5'
+
+const DRAW_MODE_ICONS: Record<string, LucideIcon> = {
+  wall: Minus,
+  'wall-arc': Spline,
+  'custom-room': Square,
+}
 
 /** mmmcraft: the construction new walls are drawn with (existing walls are
  *  changed in their own panel). */
@@ -423,12 +482,7 @@ export function BuildTab() {
     if (type.id === 'custom-room') return mode === 'build' && activeTool === 'rectangle-room'
     if (type.id === 'wall-arc') return mode === 'build' && activeTool === 'wall-arc'
     if (type.id === 'wall')
-      return (
-        mode === 'build' &&
-        activeTool === 'wall' &&
-        wallPlacementMode !== 'rectangle-room' &&
-        wallHeight === undefined
-      )
+      return mode === 'build' && activeTool === 'wall' && wallPlacementMode !== 'rectangle-room'
     if (
       type.kind === 'door' &&
       (type.id === 'door' || type.defaults?.stepProduct || type.defaults?.hidden)
@@ -484,7 +538,7 @@ export function BuildTab() {
     const item = {
       id: `wall-${h}`,
       label: `${h.toFixed(1)} m 벽 그리기`,
-      iconSrc: '/icons/wall.webp',
+      iconSrc: '/images/room-library/construction/plain.jpg',
     }
     const active =
       mode === 'build' &&
@@ -515,7 +569,7 @@ export function BuildTab() {
   )
 
   return (
-    <div className="flex h-full flex-col bg-[#eceef1] dark:bg-neutral-950 text-foreground">
+    <div className="flex h-full flex-col text-foreground">
       <div className="shrink-0 px-2 pt-3 pb-1">
         <label className="flex h-9 items-center gap-2 rounded-lg bg-white dark:bg-neutral-900 px-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
           <input
@@ -552,30 +606,60 @@ export function BuildTab() {
             </>
           )}
 
-          {visibleSections.map((section) => (
-            <Section key={section.id} title={section.title}>
-              <div className={CARD_GRID}>
-                {section.items.map((type) => (
-                  <BuildTile
-                    active={isTypeActive(type)}
-                    item={type}
-                    key={type.id}
-                    onClick={() => {
-                      triggerSFX('sfx:menu-click')
-                      if (type.id === 'wall') useWallDrawingDefaults.getState().setHeight(undefined)
-                      handleTypeClick(type)
-                    }}
-                  />
-                ))}
-              </div>
-              {section.id === 'walls' && !needle && (
-                <div className="mt-3">
-                  <NewWallConstruction />
-                  <LevelWallTakeoff />
+          {visibleSections.map((section) =>
+            section.id === 'walls' ? (
+              <Section key={section.id} title={section.title}>
+                <div className="flex gap-1 rounded-lg bg-white p-1 shadow-[0_1px_3px_rgba(0,0,0,0.12)] dark:bg-neutral-900">
+                  {section.items.map((type) => {
+                    const ModeIcon = DRAW_MODE_ICONS[type.id] ?? Minus
+                    const active = isTypeActive(type)
+                    return (
+                      <button
+                        aria-pressed={active}
+                        className={cn(
+                          'flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[12px] transition-colors',
+                          active
+                            ? 'bg-neutral-800 font-semibold text-white dark:bg-neutral-100 dark:text-neutral-900'
+                            : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-white/10',
+                        )}
+                        key={type.id}
+                        onClick={() => {
+                          triggerSFX('sfx:menu-click')
+                          handleTypeClick(type)
+                        }}
+                        type="button"
+                      >
+                        <ModeIcon className="h-3.5 w-3.5" />
+                        {type.label}
+                      </button>
+                    )
+                  })}
                 </div>
-              )}
-            </Section>
-          ))}
+                {!needle && (
+                  <div className="mt-3">
+                    <NewWallConstruction />
+                    <LevelWallTakeoff />
+                  </div>
+                )}
+              </Section>
+            ) : (
+              <Section key={section.id} title={section.title}>
+                <div className={CARD_GRID}>
+                  {section.items.map((type) => (
+                    <BuildTile
+                      active={isTypeActive(type)}
+                      item={type}
+                      key={type.id}
+                      onClick={() => {
+                        triggerSFX('sfx:menu-click')
+                        handleTypeClick(type)
+                      }}
+                    />
+                  ))}
+                </div>
+              </Section>
+            ),
+          )}
 
           {visibleImports.length > 0 && (
             <Section title="도면 가져오기">

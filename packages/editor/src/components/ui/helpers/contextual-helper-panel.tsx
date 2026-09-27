@@ -28,7 +28,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../primitives/tooltip'
 // tracks, so labels align even when keys differ in width (⌘ vs Shift) or wrap to
 // two lines. Near-opaque bg + single backdrop blur keeps active rows readable.
 const CONTAINER_CLASS =
-  'pointer-events-none fixed top-1/2 right-4 z-40 grid max-w-[260px] -translate-y-1/2 grid-cols-[max-content_1fr] gap-x-2.5 gap-y-1.5 rounded-lg border border-border bg-background/95 px-3 py-2.5 shadow-lg backdrop-blur-md'
+  'pointer-events-none fixed right-4 bottom-4 z-40 grid max-w-[240px] grid-cols-[max-content_1fr] gap-x-2 gap-y-1 rounded-xl bg-white/80 px-2.5 py-2 shadow-[0_4px_16px_rgba(0,0,0,0.12)] backdrop-blur-md dark:bg-neutral-900/80'
 
 const TOKEN_CLASS = 'h-5 px-1.5 text-[10px]'
 

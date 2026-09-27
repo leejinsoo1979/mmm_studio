@@ -100,3 +100,45 @@ export function IconRail({ tabs, activeTab, collapsed, onIconClick }: IconRailPr
     </TooltipProvider>
   )
 }
+
+/**
+ * inZOI-style tab row across the top of the floating build panel: the same
+ * tabs as `IconRail`, laid out horizontally. Clicking the open tab collapses
+ * the panel to just this row.
+ */
+export function IconTabRow({ tabs, activeTab, collapsed, onIconClick }: IconRailProps) {
+  return (
+    <TooltipProvider delayDuration={0} disableHoverableContent>
+      <div className="flex h-10 shrink-0 items-stretch border-black/5 border-b px-1 dark:border-white/10">
+        {tabs.map((tab) => {
+          const showActive = activeTab === tab.id && !collapsed
+          return (
+            <Tooltip key={tab.id}>
+              <TooltipTrigger asChild>
+                <button
+                  aria-label={tab.label}
+                  aria-pressed={showActive}
+                  className={cn(
+                    'relative flex min-w-0 flex-1 items-center justify-center text-muted-foreground transition-colors [&_img]:h-[18px] [&_img]:w-[18px] [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.9]',
+                    showActive
+                      ? 'text-foreground after:absolute after:inset-x-1.5 after:bottom-0 after:h-0.5 after:rounded-full after:bg-foreground'
+                      : 'hover:text-foreground [&_img]:opacity-55 [&_img]:grayscale hover:[&_img]:opacity-100 hover:[&_img]:grayscale-0',
+                  )}
+                  onClick={() => {
+                    triggerSFX('sfx:menu-click')
+                    onIconClick(tab.id)
+                  }}
+                  onMouseEnter={() => triggerSFX('sfx:menu-hover')}
+                  type="button"
+                >
+                  {tab.icon ?? tab.label.charAt(0)}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{tab.label}</TooltipContent>
+            </Tooltip>
+          )
+        })}
+      </div>
+    </TooltipProvider>
+  )
+}
