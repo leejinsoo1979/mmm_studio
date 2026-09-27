@@ -11,9 +11,17 @@ import {
   type WallSurfaceMaterialSpec,
   type WallSurfaceSide,
 } from '@pascal-app/core'
-import { Color, type Material } from 'three'
-import { Fn, float, fract, length, mix, positionLocal, smoothstep, step, vec2 } from 'three/tsl'
-import { MeshLambertNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
+import { Color, DoubleSide, type Material } from 'three'
+import {
+  float,
+  frontFacing,
+  materialColor,
+  positionLocal,
+  select,
+  step,
+  color as tslColor,
+} from 'three/tsl'
+import { MeshLambertNodeMaterial, MeshStandardNodeMaterial, type Node } from 'three/webgpu'
 import {
   baseMaterial,
   type ColorPreset,
@@ -56,22 +64,8 @@ export interface WallMaterials {
 
 const wallMaterialCache = new Map<string, WallMaterials>()
 
-const dotPattern = Fn(() => {
-  const scale = float(0.1)
-  const dotSize = float(0.3)
-
-  const uv = vec2(positionLocal.x, positionLocal.y).div(scale)
-  const gridUV = fract(uv)
-
-  const dist = length(gridUV.sub(0.5))
-
-  const dots = step(dist, dotSize.mul(0.5))
-
-  const fadeHeight = float(2.5)
-  const yFade = float(1).sub(smoothstep(float(0), fadeHeight, positionLocal.y))
-
-  return dots.mul(yFade)
-})
+// Cutaway walls drop to a low stub (inZOI / Sims "벽 자르기") instead of vanishing.
+const CUTAWAY_STUB_HEIGHT = 0.3
 
 function getSurfaceVisibleMaterial(
   spec: WallSurfaceMaterialSpec,
@@ -281,22 +275,15 @@ export function getSelectionHighlightMaterials(materials: WallMaterialArray): Wa
 }
 
 function createInvisibleWallMaterial(color: string, shading: RenderShading): Material {
+  const params = { color, side: DoubleSide, alphaTest: 0.5 }
   const material =
     shading === 'solid' || shading === 'performance'
-      ? new MeshLambertNodeMaterial({
-          transparent: true,
-          color,
-          depthWrite: false,
-          emissive: color,
-        })
-      : new MeshStandardNodeMaterial({
-          transparent: true,
-          color,
-          depthWrite: false,
-          emissive: color,
-        })
+      ? new MeshLambertNodeMaterial(params)
+      : new MeshStandardNodeMaterial(params)
 
-  material.opacityNode = mix(float(0.0), float(0.24), dotPattern())
+  material.opacityNode = step(positionLocal.y, float(CUTAWAY_STUB_HEIGHT))
+  // Seen from above, the cut's inner faces read as the dark wall section.
+  material.colorNode = select(frontFacing, materialColor, tslColor(WALL_CAP_COLOR)) as Node<'color'>
   return material
 }
 

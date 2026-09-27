@@ -121,18 +121,18 @@ const VIEW_MODES: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
 
 const levelModeOrder = ['stacked', 'exploded', 'solo'] as const
 const levelModeLabels: Record<string, string> = {
-  manual: 'Stack',
-  stacked: 'Stack',
-  exploded: 'Exploded',
-  solo: 'Solo',
+  manual: '층 쌓기',
+  stacked: '층 쌓기',
+  exploded: '층 펼치기',
+  solo: '한 층만',
 }
 
 const wallModeOrder = ['cutaway', 'up', 'down', 'translucent'] as const
 const wallModeConfig: Record<string, { icon: string; label: string }> = {
-  up: { icon: '/icons/room.webp', label: 'Full height' },
-  cutaway: { icon: '/icons/wallcut.webp', label: 'Cutaway' },
-  down: { icon: '/icons/walllow.webp', label: 'Low' },
-  translucent: { icon: '/icons/wall.webp', label: 'Translucent' },
+  up: { icon: '/icons/room.webp', label: '벽 올리기' },
+  cutaway: { icon: '/icons/wallcut.webp', label: '벽 자르기' },
+  down: { icon: '/icons/walllow.webp', label: '벽 내리기' },
+  translucent: { icon: '/icons/wall.webp', label: '반투명 벽' },
 }
 
 const SHADING_OPTIONS = [
@@ -234,7 +234,7 @@ function LevelModeToggle() {
     if (next) setLevelMode(next)
   }
 
-  const label = `Levels: ${levelMode === 'manual' ? 'Manual' : (levelModeLabels[levelMode] ?? 'Stack')}`
+  const label = `층 보기: ${levelMode === 'manual' ? '수동' : (levelModeLabels[levelMode] ?? '층 쌓기')}`
 
   return (
     <ToolbarTooltip label={label}>
@@ -254,7 +254,7 @@ function LevelModeToggle() {
         ) : (
           <IconifyIcon height={14} icon="charm:stack-push" width={14} />
         )}
-        <span className="font-medium text-xs">{levelModeLabels[levelMode] ?? 'Stack'}</span>
+        <span className="font-medium text-xs">{levelModeLabels[levelMode] ?? '층 쌓기'}</span>
       </button>
     </ToolbarTooltip>
   )
@@ -272,7 +272,7 @@ function WallModeToggle() {
   }
 
   return (
-    <ToolbarTooltip label={`Walls: ${config.label}`}>
+    <ToolbarTooltip label={`벽 보기: ${config.label}`}>
       <button
         className={cn(
           TOOLBAR_BTN,
@@ -402,15 +402,15 @@ function DisplayMenu() {
 
   return (
     <DropdownMenu>
-      <ToolbarTooltip label="Display settings">
+      <ToolbarTooltip label="보기 설정">
         <DropdownMenuTrigger asChild>
           <button
-            aria-label="Display settings"
+            aria-label="보기 설정"
             className={cn(TOOLBAR_BTN, 'w-auto gap-1.5 px-2.5 text-foreground/90')}
             type="button"
           >
             <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" />
-            <span className="font-medium text-xs">Display</span>
+            <span className="font-medium text-xs">보기 설정</span>
           </button>
         </DropdownMenuTrigger>
       </ToolbarTooltip>
@@ -422,7 +422,7 @@ function DisplayMenu() {
       >
         <DropdownMenuItem onSelect={(e) => keepOpen(e, () => setShowGrid(!showGrid))}>
           <Grid2X2 className="h-4 w-4" />
-          <span>Grid</span>
+          <span>격자</span>
           {showGrid ? (
             <Eye className="ml-auto h-4 w-4 text-foreground" />
           ) : (
@@ -431,7 +431,7 @@ function DisplayMenu() {
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={(e) => keepOpen(e, () => setShowDimensions(!showDimensions))}>
           <Ruler className="h-4 w-4" />
-          <span>Dimensions</span>
+          <span>치수</span>
           <span className="ml-auto text-muted-foreground text-xs">
             {showDimensions ? 'On' : 'Off'}
           </span>
@@ -445,7 +445,7 @@ function DisplayMenu() {
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={(e) => keepOpen(e, () => setShadows(!shadows))}>
           <Contrast className="h-4 w-4" />
-          <span>Shadows</span>
+          <span>그림자</span>
           <span className="ml-auto text-muted-foreground text-xs">{shadows ? 'On' : 'Off'}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -460,7 +460,7 @@ function DisplayMenu() {
             icon={cameraMode === 'perspective' ? 'icon-park-outline:perspective' : 'vaadin:grid'}
             width={16}
           />
-          <span>Camera</span>
+          <span>카메라</span>
           <span className="ml-auto text-muted-foreground text-xs">
             {cameraMode === 'perspective' ? 'Perspective' : 'Orthographic'}
           </span>
@@ -469,7 +469,7 @@ function DisplayMenu() {
           <span className="flex h-4 w-4 items-center justify-center font-semibold text-[10px]">
             {activeUnit.icon}
           </span>
-          <span>Units</span>
+          <span>단위</span>
           <span className="ml-auto text-muted-foreground text-xs">{activeUnit.label}</span>
         </DropdownMenuItem>
 
@@ -492,7 +492,7 @@ function DisplayMenu() {
               )
                 .toString()
                 .padStart(2, '0')}`}
-              label="Time"
+              label="시간"
               max={24}
               min={0}
               onValueChange={setSunTime}
@@ -501,7 +501,7 @@ function DisplayMenu() {
             />
             <SunSlider
               displayValue={MONTH_NAMES[Math.round(sunMonth) - 1] ?? 'Jun'}
-              label="Season"
+              label="계절"
               max={12}
               min={1}
               onValueChange={setSunMonth}
@@ -510,7 +510,7 @@ function DisplayMenu() {
             />
             <SunSlider
               displayValue={`${Math.round(sunAzimuth)}°`}
-              label="North offset"
+              label="북쪽 방향"
               max={359}
               min={0}
               onValueChange={setSunAzimuth}
@@ -523,7 +523,7 @@ function DisplayMenu() {
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <activeShading.icon className="h-4 w-4" />
-            <span>Render</span>
+            <span>렌더</span>
             <span className="ml-auto text-muted-foreground text-xs">{activeShading.name}</span>
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className={SUBMENU_CONTENT_CLASS}>
@@ -581,7 +581,7 @@ function DisplayMenu() {
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <PenLine className="h-4 w-4" />
-            <span>Edges</span>
+            <span>윤곽선</span>
             <span className="ml-auto text-muted-foreground text-xs">{activeEdges.name}</span>
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className={SUBMENU_CONTENT_CLASS}>
@@ -600,7 +600,7 @@ function DisplayMenu() {
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <SwatchBook className="h-4 w-4" />
-            <span>Theme</span>
+            <span>테마</span>
             <span className="ml-auto truncate text-muted-foreground text-xs">
               {activeTheme.name}
             </span>
@@ -648,7 +648,7 @@ function WalkthroughButton() {
   }, [isFirstPersonMode, setFirstPersonMode])
 
   return (
-    <ToolbarTooltip label="Walkthrough">
+    <ToolbarTooltip label="1인칭 투어">
       <button
         className={cn(
           TOOLBAR_BTN,
@@ -665,14 +665,14 @@ function WalkthroughButton() {
 
 function PreviewButton() {
   return (
-    <ToolbarTooltip label="Preview mode">
+    <ToolbarTooltip label="미리보기">
       <button
         className="flex items-center gap-1.5 px-2.5 font-medium text-muted-foreground/80 text-xs transition-colors hover:bg-foreground/8 hover:text-foreground/90"
         onClick={() => useEditor.getState().setPreviewMode(true)}
         type="button"
       >
         <Eye className="h-3.5 w-3.5 shrink-0" />
-        <span>Preview</span>
+        <span>미리보기</span>
       </button>
     </ToolbarTooltip>
   )

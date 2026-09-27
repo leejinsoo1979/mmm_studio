@@ -91,25 +91,25 @@ const wallModeConfig = {
     icon: (props: any) => (
       <img alt="Full Height" height={28} src="/icons/room.webp" width={28} {...props} />
     ),
-    label: 'Full Height',
+    label: '벽 올리기',
   },
   cutaway: {
     icon: (props: any) => (
       <img alt="Cutaway" height={28} src="/icons/wallcut.webp" width={28} {...props} />
     ),
-    label: 'Cutaway',
+    label: '벽 자르기',
   },
   down: {
     icon: (props: any) => (
       <img alt="Low" height={28} src="/icons/walllow.webp" width={28} {...props} />
     ),
-    label: 'Low',
+    label: '벽 내리기',
   },
   translucent: {
     icon: (props: any) => (
       <img alt="Translucent" height={28} src="/icons/wall.png" width={28} {...props} />
     ),
-    label: 'Translucent',
+    label: '반투명 벽',
   },
 }
 
@@ -631,7 +631,7 @@ export const ViewerOverlay = ({
                   ? 'bg-white/10'
                   : 'opacity-60 grayscale hover:bg-white/5 hover:opacity-100 hover:grayscale-0'
               }
-              label={`Walls: ${wallModeConfig[wallMode as keyof typeof wallModeConfig].label}`}
+              label={`벽 보기: ${wallModeConfig[wallMode as keyof typeof wallModeConfig].label}`}
               onClick={() => {
                 const modes: ('cutaway' | 'up' | 'down' | 'translucent')[] = [
                   'cutaway',
