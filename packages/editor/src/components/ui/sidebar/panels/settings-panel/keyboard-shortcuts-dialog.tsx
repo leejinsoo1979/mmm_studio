@@ -52,6 +52,7 @@ const SHORTCUT_CATEGORIES: ShortcutCategory[] = [
       { keys: ['Home'], action: '벽 올리기 (낮게 → 컷어웨이 → 전체 높이)' },
       { keys: ['End'], action: '벽 내리기 (전체 높이 → 컷어웨이 → 낮게)' },
       { keys: ['G'], action: '격자 켜기/끄기 (자유 배치)' },
+      { keys: ['O'], action: '가구 도어 열기/닫기 (도어설치 후)' },
       { keys: ['Cmd/Ctrl', 'B'], action: 'Toggle sidebar' },
     ],
   },

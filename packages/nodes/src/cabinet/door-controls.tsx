@@ -2,6 +2,7 @@
 
 import { useScene } from '@pascal-app/core'
 import { DoorClosed, DoorOpen } from 'lucide-react'
+import { useEffect } from 'react'
 import { anyCabinetHasDoor, setAllCabinetDoors, useCabinetDoors } from './doors'
 
 const segment = (active: boolean) =>
@@ -19,6 +20,22 @@ export function CabinetDoorControls() {
   const doorsHung = useScene((s) => anyCabinetHasDoor(s.nodes))
   const open = useCabinetDoors((s) => s.open)
   const setOpen = useCabinetDoors((s) => s.setOpen)
+
+  // O toggles open / closed (mmmcraft uses D, which pans the camera here).
+  useEffect(() => {
+    if (!doorsHung) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'KeyO' || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+      const target = e.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+      e.preventDefault()
+      const { open: isOpen, setOpen: set } = useCabinetDoors.getState()
+      set(!isOpen)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [doorsHung])
+
   if (!hasCabinets) return null
 
   return (
@@ -34,10 +51,20 @@ export function CabinetDoorControls() {
       </button>
       {doorsHung && (
         <div className="flex rounded-full bg-neutral-100 p-0.5">
-          <button className={segment(!open)} onClick={() => setOpen(false)} type="button">
+          <button
+            className={segment(!open)}
+            onClick={() => setOpen(false)}
+            title="O 키로 열기 / 닫기"
+            type="button"
+          >
             닫기
           </button>
-          <button className={segment(open)} onClick={() => setOpen(true)} type="button">
+          <button
+            className={segment(open)}
+            onClick={() => setOpen(true)}
+            title="O 키로 열기 / 닫기"
+            type="button"
+          >
             열기
           </button>
         </div>
