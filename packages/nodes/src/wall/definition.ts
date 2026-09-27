@@ -122,9 +122,10 @@ export const wallDefinition: NodeDefinition<typeof WallNode> = {
   floorplanSiblingOverrides: wallFloorplanSiblingOverrides,
 
   toolHints: [
-    { key: 'Left click', label: 'Set wall start / end' },
+    { key: 'Left click', label: '벽 시작점 / 끝점' },
     { key: 'Shift', label: '누른 채 그리기: 직각 고정', heldLabel: '직각 고정 중' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: '숫자 + Enter', label: '길이 입력' },
+    { key: 'Esc', label: '이어 그리기 취소' },
   ],
 
   presentation: {

@@ -3,9 +3,10 @@ import type { ContinuationContext } from '../../../lib/continuation'
 import type { SnapContext } from '../../../lib/snapping-mode'
 import useEditor from '../../../store/use-editor'
 import { ContextualHelperPanel } from './contextual-helper-panel'
+import { ToolCursorHints } from './tool-cursor-hints'
 
 /**
- * Generic helper panel rendered from `def.toolHints` data. Matches the
+ * Generic helper rendered from `def.toolHints` data. Matches the
  * visual styling of the hand-written `<WallHelper>` / `<ItemHelper>` /
  * etc. so registry-driven kinds get a consistent look without each kind
  * writing its own component.
@@ -36,23 +37,32 @@ export function RegisteredToolHelper({
       (hint.minDraftVertices == null || draftVertexCount >= hint.minDraftVertices),
   )
   if (visible.length === 0 && !snapContext && !continuationContext) return null
+  // The key hints follow the cursor; the docked panel keeps the clickable
+  // snapping / continuation chips.
   return (
-    <ContextualHelperPanel
-      hints={visible.map((hint) => {
-        // Shift is a per-kind bypass for opening / zone / duct placement ("Free
-        // place", "Free angle", …) — those flip to a bypassed state while held.
-        const isBypassHint = hint.key === 'Shift'
-        return {
-          keys: [hint.key],
-          label:
-            shiftPressed && isBypassHint
-              ? (hint.heldLabel ?? 'Guided constraints bypassed')
-              : hint.label,
-          active: shiftPressed && isBypassHint,
-        }
-      })}
-      continuationContext={continuationContext}
-      snapContext={snapContext}
-    />
+    <>
+      <ContextualHelperPanel
+        continuationContext={continuationContext}
+        hints={[]}
+        snapContext={snapContext}
+      />
+      {visible.length > 0 ? (
+        <ToolCursorHints
+          hints={visible.map((hint) => {
+            // Shift is a per-kind bypass for opening / zone / duct placement ("Free
+            // place", "Free angle", …) — those flip to a bypassed state while held.
+            const isBypassHint = hint.key === 'Shift'
+            return {
+              keys: [hint.key],
+              label:
+                shiftPressed && isBypassHint
+                  ? (hint.heldLabel ?? 'Guided constraints bypassed')
+                  : hint.label,
+              active: shiftPressed && isBypassHint,
+            }
+          })}
+        />
+      ) : null}
+    </>
   )
 }

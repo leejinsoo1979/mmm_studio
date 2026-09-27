@@ -17,6 +17,9 @@ import { getMovingNode } from '../../store/use-interaction-scope'
 // grid-snap mode — much tighter than the idle reveal so only the area you're
 // about to snap into lights up.
 const PLACEMENT_REVEAL_RADIUS = 12
+// Drawing walls / slabs / zones (a build tool armed, nothing in flight) lays the
+// grid over the whole working area, as inZOI does while building.
+const DRAFT_REVEAL_RADIUS = 40
 
 const UP = new Vector3(0, 1, 0)
 // PlaneGeometry faces +Z; this is the orientation that lays it flat (its normal
@@ -289,7 +292,8 @@ export const Grid = ({
     // that context resolves to grid, so it IS the gate. (Previously this also
     // required a ghost in flight, so a merely-armed draft tool showed nothing.)
     const snapPatchVisible = isGridSnapActive()
-    revealRadiusUniform.value = PLACEMENT_REVEAL_RADIUS
+    const drafting = !(surfacePoint || useEditor.getState().mode !== 'build')
+    revealRadiusUniform.value = drafting ? DRAFT_REVEAL_RADIUS : PLACEMENT_REVEAL_RADIUS
     baseAlphaUniform.value = 0
     cellSizeUniform.value = useEditor.getState().gridSnapStep
     patchAlphaUniform.value = 1.5

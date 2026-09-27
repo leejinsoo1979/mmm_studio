@@ -348,16 +348,16 @@ function SelectionPersistenceManager({ enabled }: { enabled: boolean }) {
 
 type MouseButton = 'left' | 'right' | 'wheel'
 
-type CameraControlHint = {
-  button: MouseButton
-  gesture: string
-  action: string
-}
+type CameraControlHint =
+  | { button: MouseButton; gesture: string; action: string }
+  | { keys: string[]; action: string }
 
 const EDITOR_CAMERA_CONTROL_HINTS: CameraControlHint[] = [
   { button: 'right', gesture: '드래그', action: '카메라 회전' },
   { button: 'wheel', gesture: '드래그', action: '화면 이동 (Space + 좌클릭, W A S D)' },
   { button: 'wheel', gesture: '스크롤', action: '확대 · 축소' },
+  { keys: ['Home', 'End'], action: '벽 보기 변경' },
+  { keys: ['PgUp', 'PgDn'], action: '층 위 / 층 아래' },
 ]
 
 const PREVIEW_CAMERA_CONTROL_HINTS: CameraControlHint[] = [
@@ -435,11 +435,24 @@ function ViewerCanvasControlsHint({
         className="group pointer-events-auto relative flex flex-col gap-1.5 rounded-xl bg-white/90 px-3 py-2 text-neutral-700 shadow-[0_4px_16px_rgba(0,0,0,0.18)] backdrop-blur-md"
       >
         {hints.map((hint) => (
-          <div className="flex items-center gap-2" key={`${hint.button}-${hint.action}`}>
-            <MouseIcon button={hint.button} />
-            <span className="rounded bg-neutral-200 px-1.5 py-px font-semibold text-[10px] text-neutral-700">
-              {hint.gesture}
-            </span>
+          <div className="flex items-center gap-2" key={hint.action}>
+            {'button' in hint ? (
+              <>
+                <MouseIcon button={hint.button} />
+                <span className="rounded bg-neutral-200 px-1.5 py-px font-semibold text-[10px] text-neutral-700">
+                  {hint.gesture}
+                </span>
+              </>
+            ) : (
+              hint.keys.map((key) => (
+                <span
+                  className="rounded border border-neutral-300 bg-white px-1 py-px font-semibold text-[10px] text-neutral-700"
+                  key={key}
+                >
+                  {key}
+                </span>
+              ))
+            )}
             <span className="whitespace-nowrap font-medium text-xs">{hint.action}</span>
           </div>
         ))}
