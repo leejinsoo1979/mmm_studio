@@ -71,7 +71,8 @@ export const useKeyboard = ({
     let ctrlTapClean = false
     // While setting a wall / fence direction, Shift held down is the 90° lock,
     // so only a quick clean tap (no pointer travel, no click, no other key)
-    // cycles the snapping mode — on release.
+    // cycles the snapping mode — on release. Timed by the events' own
+    // timestamps so a slow frame between keydown and keyup isn't a hold.
     let shiftTap: { at: number; travel: number; clean: boolean } | null = null
     const SHIFT_TAP_MAX_MS = 400
     const SHIFT_TAP_MAX_TRAVEL_PX = 6
@@ -112,7 +113,7 @@ export const useKeyboard = ({
       }
 
       if (e.key === 'Shift' && getActiveSnapContext() === 'wall') {
-        if (!e.repeat) shiftTap = { at: performance.now(), travel: 0, clean: true }
+        if (!e.repeat) shiftTap = { at: e.timeStamp, travel: 0, clean: true }
         return
       }
 
@@ -542,7 +543,7 @@ export const useKeyboard = ({
         shiftTap = null
         if (
           tap?.clean &&
-          performance.now() - tap.at <= SHIFT_TAP_MAX_MS &&
+          e.timeStamp - tap.at <= SHIFT_TAP_MAX_MS &&
           getActiveSnapContext() === 'wall'
         ) {
           useEditor.getState().cycleSnappingMode()
