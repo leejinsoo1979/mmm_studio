@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { type AnyNode, useScene } from '@pascal-app/core'
 import { Box3, type Object3D, Vector3 } from 'three'
-import { newCabinetHasDoor, setAllCabinetDoors, useCabinetDoors } from '../doors'
+import { isCabinetOpen, newCabinetHasDoor, setAllCabinetDoors, useCabinetDoors } from '../doors'
 import { buildCabinetParts } from '../engine/parts'
 import { buildCabinetGeometry, partCenter } from '../geometry'
 import { CabinetNode } from '../schema'
@@ -56,7 +56,7 @@ describe('cabinet doors (mmmcraft 도어설치)', () => {
     const mesh = group.getObjectByName(`cabinet-door-${door.id}`) as Object3D
     group.updateMatrixWorld(true)
     const closed = mesh.getWorldPosition(new Vector3()).toArray()
-    partCenter(node, door).forEach((v, i) => expect(closed[i]).toBeCloseTo(v, 6))
+    for (const [i, v] of partCenter(node, door).entries()) expect(closed[i]).toBeCloseTo(v, 6)
 
     const frontZ = new Box3().setFromObject(mesh).max.z
     pivot.rotation.y = -Math.PI / 2
@@ -73,7 +73,7 @@ describe('cabinet doors (mmmcraft 도어설치)', () => {
 describe('도어설치 / 도어제거', () => {
   beforeEach(() => {
     useScene.setState({ nodes: {} })
-    useCabinetDoors.setState({ installIntent: false, open: false })
+    useCabinetDoors.setState({ installIntent: false, open: false, cabinetOpen: {} })
   })
 
   const put = (...nodes: CabinetNode[]) =>
@@ -102,5 +102,18 @@ describe('도어설치 / 도어제거', () => {
   test('a scene that already has doors hung gives new cabinets doors', () => {
     put(cabinet())
     expect(newCabinetHasDoor()).toBe(true)
+  })
+
+  test('one cabinet opens on its own; open-all / close-all takes over again', () => {
+    const [a, b] = [cabinet(), cabinet()]
+    put(a, b)
+    const { toggleCabinet, setOpen } = useCabinetDoors.getState()
+    toggleCabinet(a.id)
+    expect([isCabinetOpen(a.id), isCabinetOpen(b.id)]).toEqual([true, false])
+    setOpen(true)
+    toggleCabinet(b.id)
+    expect([isCabinetOpen(a.id), isCabinetOpen(b.id)]).toEqual([true, false])
+    setOpen(false)
+    expect([isCabinetOpen(a.id), isCabinetOpen(b.id)]).toEqual([false, false])
   })
 })

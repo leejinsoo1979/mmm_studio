@@ -5,19 +5,30 @@ import { type CabinetNode, resolveCabinetNode } from './schema'
 /**
  * mmmcraft 도어설치: modules are placed as bare carcasses and the doors are
  * hung afterwards, on every module at once. Once doors are on, modules placed
- * later come with doors too. Open / closed is a view state for all doors.
+ * later come with doors too. Open / closed is a view state: all doors at
+ * once, or one cabinet at a time (walking through in first person).
  * Neither is saved; `hasDoor` on each cabinet is.
  */
 export const useCabinetDoors = create<{
   /** 도어설치 pressed and not undone: new cabinets get doors. */
   installIntent: boolean
   open: boolean
+  /** Cabinets opened / closed on their own since the last open-all. */
+  cabinetOpen: Record<string, boolean>
   setOpen: (open: boolean) => void
-}>((set) => ({
+  toggleCabinet: (id: string) => void
+}>((set, get) => ({
   installIntent: false,
   open: false,
-  setOpen: (open) => set({ open }),
+  cabinetOpen: {},
+  setOpen: (open) => set({ open, cabinetOpen: {} }),
+  toggleCabinet: (id) => set({ cabinetOpen: { ...get().cabinetOpen, [id]: !isCabinetOpen(id) } }),
 }))
+
+export function isCabinetOpen(id: string): boolean {
+  const { open, cabinetOpen } = useCabinetDoors.getState()
+  return cabinetOpen[id] ?? open
+}
 
 function cabinets(nodes: Record<string, AnyNode>): CabinetNode[] {
   return Object.values(nodes)
@@ -41,5 +52,5 @@ export function setAllCabinetDoors(hasDoor: boolean) {
     .map((c) => ({ id: c.id as AnyNodeId, data: { hasDoor } as Partial<AnyNode> }))
   if (updates.length > 0) useScene.getState().updateNodes(updates)
   // Doors are hung closed.
-  useCabinetDoors.setState({ installIntent: hasDoor, open: false })
+  useCabinetDoors.setState({ installIntent: hasDoor, open: false, cabinetOpen: {} })
 }
