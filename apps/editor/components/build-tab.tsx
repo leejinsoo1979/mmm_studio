@@ -74,9 +74,9 @@ type MepItem = {
 }
 
 const IMPORT_ITEMS: BuildType[] = [
-  { id: 'import-3d', label: 'Import 3D', iconSrc: '/icons/mesh.webp' },
-  { id: 'import-cad', label: 'Import CAD', iconSrc: '/icons/blueprint.webp' },
-  { id: 'import-image', label: 'Import Image', iconSrc: '/icons/floorplan.webp' },
+  { id: 'import-3d', label: '3D 모델 가져오기', iconSrc: '/icons/mesh.webp' },
+  { id: 'import-cad', label: 'CAD 가져오기', iconSrc: '/icons/blueprint.webp' },
+  { id: 'import-image', label: '도면 이미지 가져오기', iconSrc: '/icons/floorplan.webp' },
 ]
 
 const DOOR1_ASSET: AssetInput = {
@@ -97,13 +97,13 @@ const DOOR1_ASSET: AssetInput = {
 const BUILD_SECTIONS: BuildSection[] = [
   {
     id: 'walls',
-    title: 'Walls',
+    title: '벽',
     items: [
-      { id: 'wall', label: 'Draw Straight Walls', iconSrc: '/icons/wall.webp', kind: 'wall' },
-      { id: 'wall-arc', label: 'Draw Arc Walls', iconSrc: '/icons/wallcut.webp', kind: 'wall' },
+      { id: 'wall', label: '직선 벽 그리기', iconSrc: '/icons/wall.webp', kind: 'wall' },
+      { id: 'wall-arc', label: '곡선 벽 그리기', iconSrc: '/icons/wallcut.webp', kind: 'wall' },
       {
         id: 'custom-room',
-        label: 'Rectangle Room',
+        label: '사각형 방',
         iconSrc: '/icons/custom-room.webp',
         kind: 'custom-room',
       },
@@ -111,11 +111,11 @@ const BUILD_SECTIONS: BuildSection[] = [
   },
   {
     id: 'door',
-    title: 'Door',
+    title: '문',
     items: [
-      { id: 'door', label: 'Single Door', iconSrc: '/icons/door.webp', kind: 'door' },
-      { id: 'double-door', label: 'Double Door', iconSrc: '/icons/door.webp', kind: 'door' },
-      { id: 'sliding-door', label: 'Sliding Door', iconSrc: '/icons/door.webp', kind: 'door' },
+      { id: 'door', label: '여닫이문', iconSrc: '/icons/door.webp', kind: 'door' },
+      { id: 'double-door', label: '양개문', iconSrc: '/icons/door.webp', kind: 'door' },
+      { id: 'sliding-door', label: '미닫이문', iconSrc: '/icons/door.webp', kind: 'door' },
       {
         id: 'hidden-door',
         label: '히든도어 (목상·떡가베 벽)',
@@ -142,62 +142,62 @@ const BUILD_SECTIONS: BuildSection[] = [
   },
   {
     id: 'window',
-    title: 'Window',
+    title: '창문',
     items: [
-      { id: 'window', label: 'Single Window', iconSrc: '/icons/window.webp', kind: 'window' },
-      { id: 'dual-window', label: 'Dual Window', iconSrc: '/icons/window.webp', kind: 'window' },
+      { id: 'window', label: '단창', iconSrc: '/icons/window.webp', kind: 'window' },
+      { id: 'dual-window', label: '쌍창', iconSrc: '/icons/window.webp', kind: 'window' },
       {
         id: 'unequal-double-window',
-        label: 'Unequal Double Window',
+        label: '비대칭 쌍창',
         iconSrc: '/icons/window.webp',
         kind: 'window',
       },
       {
         id: 'corner-bay-window',
-        label: 'Corner Bay Window',
+        label: '코너 돌출창',
         iconSrc: '/icons/window.webp',
         kind: 'window',
       },
       {
         id: 'corner-window',
-        label: 'Corner Window',
+        label: '코너창',
         iconSrc: '/icons/window.webp',
         kind: 'window',
       },
-      { id: 'bay-window', label: 'Bay Window', iconSrc: '/icons/window.webp', kind: 'window' },
-      { id: 'arc-window', label: 'Arc Window', iconSrc: '/icons/window.webp', kind: 'window' },
+      { id: 'bay-window', label: '돌출창', iconSrc: '/icons/window.webp', kind: 'window' },
+      { id: 'arc-window', label: '아치창', iconSrc: '/icons/window.webp', kind: 'window' },
     ],
   },
   {
     id: 'structure',
-    title: 'Structure',
+    title: '구조',
     items: [
-      { id: 'slab', label: 'Slab', iconSrc: '/icons/floor.webp', kind: 'slab' },
-      { id: 'ceiling', label: 'Ceiling', iconSrc: '/icons/ceiling.webp', kind: 'ceiling' },
-      { id: 'roof', label: 'Roof', iconSrc: '/icons/roof.webp', kind: 'roof' },
-      { id: 'stair', label: 'Stairs', iconSrc: '/icons/stairs.webp', kind: 'stair' },
-      { id: 'elevator', label: 'Elevator', iconSrc: '/icons/elevator.webp', kind: 'elevator' },
-      { id: 'column', label: 'Column', iconSrc: '/icons/column.webp', kind: 'column' },
-      { id: 'shelf', label: 'Shelf', iconSrc: '/icons/shelf.webp', kind: 'shelf' },
-      { id: 'fence', label: 'Fence', iconSrc: '/icons/fence.webp', kind: 'fence' },
-      { id: 'spawn', label: 'Spawn Point', iconSrc: '/icons/spawn-point.webp', kind: 'spawn' },
-      { id: 'mep', label: 'MEP', iconSrc: '/icons/HVAC.webp' },
+      { id: 'slab', label: '바닥', iconSrc: '/icons/floor.webp', kind: 'slab' },
+      { id: 'ceiling', label: '천장', iconSrc: '/icons/ceiling.webp', kind: 'ceiling' },
+      { id: 'roof', label: '지붕', iconSrc: '/icons/roof.webp', kind: 'roof' },
+      { id: 'stair', label: '계단', iconSrc: '/icons/stairs.webp', kind: 'stair' },
+      { id: 'elevator', label: '엘리베이터', iconSrc: '/icons/elevator.webp', kind: 'elevator' },
+      { id: 'column', label: '기둥', iconSrc: '/icons/column.webp', kind: 'column' },
+      { id: 'shelf', label: '선반', iconSrc: '/icons/shelf.webp', kind: 'shelf' },
+      { id: 'fence', label: '울타리', iconSrc: '/icons/fence.webp', kind: 'fence' },
+      { id: 'spawn', label: '시작 위치', iconSrc: '/icons/spawn-point.webp', kind: 'spawn' },
+      { id: 'mep', label: '설비 (MEP)', iconSrc: '/icons/HVAC.webp' },
     ],
   },
 ]
 
 const MEP_ITEMS: MepItem[] = [
-  { id: 'duct-segment', label: 'Duct', iconSrc: '/icons/duct.webp', kind: 'duct-segment' },
+  { id: 'duct-segment', label: '덕트', iconSrc: '/icons/duct.webp', kind: 'duct-segment' },
   {
     id: 'duct-terminal',
-    label: 'Register',
+    label: '디퓨저',
     iconSrc: '/icons/registers.webp',
     kind: 'duct-terminal',
   },
-  { id: 'hvac-equipment', label: 'HVAC Unit', iconSrc: '/icons/HVAC.webp', kind: 'hvac-equipment' },
-  { id: 'lineset', label: 'Lineset', iconSrc: '/icons/lineset.webp', kind: 'lineset' },
-  { id: 'liquid-line', label: 'Liquid Line', iconSrc: '/icons/lineset.webp', kind: 'liquid-line' },
-  { id: 'pipe-segment', label: 'DWV Pipe', iconSrc: '/icons/dwv-pipes.webp', kind: 'pipe-segment' },
+  { id: 'hvac-equipment', label: '냉난방기', iconSrc: '/icons/HVAC.webp', kind: 'hvac-equipment' },
+  { id: 'lineset', label: '냉매 배관', iconSrc: '/icons/lineset.webp', kind: 'lineset' },
+  { id: 'liquid-line', label: '액관', iconSrc: '/icons/lineset.webp', kind: 'liquid-line' },
+  { id: 'pipe-segment', label: '오배수관', iconSrc: '/icons/dwv-pipes.webp', kind: 'pipe-segment' },
 ]
 
 const MEP_TOOL_KINDS = new Set<string>([
@@ -493,17 +493,17 @@ export function BuildTab() {
   return (
     <div className="flex h-full flex-col bg-sidebar text-foreground">
       <div className="flex h-16 shrink-0 items-center justify-between border-border border-b px-4">
-        <h1 className="font-bold text-[20px] tracking-normal">Create Room</h1>
+        <h1 className="font-bold text-[20px] tracking-normal">공간 만들기</h1>
         <div className="flex items-center gap-3 text-muted-foreground">
           <button
-            aria-label="Search"
+            aria-label="검색"
             className="rounded-full p-1 transition-colors hover:text-foreground"
             type="button"
           >
             <Search className="h-5 w-5 stroke-[1.9]" />
           </button>
           <button
-            aria-label="Back"
+            aria-label="뒤로"
             className="rounded-full p-1 transition-colors hover:text-foreground"
             type="button"
           >
@@ -514,7 +514,7 @@ export function BuildTab() {
 
       <div className="dark-scrollbar min-h-0 flex-1 overflow-y-auto">
         <TooltipProvider delayDuration={0} disableHoverableContent>
-          <Section title="Import Floor Plan">
+          <Section title="도면 가져오기">
             <div className="grid grid-cols-3 gap-2">
               {IMPORT_ITEMS.map((item) => (
                 <BuildTile disabled item={item} key={item.id} />
@@ -549,7 +549,7 @@ export function BuildTab() {
           {mode === 'build' &&
           (activeTool === 'roof' || isRoofFeatureActive) &&
           roofFeatures.length > 0 ? (
-            <Section title="Roof Features">
+            <Section title="지붕 요소">
               <div className="grid grid-cols-3 gap-2">
                 {roofFeatures.map((feature) => (
                   <BuildTile
@@ -567,7 +567,7 @@ export function BuildTab() {
           ) : null}
 
           {isMepActive ? (
-            <Section title="MEP">
+            <Section title="설비 (MEP)">
               <div className="grid grid-cols-3 gap-2">
                 {MEP_ITEMS.map((item) => (
                   <BuildTile
@@ -587,7 +587,7 @@ export function BuildTab() {
                   <ActionButton
                     active={activeTool === 'duct-fitting'}
                     iconSrc="/icons/duct-fitting.webp"
-                    label="Add Fitting"
+                    label="피팅 추가"
                     onClick={() =>
                       activateBuildTool(
                         activeTool === 'duct-fitting' ? 'duct-segment' : 'duct-fitting',
@@ -602,7 +602,7 @@ export function BuildTab() {
                   <ActionButton
                     active={activeTool === 'pipe-fitting'}
                     iconSrc="/icons/duct-fitting.webp"
-                    label="Add Fitting"
+                    label="피팅 추가"
                     onClick={() =>
                       activateBuildTool(
                         activeTool === 'pipe-fitting' ? 'pipe-segment' : 'pipe-fitting',
@@ -612,7 +612,7 @@ export function BuildTab() {
                   <ActionButton
                     active={activeTool === 'pipe-trap'}
                     iconSrc="/icons/dwv-pipes.webp"
-                    label="Add Trap"
+                    label="트랩 추가"
                     onClick={() =>
                       activateBuildTool(activeTool === 'pipe-trap' ? 'pipe-segment' : 'pipe-trap')
                     }
@@ -633,8 +633,10 @@ export function BuildTab() {
                     }}
                     type="button"
                   >
-                    <span>Follow lineset</span>
-                    <span className="text-muted-foreground text-xs">{follow ? 'On' : 'Off'}</span>
+                    <span>냉매 배관 따라가기</span>
+                    <span className="text-muted-foreground text-xs">
+                      {follow ? '켜짐' : '꺼짐'}
+                    </span>
                   </button>
                 </div>
               ) : null}
