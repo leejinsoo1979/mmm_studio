@@ -680,10 +680,10 @@ function ReferencesControl() {
       <div className="flex items-center">
         <ActionButton
           className={cn(
-            'h-9 w-9 rounded-l-full rounded-r-none p-0 text-neutral-600',
+            'h-9 w-9 rounded-l-full rounded-r-none p-0 text-neutral-600 dark:text-neutral-300',
             anyVisible
-              ? 'bg-neutral-900/[0.08] text-neutral-900'
-              : 'hover:bg-neutral-900/[0.06] hover:text-neutral-900',
+              ? 'bg-neutral-900/[0.08] text-neutral-900 dark:text-neutral-50'
+              : 'hover:bg-neutral-900/[0.06] dark:hover:bg-white/10 hover:text-neutral-900 dark:hover:text-white',
           )}
           label={`References: ${anyVisible ? 'Visible' : 'Hidden'}`}
           onClick={toggleAll}
@@ -703,7 +703,7 @@ function ReferencesControl() {
             aria-expanded={isOpen}
             aria-label="Reference settings"
             className={cn(
-              'flex h-9 w-5 items-center justify-center rounded-r-full text-neutral-500 transition-colors',
+              'flex h-9 w-5 items-center justify-center rounded-r-full text-neutral-500 dark:text-neutral-400 transition-colors',
               anyVisible
                 ? isOpen
                   ? 'bg-foreground/10'

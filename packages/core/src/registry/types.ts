@@ -104,6 +104,8 @@ export type FloorplanPalette = {
    * and the node isn't selected.
    */
   wallHoverStroke: string
+  /** Cut-wall body fill; dark on light scene themes, light on dark ones. */
+  wallFill: string
   endpointHandleFill: string
   endpointHandleStroke: string
   endpointHandleHoverStroke: string

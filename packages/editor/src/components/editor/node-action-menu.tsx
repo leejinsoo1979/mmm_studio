@@ -53,7 +53,7 @@ function MenuButton({
       className={
         danger
           ? 'tooltip-trigger flex size-9 items-center justify-center rounded-full text-red-500 transition-colors hover:bg-red-50'
-          : 'tooltip-trigger flex size-9 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900'
+          : 'tooltip-trigger flex size-9 items-center justify-center rounded-full text-neutral-600 dark:text-neutral-300 transition-colors hover:bg-neutral-100 dark:hover:bg-white/10 hover:text-neutral-900 dark:hover:text-white'
       }
       onClick={onClick}
       title={label}
@@ -85,7 +85,7 @@ export function NodeActionMenu({
 }: NodeActionMenuProps) {
   return (
     <div
-      className="pointer-events-auto flex items-center gap-0.5 rounded-full bg-white/95 px-1.5 py-1 shadow-[0_6px_24px_rgba(0,0,0,0.28)] backdrop-blur-md"
+      className="pointer-events-auto flex items-center gap-0.5 rounded-full bg-white/95 dark:bg-neutral-900/95 px-1.5 py-1 shadow-[0_6px_24px_rgba(0,0,0,0.28)] backdrop-blur-md"
       onPointerDown={onPointerDown}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}

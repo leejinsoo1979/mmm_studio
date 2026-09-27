@@ -88,6 +88,7 @@ describe('spawn definition', () => {
           selectedFill: '#dbeafe',
           selectedHatch: '#60a5fa',
           wallHoverStroke: '#60a5fa',
+          wallFill: '#111111',
           endpointHandleFill: '#fed7aa',
           endpointHandleStroke: '#f97316',
           endpointHandleHoverStroke: '#fb923c',

@@ -7591,6 +7591,7 @@ export function FloorplanPanel({
       selectedFill: palette.selectedFill,
       selectedHatch: palette.selectedStroke,
       wallHoverStroke: palette.wallHoverStroke,
+      wallFill: isDark ? palette.wallFill : '#111111',
       endpointHandleFill: palette.endpointHandleFill,
       endpointHandleStroke: palette.endpointHandleStroke,
       endpointHandleHoverStroke: palette.endpointHandleHoverStroke,

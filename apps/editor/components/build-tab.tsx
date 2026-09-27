@@ -293,8 +293,10 @@ function BuildTile({
           aria-label={item.label}
           aria-pressed={active}
           className={cn(
-            'group relative flex aspect-square min-w-0 flex-col items-center justify-center overflow-hidden rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.12)] ring-1 transition-all duration-150',
-            active ? 'ring-2 ring-sky-400' : 'ring-black/5 hover:ring-neutral-400',
+            'group relative flex aspect-square min-w-0 flex-col items-center justify-center overflow-hidden rounded-lg bg-white dark:bg-neutral-900 shadow-[0_1px_3px_rgba(0,0,0,0.12)] ring-1 transition-all duration-150',
+            active
+              ? 'ring-2 ring-sky-400'
+              : 'ring-black/5 dark:ring-white/10 hover:ring-neutral-400',
             disabled && 'cursor-not-allowed opacity-50 hover:ring-black/5',
           )}
           disabled={disabled}
@@ -311,11 +313,11 @@ function BuildTile({
             width={48}
           />
           {caption ? (
-            <span className="absolute bottom-1.5 left-1.5 font-semibold text-[11px] text-neutral-600 tabular-nums">
+            <span className="absolute bottom-1.5 left-1.5 font-semibold text-[11px] text-neutral-600 dark:text-neutral-300 tabular-nums">
               {caption}
             </span>
           ) : (
-            <span className="absolute inset-x-1 bottom-1 truncate text-center text-[9.5px] text-neutral-500 leading-tight">
+            <span className="absolute inset-x-1 bottom-1 truncate text-center text-[9.5px] text-neutral-500 dark:text-neutral-400 leading-tight">
               {item.label}
             </span>
           )}
@@ -337,7 +339,7 @@ function BuildTile({
 function Section({ children, title }: { children: React.ReactNode; title: string }) {
   return (
     <section className="px-2 pt-3">
-      <h2 className="mb-2 rounded-md bg-neutral-200/80 px-3 py-1.5 font-semibold text-[12px] text-neutral-600 leading-none">
+      <h2 className="mb-2 rounded-md bg-neutral-200/80 dark:bg-white/10 px-3 py-1.5 font-semibold text-[12px] text-neutral-600 dark:text-neutral-300 leading-none">
         {title}
       </h2>
       {children}
@@ -353,7 +355,7 @@ function NewWallConstruction() {
   const construction = useWallDrawingDefaults((s) => s.construction)
   const setConstruction = useWallDrawingDefaults((s) => s.setConstruction)
   return (
-    <div className="rounded-lg bg-white p-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
+    <div className="rounded-lg bg-white dark:bg-neutral-900 p-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
       <div className="mb-2 text-muted-foreground text-xs">새로 그릴 벽 · 벽체 두께 100 mm 기준</div>
       <WallConstructionFields onChange={setConstruction} value={construction} />
     </div>
@@ -364,7 +366,7 @@ function NewWallConstruction() {
 function LevelWallTakeoff() {
   const levelId = useViewer((s) => s.selection.levelId)
   return (
-    <div className="mt-1.5 rounded-lg bg-white p-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
+    <div className="mt-1.5 rounded-lg bg-white dark:bg-neutral-900 p-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
       <div className="mb-2 text-muted-foreground text-xs">벽 마감 자재 산출 (현재 층)</div>
       <LevelTakeoffSummary levelId={levelId ?? null} />
     </div>
@@ -513,11 +515,11 @@ export function BuildTab() {
   )
 
   return (
-    <div className="flex h-full flex-col bg-[#eceef1] text-foreground">
+    <div className="flex h-full flex-col bg-[#eceef1] dark:bg-neutral-950 text-foreground">
       <div className="shrink-0 px-2 pt-3 pb-1">
-        <label className="flex h-9 items-center gap-2 rounded-lg bg-white px-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
+        <label className="flex h-9 items-center gap-2 rounded-lg bg-white dark:bg-neutral-900 px-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
           <input
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-neutral-800 outline-none placeholder:text-neutral-400"
+            className="min-w-0 flex-1 bg-transparent text-[13px] text-neutral-800 dark:text-neutral-100 outline-none placeholder:text-neutral-400"
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
               e.stopPropagation()
@@ -529,10 +531,10 @@ export function BuildTab() {
           />
           {query ? (
             <button aria-label="검색 지우기" onClick={() => setQuery('')} type="button">
-              <X className="h-4 w-4 text-neutral-500" />
+              <X className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
             </button>
           ) : (
-            <Search className="h-4 w-4 text-neutral-500" />
+            <Search className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
           )}
         </label>
       </div>

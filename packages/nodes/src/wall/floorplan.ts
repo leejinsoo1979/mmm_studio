@@ -116,7 +116,7 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
 
   const points = polygon.map((p) => [p.x, p.y] as FloorplanPoint)
 
-  const fill = isHovered && !isSelected ? '#6557e8' : '#111111'
+  const fill = isHovered && !isSelected ? '#6557e8' : (palette?.wallFill ?? '#111111')
 
   const children: FloorplanGeometry[] = [
     {

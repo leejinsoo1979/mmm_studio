@@ -32,6 +32,7 @@ import {
 import { initSFXBus } from '../../lib/sfx-bus'
 import useEditor from '../../store/use-editor'
 import { useUiHidden } from '../../store/use-ui-hidden'
+import { useUiTheme } from '../../store/use-ui-theme'
 import { CeilingSelectionAffordanceSystem } from '../systems/ceiling/ceiling-selection-affordance-system'
 import { CeilingSystem } from '../systems/ceiling/ceiling-system'
 import { RoofEditSystem } from '../systems/roof/roof-edit-system'
@@ -434,21 +435,21 @@ function ViewerCanvasControlsHint({
     <div className="pointer-events-none absolute top-14 right-3 z-40">
       <section
         aria-label="카메라 조작 안내"
-        className="group pointer-events-auto relative flex flex-col gap-1.5 rounded-xl bg-white/90 px-3 py-2 text-neutral-700 shadow-[0_4px_16px_rgba(0,0,0,0.18)] backdrop-blur-md"
+        className="group pointer-events-auto relative flex flex-col gap-1.5 rounded-xl bg-white/90 dark:bg-neutral-900/90 px-3 py-2 text-neutral-700 dark:text-neutral-200 shadow-[0_4px_16px_rgba(0,0,0,0.18)] backdrop-blur-md"
       >
         {hints.map((hint) => (
           <div className="flex items-center gap-2" key={hint.action}>
             {'button' in hint ? (
               <>
                 <MouseIcon button={hint.button} />
-                <span className="rounded bg-neutral-200 px-1.5 py-px font-semibold text-[10px] text-neutral-700">
+                <span className="rounded bg-neutral-200 dark:bg-neutral-700 px-1.5 py-px font-semibold text-[10px] text-neutral-700 dark:text-neutral-200">
                   {hint.gesture}
                 </span>
               </>
             ) : (
               hint.keys.map((key) => (
                 <span
-                  className="rounded border border-neutral-300 bg-white px-1 py-px font-semibold text-[10px] text-neutral-700"
+                  className="rounded border border-neutral-300 bg-white dark:bg-neutral-900 px-1 py-px font-semibold text-[10px] text-neutral-700 dark:text-neutral-200"
                   key={key}
                 >
                   {key}
@@ -616,7 +617,7 @@ function PaintCursorBadge({
             </span>
           ) : (
             <span
-              className="-right-1 -bottom-1 absolute h-3.5 w-3.5 rounded-full border border-white/70 bg-cover bg-center shadow-[0_2px_6px_rgba(0,0,0,0.45)]"
+              className="-right-1 -bottom-1 absolute h-3.5 w-3.5 rounded-full border border-white/70 dark:border-white/10 bg-cover bg-center shadow-[0_2px_6px_rgba(0,0,0,0.45)]"
               style={{
                 backgroundColor: swatchColor,
                 backgroundImage: swatchImageUrl
@@ -1088,6 +1089,13 @@ export default function Editor({
   const [isViewerSceneReady, setIsViewerSceneReady] = useState(false)
   const isPreviewMode = useEditor((s) => s.isPreviewMode)
   const isCaptureMode = useEditor((s) => s.isCaptureMode)
+  const uiTheme = useUiTheme((s) => s.theme)
+
+  // On <body> so portaled popovers, menus and dialogs switch with the chrome.
+  useEffect(() => {
+    document.body.classList.toggle('dark', uiTheme === 'dark')
+    return () => document.body.classList.remove('dark')
+  }, [uiTheme])
 
   const sidebarWidth = useSidebarStore((s) => s.width)
   const isSidebarCollapsed = useSidebarStore((s) => s.isCollapsed)

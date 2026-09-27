@@ -66,7 +66,7 @@ export function ToolCursorHints({ hints }: { hints: ContextualShortcutHint[] }) 
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none fixed top-0 left-0 z-40 flex-col gap-1 rounded-lg bg-white/90 px-2.5 py-1.5 text-neutral-700 shadow-[0_4px_14px_rgba(0,0,0,0.18)] backdrop-blur-sm"
+      className="pointer-events-none fixed top-0 left-0 z-40 flex-col gap-1 rounded-lg bg-white/90 dark:bg-neutral-900/90 px-2.5 py-1.5 text-neutral-700 dark:text-neutral-200 shadow-[0_4px_14px_rgba(0,0,0,0.18)] backdrop-blur-sm"
       ref={ref}
       style={{ display: 'none' }}
     >
@@ -82,7 +82,7 @@ export function ToolCursorHints({ hints }: { hints: ContextualShortcutHint[] }) 
             <span
               className={cn(
                 'rounded px-1 py-px font-semibold text-[10px]',
-                hint.active ? 'bg-sky-100' : 'bg-neutral-200',
+                hint.active ? 'bg-sky-100' : 'bg-neutral-200 dark:bg-neutral-700',
               )}
               key={String(key)}
             >

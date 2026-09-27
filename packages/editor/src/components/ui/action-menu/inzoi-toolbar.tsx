@@ -48,8 +48,8 @@ function ToolButton({
       className={cn(
         'flex size-9 items-center justify-center rounded-full transition-colors disabled:pointer-events-none disabled:opacity-30',
         active
-          ? 'bg-neutral-800 text-white'
-          : 'text-neutral-600 hover:bg-neutral-900/[0.06] hover:text-neutral-900',
+          ? 'bg-neutral-800 text-white dark:bg-neutral-100 dark:text-neutral-900'
+          : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-900/[0.06] dark:hover:bg-white/10 hover:text-neutral-900 dark:hover:text-white',
       )}
       disabled={disabled}
       onClick={() => {
@@ -64,7 +64,7 @@ function ToolButton({
   )
 }
 
-const Divider = () => <div className="mx-1.5 h-5 w-px bg-neutral-300/70" />
+const Divider = () => <div className="mx-1.5 h-5 w-px bg-neutral-300/70 dark:bg-white/15" />
 
 function Group({ children }: { children: ReactNode }) {
   return <div className="flex items-center gap-0.5">{children}</div>
@@ -105,7 +105,7 @@ export function InzoiToolbar() {
   }
 
   return (
-    <div className="flex items-center rounded-full border border-white/70 bg-white/90 px-1.5 py-1 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md">
+    <div className="flex items-center rounded-full border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 px-1.5 py-1 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md">
       <Group>
         <ToolButton
           active={showGrid}

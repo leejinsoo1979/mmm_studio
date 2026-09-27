@@ -6,7 +6,7 @@ import { useEffect } from 'react'
 import { anyCabinetHasDoor, setAllCabinetDoors, useCabinetDoors } from './doors'
 
 const segment = (active: boolean) =>
-  `rounded-full px-3 py-1 text-xs transition-colors ${active ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:text-neutral-900'}`
+  `rounded-full px-3 py-1 text-xs transition-colors ${active ? 'bg-neutral-800 text-white dark:bg-neutral-100 dark:text-neutral-900' : 'text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white'}`
 
 /**
  * mmmcraft viewer controls for cabinet doors: 도어설치 / 도어제거 for every
@@ -40,12 +40,12 @@ export function CabinetDoorControls() {
 
   return (
     <div
-      className="pointer-events-auto fixed z-40 flex items-center gap-1 rounded-full bg-white/95 p-1 text-neutral-700 shadow-[0_4px_16px_rgba(0,0,0,0.2)] backdrop-blur-md"
+      className="pointer-events-auto fixed z-40 flex items-center gap-1 rounded-full bg-white/95 dark:bg-neutral-900/95 p-1 text-neutral-700 dark:text-neutral-200 shadow-[0_4px_16px_rgba(0,0,0,0.2)] backdrop-blur-md"
       // Bottom-left, clear of the action menu that floats over a selection.
       style={{ bottom: 72, left: 'calc(var(--viewer-left-inset, 0px) + 12px)' }}
     >
       <button
-        className="flex items-center gap-1.5 rounded-full px-3 py-1 font-medium text-xs transition-colors hover:bg-neutral-100"
+        className="flex items-center gap-1.5 rounded-full px-3 py-1 font-medium text-xs transition-colors hover:bg-neutral-100 dark:hover:bg-white/10"
         onClick={() => setAllCabinetDoors(!doorsHung)}
         title={doorsHung ? '모든 가구의 도어를 뗍니다' : '모든 가구에 도어를 답니다'}
         type="button"

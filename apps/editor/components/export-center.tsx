@@ -143,7 +143,7 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
                         <Copy className="h-3.5 w-3.5" /> Copy
                       </button>
                       <a
-                        className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 font-semibold text-black text-xs"
+                        className="flex items-center gap-1.5 rounded-lg bg-white dark:bg-neutral-900 px-3 py-2 font-semibold text-black text-xs"
                         href={published.playUrl}
                         rel="noreferrer"
                         target="_blank"
@@ -219,7 +219,7 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
             {downloadUrl ? (
               <div className="px-6 pb-6">
                 <a
-                  className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white font-semibold text-black text-sm"
+                  className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white dark:bg-neutral-900 font-semibold text-black text-sm"
                   href={downloadUrl}
                   rel="noreferrer"
                   target="_blank"

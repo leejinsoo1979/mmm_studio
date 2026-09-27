@@ -249,15 +249,15 @@ export function MaterialPalette() {
 
   return (
     <div
-      className="pointer-events-auto fixed bottom-4 left-1/2 z-50 flex w-[min(1100px,calc(100%-32px))] -translate-x-1/2 flex-col items-center gap-2 text-neutral-800"
+      className="pointer-events-auto fixed bottom-4 left-1/2 z-50 flex w-[min(1100px,calc(100%-32px))] -translate-x-1/2 flex-col items-center gap-2 text-neutral-800 dark:text-neutral-100"
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center gap-2 rounded-full bg-white/95 py-1 pr-1 pl-4 shadow-[0_6px_24px_rgba(0,0,0,0.25)]">
-        <span className="whitespace-nowrap text-neutral-500 text-xs">
+      <div className="flex items-center gap-2 rounded-full bg-white/95 dark:bg-neutral-900/95 py-1 pr-1 pl-4 shadow-[0_6px_24px_rgba(0,0,0,0.25)]">
+        <span className="whitespace-nowrap text-neutral-500 dark:text-neutral-400 text-xs">
           {hovered ? '미리보기' : '현재 재질'}
         </span>
         <span
-          className="size-5 shrink-0 rounded-full border border-black/10 bg-neutral-200"
+          className="size-5 shrink-0 rounded-full border border-black/10 bg-neutral-200 dark:bg-neutral-700"
           style={shown ? swatchStyle(shown) : undefined}
         />
         <span className="max-w-48 truncate font-medium text-xs">{shown?.label ?? '기본'}</span>
@@ -271,13 +271,13 @@ export function MaterialPalette() {
           <Check className="h-4 w-4" strokeWidth={3} />
         </button>
       </div>
-      <div className="flex w-full gap-4 rounded-2xl bg-white/95 p-3 shadow-[0_8px_32px_rgba(0,0,0,0.28)] backdrop-blur-md">
+      <div className="flex w-full gap-4 rounded-2xl bg-white/95 dark:bg-neutral-900/95 p-3 shadow-[0_8px_32px_rgba(0,0,0,0.28)] backdrop-blur-md">
         <aside className="flex w-36 shrink-0 flex-col gap-1 border-neutral-200 border-r pr-3">
           <span className="truncate font-semibold text-sm">{name}</span>
-          <span className="mb-1 text-[11px] text-neutral-500">칠할 부분</span>
+          <span className="mb-1 text-[11px] text-neutral-500 dark:text-neutral-400">칠할 부분</span>
           {targets.map((t) => (
             <button
-              className={`truncate rounded-lg px-2 py-1 text-left text-xs transition-colors ${t.key === target?.key ? 'bg-sky-100 font-medium text-sky-700' : 'text-neutral-600 hover:bg-neutral-100'}`}
+              className={`truncate rounded-lg px-2 py-1 text-left text-xs transition-colors ${t.key === target?.key ? 'bg-sky-100 font-medium text-sky-700' : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-white/10'}`}
               key={t.key}
               onClick={() => {
                 endPreview()
@@ -299,7 +299,9 @@ export function MaterialPalette() {
               if (materials.length === 0) return null
               return (
                 <section className="flex shrink-0 flex-col gap-1.5" key={section.title}>
-                  <h4 className="font-semibold text-neutral-600 text-xs">{section.title}</h4>
+                  <h4 className="font-semibold text-neutral-600 dark:text-neutral-300 text-xs">
+                    {section.title}
+                  </h4>
                   <div className="grid grid-flow-col grid-rows-3 gap-1.5">
                     {materials.map((material) => (
                       <button

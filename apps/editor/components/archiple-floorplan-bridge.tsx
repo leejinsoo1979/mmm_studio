@@ -87,7 +87,7 @@ function ArchipleCanvasStage({ onExit }: { onExit: () => void }) {
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="rounded-md bg-white px-2.5 py-1.5 font-semibold text-[#111] text-xs hover:bg-neutral-200"
+            className="rounded-md bg-white dark:bg-neutral-900 px-2.5 py-1.5 font-semibold text-[#111] text-xs hover:bg-neutral-200"
             onClick={applyToMmm}
             type="button"
           >
@@ -145,7 +145,7 @@ function ArchipleCanvasStage({ onExit }: { onExit: () => void }) {
 
         {/* `relative`: the canvas container is absolutely positioned and would
             otherwise cover the header and tool bar. */}
-        <div className="relative min-w-0 flex-1 bg-white">
+        <div className="relative min-w-0 flex-1 bg-white dark:bg-neutral-900">
           <FloorplanCanvas
             activeTool={tool}
             onDataChange={(nextData) => setData(nextData)}
@@ -170,7 +170,7 @@ export function ArchipleFloorplanBridge() {
         className={`pointer-events-auto absolute bottom-5 z-50 rounded-full border px-3 py-2 font-semibold text-xs shadow-xl backdrop-blur transition ${
           open
             ? 'border-[#7567ff]/70 bg-[#7567ff] text-white hover:bg-[#6658f2]'
-            : 'border-foreground/10 bg-white/95 text-neutral-800 hover:bg-white'
+            : 'border-foreground/10 bg-white/95 dark:bg-neutral-900/95 text-neutral-800 dark:text-neutral-100 hover:bg-white dark:hover:bg-neutral-800'
         }`}
         onClick={() => setOpen((value) => !value)}
         type="button"
