@@ -53,7 +53,7 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from './toolbar-tooltip'
 
 const TOOLBAR_CONTAINER =
-  'inline-flex h-8 items-stretch overflow-hidden rounded-xl border border-border bg-background/90 shadow-2xl backdrop-blur-md'
+  'inline-flex h-9 items-stretch overflow-hidden rounded-full border border-white/70 bg-white/90 px-1 text-neutral-700 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md'
 
 const TOOLBAR_BTN =
   'flex w-8 items-center justify-center text-muted-foreground/80 transition-colors hover:bg-foreground/8 hover:text-foreground/90'
@@ -718,7 +718,7 @@ function TimeOfDaySlider() {
   const mm = Math.round((sunTime - hh) * 60)
   return (
     <div
-      className="flex h-8 items-center gap-2 rounded-xl border border-border bg-background/90 px-2.5 shadow-2xl backdrop-blur-md"
+      className="flex h-9 items-center gap-2 rounded-full border border-white/70 bg-white/90 px-3 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md"
       onKeyDown={(event) => event.stopPropagation()}
       title={`시간대 ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`}
     >

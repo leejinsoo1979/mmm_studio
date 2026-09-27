@@ -545,7 +545,7 @@ export function FloatingLevelSelector() {
             sensors={sensors}
           >
             <SortableContext items={sortableLevelIds} strategy={verticalListSortingStrategy}>
-              <div className="flex flex-col gap-0.5 rounded-xl border border-border bg-background/90 p-1 shadow-2xl backdrop-blur-md">
+              <div className="flex flex-col gap-0.5 rounded-2xl border border-white/70 bg-white/90 p-1 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md">
                 {reversedLevels.map((level, i) => {
                   const isSelected = level.id === levelId
                   const sortedIndex = levels.indexOf(level)

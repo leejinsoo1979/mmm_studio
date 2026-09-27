@@ -29,7 +29,7 @@ function getRotatableSelectedReference() {
 
 // Select the level above (+1) or below (−1) in the active building, ordered
 // by level number as the level switcher lists them.
-function stepLevel(direction: 1 | -1) {
+export function stepLevel(direction: 1 | -1) {
   const { buildingId, levelId } = useViewer.getState().selection
   if (!buildingId) return
   const nodes = useScene.getState().nodes
@@ -47,7 +47,7 @@ function stepLevel(direction: 1 | -1) {
 
 // Home raises the walls a step (Low → Cutaway → Full height), End lowers them.
 const WALL_HEIGHT_STEPS = ['down', 'cutaway', 'up'] as const
-function stepWallMode(direction: 1 | -1) {
+export function stepWallMode(direction: 1 | -1) {
   const current = WALL_HEIGHT_STEPS.indexOf(
     useViewer.getState().wallMode as (typeof WALL_HEIGHT_STEPS)[number],
   )

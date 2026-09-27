@@ -680,10 +680,10 @@ function ReferencesControl() {
       <div className="flex items-center">
         <ActionButton
           className={cn(
-            'rounded-r-none p-0',
+            'h-9 w-9 rounded-l-full rounded-r-none p-0 text-neutral-600',
             anyVisible
-              ? 'bg-foreground/15'
-              : 'opacity-60 grayscale hover:bg-foreground/5 hover:opacity-100 hover:grayscale-0',
+              ? 'bg-neutral-900/[0.08] text-neutral-900'
+              : 'hover:bg-neutral-900/[0.06] hover:text-neutral-900',
           )}
           label={`References: ${anyVisible ? 'Visible' : 'Hidden'}`}
           onClick={toggleAll}
@@ -691,11 +691,7 @@ function ReferencesControl() {
           variant="ghost"
         >
           <div className="relative">
-            <img
-              alt="References"
-              className="h-[28px] w-[28px] object-contain"
-              src="/icons/floorplan.webp"
-            />
+            <Layers2 className="h-[19px] w-[19px]" strokeWidth={1.75} />
             <span className="absolute -right-1.5 -bottom-1 min-w-[14px] rounded-full bg-foreground/20 px-[3px] text-center font-medium text-[9px] text-foreground/70 leading-[14px]">
               {total}
             </span>
@@ -707,7 +703,7 @@ function ReferencesControl() {
             aria-expanded={isOpen}
             aria-label="Reference settings"
             className={cn(
-              'flex h-11 w-6 items-center justify-center rounded-r-lg transition-colors',
+              'flex h-9 w-5 items-center justify-center rounded-r-full text-neutral-500 transition-colors',
               anyVisible
                 ? isOpen
                   ? 'bg-foreground/10'
@@ -726,7 +722,7 @@ function ReferencesControl() {
       <PopoverContent
         align="center"
         className="w-72 rounded-xl border-border/45 bg-background/96 p-3 shadow-elevation-3 backdrop-blur-xl"
-        side="top"
+        side="bottom"
         sideOffset={14}
       >
         <div className="space-y-3">
