@@ -1,4 +1,4 @@
-import { type AnyNodeId, emitter, nodeRegistry, useScene } from '@pascal-app/core'
+import { type AnyNodeId, emitter, type LevelNode, nodeRegistry, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect } from 'react'
 import { steppedRotation } from '../components/tools/item/placement-math'
@@ -24,6 +24,36 @@ function getRotatableSelectedReference() {
   if (!node || (node.type !== 'guide' && node.type !== 'scan')) return null
   if (useEditor.getState().guideUi[refId]?.locked === true) return null
   return node
+}
+
+// Select the level above (+1) or below (−1) in the active building, ordered
+// by level number as the level switcher lists them.
+function stepLevel(direction: 1 | -1) {
+  const { buildingId, levelId } = useViewer.getState().selection
+  if (!buildingId) return
+  const nodes = useScene.getState().nodes
+  const building = nodes[buildingId]
+  if (building?.type !== 'building') return
+  const levels = building.children
+    .map((id) => nodes[id as AnyNodeId])
+    .filter((node): node is LevelNode => node?.type === 'level')
+    .sort((a, b) => a.level - b.level)
+  const index = levelId ? levels.findIndex((level) => level.id === levelId) : -1
+  const next =
+    index === -1 ? (direction > 0 ? levels[0] : levels.at(-1)) : levels[index + direction]
+  if (next) useViewer.getState().setSelection({ levelId: next.id })
+}
+
+// Home raises the walls a step (Low → Cutaway → Full height), End lowers them.
+const WALL_HEIGHT_STEPS = ['down', 'cutaway', 'up'] as const
+function stepWallMode(direction: 1 | -1) {
+  const current = WALL_HEIGHT_STEPS.indexOf(
+    useViewer.getState().wallMode as (typeof WALL_HEIGHT_STEPS)[number],
+  )
+  const from = current === -1 ? WALL_HEIGHT_STEPS.length - 1 : current
+  const next =
+    WALL_HEIGHT_STEPS[Math.max(0, Math.min(WALL_HEIGHT_STEPS.length - 1, from + direction))]
+  if (next) useViewer.getState().setWallMode(next)
 }
 
 // Tools call this in their onCancel handler when they have an active mid-action to cancel,
@@ -284,48 +314,17 @@ export const useKeyboard = ({
         if (isVersionPreviewMode) return
         e.preventDefault()
         runRedo()
-      } else if (e.key === 'ArrowUp' && (e.metaKey || e.ctrlKey)) {
+      } else if (
+        (e.key === 'ArrowUp' && (e.metaKey || e.ctrlKey)) ||
+        e.key === 'PageUp' ||
+        e.key === 'PageDown' ||
+        (e.key === 'ArrowDown' && (e.metaKey || e.ctrlKey))
+      ) {
         e.preventDefault()
-        const { buildingId, levelId } = useViewer.getState().selection
-        if (buildingId) {
-          const building = useScene.getState().nodes[buildingId]
-          const levels =
-            building?.type === 'building'
-              ? building.children.filter(
-                  (childId) => useScene.getState().nodes[childId as AnyNodeId]?.type === 'level',
-                )
-              : []
-          if (levels.length > 0) {
-            const currentIdx = levelId ? levels.indexOf(levelId as any) : -1
-            const nextIdx = currentIdx < levels.length - 1 ? currentIdx + 1 : currentIdx
-            if (nextIdx !== -1 && nextIdx !== currentIdx) {
-              useViewer.getState().setSelection({ levelId: levels[nextIdx] as any })
-            } else if (currentIdx === -1) {
-              useViewer.getState().setSelection({ levelId: levels[0] as any })
-            }
-          }
-        }
-      } else if (e.key === 'ArrowDown' && (e.metaKey || e.ctrlKey)) {
+        stepLevel(e.key === 'ArrowUp' || e.key === 'PageUp' ? 1 : -1)
+      } else if (e.key === 'Home' || e.key === 'End') {
         e.preventDefault()
-        const { buildingId, levelId } = useViewer.getState().selection
-        if (buildingId) {
-          const building = useScene.getState().nodes[buildingId]
-          const levels =
-            building?.type === 'building'
-              ? building.children.filter(
-                  (childId) => useScene.getState().nodes[childId as AnyNodeId]?.type === 'level',
-                )
-              : []
-          if (levels.length > 0) {
-            const currentIdx = levelId ? levels.indexOf(levelId as any) : -1
-            const prevIdx = currentIdx > 0 ? currentIdx - 1 : currentIdx
-            if (prevIdx !== -1 && prevIdx !== currentIdx) {
-              useViewer.getState().setSelection({ levelId: levels[prevIdx] as any })
-            } else if (currentIdx === -1) {
-              useViewer.getState().setSelection({ levelId: levels[levels.length - 1] as any })
-            }
-          }
-        }
+        stepWallMode(e.key === 'Home' ? 1 : -1)
       } else if (
         (e.key === 'r' || e.key === 'R') &&
         !e.metaKey &&
