@@ -11,12 +11,7 @@ import { useViewer } from '@pascal-app/viewer'
 import { Check, type LucideIcon, Minus, Search, Spline, Square, X } from 'lucide-react'
 import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/toolbar-tooltip'
+import { TooltipProvider } from '@/components/toolbar-tooltip'
 import { cn } from '@/lib/utils'
 import {
   FULL_WALL_HEIGHTS,
@@ -24,6 +19,7 @@ import {
   useWallDrawingDefaults,
   wallDrawingToolDefaults,
 } from '@/lib/wall-drawing-defaults'
+import { CatalogHover } from './catalog-hover-card'
 
 type BuildToolKind =
   | 'wall'
@@ -54,6 +50,7 @@ type MepToolKind =
 type BuildType = {
   id: string
   label: string
+  description?: string
   iconSrc: string
   asset?: AssetInput
   kind?: BuildToolKind
@@ -134,6 +131,7 @@ const BUILD_SECTIONS: BuildSection[] = [
       {
         id: 'hidden-door',
         label: '히든도어 (목상·떡가베 벽)',
+        description: '목상 또는 떡가베로 지은 벽에만 설치할 수 있습니다.',
         iconSrc: '/images/room-library/doors/hidden.jpg',
         kind: 'door',
         defaults: { hidden: true },
@@ -141,6 +139,7 @@ const BUILD_SECTIONS: BuildSection[] = [
       {
         id: 'step-door-yerim',
         label: '예림·인쇼 스텝도어',
+        description: '문틀 깊이가 설치하는 벽의 마감 두께에 맞춰집니다.',
         iconSrc: '/images/room-library/doors/step.jpg',
         kind: 'door',
         defaults: { stepProduct: 'yerim-inshow' },
@@ -148,6 +147,7 @@ const BUILD_SECTIONS: BuildSection[] = [
       {
         id: 'step-door-younglim',
         label: '영림 스텝도어',
+        description: '문틀 깊이가 설치하는 벽의 마감 두께에 맞춰집니다.',
         iconSrc: '/images/room-library/doors/step.jpg',
         kind: 'door',
         defaults: { stepProduct: 'younglim' },
@@ -327,62 +327,62 @@ function BuildTile({
   onClick?: () => void
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          aria-label={item.label}
-          aria-pressed={active}
-          className={cn(
-            'group relative flex aspect-square min-w-0 flex-col items-center justify-center overflow-hidden rounded-lg bg-white dark:bg-neutral-900 shadow-[0_1px_3px_rgba(0,0,0,0.12)] ring-1 transition-all duration-150',
-            active
-              ? 'ring-2 ring-sky-400'
-              : 'ring-black/5 dark:ring-white/10 hover:ring-neutral-400',
-            disabled && 'cursor-not-allowed opacity-50 hover:ring-black/5',
-          )}
-          disabled={disabled}
-          onClick={onClick}
-          onMouseEnter={() => triggerSFX('sfx:menu-hover')}
-          type="button"
-        >
-          {isPhoto(item.iconSrc) ? (
-            <Image
-              alt=""
-              aria-hidden
-              className="object-cover transition-transform duration-200 group-hover:scale-105"
-              fill
-              sizes="80px"
-              src={item.iconSrc}
-            />
-          ) : (
-            <Image
-              alt=""
-              aria-hidden
-              className="mb-3 h-[50%] w-[50%] object-contain transition-transform duration-150 group-hover:scale-105"
-              height={48}
-              src={item.iconSrc}
-              width={48}
-            />
-          )}
-          {caption ? (
-            <span className="absolute bottom-1 left-1.5 font-bold text-[11px] text-neutral-700 tabular-nums [text-shadow:0_0_3px_#fff,0_0_3px_#fff]">
-              {caption}
-            </span>
-          ) : (
-            <span className="absolute inset-x-0 bottom-0 line-clamp-2 bg-gradient-to-t from-white/95 via-white/85 to-white/0 px-1 pt-2 pb-1 text-center font-medium text-[9.5px] text-neutral-700 leading-[1.15] dark:from-neutral-900/95 dark:via-neutral-900/85 dark:to-neutral-900/0 dark:text-neutral-200">
-              {item.label}
-            </span>
-          )}
-          {active && (
-            <span className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full bg-sky-400 text-white">
-              <Check className="size-3" strokeWidth={3} />
-            </span>
-          )}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent className="pointer-events-none" side="top">
-        {item.label}
-      </TooltipContent>
-    </Tooltip>
+    <CatalogHover
+      info={{
+        title: item.label,
+        description: 'description' in item ? item.description : undefined,
+        image: isPhoto(item.iconSrc) ? item.iconSrc : undefined,
+        meta: caption,
+      }}
+    >
+      <button
+        aria-label={item.label}
+        aria-pressed={active}
+        className={cn(
+          'group relative flex aspect-square min-w-0 flex-col items-center justify-center overflow-hidden rounded-lg bg-white dark:bg-neutral-900 shadow-[0_1px_3px_rgba(0,0,0,0.12)] ring-1 transition-all duration-150',
+          active ? 'ring-2 ring-sky-400' : 'ring-black/5 dark:ring-white/10 hover:ring-neutral-400',
+          disabled && 'cursor-not-allowed opacity-50 hover:ring-black/5',
+        )}
+        disabled={disabled}
+        onClick={onClick}
+        onMouseEnter={() => triggerSFX('sfx:menu-hover')}
+        type="button"
+      >
+        {isPhoto(item.iconSrc) ? (
+          <Image
+            alt=""
+            aria-hidden
+            className="object-cover transition-transform duration-200 group-hover:scale-105"
+            fill
+            sizes="80px"
+            src={item.iconSrc}
+          />
+        ) : (
+          <Image
+            alt=""
+            aria-hidden
+            className="mb-3 h-[50%] w-[50%] object-contain transition-transform duration-150 group-hover:scale-105"
+            height={48}
+            src={item.iconSrc}
+            width={48}
+          />
+        )}
+        {caption ? (
+          <span className="absolute bottom-1 left-1.5 font-bold text-[11px] text-neutral-700 tabular-nums [text-shadow:0_0_3px_#fff,0_0_3px_#fff]">
+            {caption}
+          </span>
+        ) : (
+          <span className="absolute inset-x-0 bottom-0 line-clamp-2 bg-gradient-to-t from-white/95 via-white/85 to-white/0 px-1 pt-2 pb-1 text-center font-medium text-[9.5px] text-neutral-700 leading-[1.15] dark:from-neutral-900/95 dark:via-neutral-900/85 dark:to-neutral-900/0 dark:text-neutral-200">
+            {item.label}
+          </span>
+        )}
+        {active && (
+          <span className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full bg-sky-400 text-white">
+            <Check className="size-3" strokeWidth={3} />
+          </span>
+        )}
+      </button>
+    </CatalogHover>
   )
 }
 
@@ -604,6 +604,7 @@ export function BuildTab() {
     const item = {
       id: `wall-${h}`,
       label: `${h.toFixed(1)} m 벽 그리기`,
+      description: `${FULL_WALL_HEIGHTS.includes(h) ? '온 벽' : '부분 벽'} · 누르면 바로 이 높이로 벽을 그립니다. 새로 그리는 벽에만 적용됩니다.`,
       iconSrc: '/images/room-library/construction/plain.jpg',
     }
     const active =

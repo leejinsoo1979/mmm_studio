@@ -20,6 +20,7 @@ import {
 } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useState } from 'react'
+import { CatalogHover } from './catalog-hover-card'
 import { FurnitureSlotSection } from './furniture-slot-section'
 
 const GROUPS: { id: CabinetPreset['group']; label: string }[] = [
@@ -50,29 +51,41 @@ function PresetTile({
     return `${spec.widthMm}×${spec.heightMm}×${spec.depthMm}`
   }, [preset])
   return (
-    <button
-      className={`flex flex-col gap-1 rounded-xl border p-1.5 text-left transition-colors ${
-        active ? 'border-[#7779ff] bg-muted' : 'border-border bg-card hover:border-border'
-      }`}
-      onClick={onPick}
-      onDoubleClick={onDoublePick}
-      title={preset.description}
-      type="button"
+    <CatalogHover
+      info={{
+        title: preset.label,
+        description: preset.description,
+        image: preset.thumbnail,
+        meta: `${size} mm`,
+      }}
     >
-      <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg bg-white">
-        {preset.thumbnail ? (
-          <img alt={preset.label} className="h-full w-full object-contain" src={preset.thumbnail} />
-        ) : (
-          <span className="px-2 text-center font-medium text-muted-foreground/70 text-[11px]">
-            {preset.label}
-          </span>
-        )}
-      </div>
-      <span className="truncate px-0.5 font-medium text-[11px] text-foreground">
-        {preset.label}
-      </span>
-      <span className="truncate px-0.5 text-[10px] text-muted-foreground">{size}</span>
-    </button>
+      <button
+        className={`flex flex-col gap-1 rounded-xl border p-1.5 text-left transition-colors ${
+          active ? 'border-[#7779ff] bg-muted' : 'border-border bg-card hover:border-border'
+        }`}
+        onClick={onPick}
+        onDoubleClick={onDoublePick}
+        type="button"
+      >
+        <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg bg-white">
+          {preset.thumbnail ? (
+            <img
+              alt={preset.label}
+              className="h-full w-full object-contain"
+              src={preset.thumbnail}
+            />
+          ) : (
+            <span className="px-2 text-center font-medium text-muted-foreground/70 text-[11px]">
+              {preset.label}
+            </span>
+          )}
+        </div>
+        <span className="truncate px-0.5 font-medium text-[11px] text-foreground">
+          {preset.label}
+        </span>
+        <span className="truncate px-0.5 text-[10px] text-muted-foreground">{size}</span>
+      </button>
+    </CatalogHover>
   )
 }
 

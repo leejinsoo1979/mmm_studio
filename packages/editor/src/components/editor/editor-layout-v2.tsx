@@ -287,6 +287,7 @@ export function EditorLayoutV2({
       )}
       {showPanel && (
         <div
+          data-floating-panel
           className="absolute z-40 flex flex-col overflow-hidden rounded-2xl bg-white/80 shadow-[0_8px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5 backdrop-blur-xl dark:bg-neutral-900/80 dark:ring-white/10"
           style={{
             top: PANEL_TOP,
