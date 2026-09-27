@@ -13,16 +13,16 @@ export const CONTINUATION_PROFILES: Record<
   wall: {
     options: ['room', 'single'],
     default: 'room',
-    labels: { room: 'Room (auto-close)', single: 'Single wall' },
+    labels: { room: '방 (자동 닫기)', single: '벽 하나씩' },
     icons: { room: 'lucide:square', single: 'lucide:minus' },
   },
   fence: {
     options: ['single', 'continuous', 'curved'],
     default: 'continuous',
     labels: {
-      continuous: 'Continuous',
-      single: 'Single fence',
-      curved: 'Curved fence',
+      continuous: '이어서',
+      single: '울타리 하나씩',
+      curved: '곡선 울타리',
     },
     icons: {
       continuous: 'lucide:waypoints',
@@ -33,7 +33,7 @@ export const CONTINUATION_PROFILES: Record<
   point: {
     options: ['once', 'repeat'],
     default: 'once',
-    labels: { once: 'Place once', repeat: 'Place multiple' },
+    labels: { once: '한 번 배치', repeat: '여러 개 배치' },
     icons: { once: 'lucide:target', repeat: 'lucide:copy-plus' },
   },
 }

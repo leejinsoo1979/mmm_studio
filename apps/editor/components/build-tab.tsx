@@ -1,6 +1,6 @@
 'use client'
 
-import { type AssetInput, DEFAULT_WALL_HEIGHT, nodeRegistry } from '@pascal-app/core'
+import { type AssetInput, nodeRegistry } from '@pascal-app/core'
 import { triggerSFX, useEditor } from '@pascal-app/editor'
 import {
   LevelTakeoffSummary,
@@ -8,9 +8,9 @@ import {
   WallConstructionFields,
 } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
-import { ChevronLeft, Search } from 'lucide-react'
+import { Check, Search, X } from 'lucide-react'
 import Image from 'next/image'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Tooltip,
   TooltipContent,
@@ -97,7 +97,7 @@ const DOOR1_ASSET: AssetInput = {
 const BUILD_SECTIONS: BuildSection[] = [
   {
     id: 'walls',
-    title: '벽',
+    title: '그리기 방식',
     items: [
       { id: 'wall', label: '직선 벽 그리기', iconSrc: '/icons/wall.webp', kind: 'wall' },
       { id: 'wall-arc', label: '곡선 벽 그리기', iconSrc: '/icons/wallcut.webp', kind: 'wall' },
@@ -275,11 +275,13 @@ function activateRoofFeatureTool(kind: string): void {
 
 function BuildTile({
   active,
+  caption,
   disabled = false,
   item,
   onClick,
 }: {
   active?: boolean
+  caption?: string
   disabled?: boolean
   item: BuildType | MepItem | RoofFeature
   onClick?: () => void
@@ -288,32 +290,40 @@ function BuildTile({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          aria-label={item.label}
+          aria-pressed={active}
           className={cn(
-            'group flex h-[86px] min-w-0 flex-col items-center justify-center gap-2 rounded-md border border-border bg-card px-1.5 text-center transition-all duration-200',
-            active
-              ? 'border-[#7779ff] bg-[#eceeff] text-[#3c3fc4] shadow-[0_0_0_1px_rgba(119,121,255,0.35)]'
-              : 'text-muted-foreground hover:border-[#666] hover:bg-card hover:text-foreground',
-            disabled &&
-              'cursor-not-allowed opacity-60 hover:border-border hover:bg-card hover:text-muted-foreground',
+            'group relative flex aspect-square min-w-0 flex-col items-center justify-center overflow-hidden rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.12)] ring-1 transition-all duration-150',
+            active ? 'ring-2 ring-sky-400' : 'ring-black/5 hover:ring-neutral-400',
+            disabled && 'cursor-not-allowed opacity-50 hover:ring-black/5',
           )}
           disabled={disabled}
           onClick={onClick}
           onMouseEnter={() => triggerSFX('sfx:menu-hover')}
           type="button"
         >
-          <span className="flex h-9 w-9 items-center justify-center overflow-hidden">
-            <Image
-              alt=""
-              aria-hidden
-              className="h-8 w-8 object-contain opacity-90 transition-transform duration-200 group-hover:scale-105"
-              height={32}
-              src={item.iconSrc}
-              width={32}
-            />
-          </span>
-          <span className="line-clamp-2 text-balance font-semibold text-[11px] leading-[1.05] tracking-normal">
-            {item.label}
-          </span>
+          <Image
+            alt=""
+            aria-hidden
+            className="h-[58%] w-[58%] object-contain transition-transform duration-150 group-hover:scale-105"
+            height={48}
+            src={item.iconSrc}
+            width={48}
+          />
+          {caption ? (
+            <span className="absolute bottom-1.5 left-1.5 font-semibold text-[11px] text-neutral-600 tabular-nums">
+              {caption}
+            </span>
+          ) : (
+            <span className="absolute inset-x-1 bottom-1 truncate text-center text-[9.5px] text-neutral-500 leading-tight">
+              {item.label}
+            </span>
+          )}
+          {active && (
+            <span className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full bg-sky-400 text-white">
+              <Check className="size-3" strokeWidth={3} />
+            </span>
+          )}
         </button>
       </TooltipTrigger>
       <TooltipContent className="pointer-events-none" side="top">
@@ -323,14 +333,19 @@ function BuildTile({
   )
 }
 
+/** inZOI catalog group: grey header bar over a 4-up grid of square cards. */
 function Section({ children, title }: { children: React.ReactNode; title: string }) {
   return (
-    <section className="border-border border-b px-4 py-5">
-      <h2 className="mb-4 font-bold text-foreground text-[17px] leading-none">{title}</h2>
+    <section className="px-2 pt-3">
+      <h2 className="mb-2 rounded-md bg-neutral-200/80 px-3 py-1.5 font-semibold text-[12px] text-neutral-600 leading-none">
+        {title}
+      </h2>
       {children}
     </section>
   )
 }
+
+const CARD_GRID = 'grid grid-cols-4 gap-1.5'
 
 /** mmmcraft: the construction new walls are drawn with (existing walls are
  *  changed in their own panel). */
@@ -338,45 +353,9 @@ function NewWallConstruction() {
   const construction = useWallDrawingDefaults((s) => s.construction)
   const setConstruction = useWallDrawingDefaults((s) => s.setConstruction)
   return (
-    <div className="mt-4 rounded-xl border border-border bg-card p-3">
+    <div className="rounded-lg bg-white p-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
       <div className="mb-2 text-muted-foreground text-xs">새로 그릴 벽 · 벽체 두께 100 mm 기준</div>
       <WallConstructionFields onChange={setConstruction} value={construction} />
-      <NewWallHeight />
-    </div>
-  )
-}
-
-/** inZOI-style height presets for new walls; pressing the chosen one again
- *  goes back to the default height. */
-function NewWallHeight() {
-  const height = useWallDrawingDefaults((s) => s.height)
-  const setHeight = useWallDrawingDefaults((s) => s.setHeight)
-  const row = (label: string, heights: number[]) => (
-    <div className="flex items-center gap-1.5">
-      <span className="w-10 shrink-0 text-muted-foreground text-xs">{label}</span>
-      {heights.map((h) => (
-        <button
-          className={`flex-1 rounded-md py-1 text-xs tabular-nums transition-colors ${height === h ? 'bg-[#5b5bd6] text-white' : 'bg-muted text-foreground hover:bg-accent'}`}
-          key={h}
-          onClick={() => {
-            triggerSFX('sfx:menu-click')
-            setHeight(height === h ? undefined : h)
-          }}
-          type="button"
-        >
-          {h.toFixed(1)} m
-        </button>
-      ))}
-    </div>
-  )
-  return (
-    <div className="mt-3 flex flex-col gap-1.5">
-      <div className="text-muted-foreground text-xs">
-        벽 높이 ·{' '}
-        {height === undefined ? `기본 ${DEFAULT_WALL_HEIGHT} m` : `${height.toFixed(1)} m`}
-      </div>
-      {row('온벽', FULL_WALL_HEIGHTS)}
-      {row('부분벽', PARTIAL_WALL_HEIGHTS)}
     </div>
   )
 }
@@ -385,7 +364,7 @@ function NewWallHeight() {
 function LevelWallTakeoff() {
   const levelId = useViewer((s) => s.selection.levelId)
   return (
-    <div className="mt-3 rounded-xl border border-border bg-card p-3">
+    <div className="mt-1.5 rounded-lg bg-white p-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
       <div className="mb-2 text-muted-foreground text-xs">벽 마감 자재 산출 (현재 층)</div>
       <LevelTakeoffSummary levelId={levelId ?? null} />
     </div>
@@ -402,6 +381,10 @@ export function BuildTab() {
   )
   const follow = useLiquidLineToolOptions((s) => s.follow)
   const toggleFollow = useLiquidLineToolOptions((s) => s.toggleFollow)
+  const wallHeight = useWallDrawingDefaults((s) => s.height)
+  const [query, setQuery] = useState('')
+  const needle = query.trim()
+  const matches = (text: string) => !needle || text.includes(needle)
 
   const ductContext =
     mode === 'build' && (activeTool === 'duct-segment' || activeTool === 'duct-fitting')
@@ -438,7 +421,12 @@ export function BuildTab() {
     if (type.id === 'custom-room') return mode === 'build' && activeTool === 'rectangle-room'
     if (type.id === 'wall-arc') return mode === 'build' && activeTool === 'wall-arc'
     if (type.id === 'wall')
-      return mode === 'build' && activeTool === 'wall' && wallPlacementMode !== 'rectangle-room'
+      return (
+        mode === 'build' &&
+        activeTool === 'wall' &&
+        wallPlacementMode !== 'rectangle-room' &&
+        wallHeight === undefined
+      )
     if (
       type.kind === 'door' &&
       (type.id === 'door' || type.defaults?.stepProduct || type.defaults?.hidden)
@@ -490,41 +478,81 @@ export function BuildTab() {
     activateBuildTool('wall')
   }, [])
 
+  const heightCard = (h: number) => {
+    const item = {
+      id: `wall-${h}`,
+      label: `${h.toFixed(1)} m 벽 그리기`,
+      iconSrc: '/icons/wall.webp',
+    }
+    const active =
+      mode === 'build' &&
+      activeTool === 'wall' &&
+      wallPlacementMode !== 'rectangle-room' &&
+      wallHeight === h
+    return (
+      <BuildTile
+        active={active}
+        caption={`${h.toFixed(1)}m`}
+        item={item}
+        key={item.id}
+        onClick={() => {
+          triggerSFX('sfx:menu-click')
+          useWallDrawingDefaults.getState().setHeight(active ? undefined : h)
+          activateBuildTool('wall')
+        }}
+      />
+    )
+  }
+  const showWallHeights = matches('온 벽') || matches('부분 벽') || matches('벽')
+  const visibleSections = BUILD_SECTIONS.map((section) => ({
+    ...section,
+    items: matches(section.title) ? section.items : section.items.filter((t) => matches(t.label)),
+  })).filter((section) => section.items.length > 0)
+  const visibleImports = IMPORT_ITEMS.filter(
+    (item) => matches('도면 가져오기') || matches(item.label),
+  )
+
   return (
-    <div className="flex h-full flex-col bg-sidebar text-foreground">
-      <div className="flex h-16 shrink-0 items-center justify-between border-border border-b px-4">
-        <h1 className="font-bold text-[20px] tracking-normal">공간 만들기</h1>
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <button
-            aria-label="검색"
-            className="rounded-full p-1 transition-colors hover:text-foreground"
-            type="button"
-          >
-            <Search className="h-5 w-5 stroke-[1.9]" />
-          </button>
-          <button
-            aria-label="뒤로"
-            className="rounded-full p-1 transition-colors hover:text-foreground"
-            type="button"
-          >
-            <ChevronLeft className="h-5 w-5 stroke-[2.4]" />
-          </button>
-        </div>
+    <div className="flex h-full flex-col bg-[#eceef1] text-foreground">
+      <div className="shrink-0 px-2 pt-3 pb-1">
+        <label className="flex h-9 items-center gap-2 rounded-lg bg-white px-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
+          <input
+            className="min-w-0 flex-1 bg-transparent text-[13px] text-neutral-800 outline-none placeholder:text-neutral-400"
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Escape') setQuery('')
+            }}
+            placeholder="검색"
+            type="text"
+            value={query}
+          />
+          {query ? (
+            <button aria-label="검색 지우기" onClick={() => setQuery('')} type="button">
+              <X className="h-4 w-4 text-neutral-500" />
+            </button>
+          ) : (
+            <Search className="h-4 w-4 text-neutral-500" />
+          )}
+        </label>
       </div>
 
-      <div className="dark-scrollbar min-h-0 flex-1 overflow-y-auto">
+      <div className="dark-scrollbar min-h-0 flex-1 overflow-y-auto pb-3">
         <TooltipProvider delayDuration={0} disableHoverableContent>
-          <Section title="도면 가져오기">
-            <div className="grid grid-cols-3 gap-2">
-              {IMPORT_ITEMS.map((item) => (
-                <BuildTile disabled item={item} key={item.id} />
-              ))}
-            </div>
-          </Section>
+          {showWallHeights && (
+            <>
+              <Section title="온 벽">
+                <div className={CARD_GRID}>{FULL_WALL_HEIGHTS.map(heightCard)}</div>
+              </Section>
+              <Section title="부분 벽">
+                <div className={CARD_GRID}>{PARTIAL_WALL_HEIGHTS.map(heightCard)}</div>
+              </Section>
+            </>
+          )}
 
-          {BUILD_SECTIONS.map((section) => (
+          {visibleSections.map((section) => (
             <Section key={section.id} title={section.title}>
-              <div className="grid grid-cols-3 gap-2">
+              <div className={CARD_GRID}>
                 {section.items.map((type) => (
                   <BuildTile
                     active={isTypeActive(type)}
@@ -532,25 +560,36 @@ export function BuildTab() {
                     key={type.id}
                     onClick={() => {
                       triggerSFX('sfx:menu-click')
+                      if (type.id === 'wall') useWallDrawingDefaults.getState().setHeight(undefined)
                       handleTypeClick(type)
                     }}
                   />
                 ))}
               </div>
-              {section.id === 'walls' && (
-                <>
+              {section.id === 'walls' && !needle && (
+                <div className="mt-3">
                   <NewWallConstruction />
                   <LevelWallTakeoff />
-                </>
+                </div>
               )}
             </Section>
           ))}
+
+          {visibleImports.length > 0 && (
+            <Section title="도면 가져오기">
+              <div className={CARD_GRID}>
+                {visibleImports.map((item) => (
+                  <BuildTile disabled item={item} key={item.id} />
+                ))}
+              </div>
+            </Section>
+          )}
 
           {mode === 'build' &&
           (activeTool === 'roof' || isRoofFeatureActive) &&
           roofFeatures.length > 0 ? (
             <Section title="지붕 요소">
-              <div className="grid grid-cols-3 gap-2">
+              <div className={CARD_GRID}>
                 {roofFeatures.map((feature) => (
                   <BuildTile
                     active={mode === 'build' && activeTool === feature.kind}
@@ -568,7 +607,7 @@ export function BuildTab() {
 
           {isMepActive ? (
             <Section title="설비 (MEP)">
-              <div className="grid grid-cols-3 gap-2">
+              <div className={CARD_GRID}>
                 {MEP_ITEMS.map((item) => (
                   <BuildTile
                     active={isMepItemActive(item)}

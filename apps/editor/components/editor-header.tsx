@@ -97,18 +97,18 @@ export function EditorHeader({ sceneId, sceneName, onRename }: EditorHeaderProps
         <button
           className="flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-3 py-1.5 font-medium text-xs hover:bg-accent/40"
           onClick={saveCamera}
-          title={`${experience.cameras.length} saved cameras`}
+          title={`저장된 시점 ${experience.cameras.length}개`}
           type="button"
         >
           <Camera className="h-3.5 w-3.5" />
-          Save view
+          시점 저장
         </button>
         <ExportCenter sceneId={sceneId} sceneName={sceneName} />
         <Link
           className="rounded-md border border-border bg-background/60 px-3 py-1.5 font-medium text-xs hover:bg-accent/40"
           href="/dashboard"
         >
-          Dashboard
+          대시보드
         </Link>
       </div>
     </header>

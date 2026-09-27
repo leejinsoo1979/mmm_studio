@@ -99,7 +99,7 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
         onClick={() => setOpen(true)}
         type="button"
       >
-        Publish & Build
+        내보내기 · 발주
       </button>
       {open && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-black/60 p-4 backdrop-blur-sm">

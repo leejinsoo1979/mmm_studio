@@ -46,10 +46,10 @@ export function resolveSnapFlags(mode: SnappingMode): SnapFlags {
 }
 
 const SNAPPING_MODE_LABELS: Record<SnappingMode, string> = {
-  grid: 'Grid',
-  lines: 'Lines',
-  angles: 'Angles',
-  off: 'Off',
+  grid: '격자',
+  lines: '선',
+  angles: '각도',
+  off: '끔',
 }
 
 export function getSnappingModeLabel(mode: SnappingMode): string {

@@ -141,10 +141,10 @@ const SNAPPING_MODE_ICONS = {
 } as const
 
 const SNAPPING_MODE_LABELS = {
-  grid: 'Grid',
-  lines: 'Lines',
-  angles: 'Angles',
-  off: 'Off',
+  grid: '격자',
+  lines: '선',
+  angles: '각도',
+  off: '끔',
 } as const
 
 const GRID_SNAP_STEPS: GridSnapStep[] = [0.5, 0.25, 0.1, 0.05]
@@ -167,9 +167,9 @@ function SnappingChips({ context }: { context: SnapContext }) {
   return (
     <>
       <ChipRow
-        ariaLabel={`Snapping: ${SNAPPING_MODE_LABELS[snappingMode]}`}
+        ariaLabel={`스냅: ${SNAPPING_MODE_LABELS[snappingMode]}`}
         icon={SNAPPING_MODE_ICONS[snappingMode]}
-        label={`Snapping: ${SNAPPING_MODE_LABELS[snappingMode]}`}
+        label={`스냅: ${SNAPPING_MODE_LABELS[snappingMode]}`}
         onClick={() => {
           setSnappingMode(context, cycleSnappingModeIn(context, snappingMode))
           sfxEmitter.emit('sfx:grid-snap')
@@ -184,7 +184,7 @@ function SnappingChips({ context }: { context: SnapContext }) {
       {gridActive ? (
         <ChipRow
           ariaLabel={`Grid step: ${gridSnapStep.toFixed(2)} m`}
-          label={`Grid: ${gridSnapStep.toFixed(2)} m`}
+          label={`격자 간격: ${gridSnapStep.toFixed(2)} m`}
           onClick={() => {
             setGridSnapStep(nextGridSnapStep(gridSnapStep))
             sfxEmitter.emit('sfx:grid-snap')

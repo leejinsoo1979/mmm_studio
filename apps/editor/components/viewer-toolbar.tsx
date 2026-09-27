@@ -114,7 +114,7 @@ const VIEW_MODES: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   },
   {
     id: 'split',
-    label: 'Split',
+    label: '분할',
     icon: <Columns2 className="h-3 w-3" />,
   },
 ]
