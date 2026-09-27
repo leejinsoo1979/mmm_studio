@@ -47,28 +47,6 @@ export const SCENE_THEMES: SceneTheme[] = [
     },
   },
   {
-    // Studio lighting on a dark backdrop, for the editor's dark mode.
-    id: 'studio-dark',
-    name: 'Studio Dark',
-    appearance: 'dark',
-    background: '#1c1e23',
-    ground: '#2a2d33',
-    ambient: { color: '#ffffff', intensity: 0.15 },
-    hemi: { sky: '#ffffff', ground: '#6f6a62', intensity: 0.55 },
-    lights: [
-      { position: [10, 10, 10], color: '#ffffff', intensity: 4, castShadow: true },
-      { position: [-10, 10, -10], color: '#ffffff', intensity: 0.75 },
-    ],
-    toneMappingExposure: 0.9,
-    clayTints: {
-      wall: '#e9e5db',
-      floor: '#d8d2c4',
-      ceiling: '#f1ede4',
-      roof: '#c4bba6',
-      glazing: '#cdd8df',
-    },
-  },
-  {
     id: 'paper',
     name: 'Paper',
     appearance: 'light',
