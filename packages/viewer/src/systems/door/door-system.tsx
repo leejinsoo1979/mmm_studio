@@ -11,6 +11,7 @@ import {
   type SceneMaterial,
   type SceneMaterialId,
   sceneRegistry,
+  stepDoorError,
   useInteractive,
   useLiveNodeOverrides,
   useScene,
@@ -32,6 +33,7 @@ import {
 import useViewer from '../../store/use-viewer'
 import { getOpeningCutoutProxyDepth } from '../wall/opening-cutout-geometry'
 import { addHiddenDoor } from './hidden-door-geometry'
+import { addStepDoor } from './step-door-geometry'
 
 // Invisible material for root mesh — used as selection hitbox only
 const hitboxMaterial = new THREE.MeshBasicMaterial({ visible: false })
@@ -2369,6 +2371,14 @@ function updateDoorMesh(rawNode: DoorNode, mesh: THREE.Mesh) {
       mesh.add(frame)
       addHiddenDoor(frame, node, wall as WallNode, clampedSwingAngle, currentShading)
     }
+    syncDoorCutout(node, mesh)
+    return
+  }
+
+  if (doorType === 'step') {
+    // An invalid step door keeps only its opening; the panel and the plan
+    // show mmmcraft's message.
+    if (!stepDoorError(node)) addStepDoor(mesh, node, clampedSwingAngle, currentShading)
     syncDoorCutout(node, mesh)
     return
   }

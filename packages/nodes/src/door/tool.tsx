@@ -6,8 +6,11 @@ import {
   isCurvedWall,
   type RoofEvent,
   type RoofNode,
+  type StepDoorProduct,
   sceneRegistry,
   spatialGridManager,
+  stepDoorError,
+  stepDoorPlacement,
   useScene,
   type WallEvent,
   type WallNode,
@@ -65,8 +68,21 @@ type HostKind = 'wall' | 'roof' | null
  * onto a plain wall restores a hinged door.
  */
 function doorTypeForWall(wall: WallNode, current: DoorNode['doorType']): DoorNode['doorType'] {
+  if (current === 'step') return current
   if (wall.construction && wall.construction.kind !== 'steel') return 'hidden'
   return current === 'hidden' ? 'hinged' : current
+}
+
+/**
+ * A 스텝도어 tile seeds `toolDefaults.door.stepProduct`; the frame then takes
+ * the hovered wall's height and thickness (mmmcraft placement).
+ */
+function stepPatchFor(wall: WallNode) {
+  const defaults = useEditor.getState().toolDefaults.door as
+    | { stepProduct?: StepDoorProduct }
+    | null
+    | undefined
+  return defaults?.stepProduct ? stepDoorPlacement(defaults.stepProduct, wall) : null
 }
 
 /**
@@ -255,8 +271,9 @@ const DoorTool: React.FC = () => {
       applySnap: boolean
     }) => {
       const { wall, rawLocalX, side, itemRotation, cursorRotationY, applySnap } = args
+      const step = stepPatchFor(wall)
       const width = draftRef.current?.width ?? 0.9
-      const height = draftRef.current?.height ?? 2.1
+      const height = step?.height ?? draftRef.current?.height ?? 2.1
 
       if (!draftRef.current) {
         const node = DoorNode.parse({
@@ -266,12 +283,13 @@ const DoorTool: React.FC = () => {
           wallId: wall.id,
           parentId: wall.id,
           metadata: { isTransient: true },
+          ...step,
         })
         useScene.getState().createNode(node, wall.id as AnyNodeId)
         draftRef.current = node
       }
 
-      const { clampedX, clampedY, valid } = resolveWallPlacement(
+      const placement = resolveWallPlacement(
         wall,
         rawLocalX,
         width,
@@ -279,6 +297,8 @@ const DoorTool: React.FC = () => {
         applySnap,
         draftRef.current.id,
       )
+      const { clampedX, clampedY } = placement
+      const valid = placement.valid && !(step && stepDoorError({ ...draftRef.current, ...step }))
 
       if (wall.id === draftRef.current.parentId) {
         useScene.getState().updateNode(draftRef.current.id, {
@@ -286,6 +306,7 @@ const DoorTool: React.FC = () => {
           rotation: [0, itemRotation, 0],
           side,
           doorType: doorTypeForWall(wall, draftRef.current.doorType),
+          ...step,
         })
         markHostDirty(wall.id)
       } else {
@@ -296,6 +317,7 @@ const DoorTool: React.FC = () => {
           parentId: wall.id,
           wallId: wall.id,
           doorType: doorTypeForWall(wall, draftRef.current.doorType),
+          ...step,
           // The draft may arrive from a roof-segment face hover.
           roofSegmentId: undefined,
           roofFace: undefined,
@@ -344,6 +366,7 @@ const DoorTool: React.FC = () => {
       if (!draft) return
       draftRef.current = null
       hostKind = null
+      const step = stepPatchFor(wall)
 
       useScene.getState().deleteNode(draft.id)
       useScene.temporal.getState().resume()
@@ -364,16 +387,17 @@ const DoorTool: React.FC = () => {
         wallId: wall.id,
         parentId: wall.id,
         width: draft.width,
-        height: draft.height,
+        height: step?.height ?? draft.height,
         doorCategory: draft.doorCategory,
-        doorType: doorTypeForWall(wall, draft.doorType),
+        doorType: step?.doorType ?? doorTypeForWall(wall, draft.doorType),
+        stepDoor: step?.stepDoor,
         leafCount: draft.leafCount,
         operationState: draft.operationState,
         slideDirection: draft.slideDirection,
         trackStyle: draft.trackStyle,
         garagePanelCount: draft.garagePanelCount,
         frameThickness: draft.frameThickness,
-        frameDepth: draft.frameDepth,
+        frameDepth: step?.frameDepth ?? draft.frameDepth,
         threshold: draft.threshold,
         thresholdHeight: draft.thresholdHeight,
         hingesSide: draft.hingesSide,
@@ -446,14 +470,17 @@ const DoorTool: React.FC = () => {
       const faceSide = getSideFromNormal(event.normal)
       const side = sideFlip ? (faceSide === 'front' ? 'back' : 'front') : faceSide
       const itemRotation = calculateItemRotation(event.normal) + (sideFlip ? Math.PI : 0)
+      const step = stepPatchFor(event.node)
       const { clampedX, clampedY, valid } = resolveWallPlacement(
         event.node,
         event.localPosition[0],
         draftRef.current.width,
-        draftRef.current.height,
+        step?.height ?? draftRef.current.height,
         isMagneticSnapActive(),
         draftRef.current.id,
       )
+      // A step door outside its product range cannot be placed.
+      if (step && stepDoorError({ ...draftRef.current, ...step })) return
       // Alt force-places over a collision (the draft stays red as a warning).
       if (!valid && event.nativeEvent?.altKey !== true) return
 

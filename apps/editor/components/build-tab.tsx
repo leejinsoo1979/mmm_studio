@@ -52,6 +52,7 @@ type BuildType = {
   iconSrc: string
   asset?: AssetInput
   kind?: BuildToolKind
+  defaults?: Record<string, unknown>
 }
 
 type BuildSection = {
@@ -110,6 +111,20 @@ const BUILD_SECTIONS: BuildSection[] = [
       { id: 'door', label: 'Single Door', iconSrc: '/icons/door.webp', kind: 'door' },
       { id: 'double-door', label: 'Double Door', iconSrc: '/icons/door.webp', kind: 'door' },
       { id: 'sliding-door', label: 'Sliding Door', iconSrc: '/icons/door.webp', kind: 'door' },
+      {
+        id: 'step-door-yerim',
+        label: '예림·인쇼 스텝도어',
+        iconSrc: '/images/room-library/doors/step.jpg',
+        kind: 'door',
+        defaults: { stepProduct: 'yerim-inshow' },
+      },
+      {
+        id: 'step-door-younglim',
+        label: '영림 스텝도어',
+        iconSrc: '/images/room-library/doors/step.jpg',
+        kind: 'door',
+        defaults: { stepProduct: 'younglim' },
+      },
       { id: 'door1-glb', label: 'Door1 GLB', iconSrc: '/icons/door.webp', asset: DOOR1_ASSET },
     ],
   },
@@ -184,7 +199,10 @@ const ROOF_FEATURE_FALLBACK_ICON = '/icons/roof.webp'
 
 type RoofFeature = { kind: string; label: string; iconSrc: string }
 
-function activateBuildTool(kind: BuildToolKind | MepToolKind): void {
+function activateBuildTool(
+  kind: BuildToolKind | MepToolKind,
+  defaults?: Record<string, unknown>,
+): void {
   const ed = useEditor.getState()
   ed.setPhase('structure')
   ed.setStructureLayer('elements')
@@ -193,7 +211,7 @@ function activateBuildTool(kind: BuildToolKind | MepToolKind): void {
     kind,
     kind === 'wall'
       ? wallDrawingToolDefaults(useWallDrawingDefaults.getState().construction)
-      : null,
+      : (defaults ?? null),
   )
   if (kind === 'wall') ed.setSnappingMode('wall', 'lines')
   ed.setMode('build')
@@ -336,6 +354,9 @@ export function BuildTab() {
   const wallPlacementMode = useEditor((s) => s.toolDefaults.wall?.placementMode)
   const mode = useEditor((s) => s.mode)
   const selectedItem = useEditor((s) => s.selectedItem)
+  const doorStepProduct = useEditor(
+    (s) => (s.toolDefaults.door as { stepProduct?: string } | null | undefined)?.stepProduct,
+  )
   const follow = useLiquidLineToolOptions((s) => s.follow)
   const toggleFollow = useLiquidLineToolOptions((s) => s.toggleFollow)
 
@@ -375,6 +396,10 @@ export function BuildTab() {
     if (type.id === 'wall-arc') return mode === 'build' && activeTool === 'wall-arc'
     if (type.id === 'wall')
       return mode === 'build' && activeTool === 'wall' && wallPlacementMode !== 'rectangle-room'
+    if (type.kind === 'door' && (type.id === 'door' || type.defaults?.stepProduct))
+      return (
+        mode === 'build' && activeTool === 'door' && doorStepProduct === type.defaults?.stepProduct
+      )
     return mode === 'build' && activeTool === type.kind && type.id === type.kind
   }
 
@@ -404,7 +429,7 @@ export function BuildTab() {
       activateArcWallTool()
       return
     }
-    if (type.kind) activateBuildTool(type.kind)
+    if (type.kind) activateBuildTool(type.kind, type.defaults)
   }, [])
 
   const didInitRef = useRef(false)

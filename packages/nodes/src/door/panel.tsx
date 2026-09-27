@@ -10,6 +10,9 @@ import {
   HIDDEN_DOOR_MAX_DEGREES,
   hiddenDoorError,
   normalizeWallConstruction,
+  STEP_DOOR_MAX_DEGREES,
+  STEP_DOOR_PRODUCTS,
+  stepDoorError,
   useInteractive,
   useScene,
   type WallNode,
@@ -29,6 +32,7 @@ import {
 import { useViewer } from '@pascal-app/viewer'
 import { Copy, DoorOpen, FlipHorizontal2, Move, Trash2 } from 'lucide-react'
 import { useCallback, useRef } from 'react'
+import { MmField } from '../cabinet/panel-fields'
 import { scaleHandleHeight } from './door-math'
 
 const doorTypeOptions = [
@@ -41,6 +45,8 @@ const doorTypeOptions = [
   { label: 'Sliding', value: 'sliding', available: true },
   // Available only on a 목상 / 떡가베 wall (see `hostConstruction` below).
   { label: '히든도어', value: 'hidden', available: true },
+  // Placed from its product tile only (see `doorTypeOptions` filter below).
+  { label: '스텝도어', value: 'step', available: true },
 ] satisfies {
   label: string
   value: DoorNode['doorType']
@@ -106,7 +112,9 @@ const hingedDoorSegments: DoorNode['segments'] = [
   },
 ]
 
-const defaultDoorDimensions: Record<DoorNode['doorType'], { width: number; height: number }> = {
+type ResettableDoorType = Exclude<DoorNode['doorType'], 'step'>
+
+const defaultDoorDimensions: Record<ResettableDoorType, { width: number; height: number }> = {
   hinged: { width: 0.9, height: 2.1 },
   double: { width: 1.5, height: 2.1 },
   french: { width: 1.5, height: 2.1 },
@@ -120,7 +128,7 @@ const defaultDoorDimensions: Record<DoorNode['doorType'], { width: number; heigh
   hidden: { width: 0.9, height: 2.1 },
 }
 
-const defaultDoorSegmentsByType: Record<DoorNode['doorType'], DoorNode['segments']> = {
+const defaultDoorSegmentsByType: Record<ResettableDoorType, DoorNode['segments']> = {
   hinged: hingedDoorSegments,
   double: hingedDoorSegments,
   french: frenchDoorSegments,
@@ -348,6 +356,9 @@ export default function DoorPanel() {
   const isRollupGarageDoor = doorType === 'garage-rollup'
   const isTiltupGarageDoor = doorType === 'garage-tiltup'
   const isHiddenDoor = doorType === 'hidden'
+  const isStepDoor = doorType === 'step'
+  const stepError = isStepDoor ? stepDoorError(node) : null
+  const stepProduct = node.stepDoor ? STEP_DOOR_PRODUCTS[node.stepDoor.product] : undefined
   // Hidden doors: 목상 / 떡가베 walls only (mmmcraft has no 경량 section).
   const normalizedHost = normalizeWallConstruction(hostWall?.construction)
   const hostConstruction =
@@ -373,13 +384,13 @@ export default function DoorPanel() {
     (isSectionalGarageDoor || isRollupGarageDoor || isTiltupGarageDoor) && !isCutoutOnly
   const showOpeningShapeSection = isCutoutOnly
   const showDoorShapeSection = !isCutoutOnly && supportsTopShape
-  const showFrameSection = !isCutoutOnly && !isHiddenDoor
-  const showContentPaddingSection = !isCutoutOnly && !isGarageDoor && !isHiddenDoor
+  const showFrameSection = !isCutoutOnly && !isHiddenDoor && !isStepDoor
+  const showContentPaddingSection = !isCutoutOnly && !isGarageDoor && !isHiddenDoor && !isStepDoor
   const showSwingSection = isSwingDoor
   const showThresholdSection = isSwingDoor
   const showHandleSection = isSwingDoor
   const showHardwareSection = isSwingDoor
-  const showSegmentsSection = !isCutoutOnly && !isGarageDoor && !isHiddenDoor
+  const showSegmentsSection = !isCutoutOnly && !isGarageDoor && !isHiddenDoor && !isStepDoor
   const maxDoorWidth = isGarageDoor ? 6 : 3
 
   const setOpeningTopRadius = (index: number, value: number, commit = false) => {
@@ -393,6 +404,12 @@ export default function DoorPanel() {
   }
 
   const getDoorTypeUpdates = (nextDoorType: DoorNode['doorType']): Partial<DoorNode> => {
+    // A step door keeps its product sizes; leaving it drops the product.
+    if (nextDoorType === 'step') return {}
+    return { stepDoor: undefined, ...getResetDoorTypeUpdates(nextDoorType) }
+  }
+
+  const getResetDoorTypeUpdates = (nextDoorType: ResettableDoorType): Partial<DoorNode> => {
     const dimensions = defaultDoorDimensions[nextDoorType]
     const segments = structuredClone(defaultDoorSegmentsByType[nextDoorType])
     const dimensionUpdates = {
@@ -609,7 +626,11 @@ export default function DoorPanel() {
           <div className="grid grid-cols-2 gap-2 px-1 pt-1">
             {(isGarageDoor
               ? garageDoorTypeOptions
-              : doorTypeOptions.filter((o) => o.value !== 'hidden' || hostConstruction)
+              : doorTypeOptions.filter(
+                  (o) =>
+                    (o.value !== 'hidden' || hostConstruction) &&
+                    (o.value !== 'step' || isStepDoor),
+                )
             ).map((option) => {
               const isSelected = doorType === option.value
               return (
@@ -1096,6 +1117,64 @@ export default function DoorPanel() {
                   />
                 ))}
                 {hiddenError && <p className="text-red-400">{hiddenError}</p>}
+              </div>
+            </PanelSection>
+          )}
+
+          {isStepDoor && node.stepDoor && stepProduct && (
+            <PanelSection title="스텝도어 설정">
+              <div className="flex flex-col gap-2 px-1 pb-1 text-xs">
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  {stepProduct.label} · 상부 인방 포함 · 문짝 {stepProduct.leaf}T / 문틀{' '}
+                  {stepProduct.jamb}T · 마감 {stepProduct.finish}T. Height는 인방을 포함한 전체 설치
+                  높이, Flip Side는 앞뒤 반전입니다.
+                </p>
+                <SegmentedControl
+                  onChange={(v) => handleUpdate({ hingesSide: v })}
+                  options={[
+                    { label: '경첩 왼쪽', value: 'left' },
+                    { label: '경첩 오른쪽', value: 'right' },
+                  ]}
+                  value={node.hingesSide}
+                />
+                <SliderControl
+                  label={`열림 / ${STEP_DOOR_MAX_DEGREES}°`}
+                  max={STEP_DOOR_MAX_DEGREES}
+                  min={0}
+                  onChange={(v) => handleUpdate({ swingAngle: (v * Math.PI) / 180 })}
+                  precision={0}
+                  step={1}
+                  unit="°"
+                  value={Math.round(((node.swingAngle ?? 0) * 180) / Math.PI)}
+                />
+                {node.stepDoor.product === 'younglim' ? (
+                  <SegmentedControl
+                    onChange={(v) =>
+                      handleUpdate({
+                        stepDoor: { ...node.stepDoor!, leafHeight: Number(v) / 1000 },
+                      })
+                    }
+                    options={[
+                      { label: '문짝 2050', value: '2050' },
+                      { label: '문짝 2200', value: '2200' },
+                    ]}
+                    value={String(Math.round(node.stepDoor.leafHeight * 1000))}
+                  />
+                ) : (
+                  <MmField
+                    label="문짝 높이"
+                    onCommit={(v) =>
+                      handleUpdate({ stepDoor: { ...node.stepDoor!, leafHeight: v / 1000 } })
+                    }
+                    value={Math.round(node.stepDoor.leafHeight * 10000) / 10}
+                  />
+                )}
+                <MmField
+                  label="문틀 깊이"
+                  onCommit={(v) => handleUpdate({ frameDepth: v / 1000 })}
+                  value={Math.round(node.frameDepth * 10000) / 10}
+                />
+                {stepError && <p className="text-red-400">{stepError}</p>}
               </div>
             </PanelSection>
           )}

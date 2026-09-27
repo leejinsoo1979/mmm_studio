@@ -7,6 +7,11 @@ import {
   hiddenDoorModel,
   hiddenDoorSections,
   hiddenLeafOutline,
+  type StepDoorBox,
+  stepDoorBoxes,
+  stepDoorError,
+  stepDoorModel,
+  stepLeafPoint,
   type WallNode,
   wallLeftNormal,
 } from '@pascal-app/core'
@@ -211,6 +216,8 @@ export function buildDoorFloorplan(node: DoorNode, ctx: GeometryContext): Floorp
 
   if (node.doorType === 'hidden') {
     children.push(...hiddenDoorSymbol(node, wall, isSelected))
+  } else if (node.doorType === 'step') {
+    children.push(...stepDoorSymbol(node, wall, isSelected))
   } else if (isOpening) {
     // Open doorway — a frameless gap in the wall. No leaf, arc, or panel;
     // the cleared footprint above is the whole symbol.
@@ -822,6 +829,89 @@ function hiddenDoorSymbol(node: DoorNode, wall: WallNode, selected: boolean): Fl
     y2: openTip[1],
     stroke: '#6b7280',
     strokeWidth: 1.5,
+    vectorEffect: 'non-scaling-stroke',
+  })
+  return out
+}
+
+/**
+ * mmmcraft `StepDoor2D`: both jambs and finish returns in plan, the leaf
+ * drawn fully open with its swing arc (the plan sign, like the other
+ * doors). Taken from the same boxes as the 3D model, so the leaf opens out
+ * of its flush face as it does in 3D. An invalid step door is a red outline.
+ */
+function stepDoorSymbol(node: DoorNode, wall: WallNode, selected: boolean): FloorplanGeometry[] {
+  const [sx, sz] = wall.start
+  const len = Math.hypot(wall.end[0] - sx, wall.end[1] - sz)
+  const u: [number, number] = [(wall.end[0] - sx) / len, (wall.end[1] - sz) / len]
+  // Door-local +z is the wall's local +z, (−dz, dx); a door turned by π
+  // (Flip Side) mirrors both local axes.
+  const s = isOpeningPlanFlipped(node.rotation) ? -1 : 1
+  const c = node.position[0]
+  const plan = (xMm: number, zMm: number): FloorplanPoint => [
+    sx + u[0] * (c + (s * xMm) / 1000) - u[1] * ((s * zMm) / 1000),
+    sz + u[1] * (c + (s * xMm) / 1000) + u[0] * ((s * zMm) / 1000),
+  ]
+  const stroke = selected ? '#f97316' : '#536078'
+  const line = { stroke, strokeWidth: 1, vectorEffect: 'non-scaling-stroke' as const }
+  if (stepDoorError(node)) {
+    const half = node.width * 500
+    const t = Math.max(node.frameDepth, wall.thickness ?? 0.1) * 500
+    return [
+      {
+        kind: 'polygon',
+        points: [plan(-half, -t), plan(half, -t), plan(half, t), plan(-half, t)],
+        fill: 'none',
+        stroke: '#c13b4c',
+        strokeWidth: 1.5,
+        vectorEffect: 'non-scaling-stroke',
+      },
+    ]
+  }
+  const open = stepDoorModel(node, 1)
+  const { fixed, leaf } = stepDoorBoxes(open)
+  const rect = (b: StepDoorBox, map: (x: number, z: number) => FloorplanPoint) => {
+    const [x0, x1] = [b.at[0] - b.size[0] / 2, b.at[0] + b.size[0] / 2]
+    const [z0, z1] = [b.at[2] - b.size[2] / 2, b.at[2] + b.size[2] / 2]
+    return [map(x0, z0), map(x1, z0), map(x1, z1), map(x0, z1)]
+  }
+  const out: FloorplanGeometry[] = [
+    {
+      kind: 'polygon',
+      points: [
+        plan(-open.widthMm / 2, -open.depth / 2),
+        plan(open.widthMm / 2, -open.depth / 2),
+        plan(open.widthMm / 2, open.depth / 2),
+        plan(-open.widthMm / 2, open.depth / 2),
+      ],
+      fill: '#fafbfe',
+      stroke: 'none',
+    },
+  ]
+  for (const b of fixed) {
+    if (b.name === 'step-door-header') continue
+    out.push({ kind: 'polygon', points: rect(b, plan), fill: '#e8e2d8', ...line })
+  }
+  const leafBox = leaf.find((b) => b.name === 'step-door-leaf')
+  if (leafBox) {
+    out.push({
+      kind: 'polygon',
+      points: rect(leafBox, (x, z) => plan(...stepLeafPoint(open, x, z))),
+      fill: '#e8e2d8',
+      ...line,
+    })
+  }
+  const hinge = plan(open.hingeX, open.hingeZ)
+  const closedTip = plan(open.hingeX + open.handed * open.leafWidth, open.hingeZ)
+  const openTip = plan(...stepLeafPoint(open, open.handed * open.leafWidth, 0))
+  const r = open.leafWidth / 1000
+  out.push({
+    kind: 'path',
+    d: `M ${closedTip[0]} ${closedTip[1]} A ${r} ${r} 0 0 ${arcSweep(closedTip, openTip, hinge)} ${openTip[0]} ${openTip[1]}`,
+    fill: 'none',
+    stroke: selected ? stroke : '#6b7280',
+    strokeWidth: 1.2,
+    strokeDasharray: '8 5',
     vectorEffect: 'non-scaling-stroke',
   })
   return out

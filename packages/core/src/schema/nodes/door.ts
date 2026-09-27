@@ -33,7 +33,12 @@ export const DoorType = z.enum([
   // mmmcraft 히든도어: CAD jamb / header sections, 45T leaf and three Domus
   // 150 hidden hinges; only on a 목상 / 떡가베 wall (wall.construction).
   'hidden',
+  // mmmcraft 스텝도어: 예림·인쇼 / 영림 leaf + fixed header (상부 인방) in a
+  // full-height frame; `stepDoor` names the product.
+  'step',
 ])
+export const StepDoorProduct = z.enum(['yerim-inshow', 'younglim'])
+export type StepDoorProduct = z.infer<typeof StepDoorProduct>
 export const DoorTrackStyle = z.enum(['none', 'visible', 'pocket', 'overhead'])
 
 export type DoorCategory = z.infer<typeof DoorCategory>
@@ -73,6 +78,10 @@ export const DoorNode = BaseNode.extend({
   operationState: z.number().min(0).max(1).default(0),
   // Hidden door: hinge centres from the leaf bottom (m), exactly three.
   hiddenHingeHeights: z.array(z.number()).length(3).optional(),
+  // Step door: the product and the moving leaf's height (m, from the floor).
+  // `height` is the whole installation including the header; `frameDepth`
+  // the frame's depth across the wall.
+  stepDoor: z.object({ product: StepDoorProduct, leafHeight: z.number() }).optional(),
   slideDirection: z.enum(['left', 'right']).default('left'),
   trackStyle: DoorTrackStyle.default('none'),
   garagePanelCount: z.number().int().min(1).max(12).default(4),

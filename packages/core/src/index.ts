@@ -181,6 +181,19 @@ export {
   type SectionPoint,
 } from './systems/door/hidden-door'
 export {
+  STEP_DOOR_GAP_MM,
+  STEP_DOOR_MAX_DEGREES,
+  STEP_DOOR_PRODUCTS,
+  type StepDoorBox,
+  type StepDoorModel,
+  stepDoorBoxes,
+  stepDoorError,
+  stepDoorLeafHeightMm,
+  stepDoorModel,
+  stepDoorPlacement,
+  stepLeafPoint,
+} from './systems/door/step-door'
+export {
   type DeviceTerminal,
   deviceTerminals,
   type ElectricalState,

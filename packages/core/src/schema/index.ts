@@ -51,7 +51,7 @@ export {
   ColumnSupportStyle,
 } from './nodes/column'
 export { CupolaNode } from './nodes/cupola'
-export { DoorNode, DoorSegment } from './nodes/door'
+export { DoorNode, DoorSegment, StepDoorProduct } from './nodes/door'
 export {
   DormerNode,
   type DormerSurfaceMaterialRole,
