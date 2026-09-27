@@ -3,6 +3,7 @@
 import { type ReactNode, useCallback, useEffect, useRef } from 'react'
 import { useIsMobile } from '../../hooks/use-mobile'
 import useEditor from '../../store/use-editor'
+import { useUiHidden } from '../../store/use-ui-hidden'
 
 import { useSidebarStore } from '../ui/primitives/sidebar'
 import { IconRail, type SidebarTab } from '../ui/sidebar/tab-bar'
@@ -229,6 +230,8 @@ export function EditorLayoutV2({
   stageOverlay,
 }: EditorLayoutV2Props) {
   const isCaptureMode = useEditor((s) => s.isCaptureMode)
+  const uiHidden = useUiHidden((s) => s.hidden)
+  const hideChrome = isCaptureMode || uiHidden
   const isMobile = useIsMobile()
 
   if (isMobile) {
@@ -249,11 +252,11 @@ export function EditorLayoutV2({
   return (
     <div className="flex h-full w-full flex-col bg-sidebar text-foreground">
       {/* Top navbar */}
-      {navbarSlot}
+      {!uiHidden && navbarSlot}
 
       {/* Main content: left column + right column */}
       <div className="flex min-h-0 flex-1">
-        {!isCaptureMode && sidebarTabs.length > 0 && (
+        {!hideChrome && sidebarTabs.length > 0 && (
           <LeftColumn
             renderTabContent={renderTabContent}
             sidebarOverlay={sidebarOverlay}
@@ -261,10 +264,10 @@ export function EditorLayoutV2({
           />
         )}
         <RightColumn
-          overlays={overlays}
+          overlays={uiHidden ? undefined : overlays}
           stageOverlay={stageOverlay}
-          toolbarLeft={isCaptureMode ? undefined : viewerToolbarLeft}
-          toolbarRight={isCaptureMode ? undefined : viewerToolbarRight}
+          toolbarLeft={hideChrome ? undefined : viewerToolbarLeft}
+          toolbarRight={hideChrome ? undefined : viewerToolbarRight}
         >
           {viewerContent}
         </RightColumn>

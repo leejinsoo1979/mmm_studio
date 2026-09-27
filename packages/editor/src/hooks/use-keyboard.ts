@@ -14,6 +14,7 @@ import { defaultSnappingModeFor, type SnapContext, type SnappingMode } from '../
 import { toggleWindowOpenState } from '../lib/window-interaction'
 import useEditor, { getActiveContinuationContext, getActiveSnapContext } from '../store/use-editor'
 import useInteractionScope, { getMovingNode } from '../store/use-interaction-scope'
+import { useUiHidden } from '../store/use-ui-hidden'
 
 // References (guide/scan) are selected via `useEditor.selectedReferenceId`, not
 // the viewer selection, so selection-based key arms (R/T rotate) need this
@@ -313,6 +314,9 @@ export const useKeyboard = ({
             : 'off',
         )
         sfxEmitter.emit('sfx:grid-snap')
+      } else if ((e.key === 'u' || e.key === 'U') && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        useUiHidden.getState().toggle()
       } else if (e.key === 'c' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
         if (isVersionPreviewMode) return
         e.preventDefault()

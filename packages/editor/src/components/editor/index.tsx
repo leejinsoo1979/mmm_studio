@@ -31,6 +31,7 @@ import {
 } from '../../lib/scene'
 import { initSFXBus } from '../../lib/sfx-bus'
 import useEditor from '../../store/use-editor'
+import { useUiHidden } from '../../store/use-ui-hidden'
 import { CeilingSelectionAffordanceSystem } from '../systems/ceiling/ceiling-selection-affordance-system'
 import { CeilingSystem } from '../systems/ceiling/ceiling-system'
 import { RoofEditSystem } from '../systems/roof/roof-edit-system'
@@ -358,6 +359,7 @@ const EDITOR_CAMERA_CONTROL_HINTS: CameraControlHint[] = [
   { button: 'wheel', gesture: '스크롤', action: '확대 · 축소' },
   { keys: ['Home', 'End'], action: '벽 보기 변경' },
   { keys: ['PgUp', 'PgDn'], action: '층 위 / 층 아래' },
+  { keys: ['Ctrl', 'Shift', 'U'], action: 'UI 숨기기' },
 ]
 
 const PREVIEW_CAMERA_CONTROL_HINTS: CameraControlHint[] = [
@@ -913,6 +915,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   const floorplanPaneRatio = useEditor((s) => s.floorplanPaneRatio)
   const setFloorplanPaneRatio = useEditor((s) => s.setFloorplanPaneRatio)
   const isPreviewMode = useEditor((s) => s.isPreviewMode)
+  const uiHidden = useUiHidden((s) => s.hidden)
 
   const [isCameraControlsHintVisible, setIsCameraControlsHintVisible] = useState<boolean | null>(
     null,
@@ -1010,7 +1013,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
             containerRef={viewer3dRef}
             isVersionPreviewMode={isVersionPreviewMode}
           />
-          {!showLoader && isCameraControlsHintVisible && !isFirstPersonMode ? (
+          {!showLoader && isCameraControlsHintVisible && !isFirstPersonMode && !uiHidden ? (
             <ViewerCanvasControlsHint
               isPreviewMode={isPreviewMode}
               onDismiss={dismissCameraControlsHint}
