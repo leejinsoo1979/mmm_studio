@@ -104,6 +104,13 @@ describe('도어설치 / 도어제거', () => {
     expect(newCabinetHasDoor()).toBe(true)
   })
 
+  test('a cabinet saved before 도어설치 existed shows doors but new ones stay bare', () => {
+    const { hasDoor: _, ...legacy } = cabinet()
+    put(legacy as CabinetNode)
+    expect(buildCabinetParts(legacy as CabinetNode).parts.some((p) => p.role === 'door')).toBe(true)
+    expect(newCabinetHasDoor()).toBe(false)
+  })
+
   test('one cabinet opens on its own; open-all / close-all takes over again', () => {
     const [a, b] = [cabinet(), cabinet()]
     put(a, b)

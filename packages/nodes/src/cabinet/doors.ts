@@ -40,9 +40,17 @@ export function anyCabinetHasDoor(nodes: Record<string, AnyNode>): boolean {
   return cabinets(nodes).some((c) => c.hasDoor)
 }
 
-/** Whether a cabinet placed now comes with its doors hung. */
+/**
+ * Whether a cabinet placed now comes with its doors hung: after 도어설치, or
+ * when the scene has doors hung by 도어설치. A cabinet saved before doors
+ * were hung separately shows its doors but doesn't count, so placing next to
+ * it still gives a bare carcass.
+ */
 export function newCabinetHasDoor(): boolean {
-  return useCabinetDoors.getState().installIntent || anyCabinetHasDoor(useScene.getState().nodes)
+  if (useCabinetDoors.getState().installIntent) return true
+  return Object.values(useScene.getState().nodes).some(
+    (n) => (n.type as string) === 'cabinet' && (n as { hasDoor?: boolean }).hasDoor === true,
+  )
 }
 
 /** 도어설치 / 도어제거 on every cabinet in the scene, as one undo step. */

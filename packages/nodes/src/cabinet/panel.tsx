@@ -670,8 +670,8 @@ export default function CabinetPanel() {
           ) : (
             <PanelSection title="도어">
               <p className="text-muted-foreground text-xs leading-relaxed">
-                도어는 아직 달지 않았습니다. 가구를 모두 배치한 뒤 화면 위의 도어설치로 모든 가구에
-                한 번에 답니다. 내부 구성의 도어 종류·경첩 설정은 그때 적용됩니다.
+                도어는 아직 달지 않았습니다. 가구를 모두 배치한 뒤 화면 왼쪽 아래의 도어설치로 모든
+                가구에 한 번에 답니다. 내부 구성의 도어 종류·경첩 설정은 그때 적용됩니다.
               </p>
               <ActionButton label="지금 도어설치" onClick={() => setAllCabinetDoors(true)} />
             </PanelSection>
