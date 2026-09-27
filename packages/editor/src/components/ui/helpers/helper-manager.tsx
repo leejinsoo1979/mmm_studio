@@ -189,6 +189,7 @@ export function HelperManager() {
     return (
       <ItemHelper
         continuationContext={movingContinuationContext}
+        rightClickRotates={movingNode.type === 'item'}
         showEsc
         showForce={nodeRegistry.get(movingNode.type)?.snapProfile !== 'structural'}
         snapContext={snapContext}

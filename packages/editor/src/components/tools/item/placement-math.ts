@@ -23,6 +23,13 @@ export function steppedRotation(current: number, direction: 1 | -1): number {
   return (Math.round(current / ROTATION_QUANTUM) + direction) * ROTATION_QUANTUM
 }
 
+/** Alt + R / T (or right click while placing): a free 5° turn off the 45° grid. */
+export const FINE_ROTATION_STEP = (5 * Math.PI) / 180
+
+export function turnRotation(current: number, direction: 1 | -1, fine: boolean): number {
+  return fine ? current + direction * FINE_ROTATION_STEP : steppedRotation(current, direction)
+}
+
 function positiveModulo(value: number, divisor: number): number {
   return ((value % divisor) + divisor) % divisor
 }

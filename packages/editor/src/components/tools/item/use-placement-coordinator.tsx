@@ -48,6 +48,7 @@ import {
 } from '../../../lib/active-placement-surface'
 import { EDITOR_LAYER } from '../../../lib/constants'
 import { formatLinearMeasurement } from '../../../lib/measurements'
+import { subscribeQuickRightClick } from '../../../lib/quick-right-click'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 
 import {
@@ -71,7 +72,7 @@ import {
   snapToGrid,
   snapToHalf,
   snapUpToGridStep,
-  steppedRotation,
+  turnRotation,
 } from './placement-math'
 import {
   ceilingStrategy,
@@ -95,8 +96,6 @@ const ALIGNMENT_THRESHOLD_M = 0.08
  *  the camera (CameraControls ROTATE). Only a quick, near-stationary right
  *  press/release counts as a cancel; anything that moves past the pixel
  *  threshold or is held longer is treated as a camera orbit and left alone. */
-const RIGHT_CLICK_CANCEL_MAX_MOVE_PX = 4
-const RIGHT_CLICK_CANCEL_MAX_MS = 200
 
 /**
  * Expand `bounds` outward so each axis is rounded up to the active grid step.
@@ -2100,115 +2099,112 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
         return
       }
 
+      if (event.metaKey || event.ctrlKey) return
+      // Alt+R on macOS types '®', so match the physical key too.
+      const key = event.key.toLowerCase()
+      const direction =
+        key === 'r' || event.code === 'KeyR' ? 1 : key === 't' || event.code === 'KeyT' ? -1 : 0
+      if (direction === 0 || !draftNode.current) return
+      event.preventDefault()
+      rotateDraft(direction, event.altKey)
+    }
+
+    // R / T and a quick right click turn the draft 45° (rounded onto the 45°
+    // grid); with Alt held they turn it 5° freely (inZOI).
+    const rotateDraft = (rotationDir: 1 | -1, fine: boolean) => {
       const draft = draftNode.current
       if (!draft) return
-
       // Roof-wall drafts live flat in the host face frame (yaw 0) —
       // manual rotation would skew them off the wall plane.
       if (placementState.current.surface === 'roof-wall') return
+      sfxEmitter.emit('sfx:item-rotate')
+      const currentRotation = draft.rotation
+      const newRotationY = turnRotation(currentRotation[1] ?? 0, rotationDir, fine)
+      draft.rotation = [currentRotation[0], newRotationY, currentRotation[2]]
 
-      let rotationDir: 1 | -1 | 0 = 0
-      if ((event.key === 'r' || event.key === 'R') && !event.metaKey && !event.ctrlKey)
-        rotationDir = 1
-      else if ((event.key === 't' || event.key === 'T') && !event.metaKey && !event.ctrlKey)
-        rotationDir = -1
+      // Ref + cursor mesh + item mesh — no store update during drag
+      if (cursorGroupRef.current) {
+        cursorGroupRef.current.rotation.y = newRotationY
+      }
+      const mesh = sceneRegistry.nodes.get(draft.id)
+      if (mesh) mesh.rotation.y = newRotationY
 
-      if (rotationDir !== 0) {
-        event.preventDefault()
-        sfxEmitter.emit('sfx:item-rotate')
-        const currentRotation = draft.rotation
-        // Round to the nearest 45° then step, matching the placed-item R/T.
-        const newRotationY = steppedRotation(currentRotation[1] ?? 0, rotationDir)
-        draft.rotation = [currentRotation[0], newRotationY, currentRotation[2]]
-
-        // Ref + cursor mesh + item mesh — no store update during drag
+      // Re-snap position immediately with updated rotation (dimX/dimZ may swap at 90°)
+      const surface = placementState.current.surface
+      if (surface === 'floor' || surface === 'ceiling') {
+        const dims = getScaledDimensions(draft)
+        const [dimX, , dimZ] = dims
+        const swapDims = Math.abs(Math.sin(newRotationY)) > 0.9
+        const x = snapToGrid(lastRawPos.current.x, swapDims ? dimZ : dimX)
+        const z = snapToGrid(lastRawPos.current.z, swapDims ? dimX : dimZ)
+        gridPosition.current.set(x, gridPosition.current.y, z)
+        draft.position = [x, gridPosition.current.y, z]
         if (cursorGroupRef.current) {
-          cursorGroupRef.current.rotation.y = newRotationY
+          if (surface === 'floor') {
+            cursorGroupRef.current.position.set(
+              ...getFloorVisualPosition([x, gridPosition.current.y, z]),
+            )
+          } else {
+            cursorGroupRef.current.position.x = x
+            cursorGroupRef.current.position.z = z
+          }
         }
-        const mesh = sceneRegistry.nodes.get(draft.id)
-        if (mesh) mesh.rotation.y = newRotationY
-
-        // Re-snap position immediately with updated rotation (dimX/dimZ may swap at 90°)
-        const surface = placementState.current.surface
-        if (surface === 'floor' || surface === 'ceiling') {
+        if (mesh) {
+          mesh.position.x = x
+          mesh.position.z = z
+          if (surface === 'floor') {
+            mesh.position.y = getFloorVisualPosition([x, gridPosition.current.y, z])[1]
+          }
+        }
+      } else if (surface === 'item-surface' && placementState.current.surfaceItemId) {
+        const surfaceMesh = sceneRegistry.nodes.get(placementState.current.surfaceItemId)
+        if (surfaceMesh) {
+          const localPos = surfaceMesh.worldToLocal(lastRawPos.current.clone())
           const dims = getScaledDimensions(draft)
           const [dimX, , dimZ] = dims
           const swapDims = Math.abs(Math.sin(newRotationY)) > 0.9
-          const x = snapToGrid(lastRawPos.current.x, swapDims ? dimZ : dimX)
-          const z = snapToGrid(lastRawPos.current.z, swapDims ? dimX : dimZ)
-          gridPosition.current.set(x, gridPosition.current.y, z)
-          draft.position = [x, gridPosition.current.y, z]
+          const x = snapToGrid(localPos.x, swapDims ? dimZ : dimX)
+          const z = snapToGrid(localPos.z, swapDims ? dimX : dimZ)
+          const y = gridPosition.current.y
+          gridPosition.current.set(x, y, z)
+          draft.position = [x, y, z]
+          const worldSnapped = surfaceMesh.localToWorld(new Vector3(x, y, z))
+          const localSnapped = worldToBuildingLocal(worldSnapped.x, worldSnapped.y, worldSnapped.z)
+          const surfaceQuat = new Quaternion()
+          surfaceMesh.getWorldQuaternion(surfaceQuat)
+          const surfaceWorldY = new Euler().setFromQuaternion(surfaceQuat, 'YXZ').y
           if (cursorGroupRef.current) {
-            if (surface === 'floor') {
-              cursorGroupRef.current.position.set(
-                ...getFloorVisualPosition([x, gridPosition.current.y, z]),
-              )
-            } else {
-              cursorGroupRef.current.position.x = x
-              cursorGroupRef.current.position.z = z
-            }
+            cursorGroupRef.current.position.set(localSnapped.x, localSnapped.y, localSnapped.z)
+            // The box lives in building-local space while the mesh is parented to the host
+            // item, so add the host's world yaw: the box must track the item's true
+            // orientation, not its host-local `rotation[1]`.
+            cursorGroupRef.current.rotation.y = newRotationY + surfaceWorldY
           }
-          if (mesh) {
-            mesh.position.x = x
-            mesh.position.z = z
-            if (surface === 'floor') {
-              mesh.position.y = getFloorVisualPosition([x, gridPosition.current.y, z])[1]
-            }
-          }
-        } else if (surface === 'item-surface' && placementState.current.surfaceItemId) {
-          const surfaceMesh = sceneRegistry.nodes.get(placementState.current.surfaceItemId)
-          if (surfaceMesh) {
-            const localPos = surfaceMesh.worldToLocal(lastRawPos.current.clone())
-            const dims = getScaledDimensions(draft)
-            const [dimX, , dimZ] = dims
-            const swapDims = Math.abs(Math.sin(newRotationY)) > 0.9
-            const x = snapToGrid(localPos.x, swapDims ? dimZ : dimX)
-            const z = snapToGrid(localPos.z, swapDims ? dimX : dimZ)
-            const y = gridPosition.current.y
-            gridPosition.current.set(x, y, z)
-            draft.position = [x, y, z]
-            const worldSnapped = surfaceMesh.localToWorld(new Vector3(x, y, z))
-            const localSnapped = worldToBuildingLocal(
-              worldSnapped.x,
-              worldSnapped.y,
-              worldSnapped.z,
-            )
-            const surfaceQuat = new Quaternion()
-            surfaceMesh.getWorldQuaternion(surfaceQuat)
-            const surfaceWorldY = new Euler().setFromQuaternion(surfaceQuat, 'YXZ').y
-            if (cursorGroupRef.current) {
-              cursorGroupRef.current.position.set(localSnapped.x, localSnapped.y, localSnapped.z)
-              // The box lives in building-local space while the mesh is parented to the host
-              // item, so add the host's world yaw: the box must track the item's true
-              // orientation, not its host-local `rotation[1]`.
-              cursorGroupRef.current.rotation.y = newRotationY + surfaceWorldY
-            }
-            if (mesh) mesh.position.set(x, y, z)
-          }
+          if (mesh) mesh.position.set(x, y, z)
         }
-
-        // Update live transform for 2D floorplan with post-snap position
-        const currentLive = useLiveTransforms.getState().get(draft.id)
-        if (currentLive) {
-          const livePosition: [number, number, number] =
-            surface === 'floor'
-              ? [draft.position[0], draft.position[1], draft.position[2]]
-              : cursorGroupRef.current
-                ? [
-                    cursorGroupRef.current.position.x,
-                    cursorGroupRef.current.position.y,
-                    cursorGroupRef.current.position.z,
-                  ]
-                : [draft.position[0], draft.position[1], draft.position[2]]
-          useLiveTransforms.getState().set(draft.id, {
-            ...currentLive,
-            position: livePosition,
-            rotation: newRotationY,
-          })
-        }
-
-        revalidate()
       }
+
+      // Update live transform for 2D floorplan with post-snap position
+      const currentLive = useLiveTransforms.getState().get(draft.id)
+      if (currentLive) {
+        const livePosition: [number, number, number] =
+          surface === 'floor'
+            ? [draft.position[0], draft.position[1], draft.position[2]]
+            : cursorGroupRef.current
+              ? [
+                  cursorGroupRef.current.position.x,
+                  cursorGroupRef.current.position.y,
+                  cursorGroupRef.current.position.z,
+                ]
+              : [draft.position[0], draft.position[1], draft.position[2]]
+        useLiveTransforms.getState().set(draft.id, {
+          ...currentLive,
+          position: livePosition,
+          rotation: newRotationY,
+        })
+      }
+
+      revalidate()
     }
 
     const onKeyUp = (event: KeyboardEvent) => {
@@ -2230,36 +2226,12 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
     }
     emitter.on('tool:cancel', onCancel)
 
-    // ---- Right-click cancel (quick click only, never a right-drag orbit) ----
-    // The right button is also the camera-orbit control, so a contextmenu/up
-    // alone can't tell "cancel placement" from "move the camera". Record the
-    // right-button-down point + time and only cancel on release when the
-    // pointer barely moved within a short window — a longer / further press is
-    // an orbit and must leave the placement untouched.
-    let rightDown: { x: number; y: number; t: number } | null = null
-    const onRightPointerDown = (event: PointerEvent) => {
-      if (event.button !== 2) return
-      rightDown = { x: event.clientX, y: event.clientY, t: performance.now() }
-    }
-    const onRightPointerUp = (event: PointerEvent) => {
-      if (event.button !== 2) return
-      const down = rightDown
-      rightDown = null
-      if (!down || !configRef.current.onCancel) return
-      const movedSq = (event.clientX - down.x) ** 2 + (event.clientY - down.y) ** 2
-      const elapsed = performance.now() - down.t
-      if (movedSq <= RIGHT_CLICK_CANCEL_MAX_MOVE_PX ** 2 && elapsed <= RIGHT_CLICK_CANCEL_MAX_MS) {
-        onCancel()
-      }
-    }
-    // Suppress the OS context menu while placing; the cancel itself is decided
-    // on pointerup above.
-    const onContextMenu = (event: MouseEvent) => {
-      if (configRef.current.onCancel) event.preventDefault()
-    }
-    window.addEventListener('pointerdown', onRightPointerDown, true)
-    window.addEventListener('pointerup', onRightPointerUp, true)
-    window.addEventListener('contextmenu', onContextMenu)
+    // ---- Right-click rotate (inZOI: a quick right click turns the held
+    // object 45°; Esc cancels). A right-drag stays the camera orbit. ----
+    const unsubscribeRightClick = subscribeQuickRightClick(
+      () => !!draftNode.current,
+      (event) => rotateDraft(1, event.altKey),
+    )
 
     // ---- Bounding box geometry ----
     // Always derive the wireframe from `asset.dimensions × scale` rather than
@@ -2385,9 +2357,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
       emitter.off('tool:cancel', onCancel)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
-      window.removeEventListener('pointerdown', onRightPointerDown, true)
-      window.removeEventListener('pointerup', onRightPointerUp, true)
-      window.removeEventListener('contextmenu', onContextMenu)
+      unsubscribeRightClick()
     }
   }, [
     asset,

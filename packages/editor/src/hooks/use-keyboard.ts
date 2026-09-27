@@ -1,7 +1,7 @@
 import { type AnyNodeId, emitter, type LevelNode, nodeRegistry, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect } from 'react'
-import { steppedRotation } from '../components/tools/item/placement-math'
+import { turnRotation } from '../components/tools/item/placement-math'
 import { toggleDoorOpenState } from '../lib/door-interaction'
 import { guideEmitter } from '../lib/guide-events'
 import { runRedo, runUndo } from '../lib/history'
@@ -326,7 +326,8 @@ export const useKeyboard = ({
         e.preventDefault()
         stepWallMode(e.key === 'Home' ? 1 : -1)
       } else if (
-        (e.key === 'r' || e.key === 'R') &&
+        // Alt+R on macOS types '®', so match the physical key too.
+        (e.key === 'r' || e.key === 'R' || e.code === 'KeyR') &&
         !e.metaKey &&
         !e.ctrlKey &&
         !isVersionPreviewMode &&
@@ -352,7 +353,7 @@ export const useKeyboard = ({
           useScene.getState().updateNode(rotatableReference.id, {
             rotation: [
               rotatableReference.rotation[0],
-              steppedRotation(rotatableReference.rotation[1], 1),
+              turnRotation(rotatableReference.rotation[1], 1, e.altKey),
               rotatableReference.rotation[2],
             ],
           })
@@ -399,12 +400,12 @@ export const useKeyboard = ({
             if (typeof node.rotation === 'number') {
               useScene
                 .getState()
-                .updateNode(node.id, { rotation: steppedRotation(node.rotation, 1) })
+                .updateNode(node.id, { rotation: turnRotation(node.rotation, 1, e.altKey) })
             } else if (Array.isArray(node.rotation)) {
               useScene.getState().updateNode(node.id, {
                 rotation: [
                   node.rotation[0],
-                  steppedRotation(node.rotation[1], 1),
+                  turnRotation(node.rotation[1], 1, e.altKey),
                   node.rotation[2],
                 ],
               })
@@ -412,7 +413,11 @@ export const useKeyboard = ({
             sfxEmitter.emit('sfx:item-rotate')
           }
         }
-      } else if ((e.key === 't' || e.key === 'T') && !isVersionPreviewMode && !isPlacingOpening()) {
+      } else if (
+        (e.key === 't' || e.key === 'T' || e.code === 'KeyT') &&
+        !isVersionPreviewMode &&
+        !isPlacingOpening()
+      ) {
         // Rotate selected node counter-clockwise
         const rotatableReference = getRotatableSelectedReference()
         if (rotatableReference) {
@@ -420,7 +425,7 @@ export const useKeyboard = ({
           useScene.getState().updateNode(rotatableReference.id, {
             rotation: [
               rotatableReference.rotation[0],
-              steppedRotation(rotatableReference.rotation[1], -1),
+              turnRotation(rotatableReference.rotation[1], -1, e.altKey),
               rotatableReference.rotation[2],
             ],
           })
@@ -449,12 +454,12 @@ export const useKeyboard = ({
             if (typeof node.rotation === 'number') {
               useScene
                 .getState()
-                .updateNode(node.id, { rotation: steppedRotation(node.rotation, -1) })
+                .updateNode(node.id, { rotation: turnRotation(node.rotation, -1, e.altKey) })
             } else if (Array.isArray(node.rotation)) {
               useScene.getState().updateNode(node.id, {
                 rotation: [
                   node.rotation[0],
-                  steppedRotation(node.rotation[1], -1),
+                  turnRotation(node.rotation[1], -1, e.altKey),
                   node.rotation[2],
                 ],
               })

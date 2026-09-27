@@ -330,6 +330,7 @@ export {
   type PlanarPoint,
   resolvePlanarCursorPosition,
 } from './lib/planar-cursor-placement'
+export { subscribeQuickRightClick } from './lib/quick-right-click'
 export { clearRoofDuplicateMetadata, duplicateRoofSubtree } from './lib/roof-duplication'
 // Roof wall-face hit resolution + overlap guard — shared by the
 // kind-owned door / window tools in `@pascal-app/nodes` and the item

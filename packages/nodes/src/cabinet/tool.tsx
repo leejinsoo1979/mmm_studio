@@ -3,6 +3,7 @@
 import { type AnyNode, type AnyNodeId, emitter, type GridEvent, useScene } from '@pascal-app/core'
 import {
   isGridSnapActive,
+  subscribeQuickRightClick,
   triggerSFX,
   useEditor,
   useFacingPose,
@@ -122,17 +123,22 @@ export function useWallPlacement(args: {
       stopPlacementCommitPropagation(event)
     }
 
-    // `R` turns a free-standing cabinet by 90°; wall-attached ones follow the wall.
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'r' && event.key !== 'R') return
-      const target = event.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+    // `R` (or a quick right click, inZOI) turns a free-standing cabinet by
+    // 90°; wall-attached ones follow the wall.
+    const rotate = () => {
       useCabinetBrush.getState().rotateFree(Math.PI / 2)
       if (last && !last.wallId) {
         last = { ...last, rotationY: useCabinetBrush.getState().freeRotationY }
         show(last)
       }
     }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'r' && event.key !== 'R') return
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+      rotate()
+    }
+    const unsubscribeRightClick = subscribeQuickRightClick(() => true, rotate)
 
     emitter.on('grid:move', onMove)
     const unsubscribe = subscribeFloorPlacementClicks(onClick)
@@ -146,6 +152,7 @@ export function useWallPlacement(args: {
       emitter.off('cabinet:click' as never, cabinetClick)
       emitter.off('countertop:click' as never, cabinetClick)
       window.removeEventListener('keydown', onKey)
+      unsubscribeRightClick()
       usePlacementPreview.getState().clear()
       useFacingPose.getState().clear()
     }

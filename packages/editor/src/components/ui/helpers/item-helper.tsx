@@ -11,6 +11,8 @@ interface ItemHelperProps {
   // Set for a fresh point-kind placement (e.g. a positioned preset) so the
   // once/repeat continuation chip shows; null for an existing-node move.
   continuationContext?: ContinuationContext | null
+  // Item placement / move: a quick right click turns 45°, Alt + R / T 5°.
+  rightClickRotates?: boolean
 }
 
 // Snapping mode is the chip on the right (Shift cycles it), so it's not repeated
@@ -20,13 +22,17 @@ export function ItemHelper({
   snapContext,
   showForce,
   continuationContext = null,
+  rightClickRotates = false,
 }: ItemHelperProps) {
   return (
     <ContextualHelperPanel
       continuationContext={continuationContext}
       hints={[
         { keys: ['Left click'], label: 'Place' },
-        { keys: ['R', 'T'], label: 'Rotate' },
+        rightClickRotates
+          ? { keys: [['R', 'T', 'Right click']], label: '45° 회전' }
+          : { keys: ['R', 'T'], label: 'Rotate' },
+        ...(rightClickRotates ? [{ keys: ['Alt', ['R', 'T']], label: '5° 미세 회전' }] : []),
         ...(showForce ? [{ keys: ['Alt'], label: 'Force place' }] : []),
         { keys: [showEsc ? 'Esc' : 'Right click'], label: 'Cancel' },
       ]}
