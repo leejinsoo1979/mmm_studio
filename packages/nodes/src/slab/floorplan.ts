@@ -9,6 +9,7 @@ import {
   type SceneMaterialId,
   type SlabNode,
 } from '@pascal-app/core'
+import { roomDisplayName } from './room-name'
 
 function resolveFloorMaterial(node: SlabNode, ctx: GeometryContext) {
   const ref = node.slots?.surface ?? node.materialPreset
@@ -153,6 +154,9 @@ export function buildSlabFloorplan(node: SlabNode, ctx: GeometryContext): Floorp
     })
   }
 
+  const label = roomLabel(node, ctx, outer)
+  if (label) children.push(label)
+
   // Boundary editor — visible only when the slab is the active selection.
   if (isSelected) {
     appendRingEditor(children, polygon, undefined)
@@ -162,6 +166,72 @@ export function buildSlabFloorplan(node: SlabNode, ctx: GeometryContext): Floorp
   }
 
   return { kind: 'group', children }
+}
+
+const ROOM_LABEL_FONT_SIZE = 0.16
+
+function ringArea(points: readonly (readonly [number, number])[]): number {
+  let sum = 0
+  for (let i = 0; i < points.length; i += 1) {
+    const [x1, y1] = points[i]!
+    const [x2, y2] = points[(i + 1) % points.length]!
+    sum += x1 * y2 - x2 * y1
+  }
+  return Math.abs(sum) / 2
+}
+
+function ringCentroid(points: FloorplanPoint[]): FloorplanPoint {
+  let a = 0
+  let cx = 0
+  let cy = 0
+  for (let i = 0; i < points.length; i += 1) {
+    const [x1, y1] = points[i]!
+    const [x2, y2] = points[(i + 1) % points.length]!
+    const cross = x1 * y2 - x2 * y1
+    a += cross
+    cx += (x1 + x2) * cross
+    cy += (y1 + y2) * cross
+  }
+  if (Math.abs(a) < 1e-9) {
+    const n = points.length
+    return [points.reduce((t, p) => t + p[0], 0) / n, points.reduce((t, p) => t + p[1], 0) / n]
+  }
+  return [cx / (3 * a), cy / (3 * a)]
+}
+
+/**
+ * mmmcraft's room label on a floor found from a closed wall loop:
+ * "공간 N · 12.34 m²", the area on the wall centre lines (as mmmcraft
+ * measures it) less any holes. A named floor shows its name instead.
+ */
+function roomLabel(
+  node: SlabNode,
+  ctx: GeometryContext,
+  outer: FloorplanPoint[],
+): FloorplanGeometry | null {
+  if (!node.autoFromWalls) return null
+  const area =
+    ringArea(node.polygon) - (node.holes ?? []).reduce((sum, hole) => sum + ringArea(hole), 0)
+  const rooms = ctx.siblings.filter((n) => n.type === 'slab' && (n as SlabNode).autoFromWalls)
+  const index = rooms.findIndex((n) => n.id === node.id)
+  const name = roomDisplayName(node) ?? `공간 ${index >= 0 ? index + 1 : rooms.length + 1}`
+  const [x, y] = ringCentroid(outer)
+  return {
+    kind: 'text',
+    x,
+    y,
+    text: `${name} · ${area.toFixed(2)} m²`,
+    fontSize: ROOM_LABEL_FONT_SIZE,
+    fill: '#3d3a52',
+    stroke: '#ffffff',
+    strokeWidth: ROOM_LABEL_FONT_SIZE * 0.3,
+    paintOrder: 'stroke',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    fontWeight: 600,
+    textAnchor: 'middle',
+    dominantBaseline: 'central',
+    upright: true,
+  }
 }
 
 /**

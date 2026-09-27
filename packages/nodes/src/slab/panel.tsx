@@ -16,6 +16,7 @@ import {
 import { useViewer } from '@pascal-app/viewer'
 import { Edit, Move, Plus, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useRef } from 'react'
+import { roomDisplayName } from './room-name'
 
 /**
  * Phase 5 Stage E — slab inspector (kind-owned).
@@ -166,7 +167,7 @@ export function SlabPanel() {
     <PanelWrapper
       icon="/icons/floor.webp"
       onClose={handleClose}
-      title={node.name || 'Slab'}
+      title={roomDisplayName(node) || 'Slab'}
       width={320}
     >
       <PanelSection title="Elevation">
@@ -190,9 +191,30 @@ export function SlabPanel() {
       </PanelSection>
 
       <PanelSection title="Info">
+        {node.autoFromWalls && (
+          <label className="flex items-center justify-between gap-3 px-2 py-1 text-muted-foreground text-sm">
+            <span className="shrink-0">방 이름</span>
+            <input
+              className="min-w-0 flex-1 rounded-md bg-muted px-2 py-1 text-foreground text-sm outline-none focus:ring-1 focus:ring-primary/50"
+              defaultValue={roomDisplayName(node) ?? ''}
+              key={node.id}
+              onBlur={(e) => {
+                const name = e.target.value.trim()
+                if (name !== (roomDisplayName(node) ?? ''))
+                  handleUpdate({ name: name || undefined })
+              }}
+              onKeyDown={(e) => {
+                e.stopPropagation()
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+              }}
+              placeholder="공간"
+              type="text"
+            />
+          </label>
+        )}
         <div className="flex items-center justify-between px-2 py-1 text-muted-foreground text-sm">
           <span>Area</span>
-          <span className="font-mono text-white">{area.toFixed(2)} m²</span>
+          <span className="font-mono text-foreground">{area.toFixed(2)} m²</span>
         </div>
       </PanelSection>
 
@@ -217,7 +239,7 @@ export function SlabPanel() {
                 >
                   <div className="min-w-0 flex-1">
                     <p
-                      className={`font-medium text-xs ${isEditing ? 'text-primary' : 'text-white'}`}
+                      className={`font-medium text-xs ${isEditing ? 'text-primary' : 'text-foreground'}`}
                     >
                       Hole {index + 1} {isEditing && '(Editing)'}
                     </p>
