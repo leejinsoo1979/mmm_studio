@@ -1,4 +1,4 @@
-import type { DoorNode, StepDoorProduct, WallNode } from '../../schema'
+import type { AnyNode, AnyNodeId, DoorNode, StepDoorProduct, WallNode } from '../../schema'
 import { DEFAULT_WALL_HEIGHT } from '../wall/wall-footprint'
 import { HIDDEN_HANDLE } from './hidden-door'
 
@@ -70,6 +70,25 @@ export function stepDoorWallFinish(
     thickness: Math.max(depthMm, stepDoorMinDepthMm(wall)) / 1000,
     bodyThickness: wall.bodyThickness ?? wall.thickness ?? 0.1,
   }
+}
+
+/**
+ * Undo the finish once `door` is deleted: the wall goes back to its body
+ * thickness, unless another step door on it still sets the depth.
+ */
+export function stepDoorWallRestore(
+  door: DoorNode,
+  nodes: Record<AnyNodeId, AnyNode>,
+): { id: AnyNodeId; data: Partial<WallNode> } | null {
+  if (door.doorType !== 'step' || !door.parentId) return null
+  const wall = nodes[door.parentId as AnyNodeId]
+  if (wall?.type !== 'wall' || wall.bodyThickness === undefined) return null
+  const stillFinished = (wall.children ?? []).some((id) => {
+    const child = nodes[id as AnyNodeId]
+    return id !== door.id && child?.type === 'door' && child.doorType === 'step'
+  })
+  if (stillFinished) return null
+  return { id: wall.id, data: { thickness: wall.bodyThickness, bodyThickness: undefined } }
 }
 
 /**

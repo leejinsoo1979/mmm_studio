@@ -1,4 +1,4 @@
-import type { ParametricDescriptor } from '@pascal-app/core'
+import { type ParametricDescriptor, stepDoorWallRestore } from '@pascal-app/core'
 import type { DoorNode } from './schema'
 
 /**
@@ -26,5 +26,10 @@ export const doorParametrics: ParametricDescriptor<DoorNode> = {
       ],
     },
   ],
+  // A step door finished its wall to the frame depth; deleting it undoes that.
+  onDelete: (door, nodes) => {
+    const restore = stepDoorWallRestore(door, nodes)
+    return restore ? [restore] : []
+  },
   customPanel: () => import('./panel'),
 }

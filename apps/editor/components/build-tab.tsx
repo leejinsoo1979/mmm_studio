@@ -1,6 +1,6 @@
 'use client'
 
-import { type AssetInput, nodeRegistry } from '@pascal-app/core'
+import { type AssetInput, DEFAULT_WALL_HEIGHT, nodeRegistry } from '@pascal-app/core'
 import { triggerSFX, useEditor } from '@pascal-app/editor'
 import {
   LevelTakeoffSummary,
@@ -18,7 +18,12 @@ import {
   TooltipTrigger,
 } from '@/components/toolbar-tooltip'
 import { cn } from '@/lib/utils'
-import { useWallDrawingDefaults, wallDrawingToolDefaults } from '@/lib/wall-drawing-defaults'
+import {
+  FULL_WALL_HEIGHTS,
+  PARTIAL_WALL_HEIGHTS,
+  useWallDrawingDefaults,
+  wallDrawingToolDefaults,
+} from '@/lib/wall-drawing-defaults'
 
 type BuildToolKind =
   | 'wall'
@@ -207,12 +212,7 @@ function activateBuildTool(
   ed.setPhase('structure')
   ed.setStructureLayer('elements')
   ed.setCatalogCategory(null)
-  ed.setToolDefaults(
-    kind,
-    kind === 'wall'
-      ? wallDrawingToolDefaults(useWallDrawingDefaults.getState().construction)
-      : (defaults ?? null),
-  )
+  ed.setToolDefaults(kind, kind === 'wall' ? wallDrawingToolDefaults() : (defaults ?? null))
   if (kind === 'wall') ed.setSnappingMode('wall', 'lines')
   ed.setMode('build')
   ed.setTool(kind)
@@ -225,7 +225,7 @@ function activateRectangleRoomTool(): void {
   ed.setCatalogCategory(null)
   ed.setToolDefaults('wall', {
     placementMode: 'rectangle-room',
-    ...wallDrawingToolDefaults(useWallDrawingDefaults.getState().construction),
+    ...wallDrawingToolDefaults(),
   })
   ed.setSnappingMode('wall', 'lines')
   ed.setMode('build')
@@ -239,7 +239,7 @@ function activateArcWallTool(): void {
   ed.setCatalogCategory(null)
   ed.setToolDefaults('wall', {
     placementMode: 'arc-wall',
-    ...wallDrawingToolDefaults(useWallDrawingDefaults.getState().construction),
+    ...wallDrawingToolDefaults(),
   })
   ed.setSnappingMode('wall', 'lines')
   ed.setMode('build')
@@ -334,6 +334,42 @@ function NewWallConstruction() {
     <div className="mt-4 rounded-xl border border-[#343434] bg-[#202020] p-3">
       <div className="mb-2 text-[#9a9a9a] text-xs">새로 그릴 벽 · 벽체 두께 100 mm 기준</div>
       <WallConstructionFields onChange={setConstruction} value={construction} />
+      <NewWallHeight />
+    </div>
+  )
+}
+
+/** inZOI-style height presets for new walls; pressing the chosen one again
+ *  goes back to the default height. */
+function NewWallHeight() {
+  const height = useWallDrawingDefaults((s) => s.height)
+  const setHeight = useWallDrawingDefaults((s) => s.setHeight)
+  const row = (label: string, heights: number[]) => (
+    <div className="flex items-center gap-1.5">
+      <span className="w-10 shrink-0 text-[#9a9a9a] text-xs">{label}</span>
+      {heights.map((h) => (
+        <button
+          className={`flex-1 rounded-md py-1 text-xs tabular-nums transition-colors ${height === h ? 'bg-[#5b5bd6] text-white' : 'bg-[#2b2b2b] text-[#d0d0d0] hover:bg-[#363636]'}`}
+          key={h}
+          onClick={() => {
+            triggerSFX('sfx:menu-click')
+            setHeight(height === h ? undefined : h)
+          }}
+          type="button"
+        >
+          {h.toFixed(1)} m
+        </button>
+      ))}
+    </div>
+  )
+  return (
+    <div className="mt-3 flex flex-col gap-1.5">
+      <div className="text-[#9a9a9a] text-xs">
+        벽 높이 ·{' '}
+        {height === undefined ? `기본 ${DEFAULT_WALL_HEIGHT} m` : `${height.toFixed(1)} m`}
+      </div>
+      {row('온벽', FULL_WALL_HEIGHTS)}
+      {row('부분벽', PARTIAL_WALL_HEIGHTS)}
     </div>
   )
 }

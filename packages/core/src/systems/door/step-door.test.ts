@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { DoorNode, type StepDoorProduct, WallNode } from '../../schema'
+import {
+  type AnyNode,
+  type AnyNodeId,
+  DoorNode,
+  type StepDoorProduct,
+  WallNode,
+} from '../../schema'
 import {
   stepDoorBoxes,
   stepDoorError,
@@ -8,6 +14,7 @@ import {
   stepDoorModel,
   stepDoorPlacement,
   stepDoorWallFinish,
+  stepDoorWallRestore,
   stepLeafPoint,
 } from './step-door'
 
@@ -109,5 +116,41 @@ describe('mmmcraft step door', () => {
       '예림·인쇼 스텝 문틀 깊이는 110mm 이상으로 설정해 주세요.',
     )
     expect(() => stepDoorModel(door('younglim', { width: 1.3 }), wall(), 0)).toThrow()
+  })
+})
+
+describe('deleting a step door', () => {
+  const scene = (...doors: DoorNode[]) => {
+    const host = wall(0.14, { bodyThickness: 0.1, children: doors.map((d) => d.id) })
+    const placed = doors.map((d) => ({ ...d, parentId: host.id }))
+    const nodes = Object.fromEntries([host, ...placed].map((n) => [n.id, n])) as Record<
+      AnyNodeId,
+      AnyNode
+    >
+    return { host, placed, nodes }
+  }
+
+  test('puts the wall back to its body thickness', () => {
+    const { host, placed, nodes } = scene(door('yerim-inshow'))
+    expect(stepDoorWallRestore(placed[0]!, nodes)).toEqual({
+      id: host.id,
+      data: { thickness: 0.1, bodyThickness: undefined },
+    })
+  })
+
+  test('keeps the finish while another step door is on the wall', () => {
+    const { placed, nodes } = scene(door('yerim-inshow'), door('younglim'))
+    expect(stepDoorWallRestore(placed[0]!, nodes)).toBeNull()
+  })
+
+  test('leaves walls that were never finished and other doors alone', () => {
+    const plain = { ...door('yerim-inshow'), doorType: 'hinged' as const }
+    const { placed, nodes } = scene(plain)
+    expect(stepDoorWallRestore(placed[0]!, nodes)).toBeNull()
+    const unfinished = wall(0.14)
+    const d = { ...door('younglim'), parentId: unfinished.id }
+    expect(
+      stepDoorWallRestore(d, { [unfinished.id]: unfinished } as Record<AnyNodeId, AnyNode>),
+    ).toBeNull()
   })
 })

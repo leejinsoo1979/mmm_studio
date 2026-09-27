@@ -196,6 +196,7 @@ export {
   stepDoorModel,
   stepDoorPlacement,
   stepDoorWallFinish,
+  stepDoorWallRestore,
   stepLeafPoint,
 } from './systems/door/step-door'
 export {
