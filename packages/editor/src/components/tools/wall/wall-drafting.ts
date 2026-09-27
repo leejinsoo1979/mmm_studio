@@ -24,6 +24,7 @@ import { resolveSnapFlags } from '../../../lib/snapping-mode'
 import useEditor, {
   getActiveSnappingMode,
   isAngleSnapActive,
+  isGridSnapActive,
   isMagneticSnapActive,
 } from '../../../store/use-editor'
 import {
@@ -523,7 +524,8 @@ export type ResolvedWallDraftPoint = WallDraftSnapResult & {
  * of the 2D floor plan and the 3D wall tool all resolve their cursor through
  * this, so the same cursor under the same snapping mode always yields the same
  * endpoint: orthogonal inference → mode snap (grid / angle / magnetic) →
- * alignment → orthogonal re-lock → the commit-time corner join.
+ * alignment (grid and lines modes) → orthogonal re-lock → the commit-time
+ * corner join.
  *
  * `point` is the raw building-local cursor. `align` applies (and publishes)
  * the caller's alignment guides; it only moves the point when `applySnap`.
@@ -561,7 +563,21 @@ export function resolveWallDraftPoint({
     return { ...(corner ?? snapped), orthogonal: false }
   }
 
-  let resolved = align ? align(snapped.point, { applySnap: magnetic && !angleSnap }) : snapped.point
+  let resolved = snapped.point
+  if (align && (magnetic || isGridSnapActive()) && !angleSnap) {
+    // Line-up is judged on the cursor, not the grid-snapped point, so an
+    // off-grid corner can still be lined up with: an aligned axis takes the
+    // anchor's coordinate, the other keeps the mode's snap. The guides are
+    // then published for the final point.
+    const aligned = align(input, { applySnap: true })
+    resolved = [
+      aligned[0] !== input[0] ? aligned[0] : snapped.point[0],
+      aligned[1] !== input[1] ? aligned[1] : snapped.point[1],
+    ]
+    align(resolved, { applySnap: false })
+  } else if (align) {
+    resolved = align(snapped.point, { applySnap: false })
+  }
   const orthogonal = start !== null && (forceOrthogonal || inferred)
   if (start && orthogonal) resolved = inferOrthogonalWallPoint(start, resolved, true)
 

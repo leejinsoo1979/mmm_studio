@@ -44,7 +44,10 @@ export function RegisteredToolHelper({
         const isBypassHint = hint.key === 'Shift'
         return {
           keys: [hint.key],
-          label: shiftPressed && isBypassHint ? 'Guided constraints bypassed' : hint.label,
+          label:
+            shiftPressed && isBypassHint
+              ? (hint.heldLabel ?? 'Guided constraints bypassed')
+              : hint.label,
           active: shiftPressed && isBypassHint,
         }
       })}

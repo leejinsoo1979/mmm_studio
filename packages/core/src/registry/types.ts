@@ -230,6 +230,12 @@ export type ToolHint = {
    * so the HUD reflects reality. Omit for always-shown hints.
    */
   minDraftVertices?: number
+  /**
+   * Label while the key is held. A held Shift hint otherwise reads as the
+   * guided-constraint bypass; a tool whose Shift is a constraint (the wall's
+   * 90° lock) says what it does instead.
+   */
+  heldLabel?: string
 }
 
 export type FloorplanGeometry =

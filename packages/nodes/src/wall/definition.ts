@@ -123,6 +123,7 @@ export const wallDefinition: NodeDefinition<typeof WallNode> = {
 
   toolHints: [
     { key: 'Left click', label: 'Set wall start / end' },
+    { key: 'Shift', label: '누른 채 그리기: 직각 고정', heldLabel: '직각 고정 중' },
     { key: 'Esc', label: 'Cancel' },
   ],
 

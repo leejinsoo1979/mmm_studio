@@ -69,6 +69,20 @@ export const useKeyboard = ({
     // and is cleared the instant any other key fires, so chords like Ctrl+Z /
     // Ctrl+C never cycle.
     let ctrlTapClean = false
+    // While setting a wall / fence direction, Shift held down is the 90° lock,
+    // so only a quick clean tap (no pointer travel, no click, no other key)
+    // cycles the snapping mode — on release.
+    let shiftTap: { at: number; travel: number; clean: boolean } | null = null
+    const SHIFT_TAP_MAX_MS = 400
+    const SHIFT_TAP_MAX_TRAVEL_PX = 6
+    const breakShiftTap = () => {
+      if (shiftTap) shiftTap.clean = false
+    }
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!shiftTap) return
+      shiftTap.travel += Math.hypot(e.movementX, e.movementY)
+      if (shiftTap.travel > SHIFT_TAP_MAX_TRAVEL_PX) shiftTap.clean = false
+    }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Control' || e.key === 'Meta') {
@@ -80,6 +94,7 @@ export const useKeyboard = ({
         // the clean tap.
         ctrlTapClean = false
       }
+      if (e.key !== 'Shift') breakShiftTap()
 
       // Don't handle shortcuts if user is typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
@@ -93,6 +108,11 @@ export const useKeyboard = ({
         e.preventDefault()
         useEditor.getState().cyclePaintScope()
         sfxEmitter.emit('sfx:grid-snap')
+        return
+      }
+
+      if (e.key === 'Shift' && getActiveSnapContext() === 'wall') {
+        if (!e.repeat) shiftTap = { at: performance.now(), travel: 0, clean: true }
         return
       }
 
@@ -517,6 +537,19 @@ export const useKeyboard = ({
       }
     }
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        const tap = shiftTap
+        shiftTap = null
+        if (
+          tap?.clean &&
+          performance.now() - tap.at <= SHIFT_TAP_MAX_MS &&
+          getActiveSnapContext() === 'wall'
+        ) {
+          useEditor.getState().cycleSnappingMode()
+          sfxEmitter.emit('sfx:grid-snap')
+        }
+        return
+      }
       if (e.key === 'Control' || e.key === 'Meta') {
         const wasClean = ctrlTapClean
         ctrlTapClean = false
@@ -536,9 +569,13 @@ export const useKeyboard = ({
 
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerdown', breakShiftTap)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerdown', breakShiftTap)
     }
   }, [disabled, isVersionPreviewMode])
 

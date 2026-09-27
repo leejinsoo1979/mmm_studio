@@ -26,6 +26,7 @@ import {
   getSegmentAngleReferenceAtPoint,
   isAlignmentGuideActive,
   isFloorplanInputEvent,
+  isGridSnapActive,
   isMagneticSnapActive,
   type LinearUnit,
   markToolCancelConsumed,
@@ -587,8 +588,8 @@ export const WallTool: React.FC = () => {
     // publish the guide. Returns the possibly snapped point.
     const alignPoint = (point: WallPlanPoint, options?: { applySnap?: boolean }): WallPlanPoint => {
       // Figma alignment lines onto existing wall corners / edges are DISPLAYED
-      // in every mode except Off (isAlignmentGuideActive); the magnetic pull
-      // onto them is applied only in 'lines' mode (isMagneticSnapActive).
+      // in every mode except Off (isAlignmentGuideActive); the pull onto them
+      // applies in 'grid' and 'lines' (the draft pipeline passes `applySnap`).
       if (!isAlignmentGuideActive() || alignmentCandidates.length === 0) {
         useAlignmentGuides.getState().clear()
         return point
@@ -598,14 +599,13 @@ export const WallTool: React.FC = () => {
         candidates: alignmentCandidates,
         threshold: ALIGNMENT_THRESHOLD_M,
       })
-      const magnetic = isMagneticSnapActive()
-      // In non-magnetic modes nothing pulls the point onto a guide, so an
-      // axis-alignment dot on a far corner reads as a false "connect here" cue.
-      // Only surface guides whose anchor is within connect distance — the same
-      // tight range the wall-body connect uses — so a corner is no more
-      // magnetic-looking than any other point on the wall. 'lines' keeps the
-      // wider guides since its magnetic snap closes the gap.
-      const guides = magnetic
+      const pulls = isMagneticSnapActive() || isGridSnapActive()
+      // When nothing pulls the point onto a guide ('angles'), an axis-alignment
+      // dot on a far corner reads as a false "connect here" cue. Only surface
+      // guides whose anchor is within connect distance — the same tight range
+      // the wall-body connect uses — so a corner is no more magnetic-looking
+      // than any other point on the wall.
+      const guides = pulls
         ? ar.guides
         : ar.guides.filter(
             (guide) =>
@@ -613,7 +613,7 @@ export const WallTool: React.FC = () => {
               WALL_CONNECT_SNAP_RADIUS,
           )
       useAlignmentGuides.getState().set(guides)
-      return ar.snap && options?.applySnap !== false && magnetic
+      return ar.snap && options?.applySnap === true
         ? [point[0] + ar.snap.dx, point[1] + ar.snap.dz]
         : point
     }
@@ -654,7 +654,16 @@ export const WallTool: React.FC = () => {
         forceOrthogonal: drafting && shiftKey,
         align: alignPoint,
       })
-      if (resolved.snap || resolved.orthogonal) useAlignmentGuides.getState().clear()
+      if (resolved.snap) {
+        useAlignmentGuides.getState().clear()
+      } else if (resolved.orthogonal && drafting) {
+        // Keep the guides across the locked axis — e.g. the vertical guide to
+        // the corner a horizontal segment's end lines up with (as in 2D).
+        const horizontal = Math.abs(resolved.point[1] - startingPoint.current.z) < 1e-6
+        const alongAxis = horizontal ? 'z' : 'x'
+        const guides = useAlignmentGuides.getState().guides
+        useAlignmentGuides.getState().set(guides.filter((guide) => guide.axis !== alongAxis))
+      }
       // Stand the magnetic beacon on a wall corner / wall point lock.
       useWallSnapIndicator
         .getState()

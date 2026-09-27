@@ -175,7 +175,11 @@ function SnappingChips({ context }: { context: SnapContext }) {
           sfxEmitter.emit('sfx:grid-snap')
         }}
         shortcut="Shift"
-        tooltip="Snapping mode — click or press Shift to cycle"
+        tooltip={
+          context === 'wall'
+            ? 'Snapping mode — click or tap Shift to cycle (hold Shift: 90° lock)'
+            : 'Snapping mode — click or press Shift to cycle'
+        }
       />
       {gridActive ? (
         <ChipRow

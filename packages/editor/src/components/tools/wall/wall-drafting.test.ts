@@ -283,3 +283,44 @@ describe('wall draft commit', () => {
     expect(levelWalls()).toHaveLength(1)
   })
 })
+
+describe('wall draft alignment', () => {
+  function useDraftSnapping(mode: SnappingMode) {
+    useEditor.getState().setSnappingMode('wall', mode)
+    useEditor.getState().setGridSnapStep(0.5)
+    useInteractionScope
+      .getState()
+      .begin({ kind: 'reshaping', nodeId: 'wall_a', reshape: 'endpoint' })
+  }
+
+  // Stub alignment: an existing corner at x = 1.23 (off the 0.5 grid).
+  const alignToCorner = (point: WallPlanPoint, { applySnap }: { applySnap: boolean }) =>
+    applySnap && Math.abs(point[0] - 1.23) < 0.08 ? ([1.23, point[1]] as WallPlanPoint) : point
+
+  test.each([
+    ['grid', [1.23, 1]],
+    ['lines', [1.23, 1]],
+    ['off', [1.25, 1]],
+  ] as const)('%s: an end lined up with an off-grid corner snaps onto its line', (mode, expected) => {
+    useDraftSnapping(mode)
+    const resolved = resolveWallDraftPoint({
+      point: [1.25, 1.02],
+      walls: [],
+      start: [3, 1],
+      align: alignToCorner,
+    })
+    expect(resolved.point).toEqual([...expected])
+  })
+
+  test('Shift keeps the 90° lock while the end lines up with a corner', () => {
+    useDraftSnapping('grid')
+    const resolved = resolveWallDraftPoint({
+      point: [1.26, 1.6],
+      walls: [],
+      start: [3, 1],
+      forceOrthogonal: true,
+      align: alignToCorner,
+    })
+    expect(resolved).toMatchObject({ point: [1.23, 1], orthogonal: true })
+  })
+})
