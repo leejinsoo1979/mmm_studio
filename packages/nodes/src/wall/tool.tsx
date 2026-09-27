@@ -963,10 +963,10 @@ export const WallTool: React.FC = () => {
       <mesh layers={EDITOR_LAYER} ref={wallPreviewRef} renderOrder={1} visible={false}>
         <shapeGeometry />
         <meshBasicMaterial
-          color="#818cf8"
+          color={DRAFT_WALL_COLOR}
           depthTest={false}
           depthWrite={false}
-          opacity={0.5}
+          opacity={0.55}
           side={DoubleSide}
           transparent
         />
@@ -1079,15 +1079,18 @@ function RectanglePreviewWall({
     >
       <boxGeometry args={[length, height, thickness]} />
       <meshBasicMaterial
-        color="#818cf8"
+        color={DRAFT_WALL_COLOR}
         depthTest={false}
         depthWrite={false}
-        opacity={0.5}
+        opacity={0.55}
         transparent
       />
     </mesh>
   )
 }
+
+/** inZOI draws the wall being placed as a glowing sky-blue pane. */
+const DRAFT_WALL_COLOR = '#38d6f2'
 
 const RectangleRoomTool: React.FC = () => {
   const unit = useViewer((state) => state.unit)
@@ -1252,7 +1255,7 @@ function WallAxisGuideLine({ axis }: { axis: 'x' | 'z' }) {
         args={[DRAFT_AXIS_GUIDE_LENGTH, DRAFT_AXIS_GUIDE_HEIGHT, DRAFT_AXIS_GUIDE_WIDTH]}
       />
       <meshBasicMaterial
-        color="#818cf8"
+        color={DRAFT_WALL_COLOR}
         depthTest={false}
         depthWrite={false}
         opacity={0.9}
