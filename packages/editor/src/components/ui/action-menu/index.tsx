@@ -9,6 +9,7 @@ import { cn } from './../../../lib/utils'
 import useEditor from './../../../store/use-editor'
 import { CameraActions } from './camera-actions'
 import { ControlModes } from './control-modes'
+import { HistoryActions } from './history-actions'
 import { SecondaryToggles } from './view-toggles'
 
 // Mobile bottom offset matches the viewer's overlap behind the sheet's
@@ -42,7 +43,8 @@ export function ActionMenu({ className }: { className?: string }) {
       <motion.div
         className={cn(
           'left-1/2 z-50 -translate-x-1/2',
-          isMobile ? 'absolute origin-bottom scale-90' : 'fixed bottom-6',
+          // inZOI keeps the build tools in a bar at the top centre.
+          isMobile ? 'absolute origin-bottom scale-90' : 'fixed top-14',
           'rounded-2xl border border-border bg-background/90 shadow-2xl backdrop-blur-md',
           'transition-colors duration-200 ease-out',
           className,
@@ -69,6 +71,8 @@ export function ActionMenu({ className }: { className?: string }) {
             <SecondaryToggles />
             <div className="mx-1 h-5 w-px bg-border" />
             <CameraActions />
+            <div className="mx-1 h-5 w-px bg-border" />
+            <HistoryActions />
           </div>
         )}
       </motion.div>

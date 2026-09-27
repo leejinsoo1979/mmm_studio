@@ -249,7 +249,7 @@ export function MaterialPalette() {
 
   return (
     <div
-      className="pointer-events-auto fixed bottom-[84px] left-1/2 z-50 flex w-[min(1100px,calc(100%-32px))] -translate-x-1/2 flex-col items-center gap-2 text-neutral-800"
+      className="pointer-events-auto fixed bottom-4 left-1/2 z-50 flex w-[min(1100px,calc(100%-32px))] -translate-x-1/2 flex-col items-center gap-2 text-neutral-800"
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div className="flex items-center gap-2 rounded-full bg-white/95 py-1 pr-1 pl-4 shadow-[0_6px_24px_rgba(0,0,0,0.25)]">
@@ -355,7 +355,7 @@ function SelectionHint() {
     : `${turnable ? '클릭: 집기 · R / T · 우클릭 45° · Alt + R / T 5° · G 격자 · 더블클릭: 시점 · ' : ''}Delete 삭제 · Esc 선택 해제`
 
   return (
-    <div className="pointer-events-none fixed bottom-[92px] left-1/2 z-40 -translate-x-1/2 whitespace-nowrap rounded-full bg-neutral-900/60 px-4 py-1.5 text-center font-medium text-[13px] text-white backdrop-blur-sm">
+    <div className="pointer-events-none fixed bottom-6 left-1/2 z-40 -translate-x-1/2 whitespace-nowrap rounded-full bg-neutral-900/60 px-4 py-1.5 text-center font-medium text-[13px] text-white backdrop-blur-sm">
       {text}
     </div>
   )
