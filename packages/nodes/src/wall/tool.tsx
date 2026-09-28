@@ -45,7 +45,15 @@ import {
 import { getSceneTheme, useViewer } from '@pascal-app/viewer'
 import { Html } from '@react-three/drei'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BoxGeometry, BufferGeometry, DoubleSide, type Group, type Mesh, Vector3 } from 'three'
+import {
+  BoxGeometry,
+  BufferGeometry,
+  DoubleSide,
+  type Group,
+  type LineSegments,
+  type Mesh,
+  Vector3,
+} from 'three'
 
 /**
  * Phase 5 Stage D — wall placement tool (kind-owned).
@@ -485,6 +493,43 @@ function updateWallPreview(
     mesh.geometry.dispose()
   }
   mesh.geometry = geometry
+
+  const glow = mesh.getObjectByName(DRAFT_GLOW_NAME) as LineSegments | undefined
+  if (glow) {
+    glow.geometry.dispose()
+    glow.geometry = draftWallGlowGeometry(length, previewHeight, previewThickness)
+  }
+}
+
+const DRAFT_GLOW_NAME = 'draft-wall-glow'
+const DRAFT_GLOW_GRID = 1
+
+/**
+ * inZOI's glowing draft wall: the box outline plus a 1 m grid on both faces,
+ * in the wall preview's local frame (centred, length along x).
+ */
+function draftWallGlowGeometry(length: number, height: number, thickness: number) {
+  const points: Vector3[] = []
+  const hx = length / 2
+  const hy = height / 2
+  const hz = thickness / 2
+  const segment = (a: Vector3, b: Vector3) => points.push(a, b)
+  for (const z of [-hz, hz]) {
+    segment(new Vector3(-hx, -hy, z), new Vector3(hx, -hy, z))
+    segment(new Vector3(-hx, hy, z), new Vector3(hx, hy, z))
+    segment(new Vector3(-hx, -hy, z), new Vector3(-hx, hy, z))
+    segment(new Vector3(hx, -hy, z), new Vector3(hx, hy, z))
+    for (let x = -hx + DRAFT_GLOW_GRID; x < hx - 0.05; x += DRAFT_GLOW_GRID) {
+      segment(new Vector3(x, -hy, z), new Vector3(x, hy, z))
+    }
+    for (let y = -hy + DRAFT_GLOW_GRID; y < hy - 0.05; y += DRAFT_GLOW_GRID) {
+      segment(new Vector3(-hx, y, z), new Vector3(hx, y, z))
+    }
+  }
+  for (const x of [-hx, hx]) {
+    for (const y of [-hy, hy]) segment(new Vector3(x, y, -hz), new Vector3(x, y, hz))
+  }
+  return new BufferGeometry().setFromPoints(points)
 }
 
 function getLevelWalls(levelId: string | null, nodes: Record<string, AnyNode>): WallNode[] {
@@ -970,6 +1015,20 @@ export const WallTool: React.FC = () => {
           side={DoubleSide}
           transparent
         />
+        <lineSegments
+          frustumCulled={false}
+          layers={EDITOR_LAYER}
+          name={DRAFT_GLOW_NAME}
+          renderOrder={2}
+        >
+          <lineBasicNodeMaterial
+            color={DRAFT_WALL_GLOW_COLOR}
+            depthTest={false}
+            depthWrite={false}
+            opacity={0.95}
+            transparent
+          />
+        </lineSegments>
       </mesh>
       {draftMeasurement && (
         <>
@@ -1069,7 +1128,12 @@ function RectanglePreviewWall({
   const dx = end[0] - start[0]
   const dz = end[1] - start[1]
   const length = Math.hypot(dx, dz)
-  if (length < 0.01) return null
+  const glow = useMemo(
+    () => (length < 0.01 ? null : draftWallGlowGeometry(length, height, thickness)),
+    [length, height, thickness],
+  )
+  useEffect(() => () => glow?.dispose(), [glow])
+  if (!glow) return null
   return (
     <mesh
       layers={EDITOR_LAYER}
@@ -1085,12 +1149,22 @@ function RectanglePreviewWall({
         opacity={0.55}
         transparent
       />
+      <lineSegments frustumCulled={false} geometry={glow} layers={EDITOR_LAYER} renderOrder={2}>
+        <lineBasicNodeMaterial
+          color={DRAFT_WALL_GLOW_COLOR}
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.95}
+          transparent
+        />
+      </lineSegments>
     </mesh>
   )
 }
 
 /** inZOI draws the wall being placed as a glowing sky-blue pane. */
 const DRAFT_WALL_COLOR = '#38d6f2'
+const DRAFT_WALL_GLOW_COLOR = '#e8fdff'
 
 const RectangleRoomTool: React.FC = () => {
   const unit = useViewer((state) => state.unit)
@@ -1319,12 +1393,10 @@ function DraftMeasurementLabel({
       style={{ pointerEvents: 'none', userSelect: 'none' }}
       zIndexRange={[100, 0]}
     >
+      {/* inZOI: a small translucent pill ("9.25m") on the draft. */}
       <div
-        className="whitespace-nowrap font-bold font-mono text-[15px]"
-        style={{
-          color,
-          textShadow: `-1.5px -1.5px 0 ${shadowColor}, 1.5px -1.5px 0 ${shadowColor}, -1.5px 1.5px 0 ${shadowColor}, 1.5px 1.5px 0 ${shadowColor}, 0 0 4px ${shadowColor}, 0 0 4px ${shadowColor}`,
-        }}
+        className="whitespace-nowrap rounded-full px-2 py-0.5 font-semibold text-[12px] tabular-nums shadow-[0_1px_4px_rgba(0,0,0,0.15)] backdrop-blur-sm"
+        style={{ color, background: `${shadowColor}d9` }}
       >
         {label}
       </div>

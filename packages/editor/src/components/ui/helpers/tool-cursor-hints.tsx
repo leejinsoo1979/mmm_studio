@@ -1,8 +1,12 @@
 'use client'
 
+import { Info } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import type { ContextualShortcutHint } from '../../../lib/contextual-help'
 import { cn } from '../../../lib/utils'
+
+/** Hint key for an information line (inZOI's ⓘ rows) rather than a key. */
+const INFO_KEY = 'ⓘ'
 
 const OFFSET_X = 24
 const OFFSET_Y = 20
@@ -78,7 +82,10 @@ export function ToolCursorHints({ hints }: { hints: ContextualShortcutHint[] }) 
           )}
           key={`${hint.keys.join('+')}:${hint.label}`}
         >
-          {hint.keys.map((key) => (
+          {hint.keys.map((key) =>
+            key === INFO_KEY ? (
+              <Info className="size-3.5 shrink-0 opacity-70" key="info" />
+            ) : (
             <span
               className={cn(
                 'rounded px-1 py-px font-semibold text-[10px]',
@@ -88,7 +95,8 @@ export function ToolCursorHints({ hints }: { hints: ContextualShortcutHint[] }) 
             >
               {KEY_LABELS[String(key)] ?? String(key)}
             </span>
-          ))}
+            ),
+          )}
           <span>{hint.label}</span>
         </div>
       ))}
