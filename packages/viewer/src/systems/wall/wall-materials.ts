@@ -283,7 +283,9 @@ function createInvisibleWallMaterial(color: string, shading: RenderShading): Mat
 
   material.opacityNode = step(positionLocal.y, float(CUTAWAY_STUB_HEIGHT))
   // Seen from above, the cut's inner faces read as the dark wall section.
-  material.colorNode = select(frontFacing, materialColor, tslColor(WALL_CAP_COLOR)) as Node<'color'>
+  // Explicit node types: inferring them here trips tsgo's TS2590 union limit.
+  const surface = materialColor as unknown as Node<'color'>
+  material.colorNode = select<'color'>(frontFacing, surface, tslColor(WALL_CAP_COLOR))
   return material
 }
 
