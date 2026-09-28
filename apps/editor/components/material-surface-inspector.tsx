@@ -19,6 +19,30 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Material, Mesh, Texture, Vector2 } from 'three'
 
+const KIND_KO: Record<string, string> = {
+  wall: '벽',
+  slab: '바닥',
+  ceiling: '천장',
+  roof: '지붕',
+  'roof-segment': '지붕',
+  door: '문',
+  window: '창문',
+  item: '가구',
+  shelf: '선반',
+  fence: '울타리',
+}
+
+const ROLE_KO: Record<string, string> = {
+  interior: '안쪽 면',
+  exterior: '바깥쪽 면',
+  surface: '윗면',
+  side: '옆면',
+  panel: '문짝',
+  frame: '문틀',
+  glass: '유리',
+  hardware: '손잡이·철물',
+}
+
 function materialFromLibraryRef(ref: string): MaterialSchema | null {
   const preset = getMaterialPresetByRef(ref)
   if (!preset) return null
@@ -204,7 +228,7 @@ function InspectorMaterialEditor({
         className="h-9 w-full rounded-md border border-foreground/5 bg-card px-3 text-muted-foreground text-xs outline-none focus:border-[#7567ff]/60"
         disabled={!value.texture}
         onChange={(event) => updateTexture({ [field]: event.target.value || undefined })}
-        placeholder={value.texture ? 'Texture URL' : 'Base Color 맵을 먼저 적용하세요'}
+        placeholder={value.texture ? '텍스처 URL' : '기본 색상 맵을 먼저 적용하세요'}
         value={value.texture?.[field] ?? ''}
       />
     </label>
@@ -229,7 +253,7 @@ function InspectorMaterialEditor({
         ) : null}
         {activeTab === '일반' ? (
           <>
-            {colorControl('Tint', 'color', '#ffffff')}
+            {colorControl('색조', 'color', '#ffffff')}
             <InspectorSlider
               label="러프니스"
               onChange={(roughness) => update({ roughness })}
@@ -257,11 +281,11 @@ function InspectorMaterialEditor({
         ) : null}
         {activeTab === '맵' ? (
           <>
-            {mapField('Base Color', 'url')}
-            {mapField('Normal', 'normalUrl')}
-            {mapField('Roughness', 'roughnessUrl')}
-            {mapField('Metallic', 'metalnessUrl')}
-            {mapField('Emissive', 'emissiveUrl')}
+            {mapField('기본 색상', 'url')}
+            {mapField('노멀', 'normalUrl')}
+            {mapField('거칠기', 'roughnessUrl')}
+            {mapField('금속성', 'metalnessUrl')}
+            {mapField('발광', 'emissiveUrl')}
             {mapField('AO', 'aoUrl')}
           </>
         ) : null}
@@ -585,10 +609,8 @@ export function MaterialSurfaceInspector() {
     <aside className="fixed top-16 right-4 bottom-4 z-[70] flex w-[360px] flex-col overflow-hidden rounded-2xl border border-foreground/10 bg-sidebar/95 text-foreground shadow-2xl backdrop-blur-xl">
       <header className="flex items-center justify-between border-foreground/10 border-b px-5 py-4">
         <div>
-          <p className="text-muted-foreground text-[10px] uppercase tracking-[0.16em]">
-            Surface editor
-          </p>
-          <h2 className="mt-1 font-semibold text-lg">Material properties</h2>
+          <p className="text-muted-foreground text-[10px] uppercase tracking-[0.16em]">표면 편집</p>
+          <h2 className="mt-1 font-semibold text-lg">재질 속성</h2>
         </div>
         <button
           aria-label="Close material properties"
@@ -613,10 +635,11 @@ export function MaterialSurfaceInspector() {
           />
           <div className="min-w-0">
             <p className="truncate font-medium">
-              {sceneMaterial?.name ?? selectedNode.name ?? 'Material'}
+              {sceneMaterial?.name ?? selectedNode.name ?? '재질'}
             </p>
             <p className="mt-0.5 text-muted-foreground text-xs">
-              {selectedNode.type} · {target.role}
+              {KIND_KO[selectedNode.type] ?? selectedNode.type} ·{' '}
+              {ROLE_KO[target.role] ?? target.role}
             </p>
           </div>
         </div>
@@ -736,7 +759,7 @@ export function MaterialSurfaceInspector() {
           type="button"
         >
           <Plus className="h-4 w-4" />
-          Configurator 옵션에 추가
+          구성 옵션에 추가
         </button>
       </footer>
     </aside>,
