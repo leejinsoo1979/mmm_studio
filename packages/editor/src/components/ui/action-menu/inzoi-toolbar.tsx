@@ -5,6 +5,7 @@ import { useViewer } from '@pascal-app/viewer'
 import {
   ArrowDownToLine,
   ArrowUpToLine,
+  Check,
   Grid3x3,
   type LucideIcon,
   MousePointer2,
@@ -17,15 +18,18 @@ import {
   Trash2,
   Undo2,
   VectorSquare,
+  Video,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useStore } from 'zustand'
 import { stepLevel } from '../../../hooks/use-keyboard'
 import { runRedo, runUndo } from '../../../lib/history'
 import { hasActivePaintMaterial } from '../../../lib/material-paint'
+import { computeSceneBoundsXZ } from '../../../lib/scene-bounds'
 import { triggerSFX } from '../../../lib/sfx-bus'
 import { cn } from '../../../lib/utils'
 import useEditor from '../../../store/use-editor'
+import { type SelectionFilterKey, useSelectionFilter } from '../../../store/use-selection-filter'
 import { SecondaryToggles } from './view-toggles'
 
 function ToolButton({
@@ -46,7 +50,7 @@ function ToolButton({
       aria-label={label}
       aria-pressed={active}
       className={cn(
-        'flex size-9 items-center justify-center rounded-full transition-colors disabled:pointer-events-none disabled:opacity-30',
+        'flex size-8 items-center justify-center rounded-full transition-colors disabled:pointer-events-none disabled:opacity-30',
         active
           ? 'bg-sky-300/80 text-sky-800 dark:bg-sky-400/40 dark:text-sky-100'
           : 'text-neutral-600 hover:bg-neutral-900/[0.06] hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-white',
@@ -59,15 +63,80 @@ function ToolButton({
       title={label}
       type="button"
     >
-      <IconComponent className="h-[19px] w-[19px]" strokeWidth={1.75} />
+      <IconComponent className="h-[18px] w-[18px]" strokeWidth={1.75} />
     </button>
   )
 }
 
-const Divider = () => <div className="mx-1.5 h-5 w-px bg-neutral-300/70 dark:bg-white/15" />
+const Divider = () => <div className="mx-1 h-5 w-px bg-neutral-300/70 dark:bg-white/15" />
 
 function Group({ children }: { children: ReactNode }) {
   return <div className="flex items-center gap-0.5">{children}</div>
+}
+
+function FilterChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      aria-pressed={active}
+      className={cn(
+        'flex h-7 items-center gap-1 rounded-full px-2.5 font-medium text-xs transition-colors',
+        active
+          ? 'bg-sky-300/80 text-sky-900 dark:bg-sky-400/40 dark:text-sky-100'
+          : 'text-neutral-500 hover:bg-neutral-900/[0.06] hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-white/10',
+      )}
+      onClick={() => {
+        triggerSFX('sfx:menu-click')
+        onClick()
+      }}
+      type="button"
+    >
+      <Check className={cn('size-3.5', !active && 'opacity-0')} strokeWidth={2.5} />
+      {label}
+    </button>
+  )
+}
+
+const FILTERS: [SelectionFilterKey, string][] = [
+  ['furniture', '가구'],
+  ['structure', '구조물'],
+]
+
+/**
+ * inZOI's selection filter under the build bar: which kinds a click picks,
+ * and whether the floors above the current one are hidden.
+ */
+function SelectionFilterBar() {
+  const filter = useSelectionFilter()
+  const soloLevel = useViewer((s) => s.levelMode === 'solo')
+  return (
+    <div className="flex items-center gap-0.5 rounded-full border border-white/70 bg-white/85 px-1 py-0.5 shadow-[0_4px_16px_rgba(0,0,0,0.12)] backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/85">
+      <span className="px-2 font-semibold text-[11px] text-neutral-500 dark:text-neutral-400">
+        선택 필터
+      </span>
+      {FILTERS.map(([key, label]) => (
+        <FilterChip
+          active={filter[key]}
+          key={key}
+          label={label}
+          onClick={() => filter.toggle(key)}
+        />
+      ))}
+      <div className="mx-1 h-4 w-px bg-neutral-300/70 dark:bg-white/15" />
+      <FilterChip
+        active={soloLevel}
+        label="현재 층만"
+        onClick={() => useViewer.getState().setLevelMode(soloLevel ? 'stacked' : 'solo')}
+      />
+    </div>
+  )
 }
 
 /**
@@ -105,8 +174,8 @@ export function InzoiToolbar() {
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex items-center rounded-full border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 px-1.5 py-1 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md">
+    <div className="flex flex-col items-center gap-1.5">
+      <div className="flex items-center rounded-full border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 px-1.5 py-1.5 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md">
       <Group>
         <ToolButton
           active={showGrid}
@@ -191,12 +260,24 @@ export function InzoiToolbar() {
             onClick={() => emitter.emit('camera-controls:top-view')}
           />
         )}
+        {!is2dOnly && (
+          <ToolButton
+            icon={Video}
+            label="기본 카메라"
+            onClick={() => {
+              const bounds = computeSceneBoundsXZ(useScene.getState().nodes)
+              emitter.emit('camera-controls:fit-scene', bounds ? { bounds } : {})
+            }}
+          />
+        )}
       </Group>
-    </div>
-      <div className="flex items-center rounded-full border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 px-1.5 py-1 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md">
+      <Divider />
+      <Group>
         <ToolButton disabled={!canUndo} icon={Undo2} label="되돌리기 (⌘Z)" onClick={runUndo} />
         <ToolButton disabled={!canRedo} icon={Redo2} label="다시하기 (⇧⌘Z)" onClick={runRedo} />
-      </div>
+      </Group>
+    </div>
+      {mode === 'select' && <SelectionFilterBar />}
     </div>
   )
 }

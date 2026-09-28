@@ -74,6 +74,7 @@ import useInteractionScope, {
   useIsCurveReshape,
   useMovingNode,
 } from '../../store/use-interaction-scope'
+import { passesSelectionFilter } from '../../store/use-selection-filter'
 import { boxSelectHandled, suppressBoxSelectForPointer } from '../tools/select/box-select-state'
 import { swallowNextClick } from './node-arrow-handles'
 
@@ -1496,6 +1497,8 @@ export const SelectionManager = () => {
       // ignoring non-handle ceiling clicks (without stopping propagation)
       // the click falls through to the item underneath.
       if (node.type === 'ceiling' && !event.viaHandle) return
+      // Filtered-out kinds let the click fall through to whatever is behind.
+      if (!passesSelectionFilter(node)) return
 
       let currentPhase = useEditor.getState().phase
       let currentStructureLayer = useEditor.getState().structureLayer
@@ -1661,6 +1664,7 @@ export const SelectionManager = () => {
       // stay put, so don't repaint under the cursor mid-drag.
       if (useViewer.getState().inputDragging) return
       const node = resolveSelectModeNodeTarget(event)
+      if (!passesSelectionFilter(node)) return
       const currentPhase = useEditor.getState().phase
 
       // Ignore site/building if we are already inside a building

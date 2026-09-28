@@ -512,7 +512,13 @@ function SelectionHint() {
     : `${turnable ? '클릭: 집기 · R / T · 우클릭 45° · Alt + R / T 5° · G 격자 · 더블클릭: 시점 · ' : ''}Delete 삭제 · Esc 선택 해제`
 
   return (
-    <div className="pointer-events-none fixed bottom-6 left-1/2 z-40 -translate-x-1/2 whitespace-nowrap text-center font-medium text-[13px] text-neutral-800 [text-shadow:0_0_4px_rgba(255,255,255,0.95),0_0_2px_rgba(255,255,255,0.95)]">
+    <div
+      className="pointer-events-none fixed bottom-[76px] z-40 -translate-x-1/2 whitespace-nowrap text-center font-medium text-[13px] text-neutral-800 [text-shadow:0_0_4px_rgba(255,255,255,0.95),0_0_2px_rgba(255,255,255,0.95)] dark:text-neutral-100 dark:[text-shadow:0_0_4px_rgba(0,0,0,0.9)]"
+      // Centred over the free scene strip, above the bottom 3D / 2D row.
+      style={{
+        left: 'calc(var(--viewer-left-inset, 0px) + (100% - var(--viewer-left-inset, 0px)) / 2)',
+      }}
+    >
       {text}
     </div>
   )

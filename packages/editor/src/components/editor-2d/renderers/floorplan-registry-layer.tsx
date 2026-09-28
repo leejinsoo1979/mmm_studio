@@ -58,6 +58,7 @@ import useInteractionScope, {
   useEndpointReshape,
   useMovingNode,
 } from '../../../store/use-interaction-scope'
+import { passesSelectionFilter } from '../../../store/use-selection-filter'
 import { suppressBoxSelectForPointer } from '../../tools/select/box-select-state'
 import { useFloorplanRender } from '../floorplan-render-context'
 import { FloorplanGeometryRenderer } from './floorplan-geometry-renderer'
@@ -451,6 +452,7 @@ export const FloorplanRegistryLayer = memo(function FloorplanRegistryLayer() {
   const handleSelect = useCallback(
     (id: AnyNodeId, event: React.PointerEvent<SVGGElement>) => {
       if (event.button !== 0) return
+      if (!passesSelectionFilter(useScene.getState().nodes[id])) return
       event.stopPropagation()
       applyEntrySelection(id, event.metaKey || event.ctrlKey || event.shiftKey)
     },

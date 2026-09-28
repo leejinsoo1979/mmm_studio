@@ -18,8 +18,10 @@ const MOBILE_BOTTOM_OFFSET = 24
 
 // Centre of the free strip between the floating build panel and the view
 // controls at the top right, so the bar never runs under either.
-const TOP_RIGHT_RESERVE = '300px'
-const DESKTOP_CENTER = `calc(var(--viewer-left-inset, 0px) + (100% - var(--viewer-left-inset, 0px) - ${TOP_RIGHT_RESERVE}) / 2)`
+const TOP_RIGHT_RESERVE = '360px'
+// On narrow screens the bar stops short of the floor pill beside the panel
+// (~96px) — 380px is that pill plus half the bar's width.
+const DESKTOP_CENTER = `max(calc(var(--viewer-left-inset, 0px) + 380px), calc(var(--viewer-left-inset, 0px) + (100% - var(--viewer-left-inset, 0px) - ${TOP_RIGHT_RESERVE}) / 2))`
 
 export function ActionMenu({ className }: { className?: string }) {
   const isMobile = useIsMobile()

@@ -6,7 +6,7 @@ import {
 } from '../../../lib/continuation'
 import type { ContextualShortcutHint } from '../../../lib/contextual-help'
 import { hasActivePaintMaterial } from '../../../lib/material-paint'
-import { paintScopeLabel, type PaintScope } from '../../../lib/paint-scope'
+import type { PaintHoverInfo, PaintScope } from '../../../lib/paint-scope'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 import {
   cycleSnappingModeIn,
@@ -190,7 +190,7 @@ function SnappingChips({ context }: { context: SnapContext }) {
             sfxEmitter.emit('sfx:grid-snap')
           }}
           shortcut="Ctrl"
-          tooltip="Grid step — click or tap Ctrl to cycle"
+          tooltip="격자 간격 — 클릭하거나 Ctrl로 전환"
         />
       ) : null}
     </>
@@ -211,7 +211,7 @@ function ContinuationChip({ context }: { context: ContinuationContext }) {
       label={label}
       onClick={() => cycleContinuation(context)}
       shortcut="C"
-      tooltip="Continuation — click or press C to cycle"
+      tooltip="이어 그리기 — 클릭하거나 C로 전환"
     />
   )
 }
@@ -223,9 +223,9 @@ function FenceContinuationChips() {
 
   const isCurved = mode === 'curved'
   const straightMode = isCurved ? 'continuous' : mode
-  const straightLabel = straightMode === 'single' ? 'Straight: Single' : 'Straight: Continuous'
+  const straightLabel = straightMode === 'single' ? '직선: 한 번' : '직선: 이어서'
   const straightIcon = straightMode === 'single' ? 'lucide:minus' : 'lucide:waypoints'
-  const typeLabel = isCurved ? 'Type: Curved' : 'Type: Straight'
+  const typeLabel = isCurved ? '종류: 곡선' : '종류: 직선'
   const typeIcon = isCurved ? 'lucide:spline' : 'lucide:minus'
 
   return (
@@ -236,7 +236,7 @@ function FenceContinuationChips() {
         label={typeLabel}
         onClick={() => setContinuation('fence', isCurved ? 'continuous' : 'curved')}
         shortcut="T"
-        tooltip="Fence type — click or press T to switch between straight and curved"
+        tooltip="울타리 종류 — 클릭하거나 T로 직선 / 곡선 전환"
       />
       <ChipRow
         ariaLabel={`Fence continuation: ${straightLabel}`}
@@ -251,8 +251,8 @@ function FenceContinuationChips() {
         shortcut="C"
         tooltip={
           isCurved
-            ? 'Straight continuation is unavailable while curved fence type is active'
-            : 'Straight fence continuation — click or press C to toggle'
+            ? '곡선 울타리에서는 직선 이어 그리기를 쓸 수 없습니다'
+            : '직선 이어 그리기 — 클릭하거나 C로 전환'
         }
       />
       {/* Curved fences are committed by a closing gesture rather than per-click,
@@ -261,7 +261,7 @@ function FenceContinuationChips() {
       {isCurved && curveStarted ? (
         <ChipRow
           icon="lucide:circle-check"
-          label="Finish curve (or double-click)"
+          label="곡선 완성 (또는 더블클릭)"
           shortcut="Enter"
         />
       ) : null}
@@ -291,13 +291,13 @@ function PaintScopeChip() {
   // Nothing to paint with yet (no material picked, not erasing) → the first step
   // is choosing a material, so say that before anything about scope or hovering.
   if (!(paintEraser || hasActivePaintMaterial(activePaintMaterial))) {
-    return <ChipRow icon="lucide:palette" label="Select a material to paint" />
+    return <ChipRow icon="lucide:palette" label="칠할 재질을 고르세요" />
   }
 
   // Not over anything paintable → guide the user to hover, still teaching Shift.
   if (!paintHover) {
     return (
-      <ChipRow icon="lucide:mouse-pointer-click" label="Hover a surface to paint" shortcut="Shift" />
+      <ChipRow icon="lucide:mouse-pointer-click" label="칠할 면에 커서를 올리세요" shortcut="Shift" />
     )
   }
 
@@ -312,21 +312,48 @@ function PaintScopeChip() {
     return (
       <ChipRow
         icon={PAINT_SCOPE_ICONS[effective]}
-        label={`Paint: ${paintScopeLabel(effective, paintHover)}`}
+        label={`칠하기: ${paintScopeLabelKo(effective, paintHover)}`}
       />
     )
   }
 
   return (
     <ChipRow
-      ariaLabel={`Paint scope: ${paintScopeLabel(effective, paintHover)}`}
+      ariaLabel={`칠하기 범위: ${paintScopeLabelKo(effective, paintHover)}`}
       icon={PAINT_SCOPE_ICONS[effective]}
-      label={`Paint: ${paintScopeLabel(effective, paintHover)}`}
+      label={`칠하기: ${paintScopeLabelKo(effective, paintHover)}`}
       onClick={() => cyclePaintScope()}
       shortcut="Shift"
-      tooltip="Paint scope — click or press Shift to cycle"
+      tooltip="칠하기 범위 — 클릭하거나 Shift로 전환"
     />
   )
+}
+
+/** Korean copy for the select-mode / rotate hints `contextual-help` resolves. */
+const HINT_LABELS_KO: Record<string, string> = {
+  'Add or remove objects from the selection': '선택에 추가 / 빼기',
+  'Drag selected movable object': '선택한 사물 끌어서 옮기기',
+  'Drag left or right to rotate selected object': '좌우로 끌어 회전',
+  'Click a handle dot to show move arrows': '핸들 점을 클릭해 이동 화살표 표시',
+  'Detach the joint while dragging an arrow': '화살표를 끄는 동안 연결 분리',
+  'Click the handle dot to show move + rotate handles': '핸들 점을 클릭해 이동 · 회전 핸들 표시',
+  'Rotate ±45°': '±45° 회전',
+  'Switch the rotation axis (Y → X → Z)': '회전 축 전환 (Y → X → Z)',
+  'Rotating freely (no angle step)': '자유 회전 중 (각도 단계 없음)',
+  'Hold to rotate freely': '누른 채 자유 회전',
+}
+
+function paintScopeLabelKo(scope: PaintScope, info: PaintHoverInfo): string {
+  switch (scope) {
+    case 'object':
+      return '사물 전체'
+    case 'matching':
+      return '같은 재질 모두'
+    case 'room':
+      return '방 전체'
+    default:
+      return info.slotLabel || '이 면'
+  }
 }
 
 export function ContextualHelperPanel({
@@ -366,7 +393,7 @@ export function ContextualHelperPanel({
                 hint.active ? 'text-foreground' : 'text-muted-foreground',
               )}
             >
-              {hint.label}
+              {HINT_LABELS_KO[hint.label] ?? hint.label}
             </div>
             {hint.subtitle ? (
               <div className="text-[10px] text-muted-foreground/70 leading-snug">

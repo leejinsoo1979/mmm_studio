@@ -10,6 +10,7 @@ import {
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import useEditor from '../../../store/use-editor'
+import { passesSelectionFilter } from '../../../store/use-selection-filter'
 
 function isVisibleSelectableNode(node: AnyNode): boolean {
   if ((node as { visible?: boolean }).visible === false) return false
@@ -24,6 +25,7 @@ export function collectSelectableCandidateIds(): string[] {
   const seen = new Set<string>()
   const addNode = (node: AnyNode | undefined) => {
     if (!node || seen.has(node.id) || (node as { visible?: boolean }).visible === false) return
+    if (!passesSelectionFilter(node)) return
     seen.add(node.id)
     result.push(node.id)
   }

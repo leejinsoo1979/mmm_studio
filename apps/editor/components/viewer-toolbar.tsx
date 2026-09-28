@@ -1,6 +1,5 @@
 'use client'
 
-import { Icon as IconifyIcon } from '@iconify/react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,12 +25,15 @@ import {
   Check,
   Columns2,
   Contrast,
+  Diamond,
   Eye,
   EyeOff,
   Footprints,
   Gauge,
   Gem,
   Grid2X2,
+  Layers,
+  Layers3,
   Magnet,
   Moon,
   Palette,
@@ -135,24 +137,24 @@ const wallModeConfig: Record<string, { icon: string; label: string }> = {
 const SHADING_OPTIONS = [
   {
     id: 'performance',
-    name: 'Performance',
-    detail: 'Lowest rendering — textures with minimal GPU effects',
+    name: '가볍게',
+    detail: '가장 가벼운 렌더 — 효과 최소화',
     icon: Gauge,
   },
-  { id: 'solid', name: 'Solid', detail: 'Flat and fast — no ambient occlusion', icon: Box },
-  { id: 'rendered', name: 'Rendered', detail: 'Full ambient occlusion', icon: Sparkles },
-  { id: 'hyper', name: 'Hyper', detail: 'Sharper lighting, shadows and detail', icon: Gem },
+  { id: 'solid', name: '단색', detail: '평면 음영, 빠름 — 앰비언트 오클루전 없음', icon: Box },
+  { id: 'rendered', name: '기본 렌더', detail: '앰비언트 오클루전 포함', icon: Sparkles },
+  { id: 'hyper', name: '고품질', detail: '선명한 조명 · 그림자 · 디테일', icon: Gem },
 ] as const
 
 const TEXTURE_OPTIONS = [
-  { id: 'colored', name: 'Colored', detail: 'Show materials, textures & colors', icon: Palette },
+  { id: 'colored', name: '재질 표시', detail: '재질 · 텍스처 · 색상 표시', icon: Palette },
   {
     id: 'monochrome-outline',
-    name: 'Monochrome Outline',
-    detail: 'Clay surfaces with light edge lines',
+    name: '단색 + 윤곽선',
+    detail: '클레이 표면에 옅은 윤곽선',
     icon: PenLine,
   },
-  { id: 'monochrome', name: 'Monochrome', detail: 'Flat clay surfaces by role', icon: Square },
+  { id: 'monochrome', name: '단색', detail: '용도별 클레이 표면', icon: Square },
 ] as const
 
 function ViewModeControl() {
@@ -214,11 +216,11 @@ function LevelModeToggle() {
         type="button"
       >
         {levelMode === 'solo' ? (
-          <IconifyIcon height={14} icon="lucide:diamond" width={14} />
+          <Diamond className="h-4 w-4" />
         ) : levelMode === 'exploded' ? (
-          <IconifyIcon height={14} icon="charm:stack-pop" width={14} />
+          <Layers3 className="h-4 w-4" />
         ) : (
-          <IconifyIcon height={14} icon="charm:stack-push" width={14} />
+          <Layers className="h-4 w-4" />
         )}
       </button>
     </ToolbarTooltip>
@@ -254,32 +256,18 @@ function WallModeToggle() {
 // camera projection, units, render mode, edges and scene theme.
 
 const EDGE_OPTIONS = [
-  { id: 'off', name: 'Off', detail: 'No edge lines' },
-  { id: 'soft', name: 'Soft', detail: 'Faint outline of major creases' },
-  { id: 'strong', name: 'Strong', detail: 'Crisp, opaque edge lines' },
+  { id: 'off', name: '끄기', detail: '윤곽선 없음' },
+  { id: 'soft', name: '옅게', detail: '주요 모서리만 옅게' },
+  { id: 'strong', name: '진하게', detail: '선명한 윤곽선' },
 ] as const satisfies readonly { id: EdgeMode; name: string; detail: string }[]
 
 const UNIT_OPTIONS = [
-  { id: 'millimeter', icon: 'mm', label: 'Millimeter' },
-  { id: 'centimeter', icon: 'cm', label: 'Centimeter' },
-  { id: 'imperial', icon: 'ft', label: 'Feet' },
+  { id: 'millimeter', icon: 'mm', label: '밀리미터' },
+  { id: 'centimeter', icon: 'cm', label: '센티미터' },
+  { id: 'imperial', icon: 'ft', label: '피트' },
 ] as const
 
 const SUBMENU_CONTENT_CLASS = 'min-w-56 rounded-xl border-border/45 bg-popover/95 backdrop-blur-xl'
-const MONTH_NAMES = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-] as const
 
 function SunSlider({
   label,
@@ -391,20 +379,20 @@ function DisplayMenu() {
           <Ruler className="h-4 w-4" />
           <span>치수</span>
           <span className="ml-auto text-muted-foreground text-xs">
-            {showDimensions ? 'On' : 'Off'}
+            {showDimensions ? '켜짐' : '꺼짐'}
           </span>
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={(e) => keepOpen(e, () => setMagneticSnap(!magneticSnap))}>
           <Magnet className="h-4 w-4" />
-          <span>Magnetic snap</span>
+          <span>자석 스냅</span>
           <span className="ml-auto text-muted-foreground text-xs">
-            {magneticSnap ? 'On' : 'Off'}
+            {magneticSnap ? '켜짐' : '꺼짐'}
           </span>
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={(e) => keepOpen(e, () => setShadows(!shadows))}>
           <Contrast className="h-4 w-4" />
           <span>그림자</span>
-          <span className="ml-auto text-muted-foreground text-xs">{shadows ? 'On' : 'Off'}</span>
+          <span className="ml-auto text-muted-foreground text-xs">{shadows ? '켜짐' : '꺼짐'}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={(e) =>
@@ -413,14 +401,14 @@ function DisplayMenu() {
             )
           }
         >
-          <IconifyIcon
-            height={16}
-            icon={cameraMode === 'perspective' ? 'icon-park-outline:perspective' : 'vaadin:grid'}
-            width={16}
-          />
+          {cameraMode === 'perspective' ? (
+            <Box className="h-4 w-4" />
+          ) : (
+            <Grid2X2 className="h-4 w-4" />
+          )}
           <span>카메라</span>
           <span className="ml-auto text-muted-foreground text-xs">
-            {cameraMode === 'perspective' ? 'Perspective' : 'Orthographic'}
+            {cameraMode === 'perspective' ? '원근' : '평행 투영'}
           </span>
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={(e) => keepOpen(e, () => setUnit(nextUnit))}>
@@ -436,7 +424,7 @@ function DisplayMenu() {
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <SunMedium className="h-4 w-4" />
-            <span>Sun position</span>
+            <span>태양 위치</span>
             <span className="ml-auto text-muted-foreground text-xs">
               {`${Math.floor(sunTime).toString().padStart(2, '0')}:${Math.round((sunTime % 1) * 60)
                 .toString()
@@ -458,7 +446,7 @@ function DisplayMenu() {
               value={sunTime}
             />
             <SunSlider
-              displayValue={MONTH_NAMES[Math.round(sunMonth) - 1] ?? 'Jun'}
+              displayValue={`${Math.round(sunMonth)}월`}
               label="계절"
               max={12}
               min={1}
@@ -671,14 +659,14 @@ function TimeOfDaySlider() {
   const mm = Math.round((sunTime - hh) * 60)
   return (
     <div
-      className="flex h-11 items-center gap-2 px-1"
+      className="hidden h-11 items-center gap-1.5 px-1.5 min-[1400px]:flex"
       onKeyDown={(event) => event.stopPropagation()}
       title={`시간대 ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`}
     >
       <SunMedium className="h-4 w-4 shrink-0 text-amber-400" />
       <Slider
         aria-label="시간대"
-        className="w-28"
+        className="w-20"
         max={24}
         min={0}
         onValueChange={([next]) => next !== undefined && setTime(next)}
@@ -692,17 +680,16 @@ function TimeOfDaySlider() {
 
 export function CommunityViewerToolbarRight() {
   return (
-    <div className="flex items-center gap-2">
+    <div className={TOOLBAR_CONTAINER}>
       <TimeOfDaySlider />
-      <div className={TOOLBAR_CONTAINER}>
-        <LevelModeToggle />
-        <WallModeToggle />
-        <div className="mx-1 h-5 w-px bg-neutral-300/70 dark:bg-white/15" />
-        <DisplayMenu />
-        <div className="mx-1 h-5 w-px bg-neutral-300/70 dark:bg-white/15" />
-        <WalkthroughButton />
-        <PreviewButton />
-      </div>
+      <div className="mx-1 hidden h-5 w-px bg-neutral-300/70 min-[1400px]:block dark:bg-white/15" />
+      <LevelModeToggle />
+      <WallModeToggle />
+      <div className="mx-1 h-5 w-px bg-neutral-300/70 dark:bg-white/15" />
+      <DisplayMenu />
+      <div className="mx-1 h-5 w-px bg-neutral-300/70 dark:bg-white/15" />
+      <WalkthroughButton />
+      <PreviewButton />
     </div>
   )
 }
