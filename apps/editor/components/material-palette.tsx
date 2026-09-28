@@ -21,6 +21,7 @@ import {
   resolvePaintScopeTargets,
   triggerSFX,
   useEditor,
+  useInspectorCollapsed,
   useMovingNode,
 } from '@pascal-app/editor'
 import { type CabinetNode, resolveCabinetNode } from '@pascal-app/nodes'
@@ -46,6 +47,9 @@ const SECTIONS: Section[] = [
   { title: '돌·벽돌', categories: ['stone', 'brick', 'concrete'] },
   { title: '기타', categories: ['metal', 'fabric', 'leather', 'glass', 'ground', 'roofing'] },
 ]
+
+/** The palette tab that holds the free colour picker. */
+const CUSTOM_TAB = '직접 고르기'
 
 const SURFACE_BY_KIND: Record<string, MaterialSurface> = {
   wall: 'wall',
@@ -155,7 +159,10 @@ function slotTargets(node: AnyNode, slotIds: string[], roomScope: boolean): Targ
       })
       return restore ? [restore] : []
     })
-    return restores.length > 0 ? () => restores.forEach((restore) => restore()) : null
+    if (restores.length === 0) return null
+    return () => {
+      for (const restore of restores) restore()
+    }
   }
   return slotIds.map((role) => ({
     key: role,
@@ -261,6 +268,7 @@ export function MaterialPalette() {
   } | null>(null)
   const [gloss, setGloss] = useState(50)
   const [roomScope, setRoomScope] = useState(false)
+  const [tab, setTab] = useState<string | null>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const node = useScene((s) => (nodeId ? (s.nodes[nodeId] ?? null) : null))
   const selectedIds = useViewer((s) => s.selection.selectedIds)
@@ -335,100 +343,178 @@ export function MaterialPalette() {
       : undefined)
   const shown = hovered ?? current
 
+  const sections = target
+    ? SECTIONS.map((section) => ({ ...section, materials: materialsFor(node, section) })).filter(
+        (section) => section.materials.length > 0,
+      )
+    : []
+  const tabs = [
+    ...sections.map((section) => section.title),
+    ...(target?.applyColor ? [CUSTOM_TAB] : []),
+  ]
+  const activeTab = tab && tabs.includes(tab) ? tab : tabs[0]
+  const activeSection = sections.find((section) => section.title === activeTab)
+
   return (
     <div
-      className="pointer-events-auto fixed bottom-[68px] z-50 flex items-end gap-3 text-neutral-800 dark:text-neutral-100"
+      className="pointer-events-auto fixed bottom-[68px] z-50 flex w-[640px] max-w-[calc(100vw-var(--viewer-left-inset,0px)-32px)] -translate-x-1/2 flex-col gap-1.5 text-neutral-800 dark:text-neutral-100"
       onPointerDown={(e) => e.stopPropagation()}
-      style={{ left: 'calc(var(--viewer-left-inset, 0px) + 12px)', right: 16 }}
+      // Centred over the free scene strip, like inZOI's customize card.
+      style={{
+        left: 'calc(var(--viewer-left-inset, 0px) + (100% - var(--viewer-left-inset, 0px)) / 2)',
+      }}
     >
-      {/* inZOI: the object's name and its parts, as pills beside the palette. */}
-      <aside className="flex w-40 shrink-0 flex-col gap-2 pb-1">
-        <span className="truncate font-semibold text-[15px] text-neutral-800 [text-shadow:0_0_4px_rgba(255,255,255,0.95)]">
-          {name}
-        </span>
-        {targets.map((t) => (
+      <div className="flex items-center justify-between gap-2">
+        {/* inZOI's customize tabs: 외형 hands over to the object's inspector. */}
+        <div className="flex items-center rounded-full bg-white/95 p-0.5 shadow-[0_4px_16px_rgba(0,0,0,0.16)] dark:bg-neutral-900/95">
           <button
-            className={`truncate rounded-xl px-3 py-2 text-left text-xs shadow-[0_2px_10px_rgba(0,0,0,0.12)] transition-colors ${
-              t.key === target?.key
-                ? 'bg-white font-semibold text-neutral-900 dark:bg-neutral-100'
-                : 'border border-white/80 bg-white/45 text-neutral-700 backdrop-blur-md hover:bg-white/70'
-            }`}
-            key={t.key}
+            className="rounded-full px-3 py-1 font-medium text-[11px] text-neutral-500 transition-colors hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100"
             onClick={() => {
-              endPreview()
-              setTargetKey(t.key)
+              close()
+              useInspectorCollapsed.getState().setCollapsed(false)
             }}
             type="button"
           >
-            {t.label}
+            외형
           </button>
-        ))}
-        {targets.length === 0 && (
-          <span className="text-[11px] text-neutral-500">칠할 수 있는 부분이 없습니다</span>
-        )}
-        {canSpread && (
-          <div className="mt-1 flex rounded-xl bg-white/60 p-0.5 shadow-[0_2px_10px_rgba(0,0,0,0.12)] backdrop-blur-md dark:bg-neutral-900/60">
-            {(
-              [
-                [false, node.type === 'wall' ? '이 벽만' : '이 바닥만'],
-                [true, '방 전체'],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                aria-pressed={roomScope === value}
-                className={`flex-1 rounded-lg py-1.5 text-[11px] transition-colors ${
-                  roomScope === value
-                    ? 'bg-sky-400 font-semibold text-white'
-                    : 'text-neutral-600 hover:bg-white/70 dark:text-neutral-300'
-                }`}
-                key={label}
-                onClick={() => {
-                  endPreview()
-                  setRoomScope(value)
-                }}
-                type="button"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="mt-1 flex flex-col gap-1 text-[10.5px] text-neutral-600 leading-snug [text-shadow:0_0_3px_rgba(255,255,255,0.95)]">
-          <span>ⓘ 부분을 고른 뒤 색을 누르세요</span>
-          {node.type === 'wall' && <span>ⓘ 벽은 안과 밖을 따로 칠할 수 있음</span>}
+          <span className="rounded-full bg-sky-400 px-3 py-1 font-semibold text-[11px] text-white">
+            색상과 재질
+          </span>
         </div>
-      </aside>
-      <div className="flex min-w-0 flex-1 flex-col items-center gap-2">
-        <div className="flex items-center gap-2 rounded-full bg-white/95 py-1 pr-1 pl-4 shadow-[0_6px_24px_rgba(0,0,0,0.2)] dark:bg-neutral-900/95">
-          <span className="whitespace-nowrap text-neutral-500 text-xs dark:text-neutral-400">
-            {hovered ? '미리보기' : '현재 재질'}
+        <div className="flex min-w-0 items-center gap-1.5 rounded-full bg-white/95 py-0.5 pr-0.5 pl-3 shadow-[0_4px_16px_rgba(0,0,0,0.16)] dark:bg-neutral-900/95">
+          <span className="whitespace-nowrap text-[11px] text-neutral-500 dark:text-neutral-400">
+            {hovered ? '미리보기' : '현재'}
           </span>
           <span
-            className="size-5 shrink-0 rounded-full border border-black/10 bg-neutral-200 dark:bg-neutral-700"
+            className="size-4 shrink-0 rounded-full border border-black/10 bg-neutral-200 dark:bg-neutral-700"
             style={shown ? swatchStyle(shown) : undefined}
           />
-          <span className="max-w-48 truncate font-medium text-xs">
+          <span className="max-w-36 truncate font-medium text-[11px]">
             {shown ? materialKoName(shown) : '기본'}
           </span>
           <button
-            className="ml-2 flex h-8 items-center gap-1 rounded-full bg-sky-500 px-3 font-semibold text-white text-xs transition-colors hover:bg-sky-600"
+            className="ml-1 flex h-6 items-center gap-1 rounded-full bg-sky-500 px-2.5 font-semibold text-[11px] text-white transition-colors hover:bg-sky-600"
             onClick={close}
             title="확인 (Esc)"
             type="button"
           >
-            <Check className="h-3.5 w-3.5" strokeWidth={3} />
+            <Check className="h-3 w-3" strokeWidth={3} />
             확인
           </button>
         </div>
-        <div
-          className="relative flex w-full divide-x divide-neutral-200 overflow-x-auto rounded-2xl bg-white/95 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.22)] backdrop-blur-md dark:divide-white/10 dark:bg-neutral-900/95"
-          ref={cardRef}
-        >
-          {target?.applyColor && (
-            <section className="flex shrink-0 flex-col gap-2 px-4">
-              <h4 className="font-semibold text-[11px] text-neutral-600 dark:text-neutral-300">
-                색 고르기
-              </h4>
+      </div>
+      <div
+        className="flex overflow-hidden rounded-2xl bg-white/95 shadow-[0_8px_28px_rgba(0,0,0,0.18)] backdrop-blur-md dark:bg-neutral-900/95"
+        ref={cardRef}
+      >
+        {/* The object and its parts (inZOI's left column). */}
+        <aside className="flex w-32 shrink-0 flex-col gap-1 border-neutral-200 border-r bg-neutral-50/80 p-2 dark:border-white/10 dark:bg-white/5">
+          <span className="truncate px-1 pb-0.5 font-semibold text-[12px]">{name}</span>
+          {targets.map((t) => (
+            <button
+              className={`truncate rounded-lg px-2 py-1 text-left text-[11px] transition-colors ${
+                t.key === target?.key
+                  ? 'bg-sky-400 font-semibold text-white'
+                  : 'text-neutral-600 hover:bg-neutral-200/70 dark:text-neutral-300 dark:hover:bg-white/10'
+              }`}
+              key={t.key}
+              onClick={() => {
+                endPreview()
+                setTargetKey(t.key)
+              }}
+              type="button"
+            >
+              {t.label}
+            </button>
+          ))}
+          {targets.length === 0 && (
+            <span className="px-1 text-[10.5px] text-neutral-500">
+              칠할 수 있는 부분이 없습니다
+            </span>
+          )}
+          {canSpread && (
+            <div className="mt-auto flex rounded-lg bg-neutral-200/70 p-0.5 dark:bg-white/10">
+              {(
+                [
+                  [false, node.type === 'wall' ? '이 벽만' : '이 바닥만'],
+                  [true, '방 전체'],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  aria-pressed={roomScope === value}
+                  className={`flex-1 rounded-md py-1 text-[10.5px] transition-colors ${
+                    roomScope === value
+                      ? 'bg-white font-semibold text-sky-700 shadow-sm dark:bg-neutral-800 dark:text-sky-300'
+                      : 'text-neutral-500 dark:text-neutral-400'
+                  }`}
+                  key={label}
+                  onClick={() => {
+                    endPreview()
+                    setRoomScope(value)
+                  }}
+                  type="button"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </aside>
+        <div className="flex min-w-0 flex-1 flex-col gap-2 p-2.5">
+          <div className="no-scrollbar flex gap-1 overflow-x-auto">
+            {tabs.map((title) => (
+              <button
+                className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] transition-colors ${
+                  title === activeTab
+                    ? 'bg-neutral-800 font-semibold text-white dark:bg-neutral-100 dark:text-neutral-900'
+                    : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-white/10'
+                }`}
+                key={title}
+                onClick={() => {
+                  endPreview()
+                  setTab(title)
+                }}
+                type="button"
+              >
+                {title}
+              </button>
+            ))}
+          </div>
+          {target && activeSection && (
+            <div className="no-scrollbar grid h-[134px] auto-cols-max grid-flow-col grid-rows-4 gap-1.5 overflow-x-auto p-0.5">
+              {activeSection.materials.map((material) => (
+                <button
+                  aria-label={`${target.label} ${material.label}`}
+                  className={`size-7 shrink-0 rounded-full border shadow-sm transition-transform hover:scale-110 ${isCurrent(target, material) ? 'border-sky-500 ring-2 ring-sky-400' : 'border-black/10'}`}
+                  key={material.id}
+                  onClick={() => {
+                    endPreview()
+                    target.apply(material)
+                    triggerSFX('sfx:menu-click')
+                  }}
+                  onMouseEnter={(e) => {
+                    restorePreview.current?.()
+                    restorePreview.current = target.preview?.(material) ?? null
+                    setHovered(material)
+                    const card = cardRef.current?.getBoundingClientRect()
+                    const swatch = e.currentTarget.getBoundingClientRect()
+                    setBubble({
+                      x: swatch.left + swatch.width / 2,
+                      y: (card?.top ?? swatch.top) - 36,
+                      label: material.label,
+                      style: swatchStyle(material),
+                    })
+                  }}
+                  onMouseLeave={endPreview}
+                  style={swatchStyle(material)}
+                  title={material.label}
+                  type="button"
+                />
+              ))}
+            </div>
+          )}
+          {target?.applyColor && activeTab === CUSTOM_TAB && (
+            <div className="flex h-[134px] items-start gap-4 overflow-hidden p-0.5">
               <ColorPicker
                 onCommit={(hex) => {
                   endPreview()
@@ -445,92 +531,38 @@ export function MaterialPalette() {
                     : (current?.previewColor ?? '#FFFFFF')
                 }
               />
-            </section>
+              {target.previewColor && (
+                <label className="flex w-28 flex-col gap-1 text-[11px] text-neutral-600 dark:text-neutral-300">
+                  <span className="flex justify-between">
+                    광택 <span className="tabular-nums">{gloss}</span>
+                  </span>
+                  <input
+                    aria-label="광택"
+                    className="accent-sky-500"
+                    max={100}
+                    min={0}
+                    onChange={(e) => setGloss(Number(e.target.value))}
+                    type="range"
+                    value={gloss}
+                  />
+                </label>
+              )}
+            </div>
           )}
-          {target?.previewColor && (
-            <section className="flex w-32 shrink-0 flex-col gap-2 px-4">
-              <h4 className="font-semibold text-[11px] text-neutral-600 dark:text-neutral-300">
-                속성
-              </h4>
-              <label className="flex flex-col gap-1 text-[11px] text-neutral-600 dark:text-neutral-300">
-                <span className="flex justify-between">
-                  광택 <span className="tabular-nums">{gloss}</span>
-                </span>
-                <input
-                  aria-label="광택"
-                  className="accent-sky-500"
-                  max={100}
-                  min={0}
-                  onChange={(e) => setGloss(Number(e.target.value))}
-                  type="range"
-                  value={gloss}
-                />
-              </label>
-              <span className="text-[10px] text-neutral-400 leading-snug">
-                색 고르기로 칠할 때 적용됩니다
-              </span>
-            </section>
-          )}
-          {target &&
-            SECTIONS.map((section) => {
-              const materials = materialsFor(node, section)
-              if (materials.length === 0) return null
-              return (
-                <section className="flex shrink-0 flex-col gap-2 px-4" key={section.title}>
-                  <h4 className="font-semibold text-[11px] text-neutral-600 dark:text-neutral-300">
-                    {section.title}
-                  </h4>
-                  <div className="grid grid-flow-col grid-rows-3 gap-1.5">
-                    {materials.map((material) => (
-                      <button
-                        aria-label={`${target.label} ${material.label}`}
-                        className={`size-9 shrink-0 rounded-full border shadow-sm transition-transform hover:scale-110 ${isCurrent(target, material) ? 'border-sky-500 ring-2 ring-sky-400' : 'border-black/10'}`}
-                        key={material.id}
-                        onClick={() => {
-                          endPreview()
-                          target.apply(material)
-                          triggerSFX('sfx:menu-click')
-                        }}
-                        onMouseEnter={(e) => {
-                          restorePreview.current?.()
-                          restorePreview.current = target.preview?.(material) ?? null
-                          setHovered(material)
-                          const card = cardRef.current?.getBoundingClientRect()
-                          const swatch = e.currentTarget.getBoundingClientRect()
-                          setBubble({
-                            x: swatch.left + swatch.width / 2,
-                            y: (card?.top ?? swatch.top) - 8,
-                            label: material.label,
-                            style: swatchStyle(material),
-                          })
-                        }}
-                        onMouseLeave={endPreview}
-                        style={swatchStyle(material)}
-                        title={material.label}
-                        type="button"
-                      />
-                    ))}
-                  </div>
-                </section>
-              )
-            })}
-          {/* inZOI: the hovered material's name in a bubble over the card. */}
-          {bubble &&
-            createPortal(
-              <div
-                className="-translate-x-1/2 -translate-y-full pointer-events-none fixed z-[200] flex flex-col items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-neutral-800 shadow-[0_6px_20px_rgba(0,0,0,0.2)] dark:bg-neutral-900 dark:text-neutral-100"
-                style={{ left: bubble.x, top: bubble.y }}
-              >
-                <span className="whitespace-nowrap font-medium text-[12px]">{bubble.label}</span>
-                <span
-                  className="size-12 rounded-full border border-black/10"
-                  style={bubble.style}
-                />
-              </div>,
-              document.body,
-            )}
         </div>
       </div>
+      {/* inZOI: the hovered material's name in a bubble over the card. */}
+      {bubble &&
+        createPortal(
+          <div
+            className="-translate-x-1/2 -translate-y-full pointer-events-none fixed z-[200] flex items-center gap-2 rounded-full bg-white py-1 pr-3 pl-1 text-neutral-800 shadow-[0_6px_20px_rgba(0,0,0,0.2)] dark:bg-neutral-900 dark:text-neutral-100"
+            style={{ left: bubble.x, top: bubble.y }}
+          >
+            <span className="size-7 rounded-full border border-black/10" style={bubble.style} />
+            <span className="whitespace-nowrap font-medium text-[12px]">{bubble.label}</span>
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
@@ -559,7 +591,7 @@ function SelectionHint() {
 
   return (
     <div
-      className="pointer-events-none fixed bottom-[76px] z-40 -translate-x-1/2 whitespace-nowrap text-center font-medium text-[13px] text-neutral-800 [text-shadow:0_0_4px_rgba(255,255,255,0.95),0_0_2px_rgba(255,255,255,0.95)] dark:text-neutral-100 dark:[text-shadow:0_0_4px_rgba(0,0,0,0.9)]"
+      className="pointer-events-none fixed bottom-[68px] z-40 -translate-x-1/2 whitespace-nowrap text-center font-medium text-[13px] text-neutral-800 [text-shadow:0_0_4px_rgba(255,255,255,0.95),0_0_2px_rgba(255,255,255,0.95)] dark:text-neutral-100 dark:[text-shadow:0_0_4px_rgba(0,0,0,0.9)]"
       // Centred over the free scene strip, above the bottom 3D / 2D row.
       style={{
         left: 'calc(var(--viewer-left-inset, 0px) + (100% - var(--viewer-left-inset, 0px)) / 2)',

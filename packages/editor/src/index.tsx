@@ -401,6 +401,7 @@ export {
 } from './store/use-editor'
 export { default as useFacingPose, type FacingPose } from './store/use-facing-pose'
 export { default as useFenceCurveDraft } from './store/use-fence-curve-draft'
+export { useInspectorCollapsed } from './store/use-inspector-collapsed'
 export {
   default as useInteractionScope,
   getEditingHole,

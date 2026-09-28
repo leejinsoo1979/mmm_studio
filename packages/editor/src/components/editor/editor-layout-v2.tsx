@@ -18,7 +18,7 @@ const PANEL_MARGIN = 12
 /** The panel starts below the "‹ 돌아가기 | 프로젝트" title row. */
 const PANEL_TOP = 64
 /** Room left under the panel for the navbar's bottom card (inZOI's 소지금). */
-const PANEL_BOTTOM = 72
+const PANEL_BOTTOM = 64
 
 // ── Left column: resizable panel with tab bar ────────────────────────────────
 
@@ -184,7 +184,7 @@ function RightColumn({
       )}
       {toolbarLeft && (
         <div
-          className="pointer-events-auto absolute bottom-5 z-20 flex items-center gap-2"
+          className="pointer-events-auto absolute bottom-3 z-20 flex items-center gap-2"
           style={{ left: 'calc(var(--viewer-left-inset, 0px) + 12px)' }}
         >
           {toolbarLeft}

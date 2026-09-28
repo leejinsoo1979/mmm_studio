@@ -95,7 +95,7 @@ export function ExportCenter({ sceneId, sceneName }: { sceneId: string; sceneNam
   return (
     <>
       <button
-        className="h-9 shrink-0 rounded-full bg-neutral-900 px-4 font-semibold text-white text-xs shadow-[0_2px_10px_rgba(0,0,0,0.15)] hover:opacity-85"
+        className="ml-1 h-8 shrink-0 rounded-full bg-neutral-900 px-4 font-semibold text-white text-xs hover:opacity-85 dark:bg-white dark:text-neutral-900"
         onClick={() => setOpen(true)}
         type="button"
       >

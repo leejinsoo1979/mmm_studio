@@ -12,12 +12,12 @@ import {
 } from 'react'
 import { useIsMobile } from '../../../hooks/use-mobile'
 import { cn } from '../../../lib/utils'
+import { useInspectorCollapsed } from '../../../store/use-inspector-collapsed'
 
 const DRAG_MARGIN = 8
 // Pointer travel (px) below which a header press is treated as a click
 // (toggles collapse) rather than a drag.
 const CLICK_SLOP = 4
-let desktopInspectorCollapsed = true
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), Math.max(min, max))
@@ -89,18 +89,8 @@ export function PanelWrapper({
   // expands it to reveal the inspector body. Keep the desktop value shared
   // across inspector swaps (roof ↔ segment, etc.) so navigating between
   // related panels preserves whether the user left the inspector open.
-  const [collapsed, setCollapsedState] = useState(desktopInspectorCollapsed)
-
-  const setCollapsed = useCallback(
-    (next: boolean | ((previous: boolean) => boolean)) => {
-      setCollapsedState((previous) => {
-        const resolved = typeof next === 'function' ? next(previous) : next
-        desktopInspectorCollapsed = resolved
-        return resolved
-      })
-    },
-    [],
-  )
+  const collapsed = useInspectorCollapsed((s) => s.collapsed)
+  const setCollapsed = useInspectorCollapsed((s) => s.setCollapsed)
 
   // Drag-to-reposition from the header. `offset` is a translation applied on
   // top of the default `top-20 right-4` anchor; null until first dragged.

@@ -100,6 +100,12 @@ export function ItemCatalog({
             <span className="truncate px-0.5 text-left font-medium text-[11px] text-muted-foreground group-hover:text-foreground">
               {item.name}
             </span>
+            {item.dimensions && (
+              // inZOI's line under the name (its price) — here the size, W×H×D mm.
+              <span className="-mt-1 truncate px-0.5 text-left text-[10px] text-muted-foreground/70 tabular-nums">
+                {item.dimensions.map((m) => Math.round(m * 1000)).join('×')}
+              </span>
+            )}
           </button>
         )
       })}

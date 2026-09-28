@@ -99,13 +99,13 @@ export function EditorHeader({ sceneId, sceneName, onRename }: EditorHeaderProps
       </header>
       {/* inZOI's 소지금 card: a strip under the build panel for the project actions. */}
       <div
-        className="fixed bottom-3 left-3 z-40 flex h-[52px] items-center gap-2 rounded-2xl bg-white/80 px-3 shadow-[0_8px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5 backdrop-blur-xl dark:bg-neutral-900/80 dark:ring-white/10"
+        className="fixed bottom-3 left-3 z-40 flex h-11 items-center gap-1 rounded-full border border-white/70 bg-white/90 py-1.5 pr-1.5 pl-4 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/90"
         style={{ width: 'calc(var(--viewer-left-inset, 0px) - 12px)' }}
       >
         <span className="mr-auto text-muted-foreground text-xs">프로젝트</span>
         <button
           aria-label="시점 저장"
-          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/90 text-neutral-700 shadow-[0_2px_10px_rgba(0,0,0,0.15)] ring-1 ring-black/5 transition-colors hover:bg-white hover:text-neutral-900 dark:bg-neutral-900/90 dark:text-neutral-200 dark:ring-white/10 dark:hover:bg-neutral-800"
+          className="flex size-8 shrink-0 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-neutral-900/[0.06] hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-white"
           onClick={saveCamera}
           title={`시점 저장 (저장된 시점 ${experience.cameras.length}개)`}
           type="button"
@@ -114,7 +114,7 @@ export function EditorHeader({ sceneId, sceneName, onRename }: EditorHeaderProps
         </button>
         <button
           aria-label={uiTheme === 'dark' ? '밝은 화면' : '어두운 화면'}
-          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/90 text-neutral-700 shadow-[0_2px_10px_rgba(0,0,0,0.15)] ring-1 ring-black/5 transition-colors hover:bg-white hover:text-neutral-900 dark:bg-neutral-900/90 dark:text-neutral-200 dark:ring-white/10 dark:hover:bg-neutral-800"
+          className="flex size-8 shrink-0 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-neutral-900/[0.06] hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-white"
           onClick={toggleUiTheme}
           title={uiTheme === 'dark' ? '밝은 화면으로' : '어두운 화면으로'}
           type="button"
