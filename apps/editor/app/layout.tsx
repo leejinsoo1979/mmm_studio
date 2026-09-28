@@ -33,7 +33,10 @@ export default function RootLayout({
       <head />
       <body className="font-sans">
         <ClientBootstrap>{children}</ClientBootstrap>
-        {process.env.NODE_ENV === 'development' && <Agentation />}
+        {/* Opt-in (NEXT_PUBLIC_AGENTATION=1): its button covers the bottom-right helper card. */}
+        {process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_AGENTATION === '1' && (
+          <Agentation />
+        )}
       </body>
     </html>
   )
