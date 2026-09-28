@@ -9,6 +9,8 @@ const nextConfig: NextConfig = {
   logging: {
     browserToTerminal: true,
   },
+  // The dev-mode "N" badge covers the editor's bottom-left project card.
+  devIndicators: false,
   typescript: {
     ignoreBuildErrors: false,
   },
