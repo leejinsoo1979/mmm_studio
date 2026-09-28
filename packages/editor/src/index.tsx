@@ -38,6 +38,7 @@ export {
   DimensionPill,
   type DimensionPillPart,
   formatMeasurement,
+  MeasurementChip,
   MeasurementPill,
 } from './components/editor/measurement-pill'
 // In-world arrow handle primitives (chevron geometry, invisible hit area,
@@ -379,6 +380,7 @@ export {
 export { default as useAlignmentGuides } from './store/use-alignment-guides'
 export { default as useAudio } from './store/use-audio'
 export { type CommandAction, useCommandRegistry } from './store/use-command-registry'
+export { default as useDraftReadout } from './store/use-draft-readout'
 export type {
   CaptureMode,
   FloorplanSelectionTool,

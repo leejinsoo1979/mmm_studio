@@ -5,6 +5,7 @@ import {
   type AnyNodeId,
   type CeilingEvent,
   collectAlignmentAnchors,
+  DEFAULT_WALL_HEIGHT,
   emitter,
   type GridEvent,
   getScaledDimensions,
@@ -20,7 +21,7 @@ import {
   type WallEvent,
   type WallNode,
 } from '@pascal-app/core'
-import { useAssetUrl, useViewer } from '@pascal-app/viewer'
+import { ErrorBoundary, GRID_LAYER, useAssetUrl, useViewer } from '@pascal-app/viewer'
 import { Html } from '@react-three/drei'
 import { Clone } from '@react-three/drei/core/Clone'
 import { useGLTF } from '@react-three/drei/core/Gltf'
@@ -28,7 +29,10 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box3,
+  BoxGeometry,
+  BufferGeometry,
   Euler,
+  Float32BufferAttribute,
   type Group,
   type LineSegments,
   type Material,
@@ -40,7 +44,6 @@ import {
   Ray,
   Vector3,
 } from 'three'
-import { distance, float, fract, max, positionWorld, smoothstep, step, uv, vec2 } from 'three/tsl'
 import { LineBasicNodeMaterial, MeshBasicNodeMaterial } from 'three/webgpu'
 import {
   clearPlacementSurface,
@@ -67,6 +70,15 @@ import {
   type PreviewBounds,
   updateLineGeometry,
 } from '../shared/placement-box-geometry'
+import { PlacementCursorMarker } from '../shared/placement-cursor-marker'
+import {
+  createFootprintTileMaterial,
+  createGhostEdgeMaterial,
+  createGridPatchMaterial,
+  createHologramMaterial,
+  FOOTPRINT_RING,
+  GHOST_CYAN,
+} from '../shared/placement-ghost-materials'
 import {
   getDetachedAttachmentPreviewLift,
   getGridAlignedDimensions,
@@ -75,6 +87,7 @@ import {
   snapUpToGridStep,
   turnRotation,
 } from './placement-math'
+import { PlacementRoomGrid } from './placement-room-grid'
 import {
   ceilingStrategy,
   checkCanPlace,
@@ -177,14 +190,60 @@ function getGridAlignedPreviewNode(item: ItemNode): ItemNode {
   }
 }
 
-// Shared materials for placement cursor - we just change colors, not swap materials
-// Note: EdgesGeometry doesn't work with dashed lines, so using solid lines
-const edgeMaterial = new LineBasicNodeMaterial({
-  color: 0xef_44_44, // red-500 (invalid)
-  linewidth: 3,
-  depthTest: false,
-  depthWrite: false,
-})
+/** How far the white wall lattice extends past a wall-mounted ghost. */
+const WALL_GRID_MARGIN = 1.2
+
+const isWallAttach = (attachTo: AssetInput['attachTo'] | null | undefined): boolean =>
+  attachTo === 'wall' || attachTo === 'wall-side'
+
+/** The hologram volume: the preview box, positioned at the bounds centre. */
+function createHologramGeometry(bounds: PreviewBounds): BufferGeometry {
+  const [w, h, d] = bounds.dimensions
+  const geometry = new BoxGeometry(Math.max(w, 0.01), Math.max(h, 0.01), Math.max(d, 0.01))
+  geometry.translate(...bounds.center)
+  return geometry
+}
+
+/**
+ * The blocked-state tile plane: the footprint plus a {@link FOOTPRINT_RING}
+ * ring. Flat on the floor under floor / ceiling / surface items, upright on
+ * the wall face (local z = 0) for wall-mounted ones.
+ */
+function createFootprintGeometry(
+  bounds: PreviewBounds,
+  attachTo: AssetInput['attachTo'] | null | undefined,
+): { geometry: BufferGeometry; planeSize: [number, number]; footprint: [number, number] } {
+  const [w, h, d] = bounds.dimensions
+  const [cx, cy, cz] = bounds.center
+  if (isWallAttach(attachTo)) {
+    const planeSize: [number, number] = [w + FOOTPRINT_RING * 2, h + FOOTPRINT_RING * 2]
+    const geometry = new PlaneGeometry(...planeSize)
+    geometry.translate(cx, cy, 0)
+    return { geometry, planeSize, footprint: [w, h] }
+  }
+  const planeSize: [number, number] = [w + FOOTPRINT_RING * 2, d + FOOTPRINT_RING * 2]
+  const geometry = new PlaneGeometry(...planeSize)
+  geometry.rotateX(-Math.PI / 2)
+  geometry.translate(cx, bounds.min[1] + 0.012, cz)
+  return { geometry, planeSize, footprint: [w, d] }
+}
+
+/** Closed rectangle outline (line segments) in the XZ plane at height `y`. */
+function createRectOutlineGeometry(w: number, d: number, cx: number, cz: number, y: number) {
+  const x0 = cx - w / 2
+  const x1 = cx + w / 2
+  const z0 = cz - d / 2
+  const z1 = cz + d / 2
+  const geometry = new BufferGeometry()
+  geometry.setAttribute(
+    'position',
+    new Float32BufferAttribute(
+      [x0, y, z0, x1, y, z0, x1, y, z0, x1, y, z1, x1, y, z1, x0, y, z1, x0, y, z1, x0, y, z0],
+      3,
+    ),
+  )
+  return geometry
+}
 
 const measurementMaterial = new LineBasicNodeMaterial({
   color: 0x0f_17_2a,
@@ -193,21 +252,7 @@ const measurementMaterial = new LineBasicNodeMaterial({
   depthWrite: false,
 })
 
-const basePlaneMaterial = new MeshBasicNodeMaterial({
-  color: 0xef_44_44, // red-500 (invalid)
-  transparent: true,
-  depthTest: false,
-  depthWrite: false,
-})
-
-// inZOI's footprint: a 25 cm floor grid (lines strong, cells faint) under the
-// radial edge fade.
-const center = vec2(0.5, 0.5)
-const dist = distance(uv(), center)
-const radialOpacity = smoothstep(0, 0.7, dist).mul(0.45)
-const gridCell = fract(positionWorld.xz.div(0.25))
-const gridLine = step(0.9, max(gridCell.x, gridCell.y))
-basePlaneMaterial.opacityNode = max(radialOpacity, float(0.18).add(gridLine.mul(0.55)))
+const NO_RAYCAST = () => null
 
 const multiplyScales = (
   a: [number, number, number],
@@ -255,10 +300,14 @@ function PlacementModelGhost({
   const modelUrl = useAssetUrl(asset.src)
   if (!modelUrl) return null
 
+  // A model that fails to load must not take the scene down with it — the
+  // hologram volume already marks the ghost.
   return (
-    <Suspense fallback={null}>
-      <ResolvedPlacementModelGhost asset={asset} nodeScale={nodeScale} url={modelUrl} />
-    </Suspense>
+    <ErrorBoundary fallback={null}>
+      <Suspense fallback={null}>
+        <ResolvedPlacementModelGhost asset={asset} nodeScale={nodeScale} url={modelUrl} />
+      </Suspense>
+    </ErrorBoundary>
   )
 }
 
@@ -341,6 +390,14 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
   const measurementDepthRef = useRef<LineSegments>(null!)
   const measurementHeightRef = useRef<LineSegments>(null!)
   const basePlaneRef = useRef<Mesh>(null!)
+  const hologramRef = useRef<Mesh>(null)
+  const edgesGlowRef = useRef<LineSegments>(null)
+  const modelGhostRef = useRef<Group>(null)
+  const markerRef = useRef<Group>(null)
+  const wallGridRef = useRef<Mesh>(null)
+  const ceilingColumnRef = useRef<Mesh>(null)
+  const ceilingFloorRef = useRef<Mesh>(null)
+  const ceilingOutlineRef = useRef<LineSegments>(null)
   const gridPosition = useRef(new Vector3(0, 0, 0))
   const lastRawPos = useRef(new Vector3(0, 0, 0))
   const lastWallDirtyAtRef = useRef(new Map<string, number>())
@@ -360,10 +417,14 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
   // preview box, mirrored from the rendered dimension bounds so the per-frame
   // surface publisher can position the forward-facing triangle without reading
   // React state. Updated in the render body below.
-  const facingShapeRef = useRef<{ depth: number; center: [number, number] }>({
+  const facingShapeRef = useRef<{ depth: number; width: number; center: [number, number] }>({
     depth: 0,
+    width: 0,
     center: [0, 0],
   })
+  // The rendered preview bounds (cursor-group local), mirrored for the
+  // per-frame ghost visuals and the screen anchor of the key list.
+  const ghostBoundsRef = useRef<PreviewBounds | null>(null)
   // Goes true the first time a 3D pointer event drives this coordinator.
   // The per-frame mesh-position lerp below is only useful for that path;
   // when the move is being driven externally (2D `FloorplanRegistryMoveOverlay`
@@ -398,29 +459,60 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
   const { asset, draftNode } = config
   const unit = useViewer((state) => state.unit)
   const gridSnapStep = useEditor((s) => s.gridSnapStep)
-  const updatePreviewGeometry = useCallback((bounds: PreviewBounds) => {
-    const [width, height, depth] = bounds.dimensions
-    const [centerX, centerY, centerZ] = bounds.center
-    const signature = `${width.toFixed(4)}:${height.toFixed(4)}:${depth.toFixed(4)}:${centerX.toFixed(4)}:${centerY.toFixed(4)}:${centerZ.toFixed(4)}`
-
-    if (previewBoundsSignatureRef.current === signature) return
-    previewBoundsSignatureRef.current = signature
-
-    const nextBasePlaneGeometry = new PlaneGeometry(width, depth)
-    nextBasePlaneGeometry.rotateX(-Math.PI / 2)
-    nextBasePlaneGeometry.translate(centerX, 0.01, centerZ)
-
-    updateLineGeometry(edgesRef, getBoxEdgePoints(bounds))
-
-    const basePlane = basePlaneRef.current
-    if (basePlane) {
-      const oldBasePlaneGeometry = basePlane.geometry
-      basePlane.geometry = nextBasePlaneGeometry
-      oldBasePlaneGeometry.dispose()
-    } else {
-      nextBasePlaneGeometry.dispose()
+  // Per-session ghost materials (the hologram's grid + the footprint tiles
+  // carry per-instance uniforms), disposed with the coordinator.
+  const ghostMaterials = useMemo(() => {
+    const ceilingFloor = new MeshBasicNodeMaterial({
+      color: GHOST_CYAN,
+      transparent: true,
+      opacity: 0.45,
+      depthWrite: false,
+    })
+    return {
+      hologram: createHologramMaterial(),
+      edge: createGhostEdgeMaterial(0.85),
+      edgeGlow: createGhostEdgeMaterial(0.3),
+      footprint: createFootprintTileMaterial(),
+      wallGrid: createGridPatchMaterial(),
+      ceilingOutline: createGhostEdgeMaterial(0.9),
+      ceilingFloor,
     }
   }, [])
+  useEffect(
+    () => () => {
+      for (const material of Object.values(ghostMaterials)) material.dispose()
+    },
+    [ghostMaterials],
+  )
+
+  const updatePreviewGeometry = useCallback(
+    (bounds: PreviewBounds) => {
+      const [width, height, depth] = bounds.dimensions
+      const [centerX, centerY, centerZ] = bounds.center
+      const signature = `${width.toFixed(4)}:${height.toFixed(4)}:${depth.toFixed(4)}:${centerX.toFixed(4)}:${centerY.toFixed(4)}:${centerZ.toFixed(4)}`
+
+      if (previewBoundsSignatureRef.current === signature) return
+      previewBoundsSignatureRef.current = signature
+
+      updateLineGeometry(edgesRef, getBoxEdgePoints(bounds))
+
+      const swap = (ref: React.RefObject<Mesh | null>, next: BufferGeometry) => {
+        const mesh = ref.current
+        if (!mesh) {
+          next.dispose()
+          return
+        }
+        const old = mesh.geometry
+        mesh.geometry = next
+        old.dispose()
+      }
+      swap(hologramRef, createHologramGeometry(bounds))
+      const footprint = createFootprintGeometry(bounds, configRef.current.asset?.attachTo)
+      ghostMaterials.footprint.setFootprint(footprint.planeSize, footprint.footprint)
+      swap(basePlaneRef, footprint.geometry)
+    },
+    [ghostMaterials],
+  )
 
   const updateDimensionGuides = useCallback((bounds: PreviewBounds) => {
     setDimensionBounds((current) => {
@@ -621,10 +713,8 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
 
     const revalidate = (): boolean => {
       const placeable = altFreeRef.current || checkCanPlace(getContext(), validators)
-      // inZOI: sky blue where it fits, red where it overlaps.
-      const color = placeable ? 0x38_d6_f2 : 0xef_44_44
-      edgeMaterial.color.setHex(color)
-      basePlaneMaterial.color.setHex(color)
+      // inZOI: the cyan hologram where it fits, red footprint tiles where it
+      // overlaps — the per-frame ghost visuals read this flag.
       usePlacementFeedback.getState().setBlocked(!placeable)
       return placeable
     }
@@ -2108,8 +2198,18 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
       if (event.metaKey || event.ctrlKey) return
       // Alt+R on macOS types '®', so match the physical key too.
       const key = event.key.toLowerCase()
+      // inZOI's Z / C turn the held object left / right. While an item is held
+      // they must not reach the global Z (zone tool) / C (continuation) keys.
+      const zc = event.code === 'KeyZ' ? -1 : event.code === 'KeyC' ? 1 : 0
+      if (zc !== 0) event.stopImmediatePropagation()
       const direction =
-        key === 'r' || event.code === 'KeyR' ? 1 : key === 't' || event.code === 'KeyT' ? -1 : 0
+        zc !== 0
+          ? zc
+          : key === 'r' || event.code === 'KeyR'
+            ? 1
+            : key === 't' || event.code === 'KeyT'
+              ? -1
+              : 0
       if (direction === 0 || !draftNode.current) return
       event.preventDefault()
       rotateDraft(direction, event.altKey)
@@ -2220,7 +2320,8 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
       }
     }
 
-    window.addEventListener('keydown', onKeyDown)
+    // Capture phase so Z / C are claimed before the global shortcut handler.
+    window.addEventListener('keydown', onKeyDown, { capture: true })
     window.addEventListener('keyup', onKeyUp)
 
     // ---- tool:cancel (Escape / programmatic) ----
@@ -2362,7 +2463,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
       emitter.off('roof:click', commitFloorOnSurfaceClick as never)
       emitter.off('shelf:click', commitFloorOnSurfaceClick as never)
       emitter.off('tool:cancel', onCancel)
-      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keydown', onKeyDown, { capture: true })
       window.removeEventListener('keyup', onKeyUp)
       unsubscribeRightClick()
     }
@@ -2378,8 +2479,8 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
     updatePreviewGeometry,
   ])
 
-  // Refresh wireframe when the grid step changes mid-placement so the green/red
-  // box snaps to the new cell size right away.
+  // Refresh the ghost box when the grid step changes mid-placement so it snaps
+  // to the new cell size right away.
   useEffect(() => {
     if (!asset) return
     const draft = draftNode.current
@@ -2453,6 +2554,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
   const surfaceNormalRef = useRef(new Vector3(0, 1, 0))
   const facingForwardRef = useRef(new Vector3(0, 0, 1))
   const facingQuatRef = useRef(new Quaternion())
+  const wallOutwardSignRef = useRef<1 | -1>(1)
   useFrame(() => {
     const ghost = cursorGroupRef.current
     if (!(asset && ghost)) {
@@ -2490,12 +2592,17 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
       n.set(0, 1, 0)
     }
     publishPlacementSurface(ghost.position, n)
+    // Which side of the cursor group's local z = 0 plane faces the room (the
+    // wall face's grid / tiles sit just off it on that side).
+    wallOutwardSignRef.current = Math.cos(facingYaw - ghost.rotation.y) >= 0 ? 1 : -1
 
-    if (shape.depth > 0) {
+    // A wall / ceiling item with no host yet only shows the floor marker.
+    if (shape.depth > 0 && !(asset.attachTo && surf === 'floor')) {
       useFacingPose.getState().set({
         position: [ghost.position.x, facingY, ghost.position.z],
         rotationY: facingYaw,
         depth: shape.depth,
+        width: shape.width,
         center: shape.center,
       })
     } else {
@@ -2506,8 +2613,193 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
     () => () => {
       clearPlacementSurface()
       useFacingPose.getState().clear()
+      usePlacementFeedback.getState().setAnchor(null)
     },
     [],
+  )
+
+  // inZOI ghost states, toggled per frame: the cyan hologram + white box while
+  // the drop is valid; red footprint tiles + a glowing white box when it
+  // overlaps; only the floor marker for a wall / ceiling item with no host
+  // yet; and for a ceiling item a hologram column down to the floor plus the
+  // mount outline on the ceiling.
+  const ceilingSignatureRef = useRef('')
+  const wallGridSignatureRef = useRef('')
+  const wallFrameScratch = useRef({ a: new Vector3(), b: new Vector3(), c: new Vector3() })
+  // The host wall's face on the item's side, in the cursor group's frame: the
+  // face plane's local z (nudged off it), which way is out of the wall, and
+  // the wall's along-length / floor-to-top extent.
+  const resolveHostWallFrame = (ghost: Group, draft: ItemNode | null) => {
+    const wallId = placementState.current.wallId
+    const wall = wallId ? useScene.getState().nodes[wallId as AnyNodeId] : undefined
+    const wallMesh = wallId ? sceneRegistry.nodes.get(wallId as AnyNodeId) : undefined
+    if (wall?.type !== 'wall' || !wallMesh) return null
+    const length = Math.hypot(wall.end[0] - wall.start[0], wall.end[1] - wall.start[1])
+    const height = wall.height ?? DEFAULT_WALL_HEIGHT
+    const halfT = ((wall.thickness ?? 0.1) / 2) * (draft?.side === 'back' ? -1 : 1)
+    const { a, b, c } = wallFrameScratch.current
+    ghost.updateWorldMatrix(true, false)
+    ghost.worldToLocal(wallMesh.localToWorld(a.set(0, 0, 0)))
+    ghost.worldToLocal(wallMesh.localToWorld(b.set(0, 0, halfT)))
+    ghost.worldToLocal(wallMesh.localToWorld(c.set(length, height, halfT)))
+    const outward: 1 | -1 = b.z >= a.z ? 1 : -1
+    return {
+      faceZ: b.z + outward * 0.004,
+      outward,
+      x0: Math.min(b.x, c.x),
+      x1: Math.max(b.x, c.x),
+      y0: Math.min(b.y, c.y),
+      y1: Math.max(b.y, c.y),
+    }
+  }
+  useFrame(() => {
+    const ghost = cursorGroupRef.current
+    const bounds = ghostBoundsRef.current
+    if (!(asset && ghost && bounds)) return
+    const surf = placementState.current.surface
+    const blocked = usePlacementFeedback.getState().blocked
+    const draft = draftNode.current
+    const draftMesh = draft ? sceneRegistry.nodes.get(draft.id) : null
+    const markerMode = !!asset.attachTo && surf === 'floor'
+
+    if (hologramRef.current) hologramRef.current.visible = !(markerMode || blocked)
+    if (edgesRef.current) edgesRef.current.visible = !markerMode
+    if (edgesGlowRef.current) edgesGlowRef.current.visible = !markerMode && blocked
+    if (modelGhostRef.current) {
+      // The draft node already renders the real model; the clone only stands
+      // in until it mounts.
+      modelGhostRef.current.visible = !markerMode && !draftMesh?.visible
+    }
+    if (markerRef.current) {
+      markerRef.current.visible = markerMode
+      // Hostless wall / ceiling previews ride lifted off the floor.
+      markerRef.current.position.y = draft ? 0 : -getDetachedAttachmentPreviewLift(asset.attachTo)
+    }
+
+    const wallFace = isWallAttach(asset.attachTo) && (surf === 'wall' || surf === 'roof-wall')
+    // The cursor sits on the grid-snapped hit point, not on the wall face, so
+    // the face planes (drawn with scene depth) are placed on the host wall's
+    // real face and clipped to its extent.
+    const hostWall = wallFace && surf === 'wall' ? resolveHostWallFrame(ghost, draft) : null
+    const faceZ = hostWall?.faceZ ?? wallOutwardSignRef.current * 0.004
+    if (basePlaneRef.current) {
+      basePlaneRef.current.visible = !markerMode && blocked
+      basePlaneRef.current.position.z = wallFace ? faceZ : 0
+    }
+
+    const wallGrid = wallGridRef.current
+    if (wallGrid) {
+      wallGrid.visible = wallFace && !blocked
+      if (wallGrid.visible) {
+        // The lattice spans the item plus a margin, clipped to the host wall.
+        const [w] = bounds.dimensions
+        let left = bounds.center[0] - w / 2 - WALL_GRID_MARGIN
+        let right = bounds.center[0] + w / 2 + WALL_GRID_MARGIN
+        let bottom = bounds.min[1] - WALL_GRID_MARGIN
+        let top = bounds.max[1] + WALL_GRID_MARGIN
+        if (hostWall) {
+          left = Math.max(left, hostWall.x0)
+          right = Math.min(right, hostWall.x1)
+          bottom = Math.max(bottom, hostWall.y0)
+          top = Math.min(top, hostWall.y1)
+        } else {
+          const levelId = useViewer.getState().selection.levelId
+          const levelY = (levelId && sceneRegistry.nodes.get(levelId)?.position.y) || 0
+          bottom = Math.max(bottom, levelY - ghost.position.y)
+          top = Math.min(top, levelY + DEFAULT_WALL_HEIGHT - ghost.position.y)
+        }
+        const width = Math.max(right - left, 0.01)
+        const height = Math.max(top - bottom, 0.01)
+        const signature = [left, right, bottom, top].map((v) => v.toFixed(3)).join(':')
+        if (wallGridSignatureRef.current !== signature) {
+          wallGridSignatureRef.current = signature
+          const size: [number, number] = [width, height]
+          const geometry = new PlaneGeometry(...size)
+          geometry.translate((left + right) / 2, (top + bottom) / 2, 0)
+          wallGrid.geometry.dispose()
+          wallGrid.geometry = geometry
+          // Keep the lattice registered to the footprint's edges.
+          const offset: [number, number] = [
+            (left + right) / 2 - bounds.center[0],
+            (top + bottom) / 2 - bounds.center[1],
+          ]
+          ghostMaterials.wallGrid.setSize(size, [w, bounds.dimensions[1]], offset)
+        }
+        wallGrid.position.z = faceZ + (hostWall?.outward ?? wallOutwardSignRef.current) * 0.002
+      }
+    }
+
+    const column = ceilingColumnRef.current
+    const floorSquare = ceilingFloorRef.current
+    const outline = ceilingOutlineRef.current
+    const onCeiling = surf === 'ceiling' && !!draft
+    if (column && floorSquare && outline) {
+      column.visible = onCeiling && !blocked
+      floorSquare.visible = onCeiling && !blocked
+      outline.visible = onCeiling
+      if (onCeiling) {
+        const levelId = useViewer.getState().selection.levelId
+        const levelY = (levelId && sceneRegistry.nodes.get(levelId)?.position.y) || 0
+        const drop = Math.max(ghost.position.y - levelY, 0.01)
+        const ceilingY = -gridPosition.current.y
+        const [w, , d] = bounds.dimensions
+        const [cx, , cz] = bounds.center
+        const signature = `${Math.round(drop * 100)}:${w}:${d}:${cx}:${cz}:${ceilingY.toFixed(3)}`
+        if (ceilingSignatureRef.current !== signature) {
+          ceilingSignatureRef.current = signature
+          const columnGeometry = new BoxGeometry(w, drop, d)
+          columnGeometry.translate(cx, -drop / 2, cz)
+          column.geometry.dispose()
+          column.geometry = columnGeometry
+          const squareGeometry = new PlaneGeometry(w, d)
+          squareGeometry.rotateX(-Math.PI / 2)
+          squareGeometry.translate(cx, -drop + 0.01, cz)
+          floorSquare.geometry.dispose()
+          floorSquare.geometry = squareGeometry
+          outline.geometry.dispose()
+          outline.geometry = createRectOutlineGeometry(w * 1.3, d * 1.3, cx, cz, ceilingY - 0.005)
+        }
+      }
+    }
+  })
+
+  // Anchor the cursor key list beside the ghost's projected screen box
+  // (inZOI keeps it glued to the object, never the raw cursor).
+  const anchorCorner = useRef(new Vector3())
+  useFrame(({ camera, size: rect }) => {
+    const ghost = cursorGroupRef.current
+    const bounds = ghostBoundsRef.current
+    const feedback = usePlacementFeedback.getState()
+    if (!(asset && ghost && bounds) || rect.width < 10 || rect.height < 10) {
+      feedback.setAnchor(null)
+      return
+    }
+    const markerMode = !!asset.attachTo && placementState.current.surface === 'floor'
+    const markerY = markerRef.current?.position.y ?? 0
+    const min = markerMode ? [-0.16, markerY + 0.2, -0.16] : bounds.min
+    const max = markerMode ? [0.16, markerY + 0.46, 0.16] : bounds.max
+    let left = Number.POSITIVE_INFINITY
+    let right = Number.NEGATIVE_INFINITY
+    let top = Number.POSITIVE_INFINITY
+    let visible = false
+    const v = anchorCorner.current
+    for (let i = 0; i < 8; i++) {
+      v.set(i & 1 ? max[0]! : min[0]!, i & 2 ? max[1]! : min[1]!, i & 4 ? max[2]! : min[2]!)
+      v.applyMatrix4(ghost.matrixWorld).project(camera)
+      if (v.z > 1) continue
+      visible = true
+      const x = rect.left + ((v.x + 1) / 2) * rect.width
+      const y = rect.top + ((1 - v.y) / 2) * rect.height
+      left = Math.min(left, x)
+      right = Math.max(right, x)
+      top = Math.min(top, y)
+    }
+    feedback.setAnchor(visible ? { left, right, top } : null)
+  })
+
+  const isRoomGridActive = useCallback(
+    () => !asset?.attachTo && placementState.current.surface === 'floor',
+    [asset],
   )
 
   useFrame(() => {
@@ -2564,11 +2856,6 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
 
   const initialDraft = draftNode.current
   const initialAttachTo = config.asset?.attachTo
-  const rawDims = initialDraft
-    ? getScaledDimensions(initialDraft)
-    : (config.asset?.dimensions ?? DEFAULT_DIMENSIONS)
-  const dims = getGridAlignedDimensions(rawDims, initialAttachTo, gridSnapStep)
-  const wallSideZOffset = initialAttachTo === 'wall-side' ? dims[2] / 2 : 0
   const initialDimensionBounds = expandBoundsToGrid(
     getFallbackPreviewBounds(initialDraft, config.asset, initialAttachTo),
     initialAttachTo,
@@ -2586,29 +2873,39 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
       initialDimensionBounds,
     ],
   )
-  const basePlaneGeometry = useMemo(() => {
-    const geometry = new PlaneGeometry(dims[0], dims[2])
-    geometry.rotateX(-Math.PI / 2)
-    geometry.translate(0, 0.01, wallSideZOffset)
-    return geometry
-  }, [dims[0], dims[2], wallSideZOffset])
+  const initialAttachKey = initialAttachTo ?? null
+  const initialBoundsKey = [
+    ...initialDimensionBounds.min,
+    ...initialDimensionBounds.max,
+    initialAttachKey,
+  ].join(':')
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the bounds values
+  const basePlaneGeometry = useMemo(
+    () => createFootprintGeometry(initialDimensionBounds, initialAttachTo).geometry,
+    [initialBoundsKey],
+  )
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the bounds values
+  const hologramGeometry = useMemo(
+    () => createHologramGeometry(initialDimensionBounds),
+    [initialBoundsKey],
+  )
   const initialWidthGuideGeometry = useMemo(() => createLineGeometry(), [])
   const initialDepthGuideGeometry = useMemo(() => createLineGeometry(), [])
   const initialHeightGuideGeometry = useMemo(() => createLineGeometry(), [])
   const placementGhostScale =
     initialDraft?.scale ?? config.defaultScale ?? ([1, 1, 1] as [number, number, number])
-  // Catalog/model assets use the cloned GLB itself as the placement ghost.
-  // The dimensions box describes the logical snap footprint, not the authored
-  // mesh bounds, so drawing both made the box look like an incorrectly-sized
-  // ghost and often obscured the real model.
+  // The dimension pills only label src-less (box) assets; a model asset's
+  // hologram box already reads as its size.
   const showFallbackBounds = !config.asset?.src
   const currentDimensionBounds = dimensionBounds ?? initialDimensionBounds
   // Feed the footprint shape to the per-frame surface publisher, which orients
   // and positions the forward-facing triangle via `useFacingPose`.
   facingShapeRef.current = {
     depth: currentDimensionBounds.dimensions[2],
+    width: currentDimensionBounds.dimensions[0],
     center: [currentDimensionBounds.center[0], currentDimensionBounds.center[2]],
   }
+  ghostBoundsRef.current = currentDimensionBounds
   const widthLabel = formatLinearMeasurement(currentDimensionBounds.dimensions[0], unit)
   const depthLabel = formatLinearMeasurement(currentDimensionBounds.dimensions[2], unit)
   const heightLabel = formatLinearMeasurement(currentDimensionBounds.dimensions[1], unit)
@@ -2711,27 +3008,84 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
   )
 
   return (
-    <group ref={cursorGroupRef}>
-      {config.asset && <PlacementModelGhost asset={config.asset} nodeScale={placementGhostScale} />}
-      {showFallbackBounds ? (
-        <>
-          <lineSegments
-            geometry={initialEdgeGeometry}
-            layers={EDITOR_LAYER}
-            material={edgeMaterial}
-            ref={edgesRef}
-            renderOrder={999}
-          />
-          {measurementContent}
-          <mesh
-            geometry={basePlaneGeometry}
-            layers={EDITOR_LAYER}
-            material={basePlaneMaterial}
-            ref={basePlaneRef}
-            renderOrder={999}
-          />
-        </>
-      ) : null}
-    </group>
+    <>
+      <group ref={cursorGroupRef}>
+        {config.asset && (
+          <group ref={modelGhostRef}>
+            <PlacementModelGhost asset={config.asset} nodeScale={placementGhostScale} />
+          </group>
+        )}
+        <mesh
+          geometry={hologramGeometry}
+          layers={EDITOR_LAYER}
+          material={ghostMaterials.hologram}
+          raycast={NO_RAYCAST}
+          ref={hologramRef}
+          renderOrder={996}
+        />
+        <lineSegments
+          geometry={initialEdgeGeometry}
+          layers={EDITOR_LAYER}
+          material={ghostMaterials.edge}
+          raycast={NO_RAYCAST}
+          ref={edgesRef}
+          renderOrder={999}
+        />
+        <lineSegments
+          geometry={initialEdgeGeometry}
+          layers={EDITOR_LAYER}
+          material={ghostMaterials.edgeGlow}
+          raycast={NO_RAYCAST}
+          ref={edgesGlowRef}
+          renderOrder={999}
+          scale={1.012}
+          visible={false}
+        />
+        <mesh
+          geometry={basePlaneGeometry}
+          layers={GRID_LAYER}
+          material={ghostMaterials.footprint}
+          raycast={NO_RAYCAST}
+          ref={basePlaneRef}
+          renderOrder={997}
+          visible={false}
+        />
+        <mesh
+          layers={GRID_LAYER}
+          material={ghostMaterials.wallGrid}
+          raycast={NO_RAYCAST}
+          ref={wallGridRef}
+          renderOrder={995}
+          visible={false}
+        />
+        <mesh
+          layers={EDITOR_LAYER}
+          material={ghostMaterials.hologram}
+          raycast={NO_RAYCAST}
+          ref={ceilingColumnRef}
+          renderOrder={996}
+          visible={false}
+        />
+        <mesh
+          layers={EDITOR_LAYER}
+          material={ghostMaterials.ceilingFloor}
+          raycast={NO_RAYCAST}
+          ref={ceilingFloorRef}
+          renderOrder={996}
+          visible={false}
+        />
+        <lineSegments
+          layers={EDITOR_LAYER}
+          material={ghostMaterials.ceilingOutline}
+          raycast={NO_RAYCAST}
+          ref={ceilingOutlineRef}
+          renderOrder={999}
+          visible={false}
+        />
+        <PlacementCursorMarker ref={markerRef} visible={false} />
+        {showFallbackBounds ? measurementContent : null}
+      </group>
+      <PlacementRoomGrid isActive={isRoomGridActive} />
+    </>
   )
 }

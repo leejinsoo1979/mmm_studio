@@ -1,12 +1,13 @@
+import { getScaledDimensions, type ItemNode } from '@pascal-app/core'
 import type { ContinuationContext } from '../../../lib/continuation'
 import type { ContextualShortcutHint } from '../../../lib/contextual-help'
 import type { SnapContext } from '../../../lib/snapping-mode'
+import { useMovingNode } from '../../../store/use-interaction-scope'
 import { usePlacementFeedback } from '../../../store/use-placement-feedback'
 import { ContextualHelperPanel } from './contextual-helper-panel'
 import { ToolCursorHints } from './tool-cursor-hints'
 
 interface ItemHelperProps {
-  showEsc?: boolean
   snapContext?: SnapContext | null
   // Whether to advertise Alt = force-place. Only meaningful for kinds that
   // collision-validate their drop (structural kinds never reject, so it's hidden).
@@ -18,26 +19,57 @@ interface ItemHelperProps {
   rightClickRotates?: boolean
 }
 
+/** Catalog-style size readout (w×h×d in mm, same order as the item cards). */
+export function formatItemSize(dimensions: readonly number[]): string {
+  return `${dimensions.map((m) => Math.round(m * 1000)).join('×')} mm`
+}
+
+/**
+ * inZOI's held-object keys, shared by a fresh catalog placement (the item
+ * definition's `toolHints`) and a move so both read the same.
+ */
+function heldItemHints({
+  rightClickRotates = true,
+  showForce = true,
+}: {
+  rightClickRotates?: boolean
+  showForce?: boolean
+} = {}): ContextualShortcutHint[] {
+  return [
+    // Items (the placement coordinator) also turn on a quick right click and
+    // Z / C, and 5° with Alt; other kinds rotate on R / T only.
+    ...(rightClickRotates
+      ? [
+          { keys: ['Right click'], label: '오른쪽 45° 회전' },
+          { keys: [['Z', 'C']], label: '왼쪽·오른쪽 회전' },
+          { keys: ['Alt', ['R', 'T']], label: '5° 미세 회전' },
+        ]
+      : [{ keys: [['R', 'T']], label: '회전' }]),
+    ...(showForce ? [{ keys: ['Alt'], label: '자유 배치' }] : []),
+    { keys: ['Shift'], label: '스냅 모드 전환' },
+    { keys: ['Esc'], label: '선택 취소' },
+    { keys: ['Delete'], label: '삭제' },
+  ]
+}
+
 // inZOI lists the placement keys beside the object and warns in red when it
 // overlaps something; the docked card keeps only the snapping / continuation
 // chips. Alt forces an invalid (red) drop.
 export function ItemHelper({
-  showEsc,
   snapContext,
   showForce,
   continuationContext = null,
   rightClickRotates = false,
 }: ItemHelperProps) {
   const blocked = usePlacementFeedback((s) => s.blocked)
-  const hints: ContextualShortcutHint[] = [
-    { keys: ['Left click'], label: '클릭하여 배치' },
-    rightClickRotates
-      ? { keys: [['R', 'T', 'Right click']], label: '45° 회전' }
-      : { keys: [['R', 'T']], label: '회전' },
-    ...(rightClickRotates ? [{ keys: ['Alt', ['R', 'T']], label: '5° 미세 회전' }] : []),
-    ...(showForce ? [{ keys: ['Alt'], label: '자유 배치' }] : []),
-    { keys: [showEsc ? 'Esc' : 'Right click'], label: '선택 취소' },
-  ]
+  const movingNode = useMovingNode()
+  const title =
+    movingNode?.type === 'item'
+      ? {
+          name: movingNode.name ?? (movingNode as ItemNode).asset.name,
+          size: formatItemSize(getScaledDimensions(movingNode as ItemNode)),
+        }
+      : undefined
   return (
     <>
       <ContextualHelperPanel
@@ -46,7 +78,8 @@ export function ItemHelper({
         snapContext={snapContext}
       />
       <ToolCursorHints
-        hints={hints}
+        hints={heldItemHints({ rightClickRotates, showForce })}
+        title={title}
         warning={blocked ? '사물은 서로 겹쳐서 배치할 수 없습니다' : undefined}
       />
     </>

@@ -103,6 +103,8 @@ export type HandleDecoration<N> = {
   radius: (node: N) => number
   /** Node-local Y of the ring. Defaults to 0. */
   y?: (node: N) => number
+  /** Show whenever the handle is, not only on hover / drag. */
+  always?: boolean
 }
 
 /**

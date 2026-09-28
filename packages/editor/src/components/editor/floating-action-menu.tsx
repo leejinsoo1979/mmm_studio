@@ -93,6 +93,8 @@ const ALLOWED_TYPES = [
 ]
 const DELETE_ONLY_TYPES: string[] = []
 const HOLE_TYPES = ['slab', 'ceiling']
+// Kinds edited through in-world gizmos get inZOI's blue '확인' pill.
+const CONFIRM_TYPES = ['item', 'cabinet', 'shelf', 'door', 'window']
 
 // Menu scales with camera zoom so it feels anchored to the object, but is
 // clamped on both ends so it stays readable when zoomed way out and doesn't
@@ -704,6 +706,16 @@ export function FloatingActionMenu() {
     [node, updateNode],
   )
 
+  // inZOI's '✓ 확인': ends the gizmo edit by dropping the selection.
+  const handleConfirm = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      sfxEmitter.emit('sfx:item-place')
+      setSelection({ selectedIds: [] })
+    },
+    [setSelection],
+  )
+
   const handleFocus = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
@@ -742,6 +754,7 @@ export function FloatingActionMenu() {
         >
           <div className="relative" ref={menuScaleRef} style={{ transformOrigin: 'center center' }}>
             <NodeActionMenu
+              onConfirm={node && CONFIRM_TYPES.includes(node.type) ? handleConfirm : undefined}
               onFind={node && canFindNode ? handleFind : undefined}
               onAddHole={node && HOLE_TYPES.includes(node.type) ? handleAddHole : undefined}
               onCurve={

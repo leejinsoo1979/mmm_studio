@@ -1,6 +1,7 @@
 'use client'
 
 import { type AnyNodeId, resolveFacingIndicator, sceneRegistry, useScene } from '@pascal-app/core'
+import { GRID_LAYER } from '@pascal-app/viewer'
 import { useEffect, useMemo } from 'react'
 import {
   Box3,
@@ -12,15 +13,17 @@ import {
   PlaneGeometry,
   Vector3,
 } from 'three'
-import { distance, smoothstep, uv, vec2 } from 'three/tsl'
-import { LineBasicNodeMaterial, MeshBasicNodeMaterial } from 'three/webgpu'
 import { EDITOR_LAYER } from '../../../lib/constants'
 import useFacingPose from '../../../store/use-facing-pose'
+import { usePlacementFeedback } from '../../../store/use-placement-feedback'
+import {
+  createFootprintTileMaterial,
+  createGhostEdgeMaterial,
+  createHologramMaterial,
+  FOOTPRINT_RING,
+} from './placement-ghost-materials'
 
 const NO_RAYCAST = () => null
-
-/** green-500 — matches the item placement box's "placeable" state. */
-const DEFAULT_COLOR = 0x22_c5_5e
 
 type LocalBounds = { size: [number, number, number]; center: [number, number, number] }
 
@@ -74,16 +77,18 @@ interface DragBoundingBoxProps {
   size?: [number, number, number]
   /** Y center of the box in the node's local frame. Defaults to `size[1] / 2`. */
   centerY?: number
+  /** Any colour marks the drop as invalid (red footprint tiles, no hologram). */
   color?: number
 }
 
 /**
  * Footprint box drawn around a node while it is being dragged — the same
- * affordance items get during placement: a wireframe cube spanning the node's
- * full measured extent plus a ground plane with a radial opacity gradient
- * (transparent in the centre, opaque toward the edges). Overlay layer +
- * `depthTest: false` keep it drawn on top of scene geometry throughout the
- * drag, and the box visualises the bounds that drive alignment snapping.
+ * inZOI affordance items get during placement: a cyan hologram volume with
+ * white edges while the drop is valid, red 25 cm footprint tiles with a fading
+ * dark ring when it is not (the `color` prop, or an overlap reported through
+ * `usePlacementFeedback`). Overlay layer + `depthTest: false` keep the edges
+ * on top of scene geometry, and the box visualises the bounds that drive
+ * alignment snapping.
  */
 export function DragBoundingBox({
   nodeId,
@@ -92,10 +97,12 @@ export function DragBoundingBox({
   fallbackSize = [0, 0, 0],
   size,
   centerY,
-  color = DEFAULT_COLOR,
+  color,
 }: DragBoundingBoxProps) {
   const nodeType = useScene((state) => state.nodes[nodeId as AnyNodeId]?.type)
   const facing = nodeType ? resolveFacingIndicator(nodeType) : null
+  const overlapping = usePlacementFeedback((s) => s.blocked)
+  const invalid = color !== undefined || overlapping
 
   const measured = useMemo(() => {
     if (size) return null
@@ -108,7 +115,7 @@ export function DragBoundingBox({
     ? [0, centerY ?? size[1] / 2, 0]
     : (measured?.center ?? [0, fallbackSize[1] / 2, 0])
   const minY = cy - h / 2
-  const groundY = minY + 0.01
+  const groundY = minY + 0.012
 
   const edgeGeometry = useMemo(() => {
     const box = new BoxGeometry(w, h, d)
@@ -117,39 +124,42 @@ export function DragBoundingBox({
     return edges
   }, [w, h, d])
 
-  // Flat on the ground (XZ) at the box's base, nudged up 0.01m to avoid
-  // z-fighting with slabs.
+  const volumeGeometry = useMemo(() => new BoxGeometry(w, h, d), [w, h, d])
+
+  // Flat on the ground (XZ) at the box's base, nudged up to avoid z-fighting
+  // with slabs; the ring of dark tiles extends past the footprint.
   const planeGeometry = useMemo(() => {
-    const plane = new PlaneGeometry(w, d)
+    const plane = new PlaneGeometry(w + FOOTPRINT_RING * 2, d + FOOTPRINT_RING * 2)
     plane.rotateX(-Math.PI / 2)
     plane.translate(cx, groundY, cz)
     return plane
   }, [w, d, cx, groundY, cz])
 
-  const edgeMaterial = useMemo(
-    () => new LineBasicNodeMaterial({ color, linewidth: 3, depthTest: false, depthWrite: false }),
-    [color],
+  const materials = useMemo(
+    () => ({
+      edge: createGhostEdgeMaterial(0.85),
+      volume: createHologramMaterial(),
+      tiles: createFootprintTileMaterial(),
+    }),
+    [],
   )
-
-  const planeMaterial = useMemo(() => {
-    const material = new MeshBasicNodeMaterial({
-      color,
-      transparent: true,
-      depthTest: false,
-      depthWrite: false,
-    })
-    material.opacityNode = smoothstep(0, 0.7, distance(uv(), vec2(0.5, 0.5))).mul(0.6)
-    return material
-  }, [color])
+  useEffect(() => {
+    materials.tiles.setFootprint([w + FOOTPRINT_RING * 2, d + FOOTPRINT_RING * 2], [w, d])
+  }, [materials, w, d])
 
   useEffect(
     () => () => {
       edgeGeometry.dispose()
+      volumeGeometry.dispose()
       planeGeometry.dispose()
-      edgeMaterial.dispose()
-      planeMaterial.dispose()
     },
-    [edgeGeometry, planeGeometry, edgeMaterial, planeMaterial],
+    [edgeGeometry, volumeGeometry, planeGeometry],
+  )
+  useEffect(
+    () => () => {
+      for (const material of Object.values(materials)) material.dispose()
+    },
+    [materials],
   )
 
   // Publish the facing pose to the editor-side overlay (the single triangle
@@ -162,10 +172,11 @@ export function DragBoundingBox({
       position: [position[0], position[1] + groundY, position[2]],
       rotationY,
       depth: d,
+      width: w,
       center: [cx, cz],
       reversed: facing.reversed,
     })
-  }, [facing, position, rotationY, d, cx, cz, groundY])
+  }, [facing, position, rotationY, d, w, cx, cz, groundY])
   useEffect(() => () => useFacingPose.getState().clear(), [])
 
   if (w <= 0 || h <= 0 || d <= 0) return null
@@ -174,15 +185,25 @@ export function DragBoundingBox({
     <group position={position} rotation={[0, rotationY, 0]}>
       <mesh
         geometry={planeGeometry}
-        layers={EDITOR_LAYER}
-        material={planeMaterial}
+        layers={GRID_LAYER}
+        material={materials.tiles}
         raycast={NO_RAYCAST}
-        renderOrder={999}
+        renderOrder={997}
+        visible={invalid}
+      />
+      <mesh
+        geometry={volumeGeometry}
+        layers={EDITOR_LAYER}
+        material={materials.volume}
+        position={[cx, cy, cz]}
+        raycast={NO_RAYCAST}
+        renderOrder={996}
+        visible={!invalid}
       />
       <lineSegments
         geometry={edgeGeometry}
         layers={EDITOR_LAYER}
-        material={edgeMaterial}
+        material={materials.edge}
         position={[cx, cy, cz]}
         raycast={NO_RAYCAST}
         renderOrder={999}

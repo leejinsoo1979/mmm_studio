@@ -2,9 +2,18 @@ import type { ToolHint } from '@pascal-app/core'
 import type { ContinuationContext } from '../../../lib/continuation'
 import type { SnapContext } from '../../../lib/snapping-mode'
 import useEditor from '../../../store/use-editor'
-import { ContextualHelperPanel } from './contextual-helper-panel'
-import { ToolCursorHints } from './tool-cursor-hints'
 import { usePlacementFeedback } from '../../../store/use-placement-feedback'
+import { ContextualHelperPanel } from './contextual-helper-panel'
+import { formatItemSize } from './item-helper'
+import { ToolCursorHints } from './tool-cursor-hints'
+
+/** 'Alt + R / T' → ['Alt', ['R', 'T']]: sequential keys, each with its alternatives. */
+function splitHintKey(key: string): Array<string | string[]> {
+  return key.split(' + ').map((part) => {
+    const alternatives = part.split(' / ')
+    return alternatives.length > 1 ? alternatives : part
+  })
+}
 
 /**
  * Generic helper rendered from `def.toolHints` data. Matches the
@@ -30,6 +39,15 @@ export function RegisteredToolHelper({
   // minimum (e.g. "Finish" at ≥ 3) only appear once they're actually possible.
   const draftVertexCount = useEditor((s) => s.draftVertexCount)
   const blocked = usePlacementFeedback((s) => s.blocked)
+  const tool = useEditor((s) => s.tool)
+  const selectedItem = useEditor((s) => s.selectedItem)
+  const title =
+    tool === 'item' && selectedItem
+      ? {
+          name: selectedItem.name,
+          size: selectedItem.dimensions ? formatItemSize(selectedItem.dimensions) : undefined,
+        }
+      : undefined
   // The snapping chip (when a context is active) already shows Shift = cycle, so
   // drop the redundant 'Cycle snapping mode' tool hint to avoid a double pill;
   // also hide draft-gated hints until the draft is far enough along.
@@ -50,13 +68,14 @@ export function RegisteredToolHelper({
       />
       {visible.length > 0 ? (
         <ToolCursorHints
+          title={title}
           warning={blocked ? '사물은 서로 겹쳐서 배치할 수 없습니다' : undefined}
           hints={visible.map((hint) => {
             // Shift is a per-kind bypass for opening / zone / duct placement ("Free
             // place", "Free angle", …) — those flip to a bypassed state while held.
             const isBypassHint = hint.key === 'Shift'
             return {
-              keys: [hint.key],
+              keys: splitHintKey(hint.key),
               label:
                 shiftPressed && isBypassHint
                   ? (hint.heldLabel ?? 'Guided constraints bypassed')

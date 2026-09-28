@@ -772,7 +772,7 @@ function LinearArrow({
   // width / inner-radius rings; radial handles use it for the column's
   // round footprint ring.
   const decoration = descriptor.decoration
-  const showDecoration = Boolean(decoration) && (isHovered || isDragging)
+  const showDecoration = Boolean(decoration) && (decoration?.always || isHovered || isDragging)
 
   // Dimension chip — shows the live value the drag is steering. `node`
   // is already the effective (override-merged) node, so currentValue
@@ -812,6 +812,7 @@ function LinearArrow({
       <>
         {showDecoration && decoration ? (
           <GuideRing
+            active={isDragging}
             radius={decoration.radius(node as never)}
             y={decoration.y?.(node as never) ?? 0}
           />
@@ -840,6 +841,7 @@ function LinearArrow({
     <>
       {showDecoration && decoration ? (
         <GuideRing
+          active={isDragging}
           radius={decoration.radius(node as never)}
           y={decoration.y?.(node as never) ?? 0}
         />
@@ -864,25 +866,38 @@ function LinearArrow({
 // e.g. the curved-stair width arrow traces the outer rim, the inner-radius
 // arrow traces the central pillar. Floats at node-local `y`, lies in the
 // XZ plane.
-export function GuideRing({ radius, y }: { radius: number; y: number }) {
+export function GuideRing({
+  radius,
+  y,
+  active = false,
+}: {
+  radius: number
+  y: number
+  /** Brightens the ring while its handle is dragged. */
+  active?: boolean
+}) {
   const safeRadius = Math.max(radius, 0.01)
   const ringGeometry = useMemo(() => {
-    const inner = Math.max(safeRadius - 0.015, 0.001)
-    const outer = safeRadius + 0.015
+    const inner = Math.max(safeRadius - 0.012, 0.001)
+    const outer = safeRadius + 0.012
     return new RingGeometry(inner, outer, 96)
   }, [safeRadius])
   const ringMaterial = useMemo(
     () =>
       new MeshBasicNodeMaterial({
-        color: new Color(ARROW_COLOR),
+        color: new Color(ARROW_HOVER_COLOR),
         side: DoubleSide,
         transparent: true,
-        opacity: 0.95,
+        opacity: 0.8,
         depthTest: false,
         depthWrite: false,
       }),
     [],
   )
+  useEffect(() => {
+    ringMaterial.color.set(active ? ARROW_COLOR : ARROW_HOVER_COLOR)
+    ringMaterial.opacity = active ? 0.95 : 0.8
+  }, [active, ringMaterial])
   useEffect(() => () => ringGeometry.dispose(), [ringGeometry])
   useEffect(() => () => ringMaterial.dispose(), [ringMaterial])
 
@@ -1139,7 +1154,8 @@ function ArcArrow({
   // arrow is hovered or dragging. Same recipe as the linear / radial
   // decoration path.
   const decoration = descriptor.decoration
-  const showDecoration = Boolean(decoration) && (isHovered || isDragging || isDirectRotating)
+  const showDecoration =
+    Boolean(decoration) && (decoration?.always || isHovered || isDragging || isDirectRotating)
 
   const activate = useHandleDrag({
     kind: 'drag',
@@ -1233,6 +1249,7 @@ function ArcArrow({
     <>
       {showDecoration && decoration ? (
         <GuideRing
+          active={isDragging}
           radius={decoration.radius(node as never)}
           y={decoration.y?.(node as never) ?? 0}
         />

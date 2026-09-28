@@ -12,6 +12,8 @@ import { useGridEvents } from '../../hooks/use-grid-events'
 import { getPlacementSurface } from '../../lib/active-placement-surface'
 import useEditor, { isGridSnapActive } from '../../store/use-editor'
 import { getMovingNode } from '../../store/use-interaction-scope'
+import { RoomFloorBuildOverlay } from './room-floor-build-overlay'
+import { WallCapOutlines } from './wall-cap-outlines'
 
 // Reveal radius (m) of the cursor-local grid patch shown while placing/moving in
 // grid-snap mode — much tighter than the idle reveal so only the area you're
@@ -345,14 +347,19 @@ export const Grid = ({
   useEffect(() => () => geometry.dispose(), [geometry])
 
   return (
-    // Orientation is driven imperatively in `useFrame` (horizontal by default,
-    // tilted into the wall plane while placing on a wall), so no static rotation.
-    <mesh
-      geometry={geometry}
-      layers={GRID_LAYER}
-      material={material}
-      ref={gridRef}
-      renderOrder={1}
-    />
+    <>
+      {/* Orientation is driven imperatively in `useFrame` (horizontal by default,
+          tilted into the wall plane while placing on a wall), so no static rotation. */}
+      <mesh
+        geometry={geometry}
+        layers={GRID_LAYER}
+        material={material}
+        ref={gridRef}
+        renderOrder={1}
+      />
+      {/* inZOI's build-mode floor fill and cap outlines ride with the lattice. */}
+      <RoomFloorBuildOverlay />
+      <WallCapOutlines />
+    </>
   )
 }

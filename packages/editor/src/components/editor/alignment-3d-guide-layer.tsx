@@ -10,6 +10,7 @@ import { MeshBasicNodeMaterial } from 'three/webgpu'
 import { EDITOR_LAYER } from '../../lib/constants'
 import type { LinearUnit } from '../../lib/measurements'
 import useAlignmentGuides from '../../store/use-alignment-guides'
+import useEditor from '../../store/use-editor'
 import { formatMeasurement } from './measurement-pill'
 
 /**
@@ -58,6 +59,17 @@ const dotMaterial = new MeshBasicNodeMaterial({
   toneMapped: false,
   transparent: true,
 })
+// Drawing walls, inZOI shows plain thin green axis lines — no dashes, dots or
+// distance pills.
+const buildGuideMaterial = new MeshBasicNodeMaterial({
+  color: 0x3d_dc_84,
+  opacity: 0.85,
+  depthTest: false,
+  depthWrite: false,
+  toneMapped: false,
+  transparent: true,
+})
+const BUILD_GUIDE_WIDTH = 0.025
 const DASH_GEOMETRY = new BoxGeometry(1, 1, 1)
 const DOT_GEOMETRY = new CircleGeometry(1, 24)
 
@@ -67,6 +79,9 @@ export const Alignment3DGuideLayer = memo(function Alignment3DGuideLayer() {
   const guides = useAlignmentGuides((s) => s.guides)
   const levelId = useViewer((s) => s.selection.levelId)
   const unit = useViewer((s) => s.unit)
+  const wallDrafting = useEditor(
+    (s) => s.mode === 'build' && (s.tool === 'wall' || s.tool === 'rectangle-room'),
+  )
   const groupRef = useRef<Group>(null)
 
   // Guides carry only XZ in WORLD coords; their Y has to track the active
@@ -86,13 +101,21 @@ export const Alignment3DGuideLayer = memo(function Alignment3DGuideLayer() {
   return (
     <group ref={groupRef}>
       {guides.map((guide, i) => (
-        <GuideLine guide={guide} key={i} unit={unit} />
+        <GuideLine guide={guide} key={i} unit={unit} variant={wallDrafting ? 'build' : 'default'} />
       ))}
     </group>
   )
 })
 
-function GuideLine({ guide, unit }: { guide: AlignmentGuide; unit: LinearUnit }) {
+function GuideLine({
+  guide,
+  unit,
+  variant,
+}: {
+  guide: AlignmentGuide
+  unit: LinearUnit
+  variant: 'build' | 'default'
+}) {
   const { x: fx, z: fz } = guide.from
   const { x: tx, z: tz } = guide.to
   const distLabel = formatMeasurement(guide.distance, unit)
@@ -117,6 +140,20 @@ function GuideLine({ guide, unit }: { guide: AlignmentGuide; unit: LinearUnit })
   }, [fx, fz, tx, tz])
 
   const mid: Vec3 = [(fx + tx) / 2, GUIDE_Y, (fz + tz) / 2]
+
+  if (variant === 'build') {
+    return (
+      <mesh
+        geometry={DASH_GEOMETRY}
+        layers={EDITOR_LAYER}
+        material={buildGuideMaterial}
+        position={mid}
+        renderOrder={1000}
+        rotation={[0, angleY, 0]}
+        scale={[Math.hypot(tx - fx, tz - fz), 0.002, BUILD_GUIDE_WIDTH]}
+      />
+    )
+  }
 
   return (
     <>

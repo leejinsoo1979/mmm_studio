@@ -4,6 +4,7 @@ import {
   type AnyNode,
   type AnyNodeId,
   nodeRegistry,
+  type ToolHint,
   useScene,
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
@@ -33,6 +34,12 @@ import { ContextualHelperPanel } from './contextual-helper-panel'
 import { ItemHelper } from './item-helper'
 import { RegisteredToolHelper } from './registered-tool-helper'
 import { RoofHelper } from './roof-helper'
+
+// 사각형 방 is a wall drawing mode with no node kind of its own.
+const RECTANGLE_ROOM_HINTS: ToolHint[] = [
+  { key: 'Left click', label: '방 모서리 두 곳 클릭' },
+  { key: 'Esc', label: '그리기 취소' },
+]
 
 // Reshaping a selected node's geometry (endpoint / curve / polygon corner). The
 // snapping chip is the main control; these just name the gesture + Esc.
@@ -190,7 +197,6 @@ export function HelperManager() {
       <ItemHelper
         continuationContext={movingContinuationContext}
         rightClickRotates={movingNode.type === 'item'}
-        showEsc
         showForce={nodeRegistry.get(movingNode.type)?.snapProfile !== 'structural'}
         snapContext={snapContext}
       />
@@ -223,7 +229,7 @@ export function HelperManager() {
   // `RegisteredToolHelper` self-hides when there's genuinely nothing to show.
   if (tool) {
     const def = nodeRegistry.get(tool)
-    const hints = def?.toolHints ?? []
+    const hints = def?.toolHints ?? (tool === 'rectangle-room' ? RECTANGLE_ROOM_HINTS : [])
     if (hints.length > 0 || snapContext || continuationContext) {
       return (
         <RegisteredToolHelper

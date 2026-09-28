@@ -11,14 +11,17 @@ import { itemPaint } from './paint'
 import { itemParametrics } from './parametrics'
 import { ItemNode } from './schema'
 
-// The two floor gizmos flank the item at mid-height so they never overlap,
-// even on small items: move sits past the left edge, rotate past the right
-// edge, both floated the same distance in front of the item. Mirrors the
-// wall-item layout below (WALL_SIDE_OFFSET / WALL_GIZMO_LIFT). The guide ring
-// traces a circle slightly outside the footprint's bounding circle.
+// The two floor gizmos flank the item at floor level (inZOI's base handles) so
+// they never overlap, even on small items: move sits past the left edge,
+// rotate past the right edge, both floated the same distance in front of the
+// item. Mirrors the wall-item layout below (WALL_SIDE_OFFSET /
+// WALL_GIZMO_LIFT). The always-on guide ring traces a circle on the floor
+// slightly outside the footprint's bounding circle.
 const GIZMO_SIDE_OFFSET = 0.3
 const GIZMO_FRONT_OFFSET = 0.3
+const GIZMO_FLOOR_Y = 0.05
 const ROTATE_RING_OFFSET = 0.06
+const ROTATE_RING_Y = 0.02
 
 // Whole-item rotation handle — the two-headed curved arrow. `arc-resize`
 // does the angular drag math (raycasts a horizontal plane at the gizmo's
@@ -39,12 +42,12 @@ function itemRotateHandle(): HandleDescriptor<ItemNodeType> {
       return { rotation: [rx, ry - delta, rz] }
     },
     placement: {
-      // Past the item's right edge at mid-height, floated in front. The
+      // Past the item's right edge at floor level, floated in front. The
       // registered item mesh carries position + rotation only (scale lives on
       // an inner mesh), so the scaled footprint maps straight to world.
       position: (n) => {
-        const [w, h, d] = getScaledDimensions(n)
-        return [w / 2 + GIZMO_SIDE_OFFSET, h / 2, d / 2 + GIZMO_FRONT_OFFSET]
+        const [w, , d] = getScaledDimensions(n)
+        return [w / 2 + GIZMO_SIDE_OFFSET, GIZMO_FLOOR_Y, d / 2 + GIZMO_FRONT_OFFSET]
       },
       // Fixed −45° tilt leans the curve toward the item's front face.
       rotationY: () => -Math.PI / 4,
@@ -55,7 +58,8 @@ function itemRotateHandle(): HandleDescriptor<ItemNodeType> {
         const [w, , d] = getScaledDimensions(n)
         return Math.hypot(w / 2, d / 2) + ROTATE_RING_OFFSET
       },
-      y: (n) => getScaledDimensions(n)[1] / 2,
+      y: () => ROTATE_RING_Y,
+      always: true,
     },
   }
 }
@@ -71,11 +75,11 @@ function itemMoveHandle(): HandleDescriptor<ItemNodeType> {
     cursor: 'move',
     onActivate: (node, _scene, editor) => editor.engageMoveDrag(node),
     placement: {
-      // Past the item's left edge at mid-height, mirroring the rotate grip on
-      // the right so the two never overlap on small items.
+      // Past the item's left edge at floor level, mirroring the rotate grip
+      // on the right so the two never overlap on small items.
       position: (n) => {
-        const [w, h, d] = getScaledDimensions(n)
-        return [-(w / 2 + GIZMO_SIDE_OFFSET), h / 2, d / 2 + GIZMO_FRONT_OFFSET]
+        const [w, , d] = getScaledDimensions(n)
+        return [-(w / 2 + GIZMO_SIDE_OFFSET), GIZMO_FLOOR_Y, d / 2 + GIZMO_FRONT_OFFSET]
       },
     },
   }
@@ -161,7 +165,7 @@ function itemWallMoveHandle(): HandleDescriptor<ItemNodeType> {
  *    `getItemFloorplanTransform` math. Legacy `floorplanItemEntries`
  *    short-circuits when item is registered.
  *
- * `toolHints`: matches the legacy ItemHelper UI (mouse / R / T / Shift /
+ * `toolHints`: inZOI's held-object keys, shared with ItemHelper (mouse / Z / C / Shift /
  * Esc) — registry-driven placement panel.
  */
 export const itemDefinition: NodeDefinition<typeof ItemNode> = {
@@ -314,13 +318,15 @@ export const itemDefinition: NodeDefinition<typeof ItemNode> = {
   // in the 3D path; 2D only re-anchors within the same family.
   floorplanMoveTarget: itemFloorplanMoveTarget,
 
+  // inZOI's held-object keys — the same rows ItemHelper shows while moving.
   toolHints: [
-    { key: 'Left click', label: '클릭하여 배치' },
-    { key: 'R / T / 우클릭', label: '45° 회전' },
+    { key: 'Right click', label: '오른쪽 45° 회전' },
+    { key: 'Z / C', label: '왼쪽·오른쪽 회전' },
     { key: 'Alt + R / T', label: '5° 미세 회전' },
-    { key: 'Shift', label: '스냅 모드 전환' },
     { key: 'Alt', label: '자유 배치' },
+    { key: 'Shift', label: '스냅 모드 전환', heldLabel: '스냅 모드 전환' },
     { key: 'Esc', label: '선택 취소' },
+    { key: 'Delete', label: '삭제' },
   ],
 
   presentation: {

@@ -237,9 +237,10 @@ export const wallStrategy = {
       },
       cursorRotationY: cursorRotation,
       gridPosition: [x, adjustedY, z],
+      // The ghost rides at the item's wall-fitted height, not the raw hit.
       cursorPosition: [
         snapToHalf(event.position[0]),
-        snapToHalf(event.position[1]),
+        event.position[1] - event.localPosition[1] + adjustedY,
         snapToHalf(event.position[2]),
       ],
       stopPropagation: true,
@@ -284,9 +285,10 @@ export const wallStrategy = {
 
     return {
       gridPosition: [snappedX, adjustedY, snappedZ],
+      // The ghost rides at the item's wall-fitted height, not the raw hit.
       cursorPosition: [
         snapToHalf(event.position[0]),
-        snapToHalf(event.position[1]),
+        event.position[1] - event.localPosition[1] + adjustedY,
         snapToHalf(event.position[2]),
       ],
       cursorRotationY: cursorRotation,

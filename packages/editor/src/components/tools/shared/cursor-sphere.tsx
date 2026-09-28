@@ -7,6 +7,7 @@ import { tools } from '../../../components/ui/action-menu/structure-tools'
 import { EDITOR_LAYER } from '../../../lib/constants'
 import useEditor from '../../../store/use-editor'
 import useWallSnapIndicator from '../../../store/use-wall-snap-indicator'
+import { WallPillarMarker } from './wall-pillar-marker'
 
 interface CursorSphereProps extends Omit<ThreeElements['group'], 'ref'> {
   color?: string
@@ -28,10 +29,9 @@ interface CursorSphereProps extends Omit<ThreeElements['group'], 'ref'> {
    * height with a bright cap, instead of the thin line and tool badge.
    */
   pillar?: boolean
+  /** Footprint of the `pillar` post — the thickness of the wall being drawn. */
+  pillarWidth?: number
 }
-
-const PILLAR_WIDTH = 0.14
-const PILLAR_COLOR = '#5fd4f5'
 
 export const CursorSphere = forwardRef<Group, CursorSphereProps>(function CursorSphere(
   {
@@ -42,6 +42,7 @@ export const CursorSphere = forwardRef<Group, CursorSphereProps>(function Cursor
     visible = true,
     tooltipContent,
     pillar = false,
+    pillarWidth = 0.14,
     ...props
   },
   ref,
@@ -72,7 +73,7 @@ export const CursorSphere = forwardRef<Group, CursorSphereProps>(function Cursor
       {/* Flat marker on the ground. The bright center dot moves to the tip
           of the line in `dotAtTip` mode (the placement point hangs above the
           floor), leaving a faint ring here so the plan position stays read. */}
-      {!isSnapping && (
+      {!(isSnapping || pillar) && (
         <group rotation={[-Math.PI / 2, 0, 0]}>
           {/* Center dot — at the ground unless the placement point is elevated */}
           {!dotAtTip && (
@@ -102,24 +103,7 @@ export const CursorSphere = forwardRef<Group, CursorSphereProps>(function Cursor
         </group>
       )}
 
-      {pillar && height > 0 && (
-        <group>
-          <mesh layers={EDITOR_LAYER} position={[0, height / 2, 0]} renderOrder={2}>
-            <boxGeometry args={[PILLAR_WIDTH, height, PILLAR_WIDTH]} />
-            <meshBasicMaterial
-              color={PILLAR_COLOR}
-              depthTest={false}
-              depthWrite={false}
-              opacity={0.75}
-              transparent
-            />
-          </mesh>
-          <mesh layers={EDITOR_LAYER} position={[0, height, 0]} renderOrder={3}>
-            <boxGeometry args={[PILLAR_WIDTH * 1.15, 0.05, PILLAR_WIDTH * 1.15]} />
-            <meshBasicMaterial color="#ffffff" depthTest={false} depthWrite={false} />
-          </mesh>
-        </group>
-      )}
+      {pillar && height > 0 && <WallPillarMarker height={height} width={pillarWidth} />}
 
       {/* Vertical line */}
       {height > 0 && !pillar && (

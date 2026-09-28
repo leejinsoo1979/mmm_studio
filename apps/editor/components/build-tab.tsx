@@ -260,7 +260,7 @@ function activateBuildTool(
   ed.setStructureLayer('elements')
   ed.setCatalogCategory(null)
   ed.setToolDefaults(kind, kind === 'wall' ? wallDrawingToolDefaults() : (defaults ?? null))
-  if (kind === 'wall') ed.setSnappingMode('wall', 'lines')
+  if (kind === 'wall') ed.setSnappingMode('wall', 'grid')
   ed.setMode('build')
   ed.setTool(kind)
 }
@@ -274,7 +274,7 @@ function activateRectangleRoomTool(): void {
     placementMode: 'rectangle-room',
     ...wallDrawingToolDefaults(),
   })
-  ed.setSnappingMode('wall', 'lines')
+  ed.setSnappingMode('wall', 'grid')
   ed.setMode('build')
   ed.setTool('rectangle-room')
 }
@@ -288,7 +288,7 @@ function activateArcWallTool(): void {
     placementMode: 'arc-wall',
     ...wallDrawingToolDefaults(),
   })
-  ed.setSnappingMode('wall', 'lines')
+  ed.setSnappingMode('wall', 'grid')
   ed.setMode('build')
   ed.setTool('wall-arc')
 }
@@ -317,12 +317,15 @@ function BuildTile({
   active,
   caption,
   disabled = false,
+  imageClassName,
   item,
   onClick,
 }: {
   active?: boolean
   caption?: string
   disabled?: boolean
+  /** Extra classes for a photo thumbnail (e.g. a tint). */
+  imageClassName?: string
   item: BuildType | MepItem | RoofFeature
   onClick?: () => void
 }) {
@@ -352,7 +355,10 @@ function BuildTile({
           <Image
             alt=""
             aria-hidden
-            className="object-cover transition-transform duration-200 group-hover:scale-105"
+            className={cn(
+              'object-cover transition-transform duration-200 group-hover:scale-105',
+              imageClassName,
+            )}
             fill
             sizes="80px"
             src={item.iconSrc}
@@ -617,6 +623,8 @@ export function BuildTab() {
       <BuildTile
         active={active}
         caption={`${h.toFixed(1)}m`}
+        // New walls are off-white matte paint; tint the concrete block photo to match.
+        imageClassName="brightness-[1.5] contrast-[0.8] sepia-[0.25]"
         item={item}
         key={item.id}
         onClick={() => {

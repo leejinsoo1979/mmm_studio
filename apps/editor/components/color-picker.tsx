@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { Trash2 } from 'lucide-react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 type Hsv = { h: number; s: number; v: number }
 
@@ -32,10 +33,10 @@ export function hsvToHex({ h, s, v }: Hsv): string {
 }
 
 /** Drag on an element; reports the pointer as 0..1 fractions of its box. */
-function useDrag(
+export function useDrag(
   onMove: (x: number, y: number) => void,
   onEnd: () => void,
-): (e: React.PointerEvent<HTMLDivElement>) => void {
+): (e: React.PointerEvent<HTMLElement>) => void {
   return (e) => {
     const el = e.currentTarget
     el.setPointerCapture(e.pointerId)
@@ -59,18 +60,26 @@ function useDrag(
 }
 
 /**
- * inZOI's colour picker: a saturation / brightness square, a hue bar and a
- * HEX field. Dragging calls `onPreview`; letting go (or Enter in the field)
- * calls `onCommit`, so a drag is one change.
+ * inZOI's colour picker: current colour, a white HEX pill, the colour the
+ * part had when the card opened and a clear button on top; a saturation /
+ * brightness square and a hue bar below, with `extra` (saved colours) beside
+ * them. Dragging calls `onPreview`; letting go (or Enter in the field) calls
+ * `onCommit`, so a drag is one change.
  */
 export function ColorPicker({
   value,
+  original,
   onPreview,
   onCommit,
+  onClear,
+  extra,
 }: {
   value: string
+  original?: string
   onPreview: (hex: string) => void
   onCommit: (hex: string) => void
+  onClear?: () => void
+  extra?: ReactNode
 }) {
   const [hsv, setHsv] = useState(() => hexToHsv(value))
   const [draft, setDraft] = useState(value.toUpperCase())
@@ -95,44 +104,66 @@ export function ColorPicker({
   const hue = hsvToHex({ h: hsv.h, s: 1, v: 1 })
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-1.5">
         <span
-          className="size-6 shrink-0 rounded-md border border-black/10"
+          className="h-4 w-7 shrink-0 rounded-[4px] ring-1 ring-black/10"
           style={{ background: latest.current }}
         />
         <input
           aria-label="HEX 색상"
-          className="w-20 rounded-md bg-neutral-100 px-2 py-1 font-mono text-[11px] uppercase outline-none dark:bg-white/10"
+          className="h-[22px] w-[66px] rounded-full bg-white text-center font-medium text-[11px] text-[#333] uppercase shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] outline-none focus:shadow-[inset_0_0_0_1px_#8cc4f0] dark:bg-neutral-800 dark:text-neutral-100"
           onBlur={() => setDraft(latest.current.toUpperCase())}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             e.stopPropagation()
             if (e.key !== 'Enter') return
-            const hex = `#${e.currentTarget.value.replace(/^#/, '')}`
+            const hex = `#${e.currentTarget.value.replace(/^#/, '')}`.toUpperCase()
             if (!/^#[0-9a-f]{6}$/i.test(hex)) return
             latest.current = hex
             setHsv(hexToHsv(hex))
+            setDraft(hex)
             onCommit(hex)
           }}
           value={draft.replace(/^#/, '')}
         />
+        {original && (
+          <button
+            aria-label="처음 색으로"
+            className="size-4 shrink-0 rounded-[4px] ring-1 ring-black/10 transition-transform hover:scale-110"
+            onClick={() => onCommit(original)}
+            style={{ background: original }}
+            title="처음 색으로"
+            type="button"
+          />
+        )}
+        {onClear && (
+          <button
+            aria-label="기본 재질로"
+            className="ml-auto grid size-6 shrink-0 place-items-center rounded-full bg-white text-[#666] shadow-sm transition-colors hover:text-[#333] dark:bg-neutral-800 dark:text-neutral-300"
+            onClick={onClear}
+            title="기본 재질로"
+            type="button"
+          >
+            <Trash2 className="size-3.5" strokeWidth={1.8} />
+          </button>
+        )}
       </div>
-      <div className="flex gap-2">
+      <div className="flex gap-1.5">
         <div
-          className="relative h-24 w-28 cursor-crosshair touch-none rounded-md"
+          className="relative h-[84px] w-[100px] cursor-crosshair touch-none rounded-lg"
           onPointerDown={dragSv}
           style={{
             background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, ${hue})`,
           }}
         >
           <span
-            className="-translate-x-1/2 -translate-y-1/2 pointer-events-none absolute size-3 rounded-full border-2 border-white shadow"
+            className="-translate-x-1/2 -translate-y-1/2 pointer-events-none absolute size-3.5 rounded-full border-2 border-white shadow"
             style={{ left: `${hsv.s * 100}%`, top: `${(1 - hsv.v) * 100}%` }}
           />
         </div>
         <div
-          className="relative h-24 w-3 cursor-pointer touch-none rounded-full"
+          className="relative h-[84px] w-3.5 cursor-pointer touch-none rounded-full"
           onPointerDown={dragHue}
           style={{
             background: 'linear-gradient(to bottom, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)',
@@ -143,6 +174,7 @@ export function ColorPicker({
             style={{ top: `${(hsv.h / 360) * 100}%`, background: hue }}
           />
         </div>
+        {extra}
       </div>
     </div>
   )

@@ -21,6 +21,8 @@ export type FacingPose = {
   /** Footprint depth along the ghost's local +Z; the triangle sits just past
    *  `center[1] + depth / 2`. */
   depth: number
+  /** Footprint width along local X; sizes the triangle to the front face. */
+  width?: number
   /** Footprint centre offset `[x, z]` in the ghost's local frame. Defaults to
    *  the origin. Kinds whose forward edge isn't centred on the origin (e.g. a
    *  stair, whose run starts at the entry) shift the triangle via this. */

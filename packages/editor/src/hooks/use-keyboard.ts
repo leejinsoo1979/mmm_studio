@@ -5,6 +5,7 @@ import { turnRotation } from '../components/tools/item/placement-math'
 import { toggleDoorOpenState } from '../lib/door-interaction'
 import { guideEmitter } from '../lib/guide-events'
 import { runRedo, runUndo } from '../lib/history'
+import { isFreshPlacementMetadata } from '../lib/placement-metadata'
 import {
   copySelectedNodesToEditorClipboard,
   pasteEditorClipboardToLevel,
@@ -26,6 +27,16 @@ function getRotatableSelectedReference() {
   if (!node || (node.type !== 'guide' && node.type !== 'scan')) return null
   if (useEditor.getState().guideUi[refId]?.locked === true) return null
   return node
+}
+
+// Exactly one gizmo-edited node selected — Enter confirms it like the
+// action menu's '확인' pill.
+const CONFIRMABLE_TYPES = new Set(['item', 'cabinet', 'shelf', 'door', 'window'])
+function isConfirmableSelection(): boolean {
+  const ids = useViewer.getState().selection.selectedIds
+  if (ids.length !== 1) return false
+  const node = useScene.getState().nodes[ids[0] as AnyNodeId]
+  return !!node && CONFIRMABLE_TYPES.has(node.type)
 }
 
 // Select the level above (+1) or below (−1) in the active building, ordered
@@ -245,6 +256,17 @@ export const useKeyboard = ({
           useViewer.getState().setSelection({ selectedIds: [], zoneId: null })
           useEditor.getState().setSelectedReferenceId(null)
         }
+      } else if (
+        e.key === 'Enter' &&
+        !(e.target instanceof HTMLButtonElement) &&
+        useEditor.getState().mode === 'select' &&
+        !getMovingNode() &&
+        isConfirmableSelection()
+      ) {
+        // inZOI's '✓ 확인' (the action-menu pill): finish the gizmo edit.
+        e.preventDefault()
+        sfxEmitter.emit('sfx:item-place')
+        useViewer.getState().setSelection({ selectedIds: [] })
       } else if (e.key === '1' && !e.metaKey && !e.ctrlKey) {
         e.preventDefault()
         useEditor.getState().setPhase('site')
@@ -517,6 +539,25 @@ export const useKeyboard = ({
         }
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && !isVersionPreviewMode) {
         e.preventDefault()
+
+        // inZOI: Delete discards the held object. Cancelling restores a moved
+        // node (history is paused mid-move), so resume history before deleting
+        // it — one undo brings it back. A fresh placement is simply dropped.
+        const held = getMovingNode()
+        if (
+          held ||
+          (useEditor.getState().mode === 'build' && useEditor.getState().tool === 'item')
+        ) {
+          emitter.emit('tool:cancel')
+          if (held && !isFreshPlacementMetadata(held.metadata)) {
+            useScene.temporal.getState().resume()
+            emitDeleteSFX(held.type)
+            useScene.getState().deleteNode(held.id as AnyNodeId)
+          } else {
+            useEditor.getState().setTool(null)
+          }
+          return
+        }
 
         // Check for a selected reference (guide/scan) first
         const selectedRefId = useEditor.getState().selectedReferenceId

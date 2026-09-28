@@ -2,6 +2,7 @@
 
 import { Icon } from '@iconify/react'
 import {
+  Check,
   Copy,
   FlipHorizontal2,
   FlipVertical2,
@@ -17,6 +18,8 @@ import {
 import type { MouseEventHandler, PointerEventHandler, ReactNode } from 'react'
 
 type NodeActionMenuProps = {
+  /** inZOI's blue '확인' pill: ends the edit (clears the selection). */
+  onConfirm?: MouseEventHandler<HTMLButtonElement>
   onFind?: MouseEventHandler<HTMLButtonElement>
   onAddHole?: MouseEventHandler<HTMLButtonElement>
   onDelete?: MouseEventHandler<HTMLButtonElement>
@@ -66,6 +69,7 @@ function MenuButton({
 
 /** inZOI-style white pill of actions floating above the selected object. */
 export function NodeActionMenu({
+  onConfirm,
   onFind,
   onAddHole,
   onDelete,
@@ -91,6 +95,17 @@ export function NodeActionMenu({
       onPointerLeave={onPointerLeave}
       onPointerUp={onPointerUp}
     >
+      {onConfirm && (
+        <button
+          className="relative mr-1 inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[#2B8CE8] px-3 font-semibold text-white text-xs shadow-[0_2px_8px_rgba(0,0,0,0.25)] ring-2 ring-white after:absolute after:top-full after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:-translate-y-[3px] after:rotate-45 after:border-white after:border-r-2 after:border-b-2 after:bg-[#2B8CE8] hover:bg-[#1f7fd9]"
+          onClick={onConfirm}
+          title="확인 (Enter)"
+          type="button"
+        >
+          <Check className="size-3.5" strokeWidth={2.5} />
+          확인
+        </button>
+      )}
       {onMove && (
         <MenuButton label="이동" onClick={onMove}>
           <Move className="h-[18px] w-[18px]" />

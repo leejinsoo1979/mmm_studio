@@ -27,6 +27,7 @@ import { useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { formatLinearMeasurement } from '../../lib/measurements'
 import useEditor from '../../store/use-editor'
+import { MeasurementChip } from './measurement-pill'
 
 const GUIDE_Y_OFFSET = 0.08
 const LABEL_LIFT = 0.08
@@ -398,17 +399,7 @@ function MeasurementPath({ path, color }: { path: Vec3[]; color: string }) {
   )
 }
 
-function MeasurementLabel({
-  label,
-  position,
-  color,
-  shadowColor,
-}: {
-  label: string
-  position: Vec3
-  color: string
-  shadowColor: string
-}) {
+function MeasurementLabel({ label, position }: { label: string; position: Vec3 }) {
   return (
     <Html
       center
@@ -416,15 +407,7 @@ function MeasurementLabel({
       style={{ pointerEvents: 'none', userSelect: 'none' }}
       zIndexRange={[20, 0]}
     >
-      <div
-        className="whitespace-nowrap font-bold font-mono text-[15px]"
-        style={{
-          color,
-          textShadow: `-1.5px -1.5px 0 ${shadowColor}, 1.5px -1.5px 0 ${shadowColor}, -1.5px 1.5px 0 ${shadowColor}, 1.5px 1.5px 0 ${shadowColor}, 0 0 4px ${shadowColor}, 0 0 4px ${shadowColor}`,
-        }}
-      >
-        {label}
-      </div>
+      <MeasurementChip label={label} />
     </Html>
   )
 }
@@ -434,7 +417,6 @@ function WallMeasurementAnnotation({ wall, showHeight }: { wall: WallNode; showH
   const unit = useViewer((state) => state.unit)
   const isNight = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
   const color = isNight ? '#ffffff' : '#111111'
-  const shadowColor = isNight ? '#111111' : '#ffffff'
 
   const guide = useMemo(
     () =>
@@ -483,20 +465,8 @@ function WallMeasurementAnnotation({ wall, showHeight }: { wall: WallNode; showH
         </>
       )}
 
-      <MeasurementLabel
-        color={color}
-        label={label}
-        position={guide.labelPosition}
-        shadowColor={shadowColor}
-      />
-      {showHeight && (
-        <MeasurementLabel
-          color={color}
-          label={heightLabel}
-          position={guide.heightLabelPosition}
-          shadowColor={shadowColor}
-        />
-      )}
+      <MeasurementLabel label={label} position={guide.labelPosition} />
+      {showHeight && <MeasurementLabel label={heightLabel} position={guide.heightLabelPosition} />}
     </group>
   )
 }

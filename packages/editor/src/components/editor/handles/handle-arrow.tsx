@@ -35,8 +35,9 @@ function hitAreaRaycast(this: Mesh, raycaster: Raycaster, intersects: Intersecti
 }
 
 export const ARROW_SCALE = 0.65
-export const ARROW_COLOR = '#8381ed'
-export const ARROW_HOVER_COLOR = '#a5b4fc'
+// inZOI's flat blue gizmo: solid blue grips, light translucent blue on hover.
+export const ARROW_COLOR = '#3d9fe0'
+export const ARROW_HOVER_COLOR = '#a7d3ee'
 export const NO_RAYCAST = () => null
 export const HIT_AREA_MARGIN = 0.035
 
@@ -47,9 +48,9 @@ const CHEVRON_MAX_X = 0.22
 const CHEVRON_HALF_WIDTH = 0.12
 const CHEVRON_NOTCH_X = -0.04
 const CHEVRON_SHAFT_HALF_WIDTH = 0.035
-const CHEVRON_DEPTH = 0.08
-const CHEVRON_BEVEL_THICKNESS = 0.035
-const CHEVRON_BEVEL_SIZE = 0.03
+const CHEVRON_DEPTH = 0.05
+const CHEVRON_BEVEL_THICKNESS = 0.018
+const CHEVRON_BEVEL_SIZE = 0.015
 const CHEVRON_BEVEL_SEGMENTS = 10
 // Slimmer extrude profile matching the legacy wall side handles
 // (`wall-move-side-handles.tsx`) — opt-in via the `thin` prop so the chunkier
@@ -62,9 +63,9 @@ const MOVE_CROSS_HALF_LENGTH = 0.36
 const MOVE_CROSS_SHAFT_HALF_WIDTH = 0.03
 const MOVE_CROSS_HEAD_HALF_WIDTH = 0.12
 const MOVE_CROSS_HEAD_INSET = 0.2
-const MOVE_CROSS_DEPTH = 0.06
-const MOVE_CROSS_BEVEL_THICKNESS = 0.018
-const MOVE_CROSS_BEVEL_SIZE = 0.012
+const MOVE_CROSS_DEPTH = 0.03
+const MOVE_CROSS_BEVEL_THICKNESS = 0.008
+const MOVE_CROSS_BEVEL_SIZE = 0.008
 const MOVE_CROSS_BEVEL_SEGMENTS = 6
 const ROTATE_HANDLE_RADIUS = 0.2
 const ROTATE_HANDLE_HALF_SWEEP = Math.PI / 3
@@ -468,7 +469,7 @@ function useHandleArrowMaterial(shape: HandleArrowShape): MeshBasicNodeMaterial 
         color: new Color(ARROW_COLOR),
         side: DoubleSide,
         transparent: true,
-        opacity: shape === 'corner-picker' ? 0.95 : 1,
+        opacity: shape === 'corner-picker' ? 0.8 : 1,
         depthTest: false,
         depthWrite: shape !== 'corner-picker',
       }),

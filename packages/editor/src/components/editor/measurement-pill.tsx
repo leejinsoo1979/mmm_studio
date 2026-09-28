@@ -107,3 +107,23 @@ export const MeasurementPill = forwardRef(function MeasurementPill(
     />
   )
 })
+
+/**
+ * inZOI's small translucent length pill ("9.25m") for in-world labels on a
+ * wall: neutral grey glass with white text, the unit set slightly dimmer.
+ */
+export function MeasurementChip({ label }: { label: string }) {
+  const match = /^(-?[\d.,'"]+)(\D*)$/.exec(label)
+  return (
+    <div className="whitespace-nowrap rounded-full bg-[#8f9a96]/80 px-2 py-px font-medium font-sans text-[11px] text-white tabular-nums ring-1 ring-white/30 backdrop-blur-sm">
+      {match ? (
+        <>
+          {match[1]}
+          {match[2] && <span className="ml-px opacity-75">{match[2]}</span>}
+        </>
+      ) : (
+        label
+      )}
+    </div>
+  )
+}

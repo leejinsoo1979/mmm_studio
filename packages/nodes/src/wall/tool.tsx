@@ -25,16 +25,19 @@ import {
   getRectangleRoomCenterlineCorners,
   getSegmentAngleReferenceAtPoint,
   isAlignmentGuideActive,
+  isAngleSnapActive,
   isFloorplanInputEvent,
   isGridSnapActive,
   isMagneticSnapActive,
   type LinearUnit,
+  MeasurementChip,
   markToolCancelConsumed,
   resolveWallDraftPoint,
   type SegmentAngleReference,
   snapWallDraftPointDetailed,
   triggerSFX,
   useAlignmentGuides,
+  useDraftReadout,
   useEditor,
   useSegmentDraftChain,
   useWallSnapIndicator,
@@ -45,15 +48,8 @@ import {
 import { getSceneTheme, useViewer } from '@pascal-app/viewer'
 import { Html } from '@react-three/drei'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  BoxGeometry,
-  BufferGeometry,
-  DoubleSide,
-  type Group,
-  type LineSegments,
-  type Mesh,
-  Vector3,
-} from 'three'
+import { BufferGeometry, DoubleSide, type Group, Vector3 } from 'three'
+import { DraftWallSlab } from './draft-wall-slab'
 
 /**
  * Phase 5 Stage D — wall placement tool (kind-owned).
@@ -72,9 +68,12 @@ const WALL_HEIGHT = 2.5
 const DRAFT_WALL_THICKNESS = 0.1
 /** Figma-style alignment-snap threshold (meters), matching the move tools. */
 const ALIGNMENT_THRESHOLD_M = 0.08
-// HUD label heights are measured from the top of the preview bar, so they
-// track whatever height a seeded preset draws at (`previewHeight`).
-const DRAFT_LABEL_Y_OFFSET = 0.22
+// The length pill sits on the draft's ground line (inZOI), just above the floor.
+const DRAFT_LENGTH_LABEL_Y = 0.05
+// Shorter drafts drop the pill so it doesn't cover the pillar.
+const DRAFT_LENGTH_LABEL_MIN = 0.4
+// Connected-wall angles this close to square / straight aren't worth a label.
+const DRAFT_ANGLE_LABEL_TOLERANCE = (0.5 * Math.PI) / 180
 const DRAFT_DIMENSION_OFFSET = 0.36
 const DRAFT_DIMENSION_TICK_SIZE = 0.09
 const DRAFT_ANGLE_LABEL_Y_OFFSET = 0.08
@@ -82,9 +81,8 @@ const DRAFT_ANGLE_ARC_Y_OFFSET = 0.012
 const DRAFT_ANGLE_ARC_MIN_RADIUS = 0.32
 const DRAFT_ANGLE_ARC_MAX_RADIUS = 0.72
 const DRAFT_ANGLE_ARC_SEGMENTS = 24
-const DRAFT_AXIS_GUIDE_LENGTH = 2000
-const DRAFT_AXIS_GUIDE_WIDTH = 0.035
-const DRAFT_AXIS_GUIDE_HEIGHT = 0.004
+const DRAFT_AXIS_GUIDE_HEIGHT = 0.002
+const DRAFT_AXIS_GUIDE_WIDTH = 0.015
 const DRAFT_AXIS_GUIDE_Y_OFFSET = 0.026
 const DRAFT_AXIS_ANGLE_ARC_Y_OFFSET = 0.05
 const DRAFT_AXIS_ANGLE_LABEL_Y_OFFSET = 0.16
@@ -112,7 +110,7 @@ type DraftMeasurementState = {
   start: WallPlanPoint
   end: WallPlanPoint
   guideY: number
-  lengthLabel: string
+  lengthLabel: string | null
   lengthPosition: [number, number, number]
   angleLabels: DraftAngleLabel[]
 } | null
@@ -120,6 +118,7 @@ type DraftMeasurementState = {
 type DraftAxisGuideState = {
   origin: WallPlanPoint
   y: number
+  length: number
   lockedAxis: 'x' | 'z' | null
   angleLabel: DraftAngleLabel | null
 } | null
@@ -410,6 +409,12 @@ function getDraftAngleLabels(
       vector: connectedVector,
     })
     if (!arc || arc.angle < 0.01) continue
+    if (
+      Math.abs(arc.angle - Math.PI / 2) < DRAFT_ANGLE_LABEL_TOLERANCE ||
+      Math.abs(arc.angle - Math.PI) < DRAFT_ANGLE_LABEL_TOLERANCE
+    ) {
+      continue
+    }
     const draftLength = Math.hypot(draftVector[0], draftVector[1])
     const referenceLength = Math.hypot(connectedVector[0], connectedVector[1])
     const radius = clamp(
@@ -450,86 +455,19 @@ function getDraftMeasurementState(
   const dz = end[1] - start[1]
   const length = Math.hypot(dx, dz)
   if (length < 0.01) return null
-  const normalX = -dz / length
-  const normalZ = dx / length
   const guideY = baseY + previewHeight + DRAFT_ANGLE_ARC_Y_OFFSET
   return {
     start,
     end,
     guideY,
-    lengthLabel: formatLinearMeasurement(length, unit),
+    lengthLabel: length < DRAFT_LENGTH_LABEL_MIN ? null : formatLinearMeasurement(length, unit),
     lengthPosition: [
-      (start[0] + end[0]) / 2 + normalX * DRAFT_DIMENSION_OFFSET,
-      baseY + previewHeight + DRAFT_LABEL_Y_OFFSET,
-      (start[1] + end[1]) / 2 + normalZ * DRAFT_DIMENSION_OFFSET,
+      (start[0] + end[0]) / 2,
+      baseY + DRAFT_LENGTH_LABEL_Y,
+      (start[1] + end[1]) / 2,
     ],
     angleLabels: getDraftAngleLabels(start, end, walls, baseY, previewHeight),
   }
-}
-
-function updateWallPreview(
-  mesh: Mesh,
-  start: Vector3,
-  end: Vector3,
-  previewHeight: number,
-  previewThickness: number,
-) {
-  const direction = new Vector3(end.x - start.x, 0, end.z - start.z)
-  const length = direction.length()
-  if (length < 0.01) {
-    mesh.visible = false
-    return
-  }
-  mesh.visible = true
-  direction.normalize()
-
-  const geometry = new BoxGeometry(length, previewHeight, previewThickness)
-  const angle = Math.atan2(direction.z, direction.x)
-
-  mesh.position.set((start.x + end.x) / 2, start.y + previewHeight / 2, (start.z + end.z) / 2)
-  mesh.rotation.y = -angle
-
-  if (mesh.geometry) {
-    mesh.geometry.dispose()
-  }
-  mesh.geometry = geometry
-
-  const glow = mesh.getObjectByName(DRAFT_GLOW_NAME) as LineSegments | undefined
-  if (glow) {
-    glow.geometry.dispose()
-    glow.geometry = draftWallGlowGeometry(length, previewHeight, previewThickness)
-  }
-}
-
-const DRAFT_GLOW_NAME = 'draft-wall-glow'
-const DRAFT_GLOW_GRID = 1
-
-/**
- * inZOI's glowing draft wall: the box outline plus a 1 m grid on both faces,
- * in the wall preview's local frame (centred, length along x).
- */
-function draftWallGlowGeometry(length: number, height: number, thickness: number) {
-  const points: Vector3[] = []
-  const hx = length / 2
-  const hy = height / 2
-  const hz = thickness / 2
-  const segment = (a: Vector3, b: Vector3) => points.push(a, b)
-  for (const z of [-hz, hz]) {
-    segment(new Vector3(-hx, -hy, z), new Vector3(hx, -hy, z))
-    segment(new Vector3(-hx, hy, z), new Vector3(hx, hy, z))
-    segment(new Vector3(-hx, -hy, z), new Vector3(-hx, hy, z))
-    segment(new Vector3(hx, -hy, z), new Vector3(hx, hy, z))
-    for (let x = -hx + DRAFT_GLOW_GRID; x < hx - 0.05; x += DRAFT_GLOW_GRID) {
-      segment(new Vector3(x, -hy, z), new Vector3(x, hy, z))
-    }
-    for (let y = -hy + DRAFT_GLOW_GRID; y < hy - 0.05; y += DRAFT_GLOW_GRID) {
-      segment(new Vector3(-hx, y, z), new Vector3(hx, y, z))
-    }
-  }
-  for (const x of [-hx, hx]) {
-    for (const y of [-hy, hy]) segment(new Vector3(x, y, -hz), new Vector3(x, y, hz))
-  }
-  return new BufferGeometry().setFromPoints(points)
 }
 
 function getLevelWalls(levelId: string | null, nodes: Record<string, AnyNode>): WallNode[] {
@@ -574,6 +512,7 @@ function getBelowLevelWalls(): WallNode[] {
 export const WallTool: React.FC = () => {
   const unit = useViewer((state) => state.unit)
   const isDark = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
+  const showDimensions = useEditor((s) => s.showDimensions)
   // A placed wall preset seeds `toolDefaults.wall` (height / thickness …)
   // before the tool mounts, so the draft preview is drawn at the preset's
   // dimensions rather than the generic fallbacks — matching the wall that
@@ -585,24 +524,14 @@ export const WallTool: React.FC = () => {
     typeof wallDefaults?.thickness === 'number' ? wallDefaults.thickness : DRAFT_WALL_THICKNESS
   const previewHeightRef = useRef(previewHeight)
   previewHeightRef.current = previewHeight
-  const previewThicknessRef = useRef(previewThickness)
-  previewThicknessRef.current = previewThickness
   const cursorRef = useRef<Group>(null)
-  const wallPreviewRef = useRef<Mesh>(null!)
   const startingPoint = useRef(new Vector3(0, 0, 0))
   const endingPoint = useRef(new Vector3(0, 0, 0))
   const chainFirstVertex = useRef<Vector3 | null>(null)
   const buildingState = useRef(0)
   const [draftMeasurement, setDraftMeasurement] = useState<DraftMeasurementState>(null)
   const [axisGuide, setAxisGuide] = useState<DraftAxisGuideState>(null)
-  // CAD-style numeric entry: with the start point placed and a direction
-  // aimed, typed digits accumulate here and Enter commits a segment of
-  // exactly that length along the aim. Shown as an accent label at the
-  // cursor while typing.
-  const [typedLength, setTypedLength] = useState('')
   const measurementColor = isDark ? '#ffffff' : '#111111'
-  const measurementShadowColor = isDark ? '#111111' : '#ffffff'
-  const typedUnitSuffix = unit === 'imperial' ? 'ft' : unit === 'centimeter' ? 'cm' : 'mm'
 
   // Clear preset-seeded defaults on deactivation so a later manual wall draw
   // isn't built with a stale preset's parameters. Unmount-only.
@@ -663,18 +592,33 @@ export const WallTool: React.FC = () => {
         : point
     }
 
+    // CAD-style numeric entry: with the start point placed and a direction
+    // aimed, typed digits accumulate here and Enter commits a segment of
+    // exactly that length along the aim. Shown in the cursor readout.
     let typedBuffer = ''
+    const typedUnitSuffix = unit === 'imperial' ? 'ft' : unit === 'centimeter' ? 'cm' : 'mm'
+    // Running total of the chain drawn so far plus the live segment — the
+    // readout next to the cursor (inZOI's cost line).
+    let chainLength = 0
+    let segmentLength = 0
+    const publishReadout = () => {
+      const readout = useDraftReadout.getState()
+      if (buildingState.current !== 1) readout.set(null)
+      else if (typedBuffer) readout.set(`${typedBuffer}${typedUnitSuffix} ⏎`)
+      else if (chainLength + segmentLength < 0.01) readout.set(null)
+      else readout.set(formatLinearMeasurement(chainLength + segmentLength, unit))
+    }
     const clearTypedLength = () => {
       typedBuffer = ''
-      setTypedLength('')
+      publishReadout()
     }
 
     const stopDrafting = () => {
       buildingState.current = 0
       chainFirstVertex.current = null
-      if (wallPreviewRef.current) {
-        wallPreviewRef.current.visible = false
-      }
+      chainLength = 0
+      segmentLength = 0
+      useDraftReadout.getState().set(null)
       setDraftMeasurement(null)
       setAxisGuide(null)
       clearTypedLength()
@@ -721,7 +665,7 @@ export const WallTool: React.FC = () => {
     }
 
     const onGridMove = (event: GridEvent) => {
-      if (!(cursorRef.current && wallPreviewRef.current)) return
+      if (!cursorRef.current) return
 
       const walls = getCurrentLevelWalls()
       const localPoint: WallPlanPoint = [event.localPosition[0], event.localPosition[2]]
@@ -744,19 +688,19 @@ export const WallTool: React.FC = () => {
         const snappedLocal = gridPosition
         endingPoint.current.set(snappedLocal[0], event.localPosition[1], snappedLocal[1])
         cursorRef.current.position.copy(endingPoint.current)
+        const origin: WallPlanPoint = [startingPoint.current.x, startingPoint.current.z]
+        segmentLength = Math.hypot(snappedLocal[0] - origin[0], snappedLocal[1] - origin[1])
         setAxisGuide({
-          origin: [startingPoint.current.x, startingPoint.current.z],
+          origin,
           y: startingPoint.current.y,
-          lockedAxis: getLockedOrthogonalAxis(
-            [startingPoint.current.x, startingPoint.current.z],
-            snappedLocal,
-          ),
-          angleLabel: getNearestAxisAngleLabel(
-            [startingPoint.current.x, startingPoint.current.z],
-            snappedLocal,
-            startingPoint.current.y,
-          ),
+          length: segmentLength,
+          lockedAxis: getLockedOrthogonalAxis(origin, snappedLocal),
+          // The axis angle only matters when snapping by angle.
+          angleLabel: isAngleSnapActive()
+            ? getNearestAxisAngleLabel(origin, snappedLocal, startingPoint.current.y)
+            : null,
         })
+        publishReadout()
 
         const currentWallEnd: [number, number] = [snappedLocal[0], snappedLocal[1]]
         if (
@@ -767,13 +711,6 @@ export const WallTool: React.FC = () => {
         }
         previousWallEnd = currentWallEnd
 
-        updateWallPreview(
-          wallPreviewRef.current,
-          startingPoint.current,
-          endingPoint.current,
-          previewHeightRef.current,
-          previewThicknessRef.current,
-        )
         setDraftMeasurement(
           getDraftMeasurementState(
             [startingPoint.current.x, startingPoint.current.z],
@@ -792,7 +729,6 @@ export const WallTool: React.FC = () => {
     }
 
     const onGridClick = (event: GridEvent) => {
-      if (!wallPreviewRef.current) return
       // The floor plan commits the clicks it receives; this tool mirrors that
       // draft through `useSegmentDraftChain` instead of committing it again.
       if (isFloorplanInputEvent(event.nativeEvent)) return
@@ -822,17 +758,11 @@ export const WallTool: React.FC = () => {
         setAxisGuide({
           origin: point,
           y: event.localPosition[1],
+          length: 0,
           lockedAxis: null,
           angleLabel: null,
         })
         triggerSFX('sfx:structure-build-start')
-        // Visibility is owned by `updateWallPreview` — it flips
-        // `mesh.visible` based on segment length. Setting it here
-        // (before any geometry data has been written) draws the
-        // mesh's empty `<shapeGeometry/>` placeholder, which WebGPU
-        // flags as "Vertex buffer slot 0 ... was not set" on the
-        // first frame after click. Leaving it false until the next
-        // `onGridMove` writes a real BoxGeometry skips that frame.
         setDraftMeasurement(null)
       } else {
         commitSegmentTo(point, event.localPosition[1])
@@ -852,6 +782,11 @@ export const WallTool: React.FC = () => {
         snappedEnd,
       )
       if (!createdWall) return
+      chainLength += Math.hypot(
+        createdWall.end[0] - createdWall.start[0],
+        createdWall.end[1] - createdWall.start[1],
+      )
+      segmentLength = 0
       clearTypedLength()
 
       // The new segment is now a real node — make it an alignment target
@@ -877,17 +812,12 @@ export const WallTool: React.FC = () => {
       setAxisGuide({
         origin: nextStart,
         y: baseY,
+        length: 0,
         lockedAxis: null,
         angleLabel: null,
       })
-      // Hide the preview until the next `onGridMove` writes the
-      // new segment's geometry. Without this the prior segment's
-      // BoxGeometry stays visible for a frame on top of the
-      // freshly-committed real wall, producing a brief
-      // double-paint at the new wall's position.
-      if (wallPreviewRef.current) {
-        wallPreviewRef.current.visible = false
-      }
+      // Drop the draft slab until the next move, so the prior segment's glass
+      // doesn't sit on the freshly committed wall.
       setDraftMeasurement(null)
     }
 
@@ -942,7 +872,7 @@ export const WallTool: React.FC = () => {
       } else {
         return
       }
-      setTypedLength(typedBuffer)
+      publishReadout()
       event.preventDefault()
       event.stopPropagation()
     }
@@ -971,13 +901,20 @@ export const WallTool: React.FC = () => {
       ) {
         return
       }
-      if (buildingState.current === 0) chainFirstVertex.current = new Vector3(x, gridY, z)
+      if (buildingState.current === 0) {
+        chainFirstVertex.current = new Vector3(x, gridY, z)
+        chainLength = 0
+      } else {
+        // The floor plan committed the live segment and chains from its end.
+        chainLength += segmentLength
+      }
+      segmentLength = 0
       startingPoint.current.set(x, gridY, z)
       endingPoint.current.copy(startingPoint.current)
       buildingState.current = 1
-      if (wallPreviewRef.current) wallPreviewRef.current.visible = false
-      setAxisGuide({ origin: [x, z], y: gridY, lockedAxis: null, angleLabel: null })
+      setAxisGuide({ origin: [x, z], y: gridY, length: 0, lockedAxis: null, angleLabel: null })
       setDraftMeasurement(null)
+      publishReadout()
     })
 
     emitter.on('grid:move', onGridMove)
@@ -994,62 +931,36 @@ export const WallTool: React.FC = () => {
       useAlignmentGuides.getState().clear()
       useWallSnapIndicator.getState().clear()
       useSegmentDraftChain.getState().clear('wall')
+      useDraftReadout.getState().set(null)
     }
   }, [unit])
 
   return (
     <group>
-      <WallAxisGuides
-        guide={axisGuide}
-        labelColor={measurementColor}
-        labelShadowColor={measurementShadowColor}
-      />
-      <CursorSphere color={DRAFT_WALL_COLOR} height={previewHeight} pillar ref={cursorRef} />
-      <mesh layers={EDITOR_LAYER} ref={wallPreviewRef} renderOrder={1} visible={false}>
-        <shapeGeometry />
-        <meshBasicMaterial
-          color={DRAFT_WALL_COLOR}
-          depthTest={false}
-          depthWrite={false}
-          opacity={DRAFT_WALL_OPACITY}
-          side={DoubleSide}
-          transparent
-        />
-        <lineSegments
-          frustumCulled={false}
-          layers={EDITOR_LAYER}
-          name={DRAFT_GLOW_NAME}
-          renderOrder={2}
-        >
-          <lineBasicNodeMaterial
-            color={DRAFT_WALL_GLOW_COLOR}
-            depthTest={false}
-            depthWrite={false}
-            opacity={0.95}
-            transparent
-          />
-        </lineSegments>
-      </mesh>
+      <WallAxisGuides guide={axisGuide} />
+      <CursorSphere height={previewHeight} pillar pillarWidth={previewThickness} ref={cursorRef} />
       {draftMeasurement && (
         <>
-          <DraftLinearDimensionGuide color={measurementColor} measurement={draftMeasurement} />
-          <DraftMeasurementLabel
-            color={typedLength ? '#8b82ff' : measurementColor}
-            label={
-              typedLength ? `${typedLength}${typedUnitSuffix} ⏎` : draftMeasurement.lengthLabel
-            }
-            position={draftMeasurement.lengthPosition}
-            shadowColor={measurementShadowColor}
+          <DraftWallSlab
+            baseY={startingPoint.current.y}
+            end={draftMeasurement.end}
+            height={previewHeight}
+            start={draftMeasurement.start}
+            thickness={previewThickness}
           />
+          {showDimensions && (
+            <DraftLinearDimensionGuide color={measurementColor} measurement={draftMeasurement} />
+          )}
+          {draftMeasurement.lengthLabel && (
+            <DraftMeasurementLabel
+              label={draftMeasurement.lengthLabel}
+              position={draftMeasurement.lengthPosition}
+            />
+          )}
           {draftMeasurement.angleLabels.map((angleLabel) => (
             <group key={angleLabel.id}>
               <DraftAngleArc arc={angleLabel.arc} color={measurementColor} />
-              <DraftMeasurementLabel
-                color={measurementColor}
-                label={angleLabel.label}
-                position={angleLabel.position}
-                shadowColor={measurementShadowColor}
-              />
+              <DraftMeasurementLabel label={angleLabel.label} position={angleLabel.position} />
             </group>
           ))}
         </>
@@ -1114,75 +1025,21 @@ function DraftLinearDimensionGuide({
   )
 }
 
-function RectanglePreviewWall({
-  end,
-  height,
-  start,
-  thickness,
-}: {
-  end: WallPlanPoint
-  height: number
-  start: WallPlanPoint
-  thickness: number
-}) {
-  const dx = end[0] - start[0]
-  const dz = end[1] - start[1]
-  const length = Math.hypot(dx, dz)
-  const glow = useMemo(
-    () => (length < 0.01 ? null : draftWallGlowGeometry(length, height, thickness)),
-    [length, height, thickness],
-  )
-  useEffect(() => () => glow?.dispose(), [glow])
-  if (!glow) return null
-  return (
-    <mesh
-      layers={EDITOR_LAYER}
-      position={[(start[0] + end[0]) / 2, height / 2, (start[1] + end[1]) / 2]}
-      renderOrder={1}
-      rotation={[0, -Math.atan2(dz, dx), 0]}
-    >
-      <boxGeometry args={[length, height, thickness]} />
-      <meshBasicMaterial
-        color={DRAFT_WALL_COLOR}
-        depthTest={false}
-        depthWrite={false}
-        opacity={DRAFT_WALL_OPACITY}
-        transparent
-      />
-      <lineSegments frustumCulled={false} geometry={glow} layers={EDITOR_LAYER} renderOrder={2}>
-        <lineBasicNodeMaterial
-          color={DRAFT_WALL_GLOW_COLOR}
-          depthTest={false}
-          depthWrite={false}
-          opacity={0.95}
-          transparent
-        />
-      </lineSegments>
-    </mesh>
-  )
-}
-
-/** inZOI draws the wall being placed as a pale blue glass pane with glowing white edges. */
-const DRAFT_WALL_COLOR = '#8fdcf7'
-const DRAFT_WALL_OPACITY = 0.55
-const DRAFT_WALL_GLOW_COLOR = '#ffffff'
 /** inZOI's rectangle-room preview fills the floor it will enclose. */
-const DRAFT_FLOOR_COLOR = '#38d6f2'
+const DRAFT_FLOOR_COLOR = '#5b7395'
 
 const RectangleRoomTool: React.FC = () => {
   const unit = useViewer((state) => state.unit)
-  const isDark = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
   const defaults = useEditor((state) => state.toolDefaults.wall)
   const height = typeof defaults?.height === 'number' ? defaults.height : WALL_HEIGHT
   const thickness =
     typeof defaults?.thickness === 'number' ? defaults.thickness : DRAFT_WALL_THICKNESS
   const [start, setStart] = useState<WallPlanPoint | null>(null)
   const [end, setEnd] = useState<WallPlanPoint | null>(null)
+  const [baseY, setBaseY] = useState(0)
   const cursorRef = useRef<Group>(null)
   const startRef = useRef<WallPlanPoint | null>(null)
   const endRef = useRef<WallPlanPoint | null>(null)
-  const color = isDark ? '#ffffff' : '#111111'
-  const shadowColor = isDark ? '#111111' : '#ffffff'
 
   // Clear the rectangle mode only when the tool is really put away — a remount
   // (StrictMode's double effect run) keeps the tool active and must keep it.
@@ -1197,6 +1054,9 @@ const RectangleRoomTool: React.FC = () => {
   )
 
   useEffect(() => {
+    // True while the rectangle on screen is the floor plan's (split view): it
+    // is previewed here but the floor plan commits it.
+    let mirroring = false
     const snap = (event: GridEvent): WallPlanPoint => {
       const point: WallPlanPoint = [event.localPosition[0], event.localPosition[2]]
       return snapWallDraftPointDetailed({
@@ -1205,28 +1065,58 @@ const RectangleRoomTool: React.FC = () => {
         magnetic: isMagneticSnapActive(),
       }).point
     }
-    const clear = () => {
-      startRef.current = null
-      endRef.current = null
-      setStart(null)
-      setEnd(null)
+    const publishReadout = () => {
+      const first = startRef.current
+      const last = endRef.current
+      const width = first && last ? Math.abs(last[0] - first[0]) : 0
+      const depth = first && last ? Math.abs(last[1] - first[1]) : 0
+      useDraftReadout
+        .getState()
+        .set(
+          width >= 0.01 || depth >= 0.01
+            ? `${formatLinearMeasurement(width, unit)} × ${formatLinearMeasurement(depth, unit)}`
+            : null,
+        )
     }
-    // The floor plan owns (and previews) the rectangles drawn in it.
+    const setDraft = (first: WallPlanPoint | null, last: WallPlanPoint | null) => {
+      startRef.current = first
+      endRef.current = last
+      setStart(first)
+      setEnd(last)
+      publishReadout()
+    }
+    const clear = () => {
+      mirroring = false
+      setDraft(null, null)
+    }
     const onMove = (event: GridEvent) => {
-      if (isFloorplanInputEvent(event.nativeEvent)) return
+      setBaseY(event.localPosition[1])
+      if (isFloorplanInputEvent(event.nativeEvent)) {
+        // The floor plan resolved this point already; mirror its open rectangle.
+        const planStart = useSegmentDraftChain.getState().wall
+        if (startRef.current && !mirroring) return
+        if (!planStart) {
+          if (mirroring) clear()
+          return
+        }
+        mirroring = true
+        cursorRef.current?.position.set(...event.localPosition)
+        setDraft(planStart, [event.localPosition[0], event.localPosition[2]])
+        return
+      }
       const point = snap(event)
+      cursorRef.current?.position.set(point[0], event.localPosition[1], point[1])
+      if (mirroring) return
       endRef.current = point
       setEnd(point)
-      cursorRef.current?.position.set(point[0], event.localPosition[1], point[1])
+      publishReadout()
     }
     const onClick = (event: GridEvent) => {
       if (isFloorplanInputEvent(event.nativeEvent)) return
+      if (mirroring) clear()
       const point = snap(event)
       if (!startRef.current) {
-        startRef.current = point
-        endRef.current = point
-        setStart(point)
-        setEnd(point)
+        setDraft(point, point)
         triggerSFX('sfx:structure-build-start')
         return
       }
@@ -1240,15 +1130,29 @@ const RectangleRoomTool: React.FC = () => {
       markToolCancelConsumed()
       clear()
     }
+    // The floor plan publishes its rectangle's first corner (and null once it
+    // commits or cancels).
+    const unsubscribeChain = useSegmentDraftChain.subscribe((state, prevState) => {
+      if (state.wall === prevState.wall) return
+      if (!state.wall) {
+        if (mirroring) clear()
+        return
+      }
+      if (startRef.current && !mirroring) return
+      mirroring = true
+      setDraft(state.wall, state.wall)
+    })
     emitter.on('grid:move', onMove)
     emitter.on('grid:click', onClick)
     emitter.on('tool:cancel', onCancel)
     return () => {
+      unsubscribeChain()
       emitter.off('grid:move', onMove)
       emitter.off('grid:click', onClick)
       emitter.off('tool:cancel', onCancel)
+      useDraftReadout.getState().set(null)
     }
-  }, [])
+  }, [thickness, unit])
 
   const segments =
     start && end
@@ -1257,30 +1161,32 @@ const RectangleRoomTool: React.FC = () => {
             [corner, corners[(index + 1) % corners.length]!] as [WallPlanPoint, WallPlanPoint],
         )
       : []
+  const width = start && end ? Math.abs(end[0] - start[0]) : 0
+  const depth = start && end ? Math.abs(end[1] - start[1]) : 0
 
   return (
     <group>
-      <CursorSphere color={DRAFT_WALL_COLOR} height={height} pillar ref={cursorRef} />
-      {start && end && (
+      <CursorSphere height={height} pillar pillarWidth={thickness} ref={cursorRef} />
+      {start && end && width >= 0.01 && depth >= 0.01 && (
         <mesh
           layers={EDITOR_LAYER}
-          position={[(start[0] + end[0]) / 2, 0.02, (start[1] + end[1]) / 2]}
+          position={[(start[0] + end[0]) / 2, baseY + 0.02, (start[1] + end[1]) / 2]}
           renderOrder={1}
           rotation={[-Math.PI / 2, 0, 0]}
         >
-          <planeGeometry args={[Math.abs(end[0] - start[0]), Math.abs(end[1] - start[1])]} />
+          <planeGeometry args={[width, depth]} />
           <meshBasicMaterial
             color={DRAFT_FLOOR_COLOR}
-            depthTest={false}
             depthWrite={false}
-            opacity={0.45}
+            opacity={0.6}
             side={DoubleSide}
             transparent
           />
         </mesh>
       )}
       {segments.map(([segmentStart, segmentEnd], index) => (
-        <RectanglePreviewWall
+        <DraftWallSlab
+          baseY={baseY}
           end={segmentEnd}
           height={height}
           key={index}
@@ -1288,20 +1194,16 @@ const RectangleRoomTool: React.FC = () => {
           thickness={thickness}
         />
       ))}
-      {start && end && Math.abs(end[0] - start[0]) >= 0.01 && (
+      {start && end && width >= DRAFT_LENGTH_LABEL_MIN && (
         <DraftMeasurementLabel
-          color={color}
-          label={formatLinearMeasurement(Math.abs(end[0] - start[0]), unit)}
-          position={[(start[0] + end[0]) / 2, height + DRAFT_LABEL_Y_OFFSET, start[1]]}
-          shadowColor={shadowColor}
+          label={formatLinearMeasurement(width, unit)}
+          position={[(start[0] + end[0]) / 2, baseY + DRAFT_LENGTH_LABEL_Y, start[1]]}
         />
       )}
-      {start && end && Math.abs(end[1] - start[1]) >= 0.01 && (
+      {start && end && depth >= DRAFT_LENGTH_LABEL_MIN && (
         <DraftMeasurementLabel
-          color={color}
-          label={formatLinearMeasurement(Math.abs(end[1] - start[1]), unit)}
-          position={[end[0], height + DRAFT_LABEL_Y_OFFSET, (start[1] + end[1]) / 2]}
-          shadowColor={shadowColor}
+          label={formatLinearMeasurement(depth, unit)}
+          position={[end[0], baseY + DRAFT_LENGTH_LABEL_Y, (start[1] + end[1]) / 2]}
         />
       )}
     </group>
@@ -1313,15 +1215,7 @@ const WallToolRouter: React.FC = () => {
   return placementMode === 'rectangle-room' ? <RectangleRoomTool /> : <WallTool />
 }
 
-function WallAxisGuides({
-  guide,
-  labelColor,
-  labelShadowColor,
-}: {
-  guide: DraftAxisGuideState
-  labelColor: string
-  labelShadowColor: string
-}) {
+function WallAxisGuides({ guide }: { guide: DraftAxisGuideState }) {
   if (!guide) return null
 
   const [x, z] = guide.origin
@@ -1330,17 +1224,15 @@ function WallAxisGuides({
     <>
       {guide.lockedAxis && (
         <group position={[x, guide.y + DRAFT_AXIS_GUIDE_Y_OFFSET, z]}>
-          <WallAxisGuideLine axis={guide.lockedAxis} />
+          <WallAxisGuideLine axis={guide.lockedAxis} length={guide.length} />
         </group>
       )}
       {guide.angleLabel && (
         <>
           <DraftAngleArc arc={guide.angleLabel.arc} color="#818cf8" />
           <DraftMeasurementLabel
-            color={labelColor}
             label={guide.angleLabel.label}
             position={guide.angleLabel.position}
-            shadowColor={labelShadowColor}
           />
         </>
       )}
@@ -1348,22 +1240,23 @@ function WallAxisGuides({
   )
 }
 
-function WallAxisGuideLine({ axis }: { axis: 'x' | 'z' }) {
+/** A thin pale line along the locked axis, a few metres past both ends. */
+function WallAxisGuideLine({ axis, length }: { axis: 'x' | 'z'; length: number }) {
   return (
+    // A unit box scaled to size, so a pointer move doesn't rebuild the geometry.
     <mesh
       frustumCulled={false}
       layers={EDITOR_LAYER}
       renderOrder={0}
       rotation={[0, axis === 'z' ? Math.PI / 2 : 0, 0]}
+      scale={[Math.max(6, 2 * length + 4), DRAFT_AXIS_GUIDE_HEIGHT, DRAFT_AXIS_GUIDE_WIDTH]}
     >
-      <boxGeometry
-        args={[DRAFT_AXIS_GUIDE_LENGTH, DRAFT_AXIS_GUIDE_HEIGHT, DRAFT_AXIS_GUIDE_WIDTH]}
-      />
+      <boxGeometry />
       <meshBasicMaterial
-        color={DRAFT_WALL_COLOR}
+        color="#e0e8f0"
         depthTest={false}
         depthWrite={false}
-        opacity={0.9}
+        opacity={0.7}
         transparent
       />
     </mesh>
@@ -1407,15 +1300,11 @@ function DraftAngleArc({ arc, color }: { arc: DraftAngleLabel['arc']; color: str
 }
 
 function DraftMeasurementLabel({
-  color,
   label,
   position,
-  shadowColor,
 }: {
-  color: string
   label: string
   position: [number, number, number]
-  shadowColor: string
 }) {
   return (
     <Html
@@ -1424,13 +1313,7 @@ function DraftMeasurementLabel({
       style={{ pointerEvents: 'none', userSelect: 'none' }}
       zIndexRange={[100, 0]}
     >
-      {/* inZOI: a small translucent pill ("9.25m") on the draft. */}
-      <div
-        className="whitespace-nowrap rounded-full px-2 py-0.5 font-semibold text-[12px] tabular-nums shadow-[0_1px_4px_rgba(0,0,0,0.15)] backdrop-blur-sm"
-        style={{ color, background: `${shadowColor}d9` }}
-      >
-        {label}
-      </div>
+      <MeasurementChip label={label} />
     </Html>
   )
 }

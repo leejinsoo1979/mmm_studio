@@ -26,30 +26,35 @@ import {
 } from '@pascal-app/editor'
 import { type CabinetNode, resolveCabinetNode } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
-import { Check } from 'lucide-react'
-import { type CSSProperties, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
-import { ColorPicker } from './color-picker'
+import { ColorSection } from './customize/color-section'
+import { ColumnDivider, CustomizeDock } from './customize/customize-dock'
+import { MaterialColumn } from './customize/material-column'
+import { resolveSchema, withColor } from './customize/material-schema'
+import { MaterialSphere, type SphereMaterial } from './customize/material-sphere'
+import { PaintHints } from './customize/paint-hints'
+import { PaintPickPin } from './customize/paint-pick-pin'
+import { PartList } from './customize/part-list'
+import { PropertiesSection } from './customize/properties-section'
 
 /**
  * inZOI-style material palette. The paint button on the selected object's
- * action menu opens it: the parts that can be painted on the left, then
- * colour / wood / tile / stone swatches. Hovering a swatch previews it on the
- * model, clicking applies it, ✓ or Esc closes.
+ * action menu opens it: the parts that can be painted as pills at the bottom
+ * left, then one compact card with the colour picker, 속성 sliders and the
+ * finishes. Hovering a swatch previews it on the model, clicking applies it,
+ * 확인 or Esc closes.
  */
 
 type Section = { title: string; categories: MaterialCategory[] }
 
 const SECTIONS: Section[] = [
-  { title: '색상', categories: ['colors'] },
+  { title: '페인트', categories: ['colors'] },
   { title: '나무', categories: ['wood'] },
   { title: '타일', categories: ['tile'] },
   { title: '돌·벽돌', categories: ['stone', 'brick', 'concrete'] },
   { title: '기타', categories: ['metal', 'fabric', 'leather', 'glass', 'ground', 'roofing'] },
 ]
-
-/** The palette tab that holds the free colour picker. */
-const CUSTOM_TAB = '직접 고르기'
 
 const SURFACE_BY_KIND: Record<string, MaterialSurface> = {
   wall: 'wall',
@@ -90,27 +95,19 @@ const SLOT_LABELS: Record<string, string> = {
 type Target = {
   key: string
   label: string
+  /** The applied finish as a ref (`library:` / `scene:`) or `#hex`, for matching swatches. */
   current?: string
+  /** The applied finish as an editable schema (null when it can't be tuned). */
+  base: MaterialSchema | null
   apply: (material: MaterialCatalogItem) => void
   /** Show the material on the model without committing; returns the restore. */
   preview?: (material: MaterialCatalogItem) => (() => void) | null
-  /** A one-off colour from the picker (roughness from the 광택 slider). */
-  applyColor?: (hex: string, roughness: number) => void
-  previewColor?: (hex: string, roughness: number) => (() => void) | null
-}
-
-function customColorMaterial(hex: string, roughness: number): MaterialSchema {
-  return {
-    preset: 'custom',
-    properties: {
-      color: hex,
-      roughness,
-      metalness: 0,
-      opacity: 1,
-      transparent: false,
-      side: 'front',
-    },
-  }
+  applyColor: (hex: string) => void
+  previewColor?: (hex: string) => (() => void) | null
+  applySchema?: (material: MaterialSchema) => void
+  previewSchema?: (material: MaterialSchema) => (() => void) | null
+  /** Back to the kind's default finish. */
+  clear?: () => void
 }
 
 /** Kinds whose paint can spread to the whole room (walls, floors). */
@@ -119,9 +116,13 @@ function offersRoomScope(node: AnyNode): boolean {
 }
 
 function slotTargets(node: AnyNode, slotIds: string[], roomScope: boolean): Target[] {
-  const paint = nodeRegistry.get(node.type)?.capabilities?.paint
+  const def = nodeRegistry.get(node.type)
+  const paint = def?.capabilities?.paint
   if (!paint) return []
   const slots = (node as { slots?: Record<string, string> }).slots
+  const defaults = new Map(
+    (def.capabilities?.slots?.(node) ?? []).map((slot) => [slot.slotId, slot.default]),
+  )
   // inZOI's 방 단위: the same face of every wall (or floor) around the room.
   const spread = (role: string) =>
     roomScope
@@ -164,15 +165,31 @@ function slotTargets(node: AnyNode, slotIds: string[], roomScope: boolean): Targ
       for (const restore of restores) restore()
     }
   }
-  return slotIds.map((role) => ({
-    key: role,
-    label: SLOT_LABELS[role] ?? slotLabelFromId(role),
-    current: slots?.[role],
-    apply: (material) => commit(role, undefined, toLibraryMaterialRef(material.id)),
-    preview: (material) => preview(role, undefined, toLibraryMaterialRef(material.id)),
-    applyColor: (hex, roughness) => commit(role, customColorMaterial(hex, roughness)),
-    previewColor: (hex, roughness) => preview(role, customColorMaterial(hex, roughness)),
-  }))
+  return slotIds.map((role) => {
+    // The finish the face shows now: its slot, a pre-migration inline
+    // material, else the kind's declared default.
+    const effective = slots?.[role]
+      ? null
+      : paint.getEffectiveMaterial?.({ node, role, nodes: useScene.getState().nodes })
+    const current =
+      slots?.[role] ??
+      effective?.materialPreset ??
+      (effective?.material ? undefined : defaults.get(role))
+    const base = effective?.material ?? resolveSchema(current)
+    return {
+      key: role,
+      label: SLOT_LABELS[role] ?? slotLabelFromId(role),
+      current,
+      base,
+      apply: (material) => commit(role, undefined, toLibraryMaterialRef(material.id)),
+      preview: (material) => preview(role, undefined, toLibraryMaterialRef(material.id)),
+      applyColor: (hex) => commit(role, withColor(base, hex)),
+      previewColor: (hex) => preview(role, withColor(base, hex)),
+      applySchema: (material) => commit(role, material),
+      previewSchema: (material) => preview(role, material),
+      clear: () => commit(role, undefined, undefined),
+    }
+  })
 }
 
 function cabinetTargets(node: AnyNode): Target[] {
@@ -184,6 +201,7 @@ function cabinetTargets(node: AnyNode): Target[] {
       key: 'body',
       label: '몸통',
       current: cabinet.bodyColor,
+      base: null,
       apply: (m) => m.previewColor && set({ bodyColor: m.previewColor }),
       applyColor: (hex) => set({ bodyColor: hex }),
     },
@@ -191,6 +209,7 @@ function cabinetTargets(node: AnyNode): Target[] {
       key: 'front',
       label: '도어',
       current: cabinet.frontColor,
+      base: null,
       apply: (m) => m.previewColor && set({ frontColor: m.previewColor }),
       applyColor: (hex) => set({ frontColor: hex }),
     },
@@ -245,41 +264,66 @@ function isCurrent(target: Target | undefined, material: MaterialCatalogItem) {
   )
 }
 
-function swatchStyle(material: MaterialCatalogItem) {
-  return material.previewThumbnailUrl
-    ? {
-        backgroundImage: `url(${material.previewThumbnailUrl})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-      }
-    : { backgroundColor: material.previewColor }
+type HistoryMark = { entry: unknown; length: number }
+
+function markHistory(): HistoryMark {
+  const past = useScene.temporal.getState().pastStates
+  return { entry: past[past.length - 1], length: past.length }
+}
+
+/**
+ * Undo steps recorded since `mark`, found by the entry that was on top then
+ * (the history is capped, so its length alone stops growing).
+ */
+function stepsSince(mark: HistoryMark): number {
+  const past = useScene.temporal.getState().pastStates
+  const index = mark.entry === undefined ? -1 : past.lastIndexOf(mark.entry as never)
+  if (index >= 0) return past.length - 1 - index
+  // Undone past the mark: nothing of ours is left. Otherwise it fell off the cap.
+  return past.length < mark.length ? 0 : past.length
+}
+
+/** Undo steps since the card opened, so 처음으로 되돌리기 can enable itself. */
+function useStepsSince(mark: HistoryMark) {
+  return useSyncExternalStore(
+    (onChange) => useScene.temporal.subscribe(onChange),
+    () => stepsSince(mark),
+    () => 0,
+  )
 }
 
 export function MaterialPalette() {
   const [nodeId, setNodeId] = useState<AnyNodeId | null>(null)
   const [targetKey, setTargetKey] = useState<string | null>(null)
   const [hovered, setHovered] = useState<MaterialCatalogItem | null>(null)
-  // Swatch under the pointer, for inZOI's name bubble above the card.
+  // Swatch under the pointer: inZOI's name + sphere card over the header tab.
   const [bubble, setBubble] = useState<{
     x: number
-    y: number
-    label: string
-    style: CSSProperties
+    bottom: number
+    material: MaterialCatalogItem
   } | null>(null)
-  const [gloss, setGloss] = useState(50)
   const [roomScope, setRoomScope] = useState(false)
-  const [tab, setTab] = useState<string | null>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const node = useScene((s) => (nodeId ? (s.nodes[nodeId] ?? null) : null))
   const selectedIds = useViewer((s) => s.selection.selectedIds)
   const moving = useMovingNode()
   const restorePreview = useRef<(() => void) | null>(null)
+  const faceClickAt = useRef(Number.NEGATIVE_INFINITY)
+  // Where the history stood when the card opened, and each part's colour then.
+  const openedAt = useRef<HistoryMark>({ entry: undefined, length: 0 })
+  const originals = useRef(new Map<string, string | undefined>())
+  const stepsSinceOpen = useStepsSince(openedAt.current)
 
   useEffect(() => {
     useEditor.getState().setCanPaintNode(canPaintNode)
     const open = (target: AnyNode) => {
       setNodeId(target.id as AnyNodeId)
       setTargetKey(null)
+      // Opening another object starts on the single-face brush, so a roller
+      // armed earlier can't repaint a whole room unnoticed.
+      setRoomScope(false)
+      openedAt.current = markHistory()
+      originals.current.clear()
     }
     emitter.on('selection:paint-node' as never, open as never)
     return () => {
@@ -295,6 +339,11 @@ export function MaterialPalette() {
     setBubble(null)
   }
 
+  const showPreview = (restore: (() => void) | null | undefined) => {
+    restorePreview.current?.()
+    restorePreview.current = restore ?? null
+  }
+
   const close = () => {
     endPreview()
     setNodeId(null)
@@ -302,7 +351,16 @@ export function MaterialPalette() {
 
   // The palette belongs to the selected object: closes with the selection.
   useEffect(() => {
-    if (nodeId && (selectedIds.length !== 1 || selectedIds[0] !== nodeId || moving)) close()
+    if (!nodeId) return
+    // Clicking the object picks a part here; select mode's click-to-pick-up
+    // would carry it off (and drop the selection) instead, so undo both.
+    if (moving?.id === nodeId && performance.now() - faceClickAt.current < 500) {
+      emitter.emit('tool:cancel')
+      useEditor.getState().setMovingNode(null)
+      useViewer.getState().setSelection({ selectedIds: [nodeId] })
+      return
+    }
+    if (selectedIds.length !== 1 || selectedIds[0] !== nodeId || moving) close()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIds, moving, nodeId])
 
@@ -330,240 +388,156 @@ export function MaterialPalette() {
     KIND_NAMES[node.type] ||
     def?.presentation?.label ||
     node.type
-  const all = SECTIONS.flatMap((section) => materialsFor(node, section))
-  // A colour picked outside the palette (a cabinet's default hex) has no swatch.
-  const current =
-    all.find((m) => isCurrent(target, m)) ??
-    (target?.current?.startsWith('#')
-      ? ({
-          id: 'custom',
-          label: target.current,
-          previewColor: target.current,
-        } as MaterialCatalogItem)
-      : undefined)
-  const shown = hovered ?? current
-
   const sections = target
     ? SECTIONS.map((section) => ({ ...section, materials: materialsFor(node, section) })).filter(
         (section) => section.materials.length > 0,
       )
     : []
-  const tabs = [
-    ...sections.map((section) => section.title),
-    ...(target?.applyColor ? [CUSTOM_TAB] : []),
-  ]
-  const activeTab = tab && tabs.includes(tab) ? tab : tabs[0]
-  const activeSection = sections.find((section) => section.title === activeTab)
+  const currentItem = sections.flatMap((s) => s.materials).find((m) => isCurrent(target, m))
+  const currentHex = target?.current?.startsWith('#')
+    ? target.current
+    : (target?.base?.properties?.color ?? currentItem?.previewColor)
+  const current: SphereMaterial | undefined = currentItem ?? {
+    previewColor: currentHex,
+    previewThumbnailUrl: target?.base?.texture?.url,
+  }
+  const shown = hovered ?? current
+  const originalKey = target ? `${node.id}:${target.key}` : ''
+  if (target && !originals.current.has(originalKey)) {
+    originals.current.set(originalKey, currentHex)
+  }
+  const original = originals.current.get(originalKey)
+  const hasPartList = targets.length > 1
+
+  const reset = () => {
+    endPreview()
+    const steps = stepsSince(openedAt.current)
+    if (steps <= 0) return
+    useScene.temporal.getState().undo(steps)
+    const state = useScene.getState()
+    for (const id of Object.keys(state.nodes)) state.markDirty(id as AnyNodeId)
+  }
 
   return (
-    <div
-      className="pointer-events-auto fixed bottom-[68px] z-50 flex w-[640px] max-w-[calc(100vw-var(--viewer-left-inset,0px)-32px)] -translate-x-1/2 flex-col gap-1.5 text-neutral-800 dark:text-neutral-100"
-      onPointerDown={(e) => e.stopPropagation()}
-      // Centred over the free scene strip, like inZOI's customize card.
-      style={{
-        left: 'calc(var(--viewer-left-inset, 0px) + (100% - var(--viewer-left-inset, 0px)) / 2)',
-      }}
-    >
-      <div className="flex items-center justify-between gap-2">
-        {/* inZOI's customize tabs: 외형 hands over to the object's inspector. */}
-        <div className="flex items-center rounded-full bg-white/95 p-0.5 shadow-[0_4px_16px_rgba(0,0,0,0.16)] dark:bg-neutral-900/95">
-          <button
-            className="rounded-full px-3 py-1 font-medium text-[11px] text-neutral-500 transition-colors hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100"
-            onClick={() => {
-              close()
-              useInspectorCollapsed.getState().setCollapsed(false)
-            }}
-            type="button"
-          >
-            외형
-          </button>
-          <span className="rounded-full bg-sky-400 px-3 py-1 font-semibold text-[11px] text-white">
-            색상과 재질
-          </span>
-        </div>
-        <div className="flex min-w-0 items-center gap-1.5 rounded-full bg-white/95 py-0.5 pr-0.5 pl-3 shadow-[0_4px_16px_rgba(0,0,0,0.16)] dark:bg-neutral-900/95">
-          <span className="whitespace-nowrap text-[11px] text-neutral-500 dark:text-neutral-400">
-            {hovered ? '미리보기' : '현재'}
-          </span>
-          <span
-            className="size-4 shrink-0 rounded-full border border-black/10 bg-neutral-200 dark:bg-neutral-700"
-            style={shown ? swatchStyle(shown) : undefined}
-          />
-          <span className="max-w-36 truncate font-medium text-[11px]">
-            {shown ? materialKoName(shown) : '기본'}
-          </span>
-          <button
-            className="ml-1 flex h-6 items-center gap-1 rounded-full bg-sky-500 px-2.5 font-semibold text-[11px] text-white transition-colors hover:bg-sky-600"
-            onClick={close}
-            title="확인 (Esc)"
-            type="button"
-          >
-            <Check className="h-3 w-3" strokeWidth={3} />
-            확인
-          </button>
-        </div>
-      </div>
-      <div
-        className="flex overflow-hidden rounded-2xl bg-white/95 shadow-[0_8px_28px_rgba(0,0,0,0.18)] backdrop-blur-md dark:bg-neutral-900/95"
-        ref={cardRef}
+    <>
+      {hasPartList && (
+        <PartList
+          activeKey={target?.key}
+          name={name}
+          onPick={(key) => {
+            endPreview()
+            setTargetKey(key)
+          }}
+          parts={targets}
+        />
+      )}
+      <CustomizeDock
+        canReset={stepsSinceOpen > 0}
+        cardRef={cardRef}
+        hasPartList={hasPartList}
+        onConfirm={close}
+        onReset={reset}
+        onShape={() => {
+          close()
+          useInspectorCollapsed.getState().setCollapsed(false)
+        }}
+        previewing={!!hovered}
+        scope={
+          canSpread
+            ? {
+                room: roomScope,
+                onChange: (room) => {
+                  endPreview()
+                  setRoomScope(room)
+                },
+              }
+            : undefined
+        }
+        shown={shown}
       >
-        {/* The object and its parts (inZOI's left column). */}
-        <aside className="flex w-32 shrink-0 flex-col gap-1 border-neutral-200 border-r bg-neutral-50/80 p-2 dark:border-white/10 dark:bg-white/5">
-          <span className="truncate px-1 pb-0.5 font-semibold text-[12px]">{name}</span>
-          {targets.map((t) => (
-            <button
-              className={`truncate rounded-lg px-2 py-1 text-left text-[11px] transition-colors ${
-                t.key === target?.key
-                  ? 'bg-sky-400 font-semibold text-white'
-                  : 'text-neutral-600 hover:bg-neutral-200/70 dark:text-neutral-300 dark:hover:bg-white/10'
-              }`}
-              key={t.key}
-              onClick={() => {
+        {target && (
+          <>
+            <ColorSection
+              onClear={
+                target.clear &&
+                (() => {
+                  endPreview()
+                  target.clear?.()
+                })
+              }
+              onCommit={(hex) => {
                 endPreview()
-                setTargetKey(t.key)
+                target.applyColor(hex)
+                triggerSFX('sfx:menu-click')
               }}
-              type="button"
-            >
-              {t.label}
-            </button>
-          ))}
-          {targets.length === 0 && (
-            <span className="px-1 text-[10.5px] text-neutral-500">
-              칠할 수 있는 부분이 없습니다
-            </span>
-          )}
-          {canSpread && (
-            <div className="mt-auto flex rounded-lg bg-neutral-200/70 p-0.5 dark:bg-white/10">
-              {(
-                [
-                  [false, node.type === 'wall' ? '이 벽만' : '이 바닥만'],
-                  [true, '방 전체'],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  aria-pressed={roomScope === value}
-                  className={`flex-1 rounded-md py-1 text-[10.5px] transition-colors ${
-                    roomScope === value
-                      ? 'bg-white font-semibold text-sky-700 shadow-sm dark:bg-neutral-800 dark:text-sky-300'
-                      : 'text-neutral-500 dark:text-neutral-400'
-                  }`}
-                  key={label}
-                  onClick={() => {
-                    endPreview()
-                    setRoomScope(value)
-                  }}
-                  type="button"
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-        </aside>
-        <div className="flex min-w-0 flex-1 flex-col gap-2 p-2.5">
-          <div className="no-scrollbar flex gap-1 overflow-x-auto">
-            {tabs.map((title) => (
-              <button
-                className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] transition-colors ${
-                  title === activeTab
-                    ? 'bg-neutral-800 font-semibold text-white dark:bg-neutral-100 dark:text-neutral-900'
-                    : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-white/10'
-                }`}
-                key={title}
-                onClick={() => {
-                  endPreview()
-                  setTab(title)
-                }}
-                type="button"
-              >
-                {title}
-              </button>
-            ))}
-          </div>
-          {target && activeSection && (
-            <div className="no-scrollbar grid h-[134px] auto-cols-max grid-flow-col grid-rows-4 gap-1.5 overflow-x-auto p-0.5">
-              {activeSection.materials.map((material) => (
-                <button
-                  aria-label={`${target.label} ${material.label}`}
-                  className={`size-7 shrink-0 rounded-full border shadow-sm transition-transform hover:scale-110 ${isCurrent(target, material) ? 'border-sky-500 ring-2 ring-sky-400' : 'border-black/10'}`}
-                  key={material.id}
-                  onClick={() => {
-                    endPreview()
-                    target.apply(material)
-                    triggerSFX('sfx:menu-click')
-                  }}
-                  onMouseEnter={(e) => {
-                    restorePreview.current?.()
-                    restorePreview.current = target.preview?.(material) ?? null
-                    setHovered(material)
-                    const card = cardRef.current?.getBoundingClientRect()
-                    const swatch = e.currentTarget.getBoundingClientRect()
-                    setBubble({
-                      x: swatch.left + swatch.width / 2,
-                      y: (card?.top ?? swatch.top) - 36,
-                      label: material.label,
-                      style: swatchStyle(material),
-                    })
-                  }}
-                  onMouseLeave={endPreview}
-                  style={swatchStyle(material)}
-                  title={material.label}
-                  type="button"
-                />
-              ))}
-            </div>
-          )}
-          {target?.applyColor && activeTab === CUSTOM_TAB && (
-            <div className="flex h-[134px] items-start gap-4 overflow-hidden p-0.5">
-              <ColorPicker
-                onCommit={(hex) => {
-                  endPreview()
-                  target.applyColor?.(hex, 1 - gloss / 100)
-                  triggerSFX('sfx:menu-click')
-                }}
-                onPreview={(hex) => {
-                  restorePreview.current?.()
-                  restorePreview.current = target.previewColor?.(hex, 1 - gloss / 100) ?? null
-                }}
-                value={
-                  target.current?.startsWith('#')
-                    ? target.current
-                    : (current?.previewColor ?? '#FFFFFF')
-                }
-              />
-              {target.previewColor && (
-                <label className="flex w-28 flex-col gap-1 text-[11px] text-neutral-600 dark:text-neutral-300">
-                  <span className="flex justify-between">
-                    광택 <span className="tabular-nums">{gloss}</span>
-                  </span>
-                  <input
-                    aria-label="광택"
-                    className="accent-sky-500"
-                    max={100}
-                    min={0}
-                    onChange={(e) => setGloss(Number(e.target.value))}
-                    type="range"
-                    value={gloss}
-                  />
-                </label>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-      {/* inZOI: the hovered material's name in a bubble over the card. */}
+              onPreview={(hex) => showPreview(target.previewColor?.(hex))}
+              original={original}
+              value={currentHex ?? '#FFFFFF'}
+            />
+            <ColumnDivider />
+            <PropertiesSection
+              base={target.applySchema ? target.base : null}
+              onApply={(material) => {
+                endPreview()
+                target.applySchema?.(material)
+              }}
+              onPreview={(material) => showPreview(target.previewSchema?.(material))}
+            />
+            <ColumnDivider />
+          </>
+        )}
+        <MaterialColumn
+          emptyText="칠할 수 있는 부분이 없습니다"
+          isSelected={(m) => hovered?.id === m.id || isCurrent(target, m)}
+          onApply={(material) => {
+            if (!target) return
+            endPreview()
+            target.apply(material)
+            triggerSFX('sfx:menu-click')
+          }}
+          onHover={(material, el) => {
+            if (!target) return
+            showPreview(target.preview?.(material))
+            setHovered(material)
+            const card = cardRef.current?.getBoundingClientRect()
+            const swatch = el.getBoundingClientRect()
+            const x = swatch.left + swatch.width / 2
+            setBubble({
+              x: card ? Math.min(Math.max(x, card.left + 62), card.right - 62) : x,
+              bottom: window.innerHeight - (card?.top ?? swatch.top) - 2,
+              material,
+            })
+          }}
+          onLeave={endPreview}
+          partLabel={target?.label ?? ''}
+          sections={sections}
+        />
+      </CustomizeDock>
+      <PaintHints wall={node.type === 'wall'} />
+      <PaintPickPin
+        node={node}
+        onFaceClick={(role) => {
+          faceClickAt.current = performance.now()
+          if (!targets.some((t) => t.key === role)) return
+          endPreview()
+          setTargetKey(role)
+        }}
+      />
+      {/* inZOI: the hovered finish's name and a large sphere, rising out of the header tab. */}
       {bubble &&
         createPortal(
           <div
-            className="-translate-x-1/2 -translate-y-full pointer-events-none fixed z-[200] flex items-center gap-2 rounded-full bg-white py-1 pr-3 pl-1 text-neutral-800 shadow-[0_6px_20px_rgba(0,0,0,0.2)] dark:bg-neutral-900 dark:text-neutral-100"
-            style={{ left: bubble.x, top: bubble.y }}
+            className="-translate-x-1/2 pointer-events-none fixed z-[200] flex w-[124px] flex-col items-center gap-1.5 rounded-[14px] bg-[#f3f3f5] px-2 pt-2 pb-2.5 shadow-[0_-4px_16px_rgba(0,0,0,0.12)] dark:bg-neutral-900"
+            style={{ left: bubble.x, bottom: bubble.bottom }}
           >
-            <span className="size-7 rounded-full border border-black/10" style={bubble.style} />
-            <span className="whitespace-nowrap font-medium text-[12px]">{bubble.label}</span>
+            <span className="max-w-full truncate text-[12px] text-[#333] dark:text-neutral-100">
+              {bubble.material.label}
+            </span>
+            <MaterialSphere material={bubble.material} size={56} />
           </div>,
           document.body,
         )}
-    </div>
+    </>
   )
 }
 
