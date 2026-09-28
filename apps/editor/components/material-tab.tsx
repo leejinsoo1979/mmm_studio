@@ -28,13 +28,13 @@ export function MaterialTab() {
           </span>
           <div>
             <p className="text-muted-foreground text-[10px] uppercase tracking-[0.16em]">
-              Surface editor
+              표면 편집
             </p>
-            <h1 className="font-bold text-3xl tracking-[-0.03em]">Material</h1>
+            <h1 className="font-bold text-3xl tracking-[-0.03em]">재질</h1>
           </div>
         </div>
         <p className="mt-3 text-muted-foreground text-xs leading-5">
-          Choose a material, then paint a surface in the scene.
+          재질을 고른 뒤 장면의 면을 클릭해 칠합니다.
         </p>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">

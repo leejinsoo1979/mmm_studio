@@ -10,6 +10,7 @@ import {
 } from '@pascal-app/core'
 import { useEffect, useState } from 'react'
 import { triggerSFX } from '../../../lib/sfx-bus'
+import { MATERIAL_CATEGORY_KO, materialKoName } from '../../../lib/material-ko-names'
 
 type MaterialPickerProps = {
   selectedMaterialPreset?: string
@@ -20,7 +21,7 @@ type MaterialPickerProps = {
 }
 
 function getCategoryLabel(category: (typeof MATERIAL_CATEGORIES)[number]) {
-  return category.charAt(0).toUpperCase() + category.slice(1)
+  return MATERIAL_CATEGORY_KO[category] ?? category.charAt(0).toUpperCase() + category.slice(1)
 }
 
 /**
@@ -104,7 +105,7 @@ export function MaterialPicker({
               <div className="relative aspect-square w-full overflow-hidden rounded-lg">
                 {item.previewThumbnailUrl ? (
                   <img
-                    alt={item.label}
+                    alt={materialKoName(item)}
                     className="h-full w-full object-cover"
                     src={item.previewThumbnailUrl}
                   />
@@ -116,7 +117,7 @@ export function MaterialPicker({
                 )}
               </div>
               <span className="truncate px-0.5 text-left font-medium text-[11px] text-muted-foreground group-hover:text-foreground">
-                {item.label}
+                {materialKoName(item)}
               </span>
             </button>
           )

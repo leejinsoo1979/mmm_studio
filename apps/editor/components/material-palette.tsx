@@ -15,7 +15,14 @@ import {
   toLibraryMaterialRef,
   useScene,
 } from '@pascal-app/core'
-import { triggerSFX, useEditor, useMovingNode } from '@pascal-app/editor'
+import {
+  commitPaintScopeFanout,
+  materialKoName,
+  resolvePaintScopeTargets,
+  triggerSFX,
+  useEditor,
+  useMovingNode,
+} from '@pascal-app/editor'
 import { type CabinetNode, resolveCabinetNode } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
 import { Check } from 'lucide-react'
@@ -102,56 +109,62 @@ function customColorMaterial(hex: string, roughness: number): MaterialSchema {
   }
 }
 
-function slotTargets(node: AnyNode, slotIds: string[]): Target[] {
+/** Kinds whose paint can spread to the whole room (walls, floors). */
+function offersRoomScope(node: AnyNode): boolean {
+  return nodeRegistry.get(node.type)?.capabilities?.paint?.roomScope === true
+}
+
+function slotTargets(node: AnyNode, slotIds: string[], roomScope: boolean): Target[] {
   const paint = nodeRegistry.get(node.type)?.capabilities?.paint
   if (!paint) return []
   const slots = (node as { slots?: Record<string, string> }).slots
+  // inZOI's 방 단위: the same face of every wall (or floor) around the room.
+  const spread = (role: string) =>
+    roomScope
+      ? resolvePaintScopeTargets({
+          node,
+          role,
+          scope: 'room',
+          nodes: useScene.getState().nodes,
+          spaces: useEditor.getState().spaces,
+          slotRolesOf: () => [role],
+        })
+      : [{ nodeId: node.id as AnyNodeId, role }]
+  const commit = (role: string, material: MaterialSchema | undefined, preset?: string) => {
+    const targets = spread(role)
+    if (targets.length > 1) {
+      commitPaintScopeFanout(targets, material, preset)
+      return
+    }
+    const args = { node, role, material, materialPreset: preset }
+    if (paint.commit) paint.commit(args)
+    else useScene.getState().updateNode(node.id, paint.buildPatch(args))
+  }
+  const preview = (role: string, material: MaterialSchema | undefined, preset?: string) => {
+    const nodes = useScene.getState().nodes
+    const restores = spread(role).flatMap(({ nodeId }) => {
+      const target = nodes[nodeId]
+      const root = sceneRegistry.nodes.get(nodeId)
+      if (!(target && root)) return []
+      const restore = paint.applyPreview({
+        node: target,
+        role,
+        material,
+        materialPreset: preset,
+        root,
+      })
+      return restore ? [restore] : []
+    })
+    return restores.length > 0 ? () => restores.forEach((restore) => restore()) : null
+  }
   return slotIds.map((role) => ({
     key: role,
     label: SLOT_LABELS[role] ?? slotLabelFromId(role),
     current: slots?.[role],
-    apply: (material) => {
-      const args = {
-        node,
-        role,
-        material: undefined,
-        materialPreset: toLibraryMaterialRef(material.id),
-      }
-      if (paint.commit) paint.commit(args)
-      else useScene.getState().updateNode(node.id, paint.buildPatch(args))
-    },
-    preview: (material) => {
-      const root = sceneRegistry.nodes.get(node.id)
-      if (!root) return null
-      return paint.applyPreview({
-        node,
-        role,
-        material: undefined,
-        materialPreset: toLibraryMaterialRef(material.id),
-        root,
-      })
-    },
-    applyColor: (hex, roughness) => {
-      const args = {
-        node,
-        role,
-        material: customColorMaterial(hex, roughness),
-        materialPreset: undefined,
-      }
-      if (paint.commit) paint.commit(args)
-      else useScene.getState().updateNode(node.id, paint.buildPatch(args))
-    },
-    previewColor: (hex, roughness) => {
-      const root = sceneRegistry.nodes.get(node.id)
-      if (!root) return null
-      return paint.applyPreview({
-        node,
-        role,
-        material: customColorMaterial(hex, roughness),
-        materialPreset: undefined,
-        root,
-      })
-    },
+    apply: (material) => commit(role, undefined, toLibraryMaterialRef(material.id)),
+    preview: (material) => preview(role, undefined, toLibraryMaterialRef(material.id)),
+    applyColor: (hex, roughness) => commit(role, customColorMaterial(hex, roughness)),
+    previewColor: (hex, roughness) => preview(role, customColorMaterial(hex, roughness)),
   }))
 }
 
@@ -187,12 +200,12 @@ function meshSlotIds(node: AnyNode): string[] {
   return [...found]
 }
 
-function paintTargets(node: AnyNode): Target[] {
+function paintTargets(node: AnyNode, roomScope: boolean): Target[] {
   if ((node.type as string) === 'cabinet') return cabinetTargets(node)
   const def = nodeRegistry.get(node.type)
   if (!def?.capabilities?.paint) return []
   const declared = def.capabilities.slots?.(node).map((slot) => slot.slotId)
-  return slotTargets(node, declared ?? meshSlotIds(node))
+  return slotTargets(node, declared ?? meshSlotIds(node), roomScope)
 }
 
 export function canPaintNode(node: AnyNode): boolean {
@@ -206,11 +219,13 @@ function materialsFor(node: AnyNode, section: Section): MaterialCatalogItem[] {
   if ((node.type as string) === 'cabinet' && !section.categories.includes('colors')) return []
   const surface = SURFACE_BY_KIND[node.type]
   return section.categories.flatMap((category) =>
-    getMaterialsForCategory(category).filter(
-      (m) =>
-        (m.previewColor || m.previewThumbnailUrl) &&
-        (!(surface && m.surfaces) || m.surfaces.includes(surface)),
-    ),
+    getMaterialsForCategory(category)
+      .filter(
+        (m) =>
+          (m.previewColor || m.previewThumbnailUrl) &&
+          (!(surface && m.surfaces) || m.surfaces.includes(surface)),
+      )
+      .map((m) => ({ ...m, label: materialKoName(m) })),
   )
 }
 
@@ -245,6 +260,7 @@ export function MaterialPalette() {
     style: CSSProperties
   } | null>(null)
   const [gloss, setGloss] = useState(50)
+  const [roomScope, setRoomScope] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
   const node = useScene((s) => (nodeId ? (s.nodes[nodeId] ?? null) : null))
   const selectedIds = useViewer((s) => s.selection.selectedIds)
@@ -297,7 +313,8 @@ export function MaterialPalette() {
   useEffect(() => () => restorePreview.current?.(), [])
 
   if (!node) return <SelectionHint />
-  const targets = paintTargets(node)
+  const canSpread = offersRoomScope(node)
+  const targets = paintTargets(node, canSpread && roomScope)
   const target = targets.find((t) => t.key === targetKey) ?? targets[0]
   const def = nodeRegistry.get(node.type)
   const name =
@@ -349,6 +366,33 @@ export function MaterialPalette() {
         {targets.length === 0 && (
           <span className="text-[11px] text-neutral-500">칠할 수 있는 부분이 없습니다</span>
         )}
+        {canSpread && (
+          <div className="mt-1 flex rounded-xl bg-white/60 p-0.5 shadow-[0_2px_10px_rgba(0,0,0,0.12)] backdrop-blur-md dark:bg-neutral-900/60">
+            {(
+              [
+                [false, node.type === 'wall' ? '이 벽만' : '이 바닥만'],
+                [true, '방 전체'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                aria-pressed={roomScope === value}
+                className={`flex-1 rounded-lg py-1.5 text-[11px] transition-colors ${
+                  roomScope === value
+                    ? 'bg-sky-400 font-semibold text-white'
+                    : 'text-neutral-600 hover:bg-white/70 dark:text-neutral-300'
+                }`}
+                key={label}
+                onClick={() => {
+                  endPreview()
+                  setRoomScope(value)
+                }}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="mt-1 flex flex-col gap-1 text-[10.5px] text-neutral-600 leading-snug [text-shadow:0_0_3px_rgba(255,255,255,0.95)]">
           <span>ⓘ 부분을 고른 뒤 색을 누르세요</span>
           {node.type === 'wall' && <span>ⓘ 벽은 안과 밖을 따로 칠할 수 있음</span>}
@@ -363,7 +407,9 @@ export function MaterialPalette() {
             className="size-5 shrink-0 rounded-full border border-black/10 bg-neutral-200 dark:bg-neutral-700"
             style={shown ? swatchStyle(shown) : undefined}
           />
-          <span className="max-w-48 truncate font-medium text-xs">{shown?.label ?? '기본'}</span>
+          <span className="max-w-48 truncate font-medium text-xs">
+            {shown ? materialKoName(shown) : '기본'}
+          </span>
           <button
             className="ml-2 flex h-8 items-center gap-1 rounded-full bg-sky-500 px-3 font-semibold text-white text-xs transition-colors hover:bg-sky-600"
             onClick={close}

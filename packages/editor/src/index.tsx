@@ -302,6 +302,7 @@ export {
   holeEditScope,
   movingNodeOf,
 } from './lib/interaction/scope'
+export { MATERIAL_CATEGORY_KO, MATERIAL_KO_NAMES, materialKoName } from './lib/material-ko-names'
 export {
   buildResetSurfaceMaterialUpdates,
   buildRoofSurfaceMaterialPatch,
@@ -318,6 +319,7 @@ export {
   linearUnitToMeters,
   metersToLinearUnit,
 } from './lib/measurements'
+export { commitPaintScopeFanout, resolvePaintScopeTargets } from './lib/paint-scope'
 export { consumePlacementDragRelease } from './lib/placement-drag-release'
 export {
   addFreshPlacementMetadata,
@@ -423,6 +425,7 @@ export {
 } from './store/use-palette-view-registry'
 export { default as usePlacementPreview } from './store/use-placement-preview'
 export { default as useSegmentDraftChain } from './store/use-segment-draft-chain'
+export { passesSelectionFilter, useSelectionFilter } from './store/use-selection-filter'
 export { type UiTheme, useUiTheme } from './store/use-ui-theme'
 export { useUploadStore } from './store/use-upload'
 export { useWallMoveGhosts, type WallMoveGhostBridge } from './store/use-wall-move-ghosts'

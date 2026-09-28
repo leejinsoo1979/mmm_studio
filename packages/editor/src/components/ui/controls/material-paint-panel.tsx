@@ -149,7 +149,7 @@ export function MaterialPaintPanel() {
           variant={paintEraser ? 'default' : 'outline'}
         >
           <Eraser />
-          Erase
+          지우개
         </Button>
         <Button
           className="flex-1"
@@ -159,12 +159,12 @@ export function MaterialPaintPanel() {
           variant="outline"
         >
           <RotateCcw />
-          Reset all
+          모두 초기화
         </Button>
       </div>
       {activePaintMaterial?.materialPreset?.startsWith('library:') ? (
         <Button className="mb-2 w-full" onClick={makeActiveMaterialEditable} size="sm" variant="outline">
-          <SlidersHorizontal /> Make applied material editable
+          <SlidersHorizontal /> 적용한 재질을 편집 가능하게
         </Button>
       ) : null}
 
@@ -182,12 +182,12 @@ export function MaterialPaintPanel() {
       <div className="mt-2 shrink-0 space-y-1.5 border-border/60 border-t pt-2">
         <div className="flex items-center justify-between">
           <span className="font-medium text-muted-foreground text-xs uppercase tracking-[0.12em]">
-            Scene materials
+            내 재질
           </span>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-label="Add material"
+                aria-label="재질 추가"
                 onClick={createCustomMaterial}
                 size="icon-sm"
                 type="button"
@@ -196,7 +196,7 @@ export function MaterialPaintPanel() {
                 <Plus />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Add material</TooltipContent>
+            <TooltipContent>재질 추가</TooltipContent>
           </Tooltip>
         </div>
         <div className="subtle-scrollbar max-h-56 overflow-y-auto">
@@ -204,7 +204,7 @@ export function MaterialPaintPanel() {
             <SceneMaterialList autoEditId={autoEditMaterialId} />
           ) : (
             <p className="px-0.5 py-1 text-muted-foreground text-xs">
-              No custom materials yet — add one with +.
+              아직 만든 재질이 없습니다 — +로 추가하세요.
             </p>
           )}
         </div>
