@@ -7,6 +7,7 @@ import {
   getMaterialsForCategory,
   type MaterialCatalogItem,
   type MaterialCategory,
+  type MaterialSchema,
   type MaterialSurface,
   nodeRegistry,
   sceneRegistry,
@@ -18,7 +19,9 @@ import { triggerSFX, useEditor, useMovingNode } from '@pascal-app/editor'
 import { type CabinetNode, resolveCabinetNode } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
 import { Check } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { type CSSProperties, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { ColorPicker } from './color-picker'
 
 /**
  * inZOI-style material palette. The paint button on the selected object's
@@ -80,6 +83,23 @@ type Target = {
   apply: (material: MaterialCatalogItem) => void
   /** Show the material on the model without committing; returns the restore. */
   preview?: (material: MaterialCatalogItem) => (() => void) | null
+  /** A one-off colour from the picker (roughness from the 광택 slider). */
+  applyColor?: (hex: string, roughness: number) => void
+  previewColor?: (hex: string, roughness: number) => (() => void) | null
+}
+
+function customColorMaterial(hex: string, roughness: number): MaterialSchema {
+  return {
+    preset: 'custom',
+    properties: {
+      color: hex,
+      roughness,
+      metalness: 0,
+      opacity: 1,
+      transparent: false,
+      side: 'front',
+    },
+  }
 }
 
 function slotTargets(node: AnyNode, slotIds: string[]): Target[] {
@@ -111,6 +131,27 @@ function slotTargets(node: AnyNode, slotIds: string[]): Target[] {
         root,
       })
     },
+    applyColor: (hex, roughness) => {
+      const args = {
+        node,
+        role,
+        material: customColorMaterial(hex, roughness),
+        materialPreset: undefined,
+      }
+      if (paint.commit) paint.commit(args)
+      else useScene.getState().updateNode(node.id, paint.buildPatch(args))
+    },
+    previewColor: (hex, roughness) => {
+      const root = sceneRegistry.nodes.get(node.id)
+      if (!root) return null
+      return paint.applyPreview({
+        node,
+        role,
+        material: customColorMaterial(hex, roughness),
+        materialPreset: undefined,
+        root,
+      })
+    },
   }))
 }
 
@@ -124,12 +165,14 @@ function cabinetTargets(node: AnyNode): Target[] {
       label: '몸통',
       current: cabinet.bodyColor,
       apply: (m) => m.previewColor && set({ bodyColor: m.previewColor }),
+      applyColor: (hex) => set({ bodyColor: hex }),
     },
     {
       key: 'front',
       label: '도어',
       current: cabinet.frontColor,
       apply: (m) => m.previewColor && set({ frontColor: m.previewColor }),
+      applyColor: (hex) => set({ frontColor: hex }),
     },
   ]
 }
@@ -194,6 +237,15 @@ export function MaterialPalette() {
   const [nodeId, setNodeId] = useState<AnyNodeId | null>(null)
   const [targetKey, setTargetKey] = useState<string | null>(null)
   const [hovered, setHovered] = useState<MaterialCatalogItem | null>(null)
+  // Swatch under the pointer, for inZOI's name bubble above the card.
+  const [bubble, setBubble] = useState<{
+    x: number
+    y: number
+    label: string
+    style: CSSProperties
+  } | null>(null)
+  const [gloss, setGloss] = useState(50)
+  const cardRef = useRef<HTMLDivElement>(null)
   const node = useScene((s) => (nodeId ? (s.nodes[nodeId] ?? null) : null))
   const selectedIds = useViewer((s) => s.selection.selectedIds)
   const moving = useMovingNode()
@@ -216,6 +268,7 @@ export function MaterialPalette() {
     restorePreview.current?.()
     restorePreview.current = null
     setHovered(null)
+    setBubble(null)
   }
 
   const close = () => {
@@ -296,6 +349,10 @@ export function MaterialPalette() {
         {targets.length === 0 && (
           <span className="text-[11px] text-neutral-500">칠할 수 있는 부분이 없습니다</span>
         )}
+        <div className="mt-1 flex flex-col gap-1 text-[10.5px] text-neutral-600 leading-snug [text-shadow:0_0_3px_rgba(255,255,255,0.95)]">
+          <span>ⓘ 부분을 고른 뒤 색을 누르세요</span>
+          {node.type === 'wall' && <span>ⓘ 벽은 안과 밖을 따로 칠할 수 있음</span>}
+        </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col items-center gap-2">
         <div className="flex items-center gap-2 rounded-full bg-white/95 py-1 pr-1 pl-4 shadow-[0_6px_24px_rgba(0,0,0,0.2)] dark:bg-neutral-900/95">
@@ -317,7 +374,57 @@ export function MaterialPalette() {
             확인
           </button>
         </div>
-        <div className="flex w-full divide-x divide-neutral-200 overflow-x-auto rounded-2xl bg-white/95 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.22)] backdrop-blur-md dark:divide-white/10 dark:bg-neutral-900/95">
+        <div
+          className="relative flex w-full divide-x divide-neutral-200 overflow-x-auto rounded-2xl bg-white/95 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.22)] backdrop-blur-md dark:divide-white/10 dark:bg-neutral-900/95"
+          ref={cardRef}
+        >
+          {target?.applyColor && (
+            <section className="flex shrink-0 flex-col gap-2 px-4">
+              <h4 className="font-semibold text-[11px] text-neutral-600 dark:text-neutral-300">
+                색 고르기
+              </h4>
+              <ColorPicker
+                onCommit={(hex) => {
+                  endPreview()
+                  target.applyColor?.(hex, 1 - gloss / 100)
+                  triggerSFX('sfx:menu-click')
+                }}
+                onPreview={(hex) => {
+                  restorePreview.current?.()
+                  restorePreview.current = target.previewColor?.(hex, 1 - gloss / 100) ?? null
+                }}
+                value={
+                  target.current?.startsWith('#')
+                    ? target.current
+                    : (current?.previewColor ?? '#FFFFFF')
+                }
+              />
+            </section>
+          )}
+          {target?.previewColor && (
+            <section className="flex w-32 shrink-0 flex-col gap-2 px-4">
+              <h4 className="font-semibold text-[11px] text-neutral-600 dark:text-neutral-300">
+                속성
+              </h4>
+              <label className="flex flex-col gap-1 text-[11px] text-neutral-600 dark:text-neutral-300">
+                <span className="flex justify-between">
+                  광택 <span className="tabular-nums">{gloss}</span>
+                </span>
+                <input
+                  aria-label="광택"
+                  className="accent-sky-500"
+                  max={100}
+                  min={0}
+                  onChange={(e) => setGloss(Number(e.target.value))}
+                  type="range"
+                  value={gloss}
+                />
+              </label>
+              <span className="text-[10px] text-neutral-400 leading-snug">
+                색 고르기로 칠할 때 적용됩니다
+              </span>
+            </section>
+          )}
           {target &&
             SECTIONS.map((section) => {
               const materials = materialsFor(node, section)
@@ -338,10 +445,18 @@ export function MaterialPalette() {
                           target.apply(material)
                           triggerSFX('sfx:menu-click')
                         }}
-                        onMouseEnter={() => {
+                        onMouseEnter={(e) => {
                           restorePreview.current?.()
                           restorePreview.current = target.preview?.(material) ?? null
                           setHovered(material)
+                          const card = cardRef.current?.getBoundingClientRect()
+                          const swatch = e.currentTarget.getBoundingClientRect()
+                          setBubble({
+                            x: swatch.left + swatch.width / 2,
+                            y: (card?.top ?? swatch.top) - 8,
+                            label: material.label,
+                            style: swatchStyle(material),
+                          })
                         }}
                         onMouseLeave={endPreview}
                         style={swatchStyle(material)}
@@ -353,6 +468,21 @@ export function MaterialPalette() {
                 </section>
               )
             })}
+          {/* inZOI: the hovered material's name in a bubble over the card. */}
+          {bubble &&
+            createPortal(
+              <div
+                className="-translate-x-1/2 -translate-y-full pointer-events-none fixed z-[200] flex flex-col items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-neutral-800 shadow-[0_6px_20px_rgba(0,0,0,0.2)] dark:bg-neutral-900 dark:text-neutral-100"
+                style={{ left: bubble.x, top: bubble.y }}
+              >
+                <span className="whitespace-nowrap font-medium text-[12px]">{bubble.label}</span>
+                <span
+                  className="size-12 rounded-full border border-black/10"
+                  style={bubble.style}
+                />
+              </div>,
+              document.body,
+            )}
         </div>
       </div>
     </div>
