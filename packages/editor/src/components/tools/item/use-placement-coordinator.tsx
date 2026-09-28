@@ -40,7 +40,7 @@ import {
   Ray,
   Vector3,
 } from 'three'
-import { distance, smoothstep, uv, vec2 } from 'three/tsl'
+import { distance, float, fract, max, positionWorld, smoothstep, step, uv, vec2 } from 'three/tsl'
 import { LineBasicNodeMaterial, MeshBasicNodeMaterial } from 'three/webgpu'
 import {
   clearPlacementSurface,
@@ -59,6 +59,7 @@ import useAlignmentGuides from '../../../store/use-alignment-guides'
 import useEditor, { isAlignmentGuideActive, isMagneticSnapActive } from '../../../store/use-editor'
 
 import useFacingPose from '../../../store/use-facing-pose'
+import { usePlacementFeedback } from '../../../store/use-placement-feedback'
 import { getFloorStackPreviewPosition } from '../shared/floor-stack-preview'
 import {
   createLineGeometry,
@@ -199,11 +200,14 @@ const basePlaneMaterial = new MeshBasicNodeMaterial({
   depthWrite: false,
 })
 
-// Create radial opacity: transparent in center, opaque at edges
+// inZOI's footprint: a 25 cm floor grid (lines strong, cells faint) under the
+// radial edge fade.
 const center = vec2(0.5, 0.5)
 const dist = distance(uv(), center)
-const radialOpacity = smoothstep(0, 0.7, dist).mul(0.6)
-basePlaneMaterial.opacityNode = radialOpacity
+const radialOpacity = smoothstep(0, 0.7, dist).mul(0.45)
+const gridCell = fract(positionWorld.xz.div(0.25))
+const gridLine = step(0.9, max(gridCell.x, gridCell.y))
+basePlaneMaterial.opacityNode = max(radialOpacity, float(0.18).add(gridLine.mul(0.55)))
 
 const multiplyScales = (
   a: [number, number, number],
@@ -617,9 +621,11 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
 
     const revalidate = (): boolean => {
       const placeable = altFreeRef.current || checkCanPlace(getContext(), validators)
-      const color = placeable ? 0x22_c5_5e : 0xef_44_44 // green-500 : red-500
+      // inZOI: sky blue where it fits, red where it overlaps.
+      const color = placeable ? 0x38_d6_f2 : 0xef_44_44
       edgeMaterial.color.setHex(color)
       basePlaneMaterial.color.setHex(color)
+      usePlacementFeedback.getState().setBlocked(!placeable)
       return placeable
     }
 
@@ -2318,6 +2324,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
 
     return () => {
       tearingDown = true
+      usePlacementFeedback.getState().setBlocked(false)
       if (dragMode) window.removeEventListener('pointerup', onReleaseCommit)
       unsubDraftWatch()
       useAlignmentGuides.getState().clear()

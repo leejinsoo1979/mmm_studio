@@ -11,12 +11,14 @@ import {
   movingFootprintAnchors,
   type RoofSegmentNode,
   roofFacePointToSegment,
+  spatialGridManager,
   useScene,
 } from '@pascal-app/core'
 import {
   applyFloorplanAlignment,
   isGridSnapActive,
   isMagneticSnapActive,
+  snapUpToGridStep,
   useEditor,
   type WallPlanPoint,
 } from '@pascal-app/editor'
@@ -278,6 +280,11 @@ function buildFloorItemSession(
   const resolvePlanPoint = createPlanarMovePointResolver(resolveItemPlanPoint(node, nodes), node)
   // Alignment candidates gathered once — scene is stable during the drag.
   const candidates = collectAlignmentAnchors(nodes, node.id)
+  // Same footprint rule as the 3D mover's `checkCanPlace`: grid-aligned
+  // dimensions against every colliding floor node on the level.
+  const [w, h, d] = getScaledDimensions(node)
+  const footprint: [number, number, number] = [snapUpToGridStep(w), h, snapUpToGridStep(d)]
+  let blocked = false
   return {
     affectedIds: [node.id as AnyNodeId],
     apply({ planPoint }) {
@@ -299,6 +306,11 @@ function buildFloorItemSession(
 
       const sourceY = node.position[1]
       const nextPosition: [number, number, number] = [snapped[0], sourceY, snapped[1]]
+      blocked =
+        !!startLevelId &&
+        !spatialGridManager.canPlaceOnFloor(startLevelId, nextPosition, footprint, node.rotation, [
+          node.id,
+        ]).valid
 
       useScene.getState().updateNodes([
         {
@@ -315,8 +327,9 @@ function buildFloorItemSession(
     },
     canCommit() {
       const live = useScene.getState().nodes[node.id as AnyNodeId] as ItemNode | undefined
-      return !!live && live.type === 'item'
+      return !blocked && !!live && live.type === 'item'
     },
+    isBlocked: () => blocked,
   }
 }
 

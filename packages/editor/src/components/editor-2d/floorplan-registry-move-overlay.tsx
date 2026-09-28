@@ -29,6 +29,7 @@ import useEditor, {
   isMagneticSnapActive,
 } from '../../store/use-editor'
 import { useMovingNode } from '../../store/use-interaction-scope'
+import { usePlacementFeedback } from '../../store/use-placement-feedback'
 import { useWallMoveGhosts } from '../../store/use-wall-move-ghosts'
 
 // Figma-style alignment snap threshold. Meters in world space; 8cm gives
@@ -163,6 +164,7 @@ export function FloorplanRegistryMoveOverlay() {
             metaKey: event.metaKey,
           },
         })
+        usePlacementFeedback.getState().setBlocked(session.isBlocked?.() ?? false)
         // Move "tick" — same feedback the 3D move gives, which fires whenever the
         // resolved position changes (any snapping mode, not just grid), so it
         // ticks as the item lands on each new snapped/free position.
@@ -274,6 +276,7 @@ export function FloorplanRegistryMoveOverlay() {
         // inside the SVG viewport, including empty grid background.
         if (!isPointerOverFloorplanScene(event.clientX, event.clientY)) return
         if (!hasMovedSinceStart) return
+        if (session.isBlocked?.()) return
 
         // Commit using the LAST pointermove's state — no re-apply at
         // pointer-up coords. A previous version re-applied here to
@@ -440,6 +443,7 @@ export function FloorplanRegistryMoveOverlay() {
         // after every terminal path (commit + Esc both unmount via
         // `setMovingNode(null)`), so clearing here drops any lingering guide.
         useAlignmentGuides.getState().clear()
+        usePlacementFeedback.getState().setBlocked(false)
         // Same belt-and-suspenders pattern for the wall bridge ghost
         // previews — clear unconditionally so Esc / mid-drag unmount /
         // 3D-takeover paths all end up with no stale ghosts left over.

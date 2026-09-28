@@ -712,6 +712,13 @@ export type FloorplanMoveTargetSession = {
    * the last pointer position. Kinds with no facing leave it unset.
    */
   flipSide?(): void
+  /**
+   * Optional live placement verdict. While it returns `true` (e.g. the
+   * footprint overlaps another floor item) the overlay ignores the commit
+   * click and keeps the move going — parity with the 3D mover, which refuses
+   * an invalid drop instead of reverting it.
+   */
+  isBlocked?(): boolean
 }
 
 export type FloorplanMoveTarget<N> = (args: {

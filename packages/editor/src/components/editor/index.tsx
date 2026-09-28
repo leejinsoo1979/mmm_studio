@@ -945,7 +945,10 @@ const ViewerCanvas = memo(function ViewerCanvas({
       if (!isResizingFloorplan.current) return
       if (!viewerAreaRef.current) return
       const rect = viewerAreaRef.current.getBoundingClientRect()
-      const newRatio = (e.clientX - rect.left) / rect.width
+      // Split view is padded clear of the floating build panel; the pane
+      // ratio is a share of the remaining content box.
+      const inset = Number.parseFloat(getComputedStyle(viewerAreaRef.current).paddingLeft) || 0
+      const newRatio = (e.clientX - rect.left - inset) / (rect.width - inset)
       setFloorplanPaneRatio(Math.max(0.15, Math.min(0.85, newRatio)))
     }
     const handlePointerUp = () => {
@@ -977,7 +980,13 @@ const ViewerCanvas = memo(function ViewerCanvas({
     <ErrorBoundary fallback={<EditorSceneCrashFallback />}>
       {/* `relative` so the floorplan compass (portaled here to stay visible in
           2d / 3d / split alike) can anchor to this container's bottom-left. */}
-      <div className="relative flex h-full" ref={setViewerAreaNode}>
+      <div
+        className="relative flex h-full"
+        ref={setViewerAreaNode}
+        style={{
+          paddingLeft: viewMode === 'split' ? 'var(--viewer-left-inset, 0px)' : undefined,
+        }}
+      >
         {/* 2D floorplan — always mounted once shown, hidden via CSS to preserve state */}
         <div
           className="relative h-full flex-shrink-0"

@@ -1,6 +1,6 @@
 'use client'
 
-import { Info } from 'lucide-react'
+import { AlertCircle, Info } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import type { ContextualShortcutHint } from '../../../lib/contextual-help'
 import { cn } from '../../../lib/utils'
@@ -22,7 +22,14 @@ const KEY_LABELS: Record<string, string> = {
  * armed, so the keys are where the eye already is. Shown only over the 3D
  * canvas or the floor plan; the docked panel keeps the clickable chips.
  */
-export function ToolCursorHints({ hints }: { hints: ContextualShortcutHint[] }) {
+export function ToolCursorHints({
+  hints,
+  warning,
+}: {
+  hints: ContextualShortcutHint[]
+  /** inZOI's red line under the keys (e.g. an overlapping drop). */
+  warning?: string
+}) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -93,13 +100,21 @@ export function ToolCursorHints({ hints }: { hints: ContextualShortcutHint[] }) 
               )}
               key={String(key)}
             >
-              {KEY_LABELS[String(key)] ?? String(key)}
+              {Array.isArray(key)
+                  ? key.map((k) => KEY_LABELS[k] ?? k).join(' / ')
+                  : (KEY_LABELS[key] ?? key)}
             </span>
             ),
           )}
           <span>{hint.label}</span>
         </div>
       ))}
+      {warning && (
+        <div className="mt-1 flex items-center gap-1 whitespace-nowrap rounded-full bg-red-500/90 px-2 py-0.5 font-medium text-[11px] text-white [text-shadow:none]">
+          <AlertCircle className="size-3.5" />
+          {warning}
+        </div>
+      )}
     </div>
   )
 }
