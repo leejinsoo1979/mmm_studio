@@ -391,7 +391,7 @@ const isPhoto = (src: string) => src.endsWith('.jpg')
 /** inZOI catalog group: grey header bar over a 4-up grid of square cards. */
 function Section({ children, title }: { children: React.ReactNode; title: string }) {
   return (
-    <section className="px-2 pt-3">
+    <section className="scroll-mt-1 px-2 pt-3" data-build-section={title}>
       <h2 className="mb-2 rounded-md bg-neutral-200/80 dark:bg-white/10 px-3 py-1.5 font-semibold text-[12px] text-neutral-600 dark:text-neutral-300 leading-none">
         {title}
       </h2>
@@ -510,6 +510,7 @@ export function BuildTab() {
   const toggleFollow = useLiquidLineToolOptions((s) => s.toggleFollow)
   const wallHeight = useWallDrawingDefaults((s) => s.height)
   const [query, setQuery] = useState('')
+  const scrollRef = useRef<HTMLDivElement>(null)
   const needle = query.trim()
   const matches = (text: string) => !needle || text.includes(needle)
 
@@ -634,6 +635,12 @@ export function BuildTab() {
   const visibleImports = IMPORT_ITEMS.filter(
     (item) => matches('도면 가져오기') || matches(item.label),
   )
+  // inZOI's sub-category row: one chip per visible group, jumping to it.
+  const jumpTitles = [
+    ...(showWallHeights ? ['온 벽', '부분 벽'] : []),
+    ...visibleSections.map((section) => section.title),
+    ...(visibleImports.length > 0 ? ['도면 가져오기'] : []),
+  ]
 
   return (
     <div className="flex h-full flex-col text-foreground">
@@ -660,7 +667,27 @@ export function BuildTab() {
         </label>
       </div>
 
-      <div className="dark-scrollbar min-h-0 flex-1 overflow-y-auto pb-3">
+      {jumpTitles.length > 1 && (
+        <div className="no-scrollbar flex shrink-0 gap-1 overflow-x-auto px-2 pt-1 pb-1.5">
+          {jumpTitles.map((title) => (
+            <button
+              className="shrink-0 rounded-full bg-white px-2.5 py-1 font-medium text-[11px] text-neutral-600 shadow-[0_1px_2px_rgba(0,0,0,0.1)] transition-colors hover:bg-sky-100 hover:text-sky-800 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-sky-400/20 dark:hover:text-sky-100"
+              key={title}
+              onClick={() => {
+                triggerSFX('sfx:menu-click')
+                scrollRef.current
+                  ?.querySelector(`[data-build-section="${title}"]`)
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }}
+              type="button"
+            >
+              {title}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="dark-scrollbar min-h-0 flex-1 overflow-y-auto pb-3" ref={scrollRef}>
         <TooltipProvider delayDuration={0} disableHoverableContent>
           {showWallHeights && (
             <>
