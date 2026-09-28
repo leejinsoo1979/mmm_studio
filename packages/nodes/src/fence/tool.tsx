@@ -444,6 +444,12 @@ export const FenceTool: React.FC = () => {
   return <StraightFenceTool />
 }
 
+/** Drops the seeded preset once the fence tool is really left. A remount
+ *  while the tool stays armed (React strict mode) keeps the preset. */
+function clearFenceDefaultsOnExit() {
+  if (useEditor.getState().tool !== 'fence') useEditor.getState().setToolDefaults('fence', null)
+}
+
 const StraightFenceTool: React.FC = () => {
   const unit = useViewer((state) => state.unit)
   const isDark = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
@@ -472,7 +478,7 @@ const StraightFenceTool: React.FC = () => {
   // Scope seeded defaults to this tool session: clear on deactivation so a
   // later manual fence draw isn't drawn with a stale preset's parameters.
   // Unmount-only (empty deps) — the [unit] effect below must not clear it.
-  useEffect(() => () => useEditor.getState().setToolDefaults('fence', null), [])
+  useEffect(() => clearFenceDefaultsOnExit, [])
 
   useEffect(() => {
     let previousFenceEnd: FencePlanPoint | null = null
@@ -733,7 +739,7 @@ const SplineFenceDraft: React.FC = () => {
   }, [draftPoints])
   useEffect(() => () => useFenceCurveDraft.getState().reset(), [])
 
-  useEffect(() => () => useEditor.getState().setToolDefaults('fence', null), [])
+  useEffect(() => clearFenceDefaultsOnExit, [])
 
   useEffect(() => {
     const snapPoint = (local: FencePlanPoint): FencePlanPoint => {

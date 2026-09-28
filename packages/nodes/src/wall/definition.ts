@@ -126,7 +126,7 @@ export const wallDefinition: NodeDefinition<typeof WallNode> = {
     { key: 'Shift', label: '누른 채 그리기: 직각 고정', heldLabel: '직각 고정 중' },
     { key: '숫자 + Enter', label: '길이 입력' },
     { key: 'Esc', label: '이어 그리기 취소' },
-    { key: 'ⓘ', label: '벽 높이는 온 벽 3가지 · 부분 벽 3가지' },
+    { key: 'ⓘ', label: '벽 높이는 온 벽 4가지 · 부분 벽 4가지' },
     { key: 'ⓘ', label: '벽을 지우거나 칠하려면 벽을 클릭' },
   ],
 

@@ -56,9 +56,17 @@ import useInteractionScope, {
   useEndpointReshape,
   useIsCurveReshape,
 } from '../../store/use-interaction-scope'
-import { turnRotation } from '../tools/item/placement-math'
+import { useUiHidden } from '../../store/use-ui-hidden'
 import { formatMeasurement, MeasurementPill } from './measurement-pill'
-import { NodeActionMenu } from './node-action-menu'
+import { flashAbove, NodeActionMenu } from './node-action-menu'
+import {
+  canRotateNode,
+  duplicateFlashText,
+  findNode,
+  paintNode,
+  rotateNode,
+  toggleInspector,
+} from './node-menu-actions'
 
 /**
  * A kind shows the system pill when it exposes typed ports — `def.ports`
@@ -91,6 +99,10 @@ const ALLOWED_TYPES = [
   'ceiling',
   'spawn',
 ]
+/** Kinds that get this menu when singly selected (the inspector opens from its 속성). */
+export function hasFloatingActionMenu(type: string): boolean {
+  return ALLOWED_TYPES.includes(type) || isRegistrySelectable(type)
+}
 const DELETE_ONLY_TYPES: string[] = []
 const HOLE_TYPES = ['slab', 'ceiling']
 // Kinds edited through in-world gizmos get inZOI's blue '확인' pill.
@@ -107,46 +119,50 @@ const MAX_MENU_SCALE = 1
 const REF_ORTHO_ZOOM = 20
 const REF_CAMERA_DISTANCE = 12
 
-// World-space Y distance from a node's bbox top to the floating menu anchor.
-// Per-type because in-world chrome above the node (height-resize arrows,
-// measurement labels) varies in vertical reach.
-// `EXTRA_MENU_LIFT` is a uniform global nudge — easier to tune one
-// constant than to bump every per-type entry below.
-const EXTRA_MENU_LIFT = 0.35
-const MENU_Y_OFFSET_DEFAULT = 0.3
+// World-space Y lift from a node's bbox top to the menu anchor. Most kinds
+// sit right on the top (the pill's tail touches the object, as in inZOI);
+// kinds whose in-world handles rise above the bbox (height arrows) lift the
+// anchor past them.
+const MENU_Y_OFFSET_DEFAULT = 0.05
 const MENU_Y_OFFSETS: Record<string, number> = {
-  wall: 0.5,
-  door: 0.6,
-  window: 0.6,
-  column: 0.6,
-  // Fence: still clears the height-resize arrow (sits at fence.height +
-  // 0.45) plus the chevron's visual size, but kept low so the menu sits
-  // close to the fence rather than floating well above it.
+  // Wall / door / window / column: clear the height arrow ~0.25 above the top.
+  wall: 0.42,
+  door: 0.42,
+  window: 0.42,
+  column: 0.4,
+  // Fence: clears the height-resize arrow (fence.height + 0.45).
   fence: 0.7,
-  // Elevator: clears the cab-height arrow which sits above the SHAFT
-  // top (resolved through level entries), so the menu floats above it.
+  // Elevator: clears the cab-height arrow above the shaft top.
   elevator: 0.9,
-  stair: 0.2,
-  'stair-stair': 1.1,
-  'stair-landing': 0.9,
-  // Slab: clears the height arrow that sits at elevation + 0.22 plus the
-  // chevron's own visual reach, so the menu floats just above it.
-  slab: 0.7,
-  // Ceiling: clears the upward height arrow that sits ~0.22 above the
-  // ceiling plane, plus extra headroom so the menu doesn't crowd the
-  // chevron at any zoom level.
-  ceiling: 1.0,
-  // Shelf: clears the height arrow that sits at shelf.height + 0.22
-  // plus the chevron's visual reach.
-  shelf: 0.6,
+  'stair-stair': 0.8,
+  'stair-landing': 0.6,
+  // Slab / ceiling / shelf: clear the height arrow ~0.22 above them.
+  slab: 0.45,
+  ceiling: 0.45,
+  shelf: 0.45,
+}
+// Any other kind with a registry height handle (chimney, cupola, skylight,
+// vents, stair, …): clear its arrow, which sits ~0.25 above the top.
+const MENU_Y_OFFSET_HEIGHT_HANDLE = 0.45
+// Screen-space gap between the pill's tail tip and the anchor.
+const MENU_PIXEL_OFFSET = 10
+
+function hasVerticalHandle(node: AnyNode): boolean {
+  const handles = nodeRegistry.get(node.type)?.handles
+  if (!handles) return false
+  const list: ReadonlyArray<unknown> =
+    typeof handles === 'function' ? handles(node as never) : handles
+  return list.some((handle) => (handle as { axis?: string }).axis === 'y')
 }
 
 function getMenuYOffset(node: AnyNode | null): number {
-  if (!node) return MENU_Y_OFFSET_DEFAULT + EXTRA_MENU_LIFT
-  if (node.type === 'stair-segment') {
-    return (MENU_Y_OFFSETS[`stair-${node.segmentType}`] ?? MENU_Y_OFFSET_DEFAULT) + EXTRA_MENU_LIFT
-  }
-  return (MENU_Y_OFFSETS[node.type] ?? MENU_Y_OFFSET_DEFAULT) + EXTRA_MENU_LIFT
+  if (!node) return MENU_Y_OFFSET_DEFAULT
+  const offset =
+    node.type === 'stair-segment'
+      ? MENU_Y_OFFSETS[`stair-${node.segmentType}`]
+      : MENU_Y_OFFSETS[node.type]
+  if (offset !== undefined) return offset
+  return hasVerticalHandle(node) ? MENU_Y_OFFSET_HEIGHT_HANDLE : MENU_Y_OFFSET_DEFAULT
 }
 
 function getAttributeVersion(
@@ -228,6 +244,7 @@ export function FloatingActionMenu() {
   const updateNode = useScene((s) => s.updateNode)
   const mode = useEditor((s) => s.mode)
   const isFloorplanHovered = useEditor((s) => s.isFloorplanHovered)
+  const customizing = useUiHidden((s) => s.customizing)
   const canFindNode = useEditor((s) => s.canFindNode)
   const canPaintNode = useEditor((s) => s.canPaintNode)
   const endpointReshape = useEndpointReshape()
@@ -280,9 +297,7 @@ export function FloatingActionMenu() {
   // ALLOWED_TYPES is the hardcoded set; registry-driven kinds (any
   // NodeDefinition with `capabilities.selectable`) get the floating menu
   // by default too. Phase 4 collapses these into a single registry check.
-  const isValidType = node
-    ? ALLOWED_TYPES.includes(node.type) || isRegistrySelectable(node.type)
-    : false
+  const isValidType = node ? hasFloatingActionMenu(node.type) : false
 
   // Height-drag pill: shown just above the menu only while the selected
   // wall/fence height arrow is being dragged. Length + thickness are fixed
@@ -441,6 +456,7 @@ export function FloatingActionMenu() {
       e.stopPropagation()
       if (!node?.parentId) return
       sfxEmitter.emit('sfx:item-pick')
+      flashAbove(e.currentTarget, duplicateFlashText(node, unit))
 
       if (node.type === 'roof') {
         try {
@@ -616,7 +632,7 @@ export function FloatingActionMenu() {
         }
       }
     },
-    [node, setMovingNode, setSelection],
+    [node, setMovingNode, setSelection, unit],
   )
 
   const handleAddHole = useCallback(
@@ -675,35 +691,25 @@ export function FloatingActionMenu() {
   const handleFind = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      if (node) emitter.emit('selection:find-node' as never, node as never)
+      if (node) findNode(node)
     },
     [node],
   )
 
-  const canRotate =
-    !!node &&
-    node.type !== 'door' &&
-    node.type !== 'window' &&
-    !nodeRegistry.get(node.type)?.keyboardActions?.r &&
-    (typeof (node as { rotation?: unknown }).rotation === 'number' ||
-      Array.isArray((node as { rotation?: unknown }).rotation))
-
-  // Same 45° step as the R key.
-  const handleRotate = useCallback(
+  const canRotate = !!node && canRotateNode(node)
+  const handleRotateLeft = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      const rotation = (node as { rotation?: unknown } | null)?.rotation
-      if (!node) return
-      if (typeof rotation === 'number') {
-        updateNode(node.id, { rotation: turnRotation(rotation, 1, false) } as Partial<AnyNode>)
-      } else if (Array.isArray(rotation)) {
-        updateNode(node.id, {
-          rotation: [rotation[0], turnRotation(rotation[1], 1, false), rotation[2]],
-        } as Partial<AnyNode>)
-      } else return
-      sfxEmitter.emit('sfx:item-rotate')
+      if (node) rotateNode(node, 1)
     },
-    [node, updateNode],
+    [node],
+  )
+  const handleRotateRight = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (node) rotateNode(node, -1)
+    },
+    [node],
   )
 
   // inZOI's '✓ 확인': ends the gizmo edit by dropping the selection.
@@ -724,11 +730,15 @@ export function FloatingActionMenu() {
     [node],
   )
 
-  // The host owns the palette; the editor only signals which node to paint.
+  const handleInspect = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    toggleInspector()
+  }, [])
+
   const handlePaint = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      if (node) emitter.emit('selection:paint-node' as never, node as never)
+      if (node) paintNode(node)
     },
     [node],
   )
@@ -737,7 +747,8 @@ export function FloatingActionMenu() {
     !(selectedId && node && isValidType && !isFloorplanHovered && mode !== 'delete') ||
     endpointReshape ||
     isCurveReshape ||
-    menuStepBack
+    menuStepBack ||
+    customizing
   )
     return null
 
@@ -745,96 +756,105 @@ export function FloatingActionMenu() {
     <group>
       <group ref={groupRef}>
         <Html
-          center
           style={{
             pointerEvents: 'auto',
             touchAction: 'none',
           }}
           zIndexRange={[25, 0]}
         >
-          <div className="relative" ref={menuScaleRef} style={{ transformOrigin: 'center center' }}>
-            <NodeActionMenu
-              onConfirm={node && CONFIRM_TYPES.includes(node.type) ? handleConfirm : undefined}
-              onFind={node && canFindNode ? handleFind : undefined}
-              onAddHole={node && HOLE_TYPES.includes(node.type) ? handleAddHole : undefined}
-              onCurve={
-                (node?.type === 'fence' && !isSplineFence(node) && !isCurvedWall(node)) ||
-                (node?.type === 'wall' && canCurveSelectedWall)
-                  ? handleCurve
-                  : undefined
-              }
-              onMove={
-                // Fully registry-driven: any kind that declares
-                // `capabilities.movable`, a `floorplanMoveTarget`, or a
-                // 3D `affordanceTools.move` mover gets the Move button.
-                // Adding a new movable kind never touches this file.
-                node && isRegistryMovable(node.type) ? handleMove : undefined
-              }
-              onDelete={handleDelete}
-              onFlipHinge={
-                node?.type === 'door' || node?.type === 'window'
-                  ? () => flipOpeningHinge(node)
-                  : undefined
-              }
-              onFlipSwing={node?.type === 'door' ? () => flipDoorSwing(node) : undefined}
-              onFocus={handleFocus}
-              onSplit={
-                node?.type === 'wall' && canSplitWall(node) ? () => splitWall(node) : undefined
-              }
-              onPaint={node && canPaintNode?.(node) ? handlePaint : undefined}
-              onRotate={canRotate ? handleRotate : undefined}
-              onDuplicate={
-                node &&
-                node.type !== 'spawn' &&
-                !DELETE_ONLY_TYPES.includes(node.type) &&
-                !HOLE_TYPES.includes(node.type)
-                  ? handleDuplicate
-                  : undefined
-              }
-              onPointerDown={(e) => e.stopPropagation()}
-              onPointerUp={(e) => e.stopPropagation()}
-            />
-            {/* Height-drag dimension pill. Absolutely positioned just above
+          {/* Bottom-centre (the tail tip) sits a fixed few pixels above the
+              anchor, so the gap to the object doesn't change with zoom. */}
+          <div style={{ transform: `translate(-50%, calc(-100% - ${MENU_PIXEL_OFFSET + 8}px))` }}>
+            <div
+              className="relative"
+              ref={menuScaleRef}
+              style={{ transformOrigin: 'bottom center' }}
+            >
+              <NodeActionMenu
+                onConfirm={node && CONFIRM_TYPES.includes(node.type) ? handleConfirm : undefined}
+                onFind={node && canFindNode ? handleFind : undefined}
+                onAddHole={node && HOLE_TYPES.includes(node.type) ? handleAddHole : undefined}
+                onCurve={
+                  (node?.type === 'fence' && !isSplineFence(node) && !isCurvedWall(node)) ||
+                  (node?.type === 'wall' && canCurveSelectedWall)
+                    ? handleCurve
+                    : undefined
+                }
+                onMove={
+                  // Fully registry-driven: any kind that declares
+                  // `capabilities.movable`, a `floorplanMoveTarget`, or a
+                  // 3D `affordanceTools.move` mover gets the Move button.
+                  // Adding a new movable kind never touches this file.
+                  node && isRegistryMovable(node.type) ? handleMove : undefined
+                }
+                onDelete={handleDelete}
+                onFlipHinge={
+                  node?.type === 'door' || node?.type === 'window'
+                    ? () => flipOpeningHinge(node)
+                    : undefined
+                }
+                onFlipSwing={node?.type === 'door' ? () => flipDoorSwing(node) : undefined}
+                onFocus={handleFocus}
+                onSplit={
+                  node?.type === 'wall' && canSplitWall(node) ? () => splitWall(node) : undefined
+                }
+                onInspect={handleInspect}
+                onPaint={node && canPaintNode?.(node) ? handlePaint : undefined}
+                onRotateLeft={canRotate ? handleRotateLeft : undefined}
+                onRotateRight={canRotate ? handleRotateRight : undefined}
+                onDuplicate={
+                  node &&
+                  node.type !== 'spawn' &&
+                  !DELETE_ONLY_TYPES.includes(node.type) &&
+                  !HOLE_TYPES.includes(node.type)
+                    ? handleDuplicate
+                    : undefined
+                }
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+              />
+              {/* Height-drag dimension pill. Absolutely positioned just above
                 the menu (away from the height arrow below it) so it rides the
                 same scale transform + anchor, never overlaps the menu, and
                 needs no menu lift — which is what caused the click flicker.
                 Non-interactive. */}
-            {isHeightDragPill && pillDims ? (
-              <div className="-translate-x-1/2 pointer-events-none absolute bottom-full left-1/2 mb-2">
-                <MeasurementPill
-                  height={pillDims.height}
-                  length={pillDims.length}
-                  primary="height"
-                  ref={pillHeightRef}
-                  thickness={pillDims.thickness}
-                  unit={unit}
-                />
-              </div>
-            ) : null}
-            {/* HVAC chrome above the menu — same slot as the wall height
+              {isHeightDragPill && pillDims ? (
+                <div className="-translate-x-1/2 pointer-events-none absolute bottom-full left-1/2 mb-2">
+                  <MeasurementPill
+                    height={pillDims.height}
+                    length={pillDims.length}
+                    primary="height"
+                    ref={pillHeightRef}
+                    thickness={pillDims.thickness}
+                    unit={unit}
+                  />
+                </div>
+              ) : null}
+              {/* HVAC chrome above the menu — same slot as the wall height
                 pill. System pill (which tree, run length, equipment reach)
                 for every distribution kind; the rotation-axis pill stacks
                 under it for duct fittings. */}
-            {node && hasPorts(node.type) ? (
-              <div className="-translate-x-1/2 pointer-events-none absolute bottom-full left-1/2 mb-2 flex flex-col items-center gap-1">
-                <SystemSummaryPill nodeId={node.id} unit={unit} />
-                {hasAxisCycling(node.type) ? (
-                  <div className="flex items-center gap-2 whitespace-nowrap rounded-full border border-border/60 bg-background/90 px-4 py-1.5 text-xs tabular-nums shadow-sm backdrop-blur">
-                    <span className="font-medium text-foreground">
-                      Axis {rotationAxis.toUpperCase()}
-                    </span>
-                    <span aria-hidden className="text-muted-foreground">
-                      ·
-                    </span>
-                    <span className="text-muted-foreground">R/T rotate</span>
-                    <span aria-hidden className="text-muted-foreground">
-                      ·
-                    </span>
-                    <span className="text-muted-foreground">⌥ axis</span>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+              {node && hasPorts(node.type) ? (
+                <div className="-translate-x-1/2 pointer-events-none absolute bottom-full left-1/2 mb-2 flex flex-col items-center gap-1">
+                  <SystemSummaryPill nodeId={node.id} unit={unit} />
+                  {hasAxisCycling(node.type) ? (
+                    <div className="flex items-center gap-2 whitespace-nowrap rounded-full border border-border/60 bg-background/90 px-4 py-1.5 text-xs tabular-nums shadow-sm backdrop-blur">
+                      <span className="font-medium text-foreground">
+                        Axis {rotationAxis.toUpperCase()}
+                      </span>
+                      <span aria-hidden className="text-muted-foreground">
+                        ·
+                      </span>
+                      <span className="text-muted-foreground">R/T rotate</span>
+                      <span aria-hidden className="text-muted-foreground">
+                        ·
+                      </span>
+                      <span className="text-muted-foreground">⌥ axis</span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           </div>
         </Html>
       </group>

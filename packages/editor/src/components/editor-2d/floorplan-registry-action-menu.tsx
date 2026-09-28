@@ -5,6 +5,7 @@ import {
   type AnyNodeId,
   type CeilingNode,
   getWallMidpointHandlePoint,
+  getWallThickness,
   nodeRegistry,
   type SlabNode,
   useLiveNodeOverrides,
@@ -25,7 +26,121 @@ import {
 import { sfxEmitter } from '../../lib/sfx-bus'
 import useEditor from '../../store/use-editor'
 import { useMovingNode } from '../../store/use-interaction-scope'
-import { NodeActionMenu } from '../editor/node-action-menu'
+import { useUiHidden } from '../../store/use-ui-hidden'
+import { flashAbove, NodeActionMenu } from '../editor/node-action-menu'
+import {
+  canRotateNode,
+  duplicateFlashText,
+  findNode,
+  paintNode,
+  rotateNode,
+  toggleInspector,
+} from '../editor/node-menu-actions'
+
+type MenuPlacement = 'above' | 'below' | 'left' | 'right'
+type MenuPosition = { left: number; top: number; placement: MenuPlacement }
+
+const MENU_GAP_PX = 12
+const MENU_TRANSFORMS: Record<MenuPlacement, string> = {
+  above: `translate(-50%, calc(-100% - ${MENU_GAP_PX}px))`,
+  below: `translate(-50%, ${MENU_GAP_PX}px)`,
+  left: `translate(calc(-100% - ${MENU_GAP_PX}px), -50%)`,
+  right: `translate(${MENU_GAP_PX}px, -50%)`,
+}
+// The wall's dimension line sits this far outside its inner (room-side) face
+// (see the wall's floor-plan builder); its label (0.15 plan-unit text)
+// straddles the line.
+const DIMENSION_OFFSET = 0.75
+const DIMENSION_LABEL_HALF_HEIGHT = 0.12
+// The wall's side move arrows reach this far past its face (offset + inset +
+// shaft + head in the floor-plan builder / registry layer).
+const MOVE_ARROW_REACH = 0.35
+
+// Mean of the level's wall endpoints, cached per scene snapshot so the
+// per-frame anchor never rescans every node.
+let centroidCache: {
+  nodes: Record<string, AnyNode>
+  parentId: string | null
+  point: [number, number] | null
+} | null = null
+
+function levelWallCentroid(
+  nodes: Record<string, AnyNode>,
+  parentId: string | null,
+): [number, number] | null {
+  if (centroidCache?.nodes === nodes && centroidCache.parentId === parentId) {
+    return centroidCache.point
+  }
+  let sumX = 0
+  let sumZ = 0
+  let count = 0
+  for (const node of Object.values(nodes)) {
+    if (node?.type !== 'wall' || (node.parentId ?? null) !== parentId) continue
+    sumX += node.start[0] + node.end[0]
+    sumZ += node.start[1] + node.end[1]
+    count += 2
+  }
+  const point: [number, number] | null = count > 0 ? [sumX / count, sumZ / count] : null
+  centroidCache = { nodes, parentId, point }
+  return point
+}
+
+function samePosition(a: MenuPosition, b: MenuPosition) {
+  return (
+    a.placement === b.placement && Math.abs(a.left - b.left) < 0.5 && Math.abs(a.top - b.top) < 0.5
+  )
+}
+
+/**
+ * The wall menu sits beyond the wall's dimension label (on its outer side,
+ * away from the level's walls), so the length stays readable: above it for a
+ * top wall, below it for a bottom wall. A side wall's label runs vertically,
+ * so there the menu opens beside the wall on the room side, past its move
+ * arrow.
+ */
+function wallMenuPosition(
+  wall: WallNode,
+  nodes: Record<string, AnyNode>,
+  svg: SVGSVGElement,
+  ctm: DOMMatrix,
+): MenuPosition {
+  const toScreen = (x: number, y: number) => {
+    const point = svg.createSVGPoint()
+    point.x = x
+    point.y = y
+    return point.matrixTransform(ctm)
+  }
+  const mid = getWallMidpointHandlePoint(wall)
+  const midScreen = toScreen(mid.x, mid.y)
+  const dx = wall.end[0] - wall.start[0]
+  const dz = wall.end[1] - wall.start[1]
+  const length = Math.hypot(dx, dz)
+  if (length < 1e-6) return { left: midScreen.x, top: midScreen.y, placement: 'above' }
+
+  // Same outward side the floor-plan dimension picks: away from the mean of
+  // the level's wall endpoints.
+  const [cx, cz] = levelWallCentroid(nodes, wall.parentId ?? null) ?? [mid.x, mid.y]
+  let nx = -dz / length
+  let nz = dx / length
+  if ((mid.x - cx) * nx + (mid.y - cz) * nz < 0) {
+    nx = -nx
+    nz = -nz
+  }
+
+  const outward = toScreen(mid.x + nx, mid.y + nz)
+  const sx = outward.x - midScreen.x
+  const sy = outward.y - midScreen.y
+  const screenLength = Math.hypot(sx, sy) || 1
+  const half = getWallThickness(wall) / 2
+  if (Math.abs(sy) / screenLength >= 0.5) {
+    const reach = DIMENSION_OFFSET - half + DIMENSION_LABEL_HALF_HEIGHT
+    const anchor = toScreen(mid.x + nx * reach, mid.y + nz * reach)
+    return { left: anchor.x, top: anchor.y, placement: sy < 0 ? 'above' : 'below' }
+  }
+  const reach = half + MOVE_ARROW_REACH
+  const inner = toScreen(mid.x - nx * reach, mid.y - nz * reach)
+  return { left: inner.x, top: inner.y, placement: sx < 0 ? 'right' : 'left' }
+}
 
 /**
  * Floating Move / Duplicate / Delete buttons that appear above the
@@ -66,14 +181,20 @@ export function FloorplanRegistryActionMenu() {
   // 2D panel.
   const isFloorplanHovered = useEditor((s) => s.isFloorplanHovered)
 
-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
+  const unit = useViewer((s) => s.unit)
+  const canFindNode = useEditor((s) => s.canFindNode)
+  const canPaintNode = useEditor((s) => s.canPaintNode)
+
+  const [position, setPosition] = useState<MenuPosition | null>(null)
 
   // Only show for registered kinds (skip legacy kinds — they have their
   // own FloorplanActionMenuLayer entries).
   const selectedKind = useScene((s) => (selectedId ? (s.nodes[selectedId]?.type ?? null) : null))
   const def = selectedKind ? nodeRegistry.get(selectedKind) : null
   const isRegistryKind = !!def
-  const isVisible = isRegistryKind && !movingNode && isFloorplanHovered
+  // The paint card's customize mode steps the menu aside, as in 3D.
+  const customizing = useUiHidden((s) => s.customizing)
+  const isVisible = isRegistryKind && !movingNode && isFloorplanHovered && !customizing
   const isWall = selectedKind === 'wall'
 
   useEffect(() => {
@@ -99,7 +220,8 @@ export function FloorplanRegistryActionMenu() {
       // drags. For curved walls `getWallMidpointHandlePoint` returns the
       // apex point on the arc at t=0.5, matching what the renderer draws.
       if (isWall) {
-        const sceneNode = useScene.getState().nodes[selectedId] as WallNode | undefined
+        const { nodes } = useScene.getState()
+        const sceneNode = nodes[selectedId] as WallNode | undefined
         if (!sceneNode) {
           setPosition(null)
           return
@@ -108,19 +230,26 @@ export function FloorplanRegistryActionMenu() {
           | Partial<WallNode>
           | undefined
         const wall = (overrides ? { ...sceneNode, ...overrides } : sceneNode) as WallNode
-        const planMid = getWallMidpointHandlePoint(wall)
-        const midPt = svgEl.createSVGPoint()
-        midPt.x = planMid.x
-        midPt.y = planMid.y
-        const midScreen = midPt.matrixTransform(ctm)
-        setPosition({ left: midScreen.x, top: midScreen.y })
+        const next = wallMenuPosition(wall, nodes, svgEl, ctm)
+        setPosition((prev) => (prev && samePosition(prev, next) ? prev : next))
         return
       }
 
-      const el = sceneEl.querySelector(`[data-node-id="${selectedId}"]`) as SVGGElement | null
-      if (el) {
-        const rect = el.getBoundingClientRect()
-        setPosition({ left: rect.left + rect.width / 2, top: rect.top })
+      // The node draws in a base pass (its body, first in the DOM) and an
+      // overlay pass that carries its handles (resize / rotate arrows): the
+      // menu centres on the body and clears the handles above it.
+      const entries = sceneEl.querySelectorAll(`[data-node-id="${selectedId}"]`)
+      let top = Number.POSITIVE_INFINITY
+      let left: number | null = null
+      for (const entry of entries) {
+        const rect = entry.getBoundingClientRect()
+        if (rect.width === 0 && rect.height === 0) continue
+        top = Math.min(top, rect.top)
+        left ??= rect.left + rect.width / 2
+      }
+      if (left !== null) {
+        const next: MenuPosition = { left, top, placement: 'above' }
+        setPosition((prev) => (prev && samePosition(prev, next) ? prev : next))
       } else {
         setPosition(null)
       }
@@ -234,16 +363,32 @@ export function FloorplanRegistryActionMenu() {
     useViewer.getState().setSelection({ selectedIds: [] })
   }
 
+  const canRotate = canRotateNode(node)
+  const stop =
+    (action: () => void) =>
+    (event: { stopPropagation: () => void }): void => {
+      event.stopPropagation()
+      action()
+    }
+
   return createPortal(
     <div
       className="pointer-events-none fixed z-30"
       style={{
         left: position.left,
         top: position.top,
-        transform: 'translate(-50%, calc(-100% - 32px))',
+        transform: MENU_TRANSFORMS[position.placement],
       }}
     >
       <NodeActionMenu
+        onFind={canFindNode ? stop(() => findNode(node)) : undefined}
+        onInspect={stop(toggleInspector)}
+        onPaint={canPaintNode?.(node) ? stop(() => paintNode(node)) : undefined}
+        onRotateLeft={canRotate ? stop(() => rotateNode(node, 1)) : undefined}
+        onRotateRight={canRotate ? stop(() => rotateNode(node, -1)) : undefined}
+        tail={
+          position.placement === 'above' ? 'down' : position.placement === 'below' ? 'up' : 'none'
+        }
         onAddHole={canAddHole ? handleAddHole : undefined}
         onCurve={
           wall && canSplitWall(wall) && canCurveWall(wall, nodes)
@@ -251,7 +396,14 @@ export function FloorplanRegistryActionMenu() {
             : undefined
         }
         onDelete={canDelete ? handleDelete : undefined}
-        onDuplicate={canDuplicate ? handleDuplicate : undefined}
+        onDuplicate={
+          canDuplicate
+            ? (event) => {
+                flashAbove(event.currentTarget, duplicateFlashText(node, unit))
+                handleDuplicate()
+              }
+            : undefined
+        }
         onFlipHinge={opening ? () => flipOpeningHinge(opening) : undefined}
         onFlipSwing={node.type === 'door' ? () => flipDoorSwing(node) : undefined}
         onMove={canMove ? handleMove : undefined}

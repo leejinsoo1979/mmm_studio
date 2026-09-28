@@ -1,24 +1,136 @@
-import { useScene } from '@pascal-app/core'
-import { useUiTheme } from '@pascal-app/editor'
-import { Camera, ChevronLeft, Moon, Sun } from 'lucide-react'
+import { type AnyNodeId, getLevelDisplayName, type SlabNode, useScene } from '@pascal-app/core'
+import { HUD_TEXT, useUiHidden } from '@pascal-app/editor'
+import { useViewer } from '@pascal-app/viewer'
+import { ChevronLeft } from 'lucide-react'
 import Link from 'next/link'
-import { useEffect, useRef, useState } from 'react'
-import { ExportCenter } from './export-center'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 interface EditorHeaderProps {
   sceneName: string
-  sceneId: string
   onRename: (name: string) => Promise<void>
 }
 
-export function EditorHeader({ sceneId, sceneName, onRename }: EditorHeaderProps) {
+type Point = readonly [number, number]
+
+function ringArea(points: readonly Point[]): number {
+  let twice = 0
+  for (let i = 0; i < points.length; i++) {
+    const [x1, z1] = points[i]!
+    const [x2, z2] = points[(i + 1) % points.length]!
+    twice += x1 * z2 - x2 * z1
+  }
+  return Math.abs(twice) / 2
+}
+
+/** Floor area of the current level: its slabs, less their holes, in m². */
+function useLevelFloorArea(): { area: number; levelName: string | null } {
+  const levelId = useViewer((s) => s.selection.levelId)
+  const area = useScene((s) => {
+    const level = levelId ? s.nodes[levelId as AnyNodeId] : null
+    if (level?.type !== 'level') return 0
+    let total = 0
+    for (const childId of level.children) {
+      const node = s.nodes[childId as AnyNodeId]
+      if (node?.type !== 'slab') continue
+      const slab = node as SlabNode
+      total += ringArea(slab.polygon)
+      for (const hole of slab.holes ?? []) total -= ringArea(hole)
+    }
+    return total
+  })
+  const levelName = useScene((s) => {
+    const level = levelId ? s.nodes[levelId as AnyNodeId] : null
+    return level?.type === 'level' ? getLevelDisplayName(level) : null
+  })
+  return { area, levelName }
+}
+
+function formatFloorArea(squareMeters: number, imperial: boolean): string {
+  if (squareMeters <= 0) return '—'
+  return imperial ? `${(squareMeters * 10.7639).toFixed(0)}ft²` : `${squareMeters.toFixed(1)}m²`
+}
+
+/** inZOI's 소지금 card under the build panel; ours reads the floor area. */
+function FloorAreaCard() {
+  const { area, levelName } = useLevelFloorArea()
+  const imperial = useViewer((s) => s.unit === 'imperial')
+  return (
+    <div
+      className="fixed bottom-3 left-3 z-40 h-12 rounded-xl bg-[#f9f9f9]/95 shadow-[0_2px_10px_rgba(0,0,0,0.08)] backdrop-blur-md dark:bg-neutral-900/95"
+      style={{ width: 'calc(var(--viewer-left-inset, 0px) - 12px)' }}
+    >
+      <span className="absolute top-2 left-3 text-[11px] text-neutral-500 dark:text-neutral-400">
+        바닥 면적{levelName ? ` · ${levelName}` : ''}
+      </span>
+      <span className="absolute top-1/2 right-4 -translate-y-1/2 font-semibold text-[17px] text-neutral-900 tabular-nums dark:text-neutral-50">
+        {formatFloorArea(area, imperial)}
+      </span>
+    </div>
+  )
+}
+
+/** Warns when the server keeps scenes in memory only (they vanish on restart). */
+function useMemoryStoreWarning(): boolean {
+  const [memory, setMemory] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/health', { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((health: { store?: string } | null) => {
+        if (!cancelled && health?.store === 'memory') setMemory(true)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return memory
+}
+
+/** The palette's own Esc handler closes it, exactly like its 확인 button. */
+function leaveCustomize() {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+}
+
+function BackButton({ customizing }: { customizing: boolean }) {
+  const disc = (
+    <span className="flex size-full items-center justify-center rounded-full bg-white text-[#555] shadow-[0_1px_3px_rgba(0,0,0,0.2)]">
+      <ChevronLeft className="size-4" strokeWidth={2.25} />
+    </span>
+  )
+  const ringClass =
+    'flex size-9 shrink-0 items-center justify-center rounded-full bg-white/35 p-[5px] backdrop-blur-sm transition-colors hover:bg-white/55'
+  const textClass = `ml-2.5 shrink-0 font-normal text-[17px] hover:underline ${HUD_TEXT}`
+  if (customizing) {
+    return (
+      <>
+        <button aria-label="돌아가기" className={ringClass} onClick={leaveCustomize} type="button">
+          {disc}
+        </button>
+        <button className={textClass} onClick={leaveCustomize} type="button">
+          돌아가기
+        </button>
+      </>
+    )
+  }
+  return (
+    <>
+      <Link aria-label="대시보드로 돌아가기" className={ringClass} href="/dashboard">
+        {disc}
+      </Link>
+      <Link className={textClass} href="/dashboard">
+        돌아가기
+      </Link>
+    </>
+  )
+}
+
+export function EditorHeader({ sceneName, onRename }: EditorHeaderProps) {
   const [draftName, setDraftName] = useState(sceneName)
   const [isSaving, setIsSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const experience = useScene((state) => state.experience)
-  const setExperience = useScene((state) => state.setExperience)
-  const uiTheme = useUiTheme((state) => state.theme)
-  const toggleUiTheme = useUiTheme((state) => state.toggle)
+  const customizing = useUiHidden((s) => s.customizing)
+  const memoryStore = useMemoryStoreWarning()
 
   useEffect(() => setDraftName(sceneName), [sceneName])
 
@@ -38,91 +150,49 @@ export function EditorHeader({ sceneId, sceneName, onRename }: EditorHeaderProps
     }
   }
 
-  const saveCamera = () => {
-    window.dispatchEvent(
-      new CustomEvent('mmm-camera-capture', {
-        detail: (snapshot: {
-          position: [number, number, number]
-          target: [number, number, number]
-          fov?: number
-        }) => {
-          const nextIndex = experience.cameras.length + 1
-          setExperience({
-            ...experience,
-            cameras: [
-              ...experience.cameras,
-              { id: crypto.randomUUID(), label: `Camera ${nextIndex}`, ...snapshot },
-            ],
-          })
-        },
-      }),
+  let title: ReactNode
+  if (customizing) {
+    title = <span className={`font-normal text-[17px] ${HUD_TEXT}`}>건축 커스터마이즈</span>
+  } else {
+    title = (
+      <input
+        aria-label="프로젝트 이름"
+        className={`h-8 w-auto min-w-24 max-w-60 rounded-md border border-transparent bg-transparent px-1.5 font-normal text-[17px] outline-none transition [field-sizing:content] hover:border-black/10 focus:border-black/15 focus:bg-white/90 focus:text-neutral-900 focus:[text-shadow:none] disabled:opacity-60 ${HUD_TEXT}`}
+        disabled={isSaving}
+        maxLength={200}
+        onBlur={() => void commitName()}
+        onChange={(event) => setDraftName(event.target.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation()
+          if (event.key === 'Enter') event.currentTarget.blur()
+          if (event.key === 'Escape') {
+            setDraftName(sceneName)
+            event.currentTarget.blur()
+          }
+        }}
+        ref={inputRef}
+        value={draftName}
+      />
     )
   }
 
-  // inZOI "‹ Go Back | Customize Architecture": a slim row on top of the
-  // floating build panel instead of a full-width web header.
+  // inZOI "‹ 돌아가기 | 건축 모드": plate-less HUD text over the scene.
   return (
     <>
-      <header className="flex h-11 items-center gap-2">
-        <Link
-          aria-label="대시보드로 돌아가기"
-          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/90 text-neutral-700 shadow-[0_2px_10px_rgba(0,0,0,0.15)] ring-1 ring-black/5 transition-colors hover:bg-white hover:text-neutral-900 dark:bg-neutral-900/90 dark:text-neutral-200 dark:ring-white/10 dark:hover:bg-neutral-800"
-          href="/dashboard"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </Link>
-        <Link
-          className="shrink-0 font-medium text-[15px] text-neutral-800 [text-shadow:0_0_4px_rgba(255,255,255,0.95)] hover:underline"
-          href="/dashboard"
-        >
-          돌아가기
-        </Link>
-        <span className="h-4 w-px shrink-0 bg-neutral-500/60" />
-        <input
-          aria-label="프로젝트 이름"
-          className="h-8 w-44 rounded-md border border-transparent bg-transparent px-1.5 font-medium text-[15px] text-neutral-800 outline-none transition [text-shadow:0_0_4px_rgba(255,255,255,0.95)] hover:border-black/10 focus:border-black/15 focus:bg-white/90 disabled:opacity-60"
-          disabled={isSaving}
-          maxLength={200}
-          onBlur={() => void commitName()}
-          onChange={(event) => setDraftName(event.target.value)}
-          onKeyDown={(event) => {
-            event.stopPropagation()
-            if (event.key === 'Enter') event.currentTarget.blur()
-            if (event.key === 'Escape') {
-              setDraftName(sceneName)
-              event.currentTarget.blur()
-            }
-          }}
-          ref={inputRef}
-          value={draftName}
-        />
+      <header className="flex h-11 items-center">
+        <BackButton customizing={customizing} />
+        <span className="mx-4 h-4 w-px shrink-0 bg-[color:var(--hud-fg)] opacity-60" />
+        {title}
+        {memoryStore && !customizing && (
+          <span
+            className="ml-3 whitespace-nowrap font-medium text-[#b45309] text-[12px] [text-shadow:0_0_4px_rgba(255,255,255,0.95)]"
+            title="서버가 장면을 메모리에만 저장하고 있습니다"
+          >
+            임시 저장소 사용 중 · 재시작하면 사라집니다
+          </span>
+        )}
       </header>
-      {/* inZOI's 소지금 card: a strip under the build panel for the project actions. */}
-      <div
-        className="fixed bottom-3 left-3 z-40 flex h-11 items-center gap-1 rounded-full border border-white/70 bg-white/90 py-1.5 pr-1.5 pl-4 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/90"
-        style={{ width: 'calc(var(--viewer-left-inset, 0px) - 12px)' }}
-      >
-        <span className="mr-auto text-muted-foreground text-xs">프로젝트</span>
-        <button
-          aria-label="시점 저장"
-          className="flex size-8 shrink-0 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-neutral-900/[0.06] hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-white"
-          onClick={saveCamera}
-          title={`시점 저장 (저장된 시점 ${experience.cameras.length}개)`}
-          type="button"
-        >
-          <Camera className="h-4 w-4" />
-        </button>
-        <button
-          aria-label={uiTheme === 'dark' ? '밝은 화면' : '어두운 화면'}
-          className="flex size-8 shrink-0 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-neutral-900/[0.06] hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-white"
-          onClick={toggleUiTheme}
-          title={uiTheme === 'dark' ? '밝은 화면으로' : '어두운 화면으로'}
-          type="button"
-        >
-          {uiTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </button>
-        <ExportCenter sceneId={sceneId} sceneName={sceneName} />
-      </div>
+      {!customizing && <FloorAreaCard />}
     </>
   )
 }

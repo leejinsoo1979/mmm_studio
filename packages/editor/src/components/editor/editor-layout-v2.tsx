@@ -1,7 +1,10 @@
 'use client'
 
+import { getSceneTheme, useViewer } from '@pascal-app/viewer'
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useRef } from 'react'
 import { useIsMobile } from '../../hooks/use-mobile'
+import { hudVars } from '../../lib/hud'
+import { cn } from '../../lib/utils'
 import useEditor from '../../store/use-editor'
 import { useUiHidden } from '../../store/use-ui-hidden'
 
@@ -17,8 +20,8 @@ const SIDEBAR_COLLAPSE_THRESHOLD = 220
 const PANEL_MARGIN = 12
 /** The panel starts below the "‹ 돌아가기 | 프로젝트" title row. */
 const PANEL_TOP = 64
-/** Room left under the panel for the navbar's bottom card (inZOI's 소지금). */
-const PANEL_BOTTOM = 64
+/** Room left under the panel for the navbar's 48px bottom card (inZOI's 소지금) plus a 12px gap. */
+const PANEL_BOTTOM = 72
 
 // ── Left column: resizable panel with tab bar ────────────────────────────────
 
@@ -146,10 +149,15 @@ function LeftColumn({
 
           {/* Resize handle + hit area */}
           <div
-            className="absolute inset-y-0 -right-3 z-[100] flex w-6 cursor-col-resize items-center justify-center"
+            className="group/resize absolute inset-y-0 right-0 z-[100] flex w-3 cursor-col-resize items-center justify-center"
             onPointerDown={handleResizerDown}
           >
-            <div className="h-8 w-1 rounded-full bg-neutral-500" />
+            <div
+              className={cn(
+                'h-8 w-1 rounded-full bg-neutral-400/80 transition-opacity group-hover/resize:opacity-100',
+                isDragging ? 'opacity-100' : 'opacity-0',
+              )}
+            />
           </div>
         </div>
       )}
@@ -174,11 +182,14 @@ function RightColumn({
 }) {
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden">
-      {/* Viewer toolbar */}
-      {/* inZOI top row: the tool bar sits centred (ActionMenu), view controls
-          at the right; the 3D / 2D switch moves to the bottom-left corner. */}
+      {/* inZOI top row: breadcrumb, the tool bar centred on the screen
+          (ActionMenu) and the day / night slider at the right, all 44px tall
+          at top 12. */}
       {toolbarRight && (
-        <div className="pointer-events-auto absolute top-3 right-3 z-20 flex h-11 items-center gap-2">
+        <div
+          className="pointer-events-auto absolute top-3 right-3 z-20 flex h-11 items-center gap-2"
+          data-hud-avoid
+        >
           {toolbarRight}
         </div>
       )}
@@ -238,6 +249,8 @@ export function EditorLayoutV2({
 }: EditorLayoutV2Props) {
   const isCaptureMode = useEditor((s) => s.isCaptureMode)
   const uiHidden = useUiHidden((s) => s.hidden)
+  const customizing = useUiHidden((s) => s.customizing)
+  const sceneAppearance = useViewer((s) => getSceneTheme(s.sceneTheme).appearance)
   const hideChrome = isCaptureMode || uiHidden
   const sidebarWidth = useSidebarStore((s) => s.width)
   const sidebarCollapsed = useSidebarStore((s) => s.isCollapsed)
@@ -258,28 +271,31 @@ export function EditorLayoutV2({
     )
   }
 
-  const showPanel = !hideChrome && sidebarTabs.length > 0
+  const showPanel = !(hideChrome || customizing) && sidebarTabs.length > 0
   const leftInset = showPanel ? PANEL_MARGIN + Math.max(sidebarWidth, SIDEBAR_MIN_WIDTH) : 0
 
   return (
     <div
       className="relative h-full w-full overflow-hidden bg-sidebar text-foreground"
-      style={{ '--viewer-left-inset': `${leftInset}px` } as CSSProperties}
+      style={
+        { '--viewer-left-inset': `${leftInset}px`, ...hudVars(sceneAppearance) } as CSSProperties
+      }
     >
       {/* Full-screen scene; the build panel floats over it (inZOI). */}
       <div className="absolute inset-0">
         <RightColumn
           overlays={uiHidden ? undefined : overlays}
           stageOverlay={stageOverlay}
-          toolbarLeft={hideChrome ? undefined : viewerToolbarLeft}
+          toolbarLeft={hideChrome || customizing ? undefined : viewerToolbarLeft}
           toolbarRight={hideChrome ? undefined : viewerToolbarRight}
         >
           {viewerContent}
         </RightColumn>
       </div>
-      {showPanel && navbarSlot && (
+      {!hideChrome && navbarSlot && (
         <div
           className="absolute z-40 flex h-11 items-center"
+          data-hud-avoid
           style={{ top: PANEL_MARGIN, left: PANEL_MARGIN }}
         >
           {navbarSlot}
@@ -288,7 +304,13 @@ export function EditorLayoutV2({
       {showPanel && (
         <div
           data-floating-panel
-          className="absolute z-40 flex flex-col overflow-hidden rounded-2xl bg-white/80 shadow-[0_8px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5 backdrop-blur-xl dark:bg-neutral-900/80 dark:ring-white/10"
+          className={cn(
+            'absolute z-40 flex flex-col overflow-hidden rounded-[20px] bg-[var(--panel-body)] shadow-[0_2px_12px_rgba(0,0,0,0.08)] backdrop-blur-[30px] backdrop-saturate-150',
+            // inZOI panel bands: opaque tabs, frosted search band, light
+            // sub-row, frosted grey body, translucent headers, near-white cards.
+            '[--panel-accent:#8ec3f2] [--panel-band:rgba(170,170,178,0.55)] [--panel-body:rgba(176,177,181,0.55)] [--panel-card-fg:#4a4a4a] [--panel-card-hover:#ffffff] [--panel-card:rgba(247,247,247,0.94)] [--panel-header:rgba(80,80,90,0.3)] [--panel-hero:#edebea] [--panel-subrow:#f2f2f2] [--panel-tabs:#f8f8f8]',
+            'dark:[--panel-band:rgba(44,44,48,0.62)] dark:[--panel-body:rgba(26,26,28,0.62)] dark:[--panel-card-fg:#e5e5e5] dark:[--panel-card-hover:rgba(72,72,74,0.96)] dark:[--panel-card:rgba(56,56,58,0.94)] dark:[--panel-header:rgba(255,255,255,0.12)] dark:[--panel-hero:#2c2c2c] dark:[--panel-subrow:#262626] dark:[--panel-tabs:#242424]',
+          )}
           style={{
             top: PANEL_TOP,
             bottom: sidebarCollapsed ? undefined : navbarSlot ? PANEL_BOTTOM : PANEL_MARGIN,

@@ -13,6 +13,19 @@ interface UseAutoSaveOptions {
   onDirty?: () => void
   onSaveStatusChange?: (status: SaveStatus) => void
   isVersionPreviewMode?: boolean
+  /**
+   * localStorage key for a client-side copy written with every save attempt, so
+   * a scene the server lost (restart, in-memory store) can still be restored.
+   */
+  backupKey?: string
+}
+
+function writeBackup(key: string, graph: SceneGraph) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ graph, savedAt: new Date().toISOString() }))
+  } catch {
+    // Swallow storage quota errors
+  }
 }
 
 /**
@@ -26,6 +39,7 @@ export function useAutoSave({
   onDirty,
   onSaveStatusChange,
   isVersionPreviewMode = false,
+  backupKey,
 }: UseAutoSaveOptions): { isLoadingSceneRef: MutableRefObject<boolean> } {
   const saveTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
   const isSavingRef = useRef(false)
@@ -39,6 +53,7 @@ export function useAutoSave({
   const onDirtyRef = useRef(onDirty)
   const onSaveStatusChangeRef = useRef(onSaveStatusChange)
   const isVersionPreviewModeRef = useRef(isVersionPreviewMode)
+  const backupKeyRef = useRef(backupKey)
 
   useEffect(() => {
     onSaveRef.current = onSave
@@ -52,6 +67,9 @@ export function useAutoSave({
   useEffect(() => {
     isVersionPreviewModeRef.current = isVersionPreviewMode
   }, [isVersionPreviewMode])
+  useEffect(() => {
+    backupKeyRef.current = backupKey
+  }, [backupKey])
 
   const setSaveStatus = useCallback((status: SaveStatus) => {
     onSaveStatusChangeRef.current?.(status)
@@ -98,6 +116,9 @@ export function useAutoSave({
 
       try {
         if (onSaveRef.current) {
+          // Before the request, so edits made while the server is unreachable
+          // still land in the local copy.
+          if (backupKeyRef.current) writeBackup(backupKeyRef.current, sceneGraph)
           await onSaveRef.current(sceneGraph)
         } else {
           saveSceneToLocalStorage(sceneGraph)
@@ -144,8 +165,8 @@ export function useAutoSave({
       const changed =
         currentNodesSnapshot !== lastNodesSnapshot ||
         state.collections !== lastCollectionsRef ||
-        state.materials !== lastMaterialsRef
-        || state.experience !== lastExperienceRef
+        state.materials !== lastMaterialsRef ||
+        state.experience !== lastExperienceRef
       if (!changed) return
 
       lastNodesSnapshot = currentNodesSnapshot
@@ -180,6 +201,8 @@ export function useAutoSave({
       const { nodes, rootNodeIds, collections, materials, experience } = useScene.getState()
       const sceneGraph = { nodes, rootNodeIds, collections, materials, experience } as SceneGraph
       if (onSaveRef.current) {
+        // The keepalive request may not land before the page is gone.
+        if (backupKeyRef.current) writeBackup(backupKeyRef.current, sceneGraph)
         onSaveRef.current(sceneGraph, { keepalive: true }).catch(() => {})
       } else {
         saveSceneToLocalStorage(sceneGraph)

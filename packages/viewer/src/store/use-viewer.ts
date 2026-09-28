@@ -106,6 +106,12 @@ type ViewerState = {
   transparentBackground: boolean
   setTransparentBackground: (transparent: boolean) => void
 
+  // Selected walls get a light emissive tint. A host that draws its own
+  // selection treatment on walls turns this off (the `wallSelectionTint`
+  // Viewer prop). Not persisted.
+  wallSelectionTint: boolean
+  setWallSelectionTint: (tint: boolean) => void
+
   // Embed-controlled ink-edge opacity override (null = use the per-mode default).
   inkOpacity: number | null
   setInkOpacity: (opacity: number | null) => void
@@ -348,6 +354,9 @@ const useViewer = create<ViewerState>()(
 
       transparentBackground: false,
       setTransparentBackground: (transparent) => set({ transparentBackground: transparent }),
+
+      wallSelectionTint: true,
+      setWallSelectionTint: (tint) => set({ wallSelectionTint: tint }),
 
       inkOpacity: null,
       setInkOpacity: (opacity) => set({ inkOpacity: opacity }),

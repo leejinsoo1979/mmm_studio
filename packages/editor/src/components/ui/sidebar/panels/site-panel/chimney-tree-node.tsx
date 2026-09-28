@@ -43,7 +43,7 @@ export const ChimneyTreeNode = memo(function ChimneyTreeNode({
     [nodeId, setSelection],
   )
 
-  const defaultName = node?.name || 'Chimney'
+  const defaultName = '굴뚝'
 
   return (
     <TreeNodeWrapper

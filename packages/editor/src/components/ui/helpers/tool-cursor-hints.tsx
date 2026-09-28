@@ -3,9 +3,11 @@
 import { Info, Ruler } from 'lucide-react'
 import { Fragment, useEffect, useRef } from 'react'
 import type { ContextualShortcutHint } from '../../../lib/contextual-help'
+import { HUD_KEYCAP, HUD_MUTED, HUD_TEXT } from '../../../lib/hud'
 import { cn } from '../../../lib/utils'
 import useDraftReadout from '../../../store/use-draft-readout'
 import { type PlacementAnchor, usePlacementFeedback } from '../../../store/use-placement-feedback'
+import { MouseGlyph } from '../primitives/mouse-glyph'
 
 /** Hint key for an information line (inZOI's ⓘ rows) rather than a key. */
 const INFO_KEY = 'ⓘ'
@@ -21,9 +23,19 @@ const RIGHT_CLICK = 'Right click'
 const ANCHOR_GAP = 16
 
 const KEY_LABELS: Record<string, string> = {
-  [LEFT_CLICK]: '클릭',
-  [RIGHT_CLICK]: '우클릭',
   'Double click': '더블클릭',
+}
+
+type Rect = { left: number; top: number; right: number; bottom: number }
+
+const overlaps = (a: Rect, b: Rect) =>
+  a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+
+/** HUD chrome (tool bar, legend, header, …) the hints must never draw over. */
+function hudAvoidRects(doc: Document): Rect[] {
+  return Array.from(doc.querySelectorAll<HTMLElement>('[data-hud-avoid]'), (el) =>
+    el.getBoundingClientRect(),
+  ).filter((rect) => rect.width > 0 && rect.height > 0)
 }
 
 /**
@@ -76,14 +88,36 @@ export function ToolCursorHints({
         el.style.transform = `translate(${left}px, ${top}px)`
         return
       }
-      // Flip to the cursor's left / top near the far edges so it stays on screen.
-      const left =
-        x + OFFSET_X + el.offsetWidth > rect.width ? x - OFFSET_X - el.offsetWidth : x + OFFSET_X
-      const top = Math.max(
-        0,
-        y + OFFSET_Y + el.offsetHeight > rect.height ? y - el.offsetHeight : y + OFFSET_Y,
-      )
-      el.style.transform = `translate(${left}px, ${top}px)`
+      // Right / below the cursor first, then flip left and / or up: the first
+      // placement that stays on screen and clear of the HUD chrome wins.
+      const avoid = hudAvoidRects(el.ownerDocument)
+      const px = x + rect.left
+      const py = y + rect.top
+      if (avoid.some((r) => overlaps(r, { left: px, top: py, right: px, bottom: py }))) {
+        el.style.display = 'none'
+        return
+      }
+      const w = el.offsetWidth
+      const h = el.offsetHeight
+      const candidates = [
+        [x + OFFSET_X, y + OFFSET_Y],
+        [x - OFFSET_X - w, y + OFFSET_Y],
+        [x + OFFSET_X, y - h - OFFSET_Y],
+        [x - OFFSET_X - w, y - h - OFFSET_Y],
+      ] as const
+      const fits = ([cx, cy]: readonly [number, number]) => {
+        if (cx < 0 || cy < 0 || cx + w > rect.width || cy + h > rect.height) return false
+        const left = cx + rect.left
+        const top = cy + rect.top
+        const box = { left, top, right: left + w, bottom: top + h }
+        return !avoid.some((r) => overlaps(r, box))
+      }
+      const placement = candidates.find(fits)
+      if (!placement) {
+        el.style.display = 'none'
+        return
+      }
+      el.style.transform = `translate(${placement[0]}px, ${placement[1]}px)`
     }
     const onMove = (event: PointerEvent) => {
       const target = event.target as Element | null
@@ -116,7 +150,10 @@ export function ToolCursorHints({
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none fixed top-0 left-0 z-40 flex-col gap-[9px] font-medium text-white [text-shadow:0_0_1px_rgba(0,0,0,1),0_0_2px_rgba(0,0,0,0.95),0_1px_3px_rgba(0,0,0,0.8),0_0_8px_rgba(0,0,0,0.5)]"
+      className={cn(
+        'pointer-events-none fixed top-0 left-0 z-40 flex-col gap-[7px] font-medium',
+        HUD_TEXT,
+      )}
       ref={ref}
       style={{ display: 'none' }}
     >
@@ -124,7 +161,7 @@ export function ToolCursorHints({
         <div className="mb-0.5 flex items-baseline gap-2 whitespace-nowrap">
           <span className="font-semibold text-[13px]">{title.name}</span>
           {title.size && (
-            <span className="text-[11px] text-white/80 tabular-nums">{title.size}</span>
+            <span className={cn('text-[11px] tabular-nums', HUD_MUTED)}>{title.size}</span>
           )}
         </div>
       )}
@@ -139,15 +176,15 @@ export function ToolCursorHints({
       {hints.map((hint) => (
         <div
           className={cn(
-            'flex items-center gap-3 whitespace-nowrap text-[12px]',
-            hint.active && 'text-sky-300',
+            'flex items-center gap-2.5 whitespace-nowrap text-[11px]',
+            hint.active && 'text-[#2f7fd0]',
           )}
           key={`${hint.keys.join('+')}:${hint.label}`}
         >
           <span className="flex min-w-5 shrink-0 items-center justify-center gap-0.5">
             {hint.keys.map((key, index) => (
               <Fragment key={String(key)}>
-                {index > 0 && <span className="px-px text-[9px] opacity-80">+</span>}
+                {index > 0 && <span className="px-px text-[9px]">+</span>}
                 {(Array.isArray(key) ? key : [key]).map((k) => (
                   <HintKey active={hint.active} key={k} value={k} />
                 ))}
@@ -171,38 +208,11 @@ export function ToolCursorHints({
 
 function HintKey({ value, active }: { value: string; active?: boolean }) {
   if (value === INFO_KEY) return <Info className="size-4" strokeWidth={1.5} />
-  if (value === LEFT_CLICK) return <MouseGlyph />
-  if (value === RIGHT_CLICK) return <MouseGlyph right />
+  if (value === LEFT_CLICK) return <MouseGlyph button="left" />
+  if (value === RIGHT_CLICK) return <MouseGlyph button="right" />
   return (
-    <span
-      className={cn(
-        'h-[18px] rounded-[4px] px-1 font-semibold text-[9px] text-white leading-[18px] ring-1 ring-white/35 [text-shadow:none]',
-        active ? 'bg-sky-500/90' : 'bg-[#8e8e8e]/80',
-      )}
-    >
+    <span className={cn(HUD_KEYCAP, 'h-[18px] px-1 text-[9px]', active && 'bg-[#3d8fe0]')}>
       {KEY_LABELS[value] ?? value}
     </span>
-  )
-}
-
-/** inZOI's mouse icon: grey body with the pressed (left / right) button lit white. */
-function MouseGlyph({ right = false }: { right?: boolean }) {
-  return (
-    <svg aria-hidden="true" className="shrink-0" height="18" viewBox="0 0 14 18" width="14">
-      <rect
-        fill="rgba(0,0,0,0.25)"
-        height="16.5"
-        rx="6.25"
-        stroke="#a0a0a0"
-        width="12.5"
-        x="0.75"
-        y="0.75"
-      />
-      <path
-        d={right ? 'M7 1.25A5.75 5.75 0 0 1 12.75 7v1H7z' : 'M7 1.25A5.75 5.75 0 0 0 1.25 7v1h5.75z'}
-        fill="#ffffff"
-      />
-      <path d="M1.25 8h11.5M7 1.25V8" stroke="#a0a0a0" strokeWidth="1" />
-    </svg>
   )
 }

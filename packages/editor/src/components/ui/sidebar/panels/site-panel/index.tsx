@@ -15,11 +15,14 @@ import {
   Camera,
   ChevronDown,
   Copy,
+  House,
+  LayoutGrid,
   Loader2,
   MoreHorizontal,
   Pencil,
   Pentagon,
   Plus,
+  Sofa,
   Trash2,
   X,
 } from 'lucide-react'
@@ -277,7 +280,7 @@ const CameraPopover = memo(function CameraPopover({
             buttonClassName,
           )}
           onClick={(e) => e.stopPropagation()}
-          title="Camera snapshot"
+          title="카메라 스냅샷"
         >
           <Camera className="h-3.5 w-3.5" />
           {hasCamera && (
@@ -302,7 +305,7 @@ const CameraPopover = memo(function CameraPopover({
               }}
             >
               <Camera className="h-3.5 w-3.5" />
-              View snapshot
+              스냅샷 보기
             </button>
           )}
           <button
@@ -314,7 +317,7 @@ const CameraPopover = memo(function CameraPopover({
             }}
           >
             <Camera className="h-3.5 w-3.5" />
-            {hasCamera ? 'Update snapshot' : 'Take snapshot'}
+            {hasCamera ? '스냅샷 갱신' : '스냅샷 찍기'}
           </button>
           {hasCamera && (
             <button
@@ -326,7 +329,7 @@ const CameraPopover = memo(function CameraPopover({
               }}
             >
               <Trash2 className="h-3.5 w-3.5" />
-              Clear snapshot
+              스냅샷 지우기
             </button>
           )}
         </div>
@@ -388,7 +391,7 @@ const ReferenceItem = memo(function ReferenceItem({
           />
         )}
         <InlineRenameInput
-          defaultName={refNode.type === 'scan' ? '3D Scan' : 'Guide Image'}
+          defaultName={refNode.type === 'scan' ? '3D 스캔' : '가이드 이미지'}
           isEditing={isEditing}
           nodeId={refNode.id}
           onStartEditing={() => setIsEditing(true)}
@@ -399,7 +402,7 @@ const ReferenceItem = memo(function ReferenceItem({
       <button
         className="z-20 flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-black/5 hover:text-foreground group-hover/ref:opacity-100 dark:hover:bg-foreground/10"
         onClick={(e) => handleDelete(refNode.id, e)}
-        title="Delete"
+        title="삭제"
       >
         <Trash2 className="h-3 w-3" />
       </button>
@@ -444,7 +447,6 @@ const LevelReferences = memo(function LevelReferences({
     uploadState?.status === 'preparing' ||
     uploadState?.status === 'uploading' ||
     uploadState?.status === 'confirming'
-  const uploadingType = uploadState?.assetType ?? null
   const uploadError = uploadState?.error ?? null
   const progress = uploadState?.progress ?? 0
 
@@ -492,14 +494,14 @@ const LevelReferences = memo(function LevelReferences({
         useUploadStore.getState().setResult(levelId, guide.url)
         window.setTimeout(() => useUploadStore.getState().clearUpload(levelId), 600)
       } catch {
-        useUploadStore.getState().setError(levelId, 'Could not add that guide image.')
+        useUploadStore.getState().setError(levelId, '가이드 이미지를 추가하지 못했습니다.')
       }
       return
     }
 
     if (!projectId) {
       useUploadStore.getState().startUpload(levelId, 'scan', file.name)
-      useUploadStore.getState().setError(levelId, 'No active project. Please open a project first.')
+      useUploadStore.getState().setError(levelId, '열린 프로젝트가 없습니다. 먼저 프로젝트를 여세요.')
       return
     }
 
@@ -566,7 +568,7 @@ const LevelReferences = memo(function LevelReferences({
                 ) : (
                   <Plus className="h-3.5 w-3.5" />
                 )}
-                {uploading ? `Uploading ${uploadingType}... ${progress}%` : 'Upload scan/floorplan'}
+                {uploading ? `올리는 중… ${progress}%` : '도면·스캔 올리기'}
               </button>
 
               <input
@@ -764,7 +766,7 @@ const LevelItem = memo(function LevelItem({
                   : 'text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
               onClick={(e) => e.stopPropagation()}
-              title="Camera snapshot"
+              title="카메라 스냅샷"
             >
               <Camera className="h-3.5 w-3.5" />
               {level.camera && (
@@ -789,7 +791,7 @@ const LevelItem = memo(function LevelItem({
                   }}
                 >
                   <Camera className="h-3.5 w-3.5" />
-                  View snapshot
+                  스냅샷 보기
                 </button>
               )}
               <button
@@ -801,7 +803,7 @@ const LevelItem = memo(function LevelItem({
                 }}
               >
                 <Camera className="h-3.5 w-3.5" />
-                {level.camera ? 'Update snapshot' : 'Take snapshot'}
+                {level.camera ? '스냅샷 갱신' : '스냅샷 찍기'}
               </button>
               {level.camera && (
                 <button
@@ -813,7 +815,7 @@ const LevelItem = memo(function LevelItem({
                   }}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  Clear snapshot
+                  스냅샷 지우기
                 </button>
               )}
             </div>
@@ -837,27 +839,27 @@ const LevelItem = memo(function LevelItem({
             <button
               className="flex w-full cursor-pointer items-center gap-2 rounded px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent"
               onClick={() => handleDuplicateLevel()}
-              title="Duplicate level"
+              title="층 복제"
             >
               <Copy className="h-3.5 w-3.5" />
-              Duplicate
+              복제
             </button>
             <button
               className="flex w-full cursor-pointer items-center gap-2 rounded px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent"
               onClick={() => setDuplicateDialogOpen(true)}
-              title="Duplicate level with options"
+              title="옵션으로 층 복제"
             >
               <Copy className="h-3.5 w-3.5" />
-              Duplicate with options...
+              옵션으로 복제…
             </button>
             <button
               className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-sm transition-colors enabled:cursor-pointer enabled:hover:bg-accent enabled:hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!canDeleteLevel}
               onClick={() => deleteLevelWithFallbackSelection(level.id)}
-              title={canDeleteLevel ? 'Delete level' : 'The ground level cannot be deleted'}
+              title={canDeleteLevel ? '층 삭제' : '1층은 삭제할 수 없습니다'}
             >
               <Trash2 className="h-3.5 w-3.5" />
-              Delete
+              삭제
             </button>
           </PopoverContent>
         </Popover>
@@ -948,7 +950,7 @@ const LevelsSection = memo(function LevelsSection({
           <div className="relative z-10 flex items-center pr-1 pl-[38px]">
             <Plus className="h-3.5 w-3.5" />
           </div>
-          <span className="truncate">Add level</span>
+          <span className="truncate">층 추가</span>
         </button>
         {levels.length === 0 && (
           <div className="relative flex h-8 select-none items-center border-border/50 border-b py-0 pr-2 pl-[38px] text-muted-foreground text-xs">
@@ -956,7 +958,7 @@ const LevelsSection = memo(function LevelsSection({
             <div className="pointer-events-none absolute top-0 bottom-1/2 left-[21px] w-px bg-border/50" />
             {/* Horizontal branch line */}
             <div className="pointer-events-none absolute top-1/2 left-[21px] h-px w-[11px] bg-border/50" />
-            No levels yet
+            아직 층이 없습니다
           </div>
         )}
         {[...levels].reverse().map((level, index) => (
@@ -1015,15 +1017,15 @@ const LayerToggle = memo(function LayerToggle() {
           />
         )}
         <div className="relative z-10 flex flex-col items-center">
-          <img
-            alt="Structure"
+          <House
+            aria-hidden
             className={cn(
-              'mb-1 h-6 w-6 transition-all',
-              activeTab !== 'structure' && 'opacity-50 grayscale',
+              'mb-1 h-6 w-6 transition-colors',
+              activeTab === 'structure' ? 'text-[#5aa0e0]' : 'text-[#555] dark:text-neutral-300',
             )}
-            src="/icons/room.webp"
+            strokeWidth={1.5}
           />
-          Structure
+          구조
         </div>
         <div className="absolute right-1.5 bottom-1 z-10 rounded border border-border/40 bg-background/40 px-1 py-[2px] backdrop-blur-md">
           <span className="block font-medium font-mono text-[9px] text-muted-foreground/70 leading-none">
@@ -1051,15 +1053,15 @@ const LayerToggle = memo(function LayerToggle() {
           />
         )}
         <div className="relative z-10 flex flex-col items-center">
-          <img
-            alt="Furnish"
+          <Sofa
+            aria-hidden
             className={cn(
-              'mb-1 h-6 w-6 transition-all',
-              activeTab !== 'furnish' && 'opacity-50 grayscale',
+              'mb-1 h-6 w-6 transition-colors',
+              activeTab === 'furnish' ? 'text-[#5aa0e0]' : 'text-[#555] dark:text-neutral-300',
             )}
-            src="/icons/couch.webp"
+            strokeWidth={1.5}
           />
-          Furnish
+          가구
         </div>
         <div className="absolute right-1.5 bottom-1 z-10 rounded border border-border/40 bg-background/40 px-1 py-[2px] backdrop-blur-md">
           <span className="block font-medium font-mono text-[9px] text-muted-foreground/70 leading-none">
@@ -1088,15 +1090,15 @@ const LayerToggle = memo(function LayerToggle() {
           />
         )}
         <div className="relative z-10 flex flex-col items-center">
-          <img
-            alt="Zones"
+          <LayoutGrid
+            aria-hidden
             className={cn(
-              'mb-1 h-6 w-6 transition-all',
-              activeTab !== 'zones' && 'opacity-50 grayscale',
+              'mb-1 h-6 w-6 transition-colors',
+              activeTab === 'zones' ? 'text-[#5aa0e0]' : 'text-[#555] dark:text-neutral-300',
             )}
-            src="/icons/kitchen.webp"
+            strokeWidth={1.5}
           />
-          Zones
+          방
         </div>
         <div className="absolute right-1.5 bottom-1 z-10 rounded border border-border/40 bg-background/40 px-1 py-[2px] backdrop-blur-md">
           <span className="block font-medium font-mono text-[9px] text-muted-foreground/70 leading-none">
@@ -1132,7 +1134,7 @@ const ZoneItem = memo(function ZoneItem({ zone, isLast }: { zone: ZoneNode; isLa
     }
   }, [isSelected])
 
-  const defaultName = `Zone (${formatAreaLabel(calculatePolygonArea(zone.polygon), unit)})`
+  const defaultName = `방 (${formatAreaLabel(calculatePolygonArea(zone.polygon), unit)})`
 
   const handleClick = () => {
     setSelection({ zoneId: zone.id })
@@ -1205,7 +1207,7 @@ const ZoneItem = memo(function ZoneItem({ zone, isLast }: { zone: ZoneNode; isLa
             <button
               className="relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-black/5 hover:text-foreground group-hover/row:opacity-100 dark:hover:bg-foreground/10"
               onClick={(e) => e.stopPropagation()}
-              title="Camera snapshot"
+              title="카메라 스냅샷"
             >
               <Camera className="h-3 w-3" />
               {zone.camera && (
@@ -1230,7 +1232,7 @@ const ZoneItem = memo(function ZoneItem({ zone, isLast }: { zone: ZoneNode; isLa
                   }}
                 >
                   <Camera className="h-3.5 w-3.5" />
-                  View snapshot
+                  스냅샷 보기
                 </button>
               )}
               <button
@@ -1242,7 +1244,7 @@ const ZoneItem = memo(function ZoneItem({ zone, isLast }: { zone: ZoneNode; isLa
                 }}
               >
                 <Camera className="h-3.5 w-3.5" />
-                {zone.camera ? 'Update snapshot' : 'Take snapshot'}
+                {zone.camera ? '스냅샷 갱신' : '스냅샷 찍기'}
               </button>
               {zone.camera && (
                 <button
@@ -1254,7 +1256,7 @@ const ZoneItem = memo(function ZoneItem({ zone, isLast }: { zone: ZoneNode; isLa
                   }}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  Clear snapshot
+                  스냅샷 지우기
                 </button>
               )}
             </div>
@@ -1284,7 +1286,7 @@ const MultiSelectionBadge = memo(function MultiSelectionBadge() {
         <button
           className="cursor-pointer rounded-full p-1.5 transition-colors hover:bg-primary-foreground/20"
           onClick={() => setSelection({ selectedIds: [] })}
-          title="Clear selection"
+          title="선택 해제"
         >
           <X className="h-4 w-4" />
         </button>
@@ -1337,9 +1339,9 @@ const ContentSection = memo(function ContentSection() {
     if (levelZones.length === 0) {
       return (
         <div className="px-3 py-4 text-muted-foreground text-sm">
-          No zones on this level.{' '}
+          이 층에 방이 없습니다.{' '}
           <button className="cursor-pointer text-primary hover:underline" onClick={handleAddZone}>
-            Add one
+            추가하기
           </button>
         </div>
       )
@@ -1355,7 +1357,7 @@ const ContentSection = memo(function ContentSection() {
   }
 
   if (elementChildren.length === 0) {
-    return <div className="px-3 py-4 text-muted-foreground text-sm">No elements on this level</div>
+    return <div className="px-3 py-4 text-muted-foreground text-sm">이 층에 요소가 없습니다</div>
   }
   return (
     <TreeNodeDragProvider>
@@ -1437,7 +1439,7 @@ const BuildingItem = memo(function BuildingItem({
             )}
             src="/icons/building.webp"
           />
-          <span className="truncate font-medium text-sm">{building.name || 'Building'}</span>
+          <span className="truncate font-medium text-sm">{building.name || '건물'}</span>
         </div>
         <Popover
           onOpenChange={(open) => setBuildingCameraOpen(open ? building.id : null)}
@@ -1452,7 +1454,7 @@ const BuildingItem = memo(function BuildingItem({
                   : 'text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
               onClick={(e) => e.stopPropagation()}
-              title="Camera snapshot"
+              title="카메라 스냅샷"
             >
               <Camera className="h-4 w-4" />
               {building.camera && (
@@ -1477,7 +1479,7 @@ const BuildingItem = memo(function BuildingItem({
                   }}
                 >
                   <Camera className="h-3.5 w-3.5" />
-                  View snapshot
+                  스냅샷 보기
                 </button>
               )}
               <button
@@ -1489,7 +1491,7 @@ const BuildingItem = memo(function BuildingItem({
                 }}
               >
                 <Camera className="h-3.5 w-3.5" />
-                {building.camera ? 'Update snapshot' : 'Take snapshot'}
+                {building.camera ? '스냅샷 갱신' : '스냅샷 찍기'}
               </button>
               {building.camera && (
                 <button
@@ -1501,7 +1503,7 @@ const BuildingItem = memo(function BuildingItem({
                   }}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  Clear snapshot
+                  스냅샷 지우기
                 </button>
               )}
             </div>
@@ -1593,7 +1595,7 @@ export function SitePanel({ projectId, onUploadAsset, onDeleteAsset }: SitePanel
                 )}
                 src="/icons/site-flag.webp"
               />
-              <span className="font-medium text-sm">{siteNode.name || 'Site'}</span>
+              <span className="font-medium text-sm">{siteNode.name || '대지'}</span>
             </div>
             <CameraPopover
               buttonClassName={cn(

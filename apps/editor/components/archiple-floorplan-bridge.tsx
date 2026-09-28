@@ -4,6 +4,7 @@ import { createWallSegmentsOnCurrentLevel } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { Check, DoorOpen, MousePointer2, PenLine, Square, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { create } from 'zustand'
 import { ToolType } from './archiple2d/core/types/EditorState'
 import FloorplanCanvas from './archiple2d/floorplan/FloorplanCanvas'
 
@@ -77,25 +78,31 @@ function ArchipleCanvasStage({ onExit }: { onExit: () => void }) {
   }, [data])
 
   return (
-    <section className="pointer-events-auto absolute inset-0 z-40 flex flex-col bg-sidebar">
+    // A card in the scene area, below the top row and beside the build panel,
+    // so the tool bar and the panel never cover its header. z-[60] lifts it
+    // over the tool bar's filter row (z-50), which hangs into the same band.
+    <section
+      className="pointer-events-auto absolute z-[60] flex flex-col overflow-hidden rounded-2xl bg-sidebar shadow-[0_2px_12px_rgba(0,0,0,0.12)]"
+      style={{ top: 64, right: 12, bottom: 12, left: 'calc(var(--viewer-left-inset, 0px) + 12px)' }}
+    >
       <header className="flex h-10 shrink-0 items-center justify-between border-foreground/10 border-b bg-sidebar px-3">
         <div className="flex items-center gap-2 text-muted-foreground">
-          <span className="font-semibold text-foreground text-xs">Archiple 2D Floorplan</span>
-          <span className="text-[11px]">
-            original engine · mm coordinates · right-click finishes wall chain
-          </span>
+          <span className="font-semibold text-foreground text-xs">Archiple 2D 도면 (실험)</span>
+          <span className="text-[11px]">원본 엔진 · mm 좌표 · 우클릭으로 벽 잇기 끝내기</span>
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="rounded-md bg-white dark:bg-neutral-900 px-2.5 py-1.5 font-semibold text-[#111] text-xs hover:bg-neutral-200"
+            className="rounded-md bg-white px-2.5 py-1.5 font-semibold text-[#111] text-xs hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-neutral-700"
             onClick={applyToMmm}
             type="button"
           >
-            Apply to MMM
+            MMM에 적용
           </button>
           <button
+            aria-label="닫기"
             className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
             onClick={onExit}
+            title="닫기"
             type="button"
           >
             <X className="h-4 w-4" />
@@ -107,21 +114,21 @@ function ArchipleCanvasStage({ onExit }: { onExit: () => void }) {
         <aside className="flex w-12 shrink-0 flex-col items-center gap-2 border-foreground/10 border-r bg-card py-3">
           <ToolButton
             active={tool === ToolType.SELECT}
-            label="Select"
+            label="선택"
             onClick={() => setTool(ToolType.SELECT)}
           >
             <MousePointer2 className="h-4 w-4" />
           </ToolButton>
           <ToolButton
             active={tool === ToolType.WALL}
-            label="Wall"
+            label="벽"
             onClick={() => setTool(ToolType.WALL)}
           >
             <PenLine className="h-4 w-4" />
           </ToolButton>
           <ToolButton
             active={tool === ToolType.RECTANGLE}
-            label="Room"
+            label="방"
             onClick={() => setTool(ToolType.RECTANGLE)}
           >
             <Square className="h-4 w-4" />
@@ -129,14 +136,14 @@ function ArchipleCanvasStage({ onExit }: { onExit: () => void }) {
           <div className="my-1 h-px w-7 bg-foreground/10" />
           <ToolButton
             active={tool === ToolType.DOOR}
-            label="Door"
+            label="문"
             onClick={() => setTool(ToolType.DOOR)}
           >
             <DoorOpen className="h-4 w-4" />
           </ToolButton>
           <ToolButton
             active={tool === ToolType.WINDOW}
-            label="Window"
+            label="창문"
             onClick={() => setTool(ToolType.WINDOW)}
           >
             <Check className="h-4 w-4" />
@@ -160,24 +167,20 @@ function ArchipleCanvasStage({ onExit }: { onExit: () => void }) {
   )
 }
 
-export function ArchipleFloorplanBridge() {
-  const [open, setOpen] = useState(false)
+/** Opened from the 보기 설정 menu ('Archiple 2D 도면'); the stage's ✕ closes it. */
+export const useArchipleBridge = create<{ open: boolean; setOpen: (open: boolean) => void }>(
+  (set) => ({
+    open: false,
+    setOpen: (open) => set({ open }),
+  }),
+)
 
+export function ArchipleFloorplanBridge() {
+  const open = useArchipleBridge((s) => s.open)
+  if (!open) return null
   return (
     <div className="pointer-events-none absolute inset-0">
-      <button
-        style={{ left: 'calc(var(--viewer-left-inset, 0px) + 226px)' }}
-        className={`pointer-events-auto absolute bottom-3 z-50 h-11 rounded-full border px-4 font-semibold text-xs shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md transition ${
-          open
-            ? 'border-[#7567ff]/70 bg-[#7567ff] text-white hover:bg-[#6658f2]'
-            : 'border-white/70 bg-white/90 text-neutral-700 hover:bg-white dark:border-white/10 dark:bg-neutral-900/90 dark:text-neutral-200 dark:hover:bg-neutral-800'
-        }`}
-        onClick={() => setOpen((value) => !value)}
-        type="button"
-      >
-        {open ? 'MMM 3D' : 'Archiple 2D'}
-      </button>
-      {open && <ArchipleCanvasStage onExit={() => setOpen(false)} />}
+      <ArchipleCanvasStage onExit={() => useArchipleBridge.getState().setOpen(false)} />
     </div>
   )
 }

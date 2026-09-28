@@ -55,8 +55,10 @@ const HANDLE_MIN_HEIGHT = 0.4
 const HANDLE_TOP_INSET = 0.08
 const HEIGHT_HANDLE_OFFSET = 0.26
 const MIN_WALL_HEIGHT = 0.5
-const ARROW_COLOR = '#8381ed'
-const ARROW_HOVER_COLOR = '#a5b4fc'
+// The selected wall's violet, shared with the 2D plan's wall handles.
+const ARROW_COLOR = '#7563ff'
+const ARROW_HOVER_COLOR = '#9d93ff'
+const CORNER_FILL_COLOR = '#ffffff'
 // Match the door arrows: scale the rendered chevron down to ~two-thirds
 // so the in-world handles read as a single UI family.
 const ARROW_SCALE = 0.65
@@ -268,7 +270,7 @@ function WallCornerLeaderHandle({ wall, endpoint }: { wall: WallNode; endpoint: 
   const hexMaterial = useMemo(
     () =>
       new MeshBasicNodeMaterial({
-        color: new Color(ARROW_COLOR),
+        color: new Color(CORNER_FILL_COLOR),
         side: DoubleSide,
         transparent: true,
         opacity: 0.95,
@@ -293,9 +295,8 @@ function WallCornerLeaderHandle({ wall, endpoint }: { wall: WallNode; endpoint: 
   useEffect(() => {
     const next = isHovered ? ARROW_HOVER_COLOR : ARROW_COLOR
     dashMaterial.color.set(next)
-    hexMaterial.color.set(next)
     ringMaterial.color.set(next)
-  }, [dashMaterial, hexMaterial, ringMaterial, isHovered])
+  }, [dashMaterial, ringMaterial, isHovered])
 
   useEffect(() => () => dashMaterial.dispose(), [dashMaterial])
   useEffect(() => () => hexMaterial.dispose(), [hexMaterial])
@@ -371,7 +372,7 @@ function WallCornerLeaderHandle({ wall, endpoint }: { wall: WallNode; endpoint: 
             <circleGeometry args={[CORNER_HEX_RADIUS, 6]} />
           </mesh>
           <mesh material={ringMaterial} raycast={NO_RAYCAST} renderOrder={1002}>
-            <ringGeometry args={[CORNER_HEX_RADIUS, CORNER_HEX_RADIUS * 1.18, 6]} />
+            <ringGeometry args={[CORNER_HEX_RADIUS, CORNER_HEX_RADIUS * 1.3, 6]} />
           </mesh>
         </group>
       </group>

@@ -10,6 +10,8 @@ import useEditor from '../../../../../store/use-editor'
 import { furnishTools } from '../../../action-menu/furnish-tools'
 import { CATALOG_ITEMS } from '../../../item-catalog/catalog-items'
 import { ItemCatalog } from '../../../item-catalog/item-catalog'
+import { CatalogSearchBand } from '../../../item-catalog/catalog-search-band'
+import { CATALOG_SCROLL } from '../../../item-catalog/catalog-section'
 import { type FunctionTreeNode, FunctionTreePanel } from './function-tree-panel'
 
 const PLACEMENT_TAGS = new Set(['floor', 'wall', 'ceiling', 'countertop'])
@@ -17,7 +19,9 @@ const PLACEMENT_TAGS = new Set(['floor', 'wall', 'ceiling', 'countertop'])
 export type ItemsPanelCustomCategory = {
   id: string
   label: string
-  iconSrc: string
+  /** Outline glyph for the category row; falls back to `iconSrc`. */
+  icon?: React.ReactNode
+  iconSrc?: string
   content: React.ReactNode
 }
 
@@ -32,9 +36,12 @@ export function ItemsPanel({
   customCategories = [],
   showSourceFilter = true,
   showTagFilters = true,
+  renderHero,
 }: {
   items?: AssetInput[]
   extraItems?: AssetInput[]
+  /** Illustration band between the room row and the catalogue (tree browse). */
+  renderHero?: (room: { slug: string; name: string }) => React.ReactNode
   /** Called when the search query changes (community edition uses this for server-side search) */
   onSearchChange?: (query: string) => void
   /** When non-null and search is active, these results bypass local filtering (server search results) */
@@ -78,6 +85,7 @@ export function ItemsPanel({
         items={extraItems.length > 0 ? [...extraItems, ...(items ?? [])] : items}
         leadingTile={leadingTile}
         onSearchChange={onSearchChange}
+        renderHero={renderHero}
         searchResults={searchResults}
         showSourceFilter={showSourceFilter}
       />
@@ -202,9 +210,9 @@ function LegacyItemsPanel({
   // filter even before they own any items. Selecting "Mine" with no
   // matching items falls through to the empty/no-results state.
   const sourceChips: Array<{ id: AssetInput['source']; label: string }> = [
-    { id: 'library', label: 'Library' },
-    { id: 'community', label: 'Community' },
-    { id: 'mine', label: 'Mine' },
+    { id: 'library', label: '라이브러리' },
+    { id: 'community', label: '커뮤니티' },
+    { id: 'mine', label: '내 것' },
   ]
   const allTags = Array.from(new Set(categoryItems.flatMap((item) => item.tags ?? [])))
   const placementTags = allTags.filter((t) => PLACEMENT_TAGS.has(t))
@@ -279,13 +287,19 @@ function LegacyItemsPanel({
               onMouseEnter={() => triggerSFX('sfx:menu-hover')}
               type="button"
             >
-              <NextImage
-                alt={category.label}
-                className={cn('size-7 object-contain', !isActive && 'opacity-60 grayscale')}
-                height={28}
-                src={category.iconSrc}
-                width={28}
-              />
+              {category.icon ? (
+                <span className="grid size-7 place-items-center [&_svg]:size-5 [&_svg]:stroke-[1.5]">
+                  {category.icon}
+                </span>
+              ) : category.iconSrc ? (
+                <NextImage
+                  alt={category.label}
+                  className={cn('size-7 object-contain', !isActive && 'opacity-60 grayscale')}
+                  height={28}
+                  src={category.iconSrc}
+                  width={28}
+                />
+              ) : null}
               <span className="font-medium text-[10px] leading-none">{category.label}</span>
             </button>
           )
@@ -297,55 +311,41 @@ function LegacyItemsPanel({
       )}
 
       {/* Search + filters (non-scrollable) */}
-      <div
-        className={cn(
-          'shrink-0 flex-col gap-2 border-border/70 border-b p-2',
-          activeCustomCategory ? 'hidden' : 'flex',
-        )}
-      >
-        <div className="flex items-center gap-1.5">
-          {/* Search and source filter take 50/50 of the row. `min-w-0` on
-              both sides lets each half shrink to fit when the panel narrows.
-              With the source chips hidden, search spans the full row. */}
-          <input
-            className={cn(
-              'min-w-0 shrink-0 rounded-lg bg-muted px-2.5 py-1.5 text-xs placeholder:text-muted-foreground focus:outline-none',
-              showSourceFilter ? 'w-1/2' : 'w-full',
-            )}
-            onChange={(e) => {
-              setSearch(e.target.value)
-              onSearchChange?.(e.target.value)
-            }}
-            placeholder="Search..."
-            type="text"
-            value={search}
-          />
-          {showSourceFilter && sourceChips.length > 0 && (
-            <div className="flex w-1/2 min-w-0 shrink-0 rounded-lg bg-muted p-0.5">
-              {sourceChips.map((chip) => {
-                const isActive = activeSource === chip.id
-                return (
-                  <button
-                    className={cn(
-                      'min-w-0 flex-1 truncate rounded-md px-1 py-1 text-center font-medium text-[10px] transition-colors',
-                      isActive
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground',
-                    )}
-                    key={chip.id}
-                    onClick={() => setActiveSource(isActive ? null : chip.id)}
-                    type="button"
-                  >
-                    {chip.label}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </div>
+      <div className={cn('shrink-0 flex-col', activeCustomCategory ? 'hidden' : 'flex')}>
+        <CatalogSearchBand
+          left={
+            showSourceFilter && sourceChips.length > 0 ? (
+              <div className="flex rounded-full bg-white/60 p-0.5 dark:bg-white/10">
+                {sourceChips.map((chip) => {
+                  const isActive = activeSource === chip.id
+                  return (
+                    <button
+                      className={cn(
+                        'rounded-full px-2 py-0.5 font-medium text-[10px] transition-colors',
+                        isActive
+                          ? 'bg-white text-[#5aa0e0] shadow-sm dark:bg-white/20 dark:text-sky-200'
+                          : 'text-[#555] hover:text-[#222] dark:text-neutral-300',
+                      )}
+                      key={chip.id}
+                      onClick={() => setActiveSource(isActive ? null : chip.id)}
+                      type="button"
+                    >
+                      {chip.label}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : undefined
+          }
+          onChange={(value) => {
+            setSearch(value)
+            onSearchChange?.(value)
+          }}
+          value={search}
+        />
 
         {hasFilters && !search && !isServerSearch && (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1.5 px-2.5 pt-2">
             {placementTags.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 <button
@@ -358,7 +358,7 @@ function LegacyItemsPanel({
                   onClick={() => setActivePlacementTag(null)}
                   type="button"
                 >
-                  All
+                  전체
                 </button>
                 {placementTags.map((tag) => {
                   const count = placementCount(tag)
@@ -442,7 +442,7 @@ function LegacyItemsPanel({
       </div>
 
       {/* Item grid */}
-      <div className={cn('min-h-0 flex-1 overflow-y-auto p-3', activeCustomCategory && 'hidden')}>
+      <div className={cn(CATALOG_SCROLL, 'px-2.5 pt-2 pb-3', activeCustomCategory && 'hidden')}>
         {isSearchPending ? (
           <div className="flex h-full items-center justify-center">
             <div className="size-5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground" />
@@ -450,7 +450,7 @@ function LegacyItemsPanel({
         ) : isServerSearch && search && searchResults?.length === 0 ? (
           (emptyState ?? (
             <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
-              No results for &ldquo;{search}&rdquo;
+              &ldquo;{search}&rdquo; 검색 결과가 없습니다
             </div>
           ))
         ) : (

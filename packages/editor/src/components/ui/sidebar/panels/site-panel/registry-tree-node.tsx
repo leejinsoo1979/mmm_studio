@@ -12,6 +12,17 @@ import {
 } from './tree-node'
 import { TreeNodeActions } from './tree-node-actions'
 
+/** Korean row names for the kinds routed here (the registry labels are English). */
+const KIND_NAMES: Record<string, string> = {
+  'box-vent': '박스 환기구',
+  cupola: '큐폴라',
+  downspout: '선홈통',
+  'eyebrow-vent': '눈썹 환기구',
+  'ridge-vent': '용마루 환기구',
+  skylight: '천창',
+  'turbine-vent': '터빈 환기구',
+}
+
 interface RegistryTreeNodeProps {
   nodeId: AnyNodeId
   depth: number
@@ -42,7 +53,7 @@ export const RegistryTreeNode = memo(function RegistryTreeNode({
   const icon = presentation?.icon
   const iconSrc = icon?.kind === 'url' ? icon.src : '/icons/roof.webp'
   const snapTarget = resolveNodeSnapTarget(node)
-  const defaultName = node?.name || presentation?.label || 'Node'
+  const defaultName = (node && KIND_NAMES[node.type]) || presentation?.label || '요소'
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {

@@ -62,6 +62,7 @@ export {
   useArrowMaterial,
   useInvisibleHitAreaMaterial,
 } from './components/editor/node-arrow-handles'
+export { type PaintFocus, usePaintFocus } from './components/editor/paint-focus'
 export {
   type SnapshotCameraData,
   ThumbnailGenerator,
@@ -151,16 +152,24 @@ export { ToolManager } from './components/tools/tool-manager'
 export {
   commitWallDraftSegment,
   createRectangleRoomOnCurrentLevel,
+  createRoomPresetOnCurrentLevel,
   createWallOnCurrentLevel,
   createWallSegmentsOnCurrentLevel,
   flushAutoSurfacesForCurrentLevel,
   getRectangleRoomCenterlineCorners,
+  getRoomPresetPolygon,
   getSegmentGridStep,
   getWallResizeGridStep,
   inferOrthogonalWallPoint,
   isSegmentLongEnough,
+  normalizeQuarterTurns,
   type ResolvedWallDraftPoint,
+  ROOM_PRESET_PLATFORM_ELEVATION,
+  type RoomPresetKind,
+  type RoomPresetPlacement,
+  type RoomPresetSpec,
   resolveWallDraftPoint,
+  roomPresetLocalToPlan,
   snapPointToGrid,
   snapScalarToGrid,
   snapWallDraftPoint,
@@ -198,7 +207,28 @@ export { SegmentedControl } from './components/ui/controls/segmented-control'
 export { SliderControl } from './components/ui/controls/slider-control'
 export { ToggleControl } from './components/ui/controls/toggle-control'
 export { FloatingLevelSelector } from './components/ui/floating-level-selector'
+export { CatalogCard, type CatalogCardHover } from './components/ui/item-catalog/catalog-card'
+export {
+  formatCatalogSize,
+  formatCatalogSizeFull,
+} from './components/ui/item-catalog/catalog-format'
+export { CatalogHero } from './components/ui/item-catalog/catalog-hero'
+export { CatalogHover, type CatalogHoverInfo } from './components/ui/item-catalog/catalog-hover'
+export {
+  CatalogIconRow,
+  type CatalogIconRowItem,
+} from './components/ui/item-catalog/catalog-icon-row'
 export { CATALOG_ITEMS } from './components/ui/item-catalog/catalog-items'
+export {
+  CATALOG_BAND_ACTION,
+  CatalogBandPill,
+  CatalogSearchBand,
+} from './components/ui/item-catalog/catalog-search-band'
+export {
+  CATALOG_GRID,
+  CATALOG_SCROLL,
+  CatalogSection,
+} from './components/ui/item-catalog/catalog-section'
 // Item collections UI — used by the kind-owned ItemPanel in nodes/.
 export { CollectionsPopover } from './components/ui/panels/collections/collections-popover'
 // Phase 5 Stage E — kinds with bespoke editors (slab holes list,
@@ -296,6 +326,7 @@ export {
 export { isFloorplanInputEvent } from './lib/floorplan-input'
 export { commitFreshPlacementSubtree } from './lib/fresh-planar-placement'
 export { exportSceneToGlb } from './lib/glb-export'
+export { HUD_KEYCAP, HUD_MUTED, HUD_TEXT } from './lib/hud'
 export {
   boundaryReshapeScope,
   curveReshapeScope,
@@ -429,6 +460,7 @@ export {
 export { default as usePlacementPreview } from './store/use-placement-preview'
 export { default as useSegmentDraftChain } from './store/use-segment-draft-chain'
 export { passesSelectionFilter, useSelectionFilter } from './store/use-selection-filter'
+export { useUiHidden } from './store/use-ui-hidden'
 export { type UiTheme, useUiTheme } from './store/use-ui-theme'
 export { useUploadStore } from './store/use-upload'
 export { useWallMoveGhosts, type WallMoveGhostBridge } from './store/use-wall-move-ghosts'

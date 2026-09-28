@@ -6602,6 +6602,9 @@ export function FloorplanPanel({
   // Independent of whether the kind has a `def.floorplan` builder — placement
   // works as long as the kind's tool subscribes to the emitter.
   const isRegistryToolBuildActive = mode === 'build' && tool != null && nodeRegistry.has(tool)
+  // The room / platform preset (a wall-kind alias) previews and places off
+  // the generic grid events, like a registered kind's tool.
+  const isRoomPresetBuildActive = mode === 'build' && tool === 'room-preset'
   const isFloorplanGridInteractionActive =
     isFenceBuildActive ||
     isRoofBuildActive ||
@@ -6620,7 +6623,8 @@ export function FloorplanPanel({
     isFenceEndpointMoveActive ||
     isFloorItemBuildActive ||
     isFloorItemMoveActive ||
-    isRegistryToolBuildActive
+    isRegistryToolBuildActive ||
+    isRoomPresetBuildActive
   const floorplanOpeningLocalY = useMemo(() => {
     if (movingNode?.type === 'door' || movingNode?.type === 'window') {
       return snapToHalf(movingNode.position[1])

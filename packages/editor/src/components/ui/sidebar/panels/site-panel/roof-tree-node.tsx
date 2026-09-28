@@ -10,6 +10,16 @@ import { focusTreeNode, handleTreeSelection, TreeNode, TreeNodeWrapper } from '.
 import { TreeNodeActions } from './tree-node-actions'
 import { DropIndicatorLine, useTreeNodeDrag } from './tree-node-drag'
 
+const ROOF_TYPE_NAMES: Record<RoofSegmentNode['roofType'], string> = {
+  dutch: '팔작지붕',
+  flat: '평지붕',
+  gable: '박공지붕',
+  gambrel: '꺾인 박공지붕',
+  hip: '모임지붕',
+  mansard: '망사르드 지붕',
+  shed: '외쪽지붕',
+}
+
 interface RoofTreeNodeProps {
   nodeId: AnyNodeId
   depth: number
@@ -87,7 +97,7 @@ export const RoofTreeNode = memo(function RoofTreeNode({
   }, [isDropTarget, expanded])
 
   const segmentCount = segments.length
-  const defaultName = `Roof (${segmentCount} segment${segmentCount !== 1 ? 's' : ''})`
+  const defaultName = `지붕 (${segmentCount}면)`
 
   // Hide the dragged segment from every roof while dragging
   const visibleSegments = drag ? segments.filter((seg) => seg.id !== drag.nodeId) : segments
@@ -209,7 +219,7 @@ function RoofSegmentTreeNode({
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.button !== 0) return
-      const label = `${node.roofType.charAt(0).toUpperCase() + node.roofType.slice(1)} (${node.width.toFixed(1)}×${node.depth.toFixed(1)}m)`
+      const label = `${ROOF_TYPE_NAMES[node.roofType]} (${node.width.toFixed(1)}×${node.depth.toFixed(1)}m)`
       startDrag(node.id, node.type, node.parentId as string, label, e.clientX, e.clientY)
     },
     [node.id, node.type, node.parentId, node.roofType, node.width, node.depth, startDrag],
@@ -218,7 +228,7 @@ function RoofSegmentTreeNode({
   const handleStartEditing = useCallback(() => setIsEditing(true), [])
   const handleStopEditing = useCallback(() => setIsEditing(false), [])
 
-  const defaultName = `${node.roofType.charAt(0).toUpperCase() + node.roofType.slice(1)} (${node.width.toFixed(1)}x${node.depth.toFixed(1)}m)`
+  const defaultName = `${ROOF_TYPE_NAMES[node.roofType]} (${node.width.toFixed(1)}×${node.depth.toFixed(1)}m)`
 
   const hasAccessories = accessoryIds.length > 0
 

@@ -1,14 +1,12 @@
 import { getScaledDimensions, type ItemNode } from '@pascal-app/core'
 import type { ContinuationContext } from '../../../lib/continuation'
 import type { ContextualShortcutHint } from '../../../lib/contextual-help'
-import type { SnapContext } from '../../../lib/snapping-mode'
 import { useMovingNode } from '../../../store/use-interaction-scope'
 import { usePlacementFeedback } from '../../../store/use-placement-feedback'
-import { ContextualHelperPanel } from './contextual-helper-panel'
+import { useContinuationHints } from './continuation-hints'
 import { ToolCursorHints } from './tool-cursor-hints'
 
 interface ItemHelperProps {
-  snapContext?: SnapContext | null
   // Whether to advertise Alt = force-place. Only meaningful for kinds that
   // collision-validate their drop (structural kinds never reject, so it's hidden).
   showForce?: boolean
@@ -53,16 +51,15 @@ function heldItemHints({
 }
 
 // inZOI lists the placement keys beside the object and warns in red when it
-// overlaps something; the docked card keeps only the snapping / continuation
-// chips. Alt forces an invalid (red) drop.
+// overlaps something. Alt forces an invalid (red) drop.
 export function ItemHelper({
-  snapContext,
   showForce,
   continuationContext = null,
   rightClickRotates = false,
 }: ItemHelperProps) {
   const blocked = usePlacementFeedback((s) => s.blocked)
   const movingNode = useMovingNode()
+  const continuationHints = useContinuationHints(continuationContext)
   const title =
     movingNode?.type === 'item'
       ? {
@@ -71,17 +68,10 @@ export function ItemHelper({
         }
       : undefined
   return (
-    <>
-      <ContextualHelperPanel
-        continuationContext={continuationContext}
-        hints={[]}
-        snapContext={snapContext}
-      />
-      <ToolCursorHints
-        hints={heldItemHints({ rightClickRotates, showForce })}
-        title={title}
-        warning={blocked ? '사물은 서로 겹쳐서 배치할 수 없습니다' : undefined}
-      />
-    </>
+    <ToolCursorHints
+      hints={[...heldItemHints({ rightClickRotates, showForce }), ...continuationHints]}
+      title={title}
+      warning={blocked ? '사물은 서로 겹쳐서 배치할 수 없습니다' : undefined}
+    />
   )
 }

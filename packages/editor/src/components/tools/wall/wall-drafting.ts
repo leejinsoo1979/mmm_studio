@@ -11,6 +11,7 @@ import {
   planAutoSlabsForLevel,
   projectAutoSlabsForPlan,
   resumeSceneHistory,
+  SlabNode as SlabSchema,
   snapPointAlongAngleRay,
   useScene,
   type WallNode,
@@ -813,6 +814,85 @@ export function createRectangleRoomOnCurrentLevel(
   return createWallSegmentsOnCurrentLevel(
     corners.map((corner, index) => [corner, corners[(index + 1) % corners.length]!]),
   )
+}
+
+/** 방 = a closed ring of walls (+ its auto floor); 플랫폼 = a raised slab only. */
+export type RoomPresetKind = 'room' | 'platform'
+
+/**
+ * What the build panel seeds into `toolDefaults.wall.roomPreset` before arming
+ * the `room-preset` tool: the outline normalised to the unit box
+ * [-0.5, 0.5]², scaled by `size` (m) when placed.
+ */
+export type RoomPresetSpec = {
+  kind: RoomPresetKind
+  label: string
+  outline: WallPlanPoint[]
+  size: [number, number]
+}
+
+export type RoomPresetPlacement = {
+  center: WallPlanPoint
+  /** Width / depth in the shape's own frame, m. */
+  size: [number, number]
+  /** Quarter turns, clockwise seen from above. */
+  turns: number
+}
+
+/** How high a 플랫폼 pad stands off the level floor, m. */
+export const ROOM_PRESET_PLATFORM_ELEVATION = 0.3
+
+export function normalizeQuarterTurns(turns: number): number {
+  return ((turns % 4) + 4) % 4
+}
+
+/** Unit-box point → level-local plan point for a placement. */
+export function roomPresetLocalToPlan(
+  [u, v]: WallPlanPoint,
+  placement: RoomPresetPlacement,
+): WallPlanPoint {
+  let x = u * placement.size[0]
+  let z = v * placement.size[1]
+  for (let turn = 0; turn < normalizeQuarterTurns(placement.turns); turn++) {
+    ;[x, z] = [-z, x]
+  }
+  return [placement.center[0] + x, placement.center[1] + z]
+}
+
+export function getRoomPresetPolygon(
+  outline: WallPlanPoint[],
+  placement: RoomPresetPlacement,
+): WallPlanPoint[] {
+  return outline.map((point) => roomPresetLocalToPlan(point, placement))
+}
+
+/**
+ * Commits a placed preset as one undo step: a 방 becomes walls along the
+ * outline (the centerline) plus the auto floor / ceiling they close, a 플랫폼
+ * a single raised slab. Returns false when nothing was created.
+ */
+export function createRoomPresetOnCurrentLevel(
+  kind: RoomPresetKind,
+  polygon: WallPlanPoint[],
+): boolean {
+  if (polygon.length < 3) return false
+  if (kind === 'room') {
+    return (
+      createWallSegmentsOnCurrentLevel(
+        polygon.map((corner, index) => [corner, polygon[(index + 1) % polygon.length]!]),
+      ).length > 0
+    )
+  }
+  const levelId = useViewer.getState().selection.levelId
+  if (!levelId) return false
+  const slab = SlabSchema.parse({
+    name: '플랫폼',
+    polygon,
+    elevation: ROOM_PRESET_PLATFORM_ELEVATION,
+  })
+  useScene.getState().createNode(slab, levelId as AnyNodeId)
+  sfxEmitter.emit('sfx:structure-build')
+  return true
 }
 
 /**

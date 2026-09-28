@@ -111,6 +111,7 @@ export type Mode = 'select' | 'edit' | 'delete' | 'build' | 'material-paint'
 // Structure mode tools (building elements)
 export type StructureTool =
   | 'wall'
+  | 'room-preset'
   | 'fence'
   | 'room'
   | 'custom-room'

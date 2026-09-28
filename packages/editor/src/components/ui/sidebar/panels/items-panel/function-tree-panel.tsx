@@ -1,32 +1,49 @@
 'use client'
 
 import type { AssetInput } from '@pascal-app/core'
-import { Root as TooltipRoot } from '@radix-ui/react-tooltip'
+import { Funnel } from 'lucide-react'
 import NextImage from 'next/image'
-import { useMemo, useState } from 'react'
-import { triggerSFX } from '../../../../../lib/sfx-bus'
+import { type ReactNode, useMemo, useState } from 'react'
 import { cn } from '../../../../../lib/utils'
-import { ItemCatalog } from '../../../item-catalog/item-catalog'
-import type { ItemsPanelCustomCategory } from '.'
+import { CatalogIconRow } from '../../../item-catalog/catalog-icon-row'
 import {
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '../../../../../components/ui/primitives/tooltip'
+  CATALOG_BAND_ACTION,
+  CatalogSearchBand,
+} from '../../../item-catalog/catalog-search-band'
+import { CATALOG_SCROLL, CatalogSection } from '../../../item-catalog/catalog-section'
+import { ItemCatalog } from '../../../item-catalog/item-catalog'
+import { Popover, PopoverContent, PopoverTrigger } from '../../../primitives/popover'
+import { resolveAssetSnapTarget } from '../../../snap-target-badge'
+import type { ItemsPanelCustomCategory } from '.'
 
 /** A function-axis taxonomy node, assembled into a tree by the embedder. */
 export type FunctionTreeNode = {
   slug: string
   name: string
+  /** Outline glyph for the room row; falls back to `iconUrl`. */
+  icon?: ReactNode
   iconUrl?: string | null
   children: FunctionTreeNode[]
 }
 
 const SOURCE_CHIPS: Array<{ id: NonNullable<AssetInput['source']>; label: string }> = [
-  { id: 'library', label: 'Library' },
-  { id: 'community', label: 'Community' },
-  { id: 'mine', label: 'Mine' },
+  { id: 'library', label: '라이브러리' },
+  { id: 'community', label: '커뮤니티' },
+  { id: 'mine', label: '내 것' },
 ]
+
+type Placement = 'floor' | 'wall' | 'ceiling'
+
+const PLACEMENTS: Array<{ id: Placement; label: string }> = [
+  { id: 'floor', label: '바닥' },
+  { id: 'wall', label: '벽' },
+  { id: 'ceiling', label: '천장' },
+]
+
+function itemPlacement(item: AssetInput): Placement {
+  const target = resolveAssetSnapTarget(item.attachTo)
+  return target === 'wall' || target === 'ceiling' ? target : 'floor'
+}
 
 /** Every slug at or below `node`, so a non-leaf selection matches descendants. */
 function descendantSlugs(node: FunctionTreeNode): Set<string> {
@@ -44,11 +61,27 @@ function itemFunctionSlugs(item: AssetInput): string[] {
   return item.category ? [item.category] : []
 }
 
+function RootIcon({ node }: { node: FunctionTreeNode }) {
+  if (node.icon) return <>{node.icon}</>
+  if (node.iconUrl)
+    return (
+      <NextImage
+        alt=""
+        className="size-5 object-contain"
+        height={20}
+        src={node.iconUrl}
+        width={20}
+      />
+    )
+  return <span className="font-semibold text-[10px]">{node.name.slice(0, 2)}</span>
+}
+
 /**
- * DB-driven hierarchical Items browse. Roots render as the category tab bar;
- * a selected root with children exposes those children as a secondary chip
- * row. Selecting any node shows items tagged with that node or any descendant.
- * Library / Community / Mine narrows by source on top of the tree selection.
+ * DB-driven hierarchical Items browse, laid out like inZOI's furniture tab:
+ * the frosted search band, one icon row of rooms (roots), then one scroll of
+ * sub-category sections, each a header bar over a 4-up grid. Searching
+ * collapses the list to a flat result grid. The funnel narrows by placement
+ * (floor / wall / ceiling); Library / Community / Mine by source.
  */
 export function FunctionTreePanel({
   functionTree,
@@ -59,6 +92,7 @@ export function FunctionTreePanel({
   emptyState,
   customCategories = [],
   showSourceFilter = true,
+  renderHero,
 }: {
   functionTree: FunctionTreeNode[]
   items?: AssetInput[]
@@ -70,15 +104,17 @@ export function FunctionTreePanel({
   customCategories?: ItemsPanelCustomCategory[]
   /** Library / Community / Mine chips; off shows every source. */
   showSourceFilter?: boolean
+  /** Illustration band between the room row and the catalogue. */
+  renderHero?: (room: { slug: string; name: string }) => ReactNode
 }) {
   const [activeRootSlug, setActiveRootSlug] = useState<string | null>(
     functionTree[0]?.slug ?? null,
   )
-  const [activeChildSlug, setActiveChildSlug] = useState<string | null>(null)
   const [activeCustomId, setActiveCustomId] = useState<string | null>(null)
   const [activeSource, setActiveSource] = useState<AssetInput['source'] | null>(
     showSourceFilter ? 'library' : null,
   )
+  const [placement, setPlacement] = useState<Placement | null>(null)
   const activeCustom = customCategories.find((category) => category.id === activeCustomId)
   const [search, setSearch] = useState('')
 
@@ -86,10 +122,9 @@ export function FunctionTreePanel({
   const isSearchPending = isServerSearch && search.length > 0 && searchResults === null
 
   const activeRoot = functionTree.find((n) => n.slug === activeRootSlug) ?? functionTree[0]
-  const activeNode =
-    (activeChildSlug && activeRoot?.children.find((c) => c.slug === activeChildSlug)) || activeRoot
 
-  const matchesSource = (item: AssetInput) => {
+  const matchesFilters = (item: AssetInput) => {
+    if (placement && itemPlacement(item) !== placement) return false
     if (!activeSource) return true
     const itemSource = item.source ?? 'library'
     if (activeSource === 'mine') return itemSource === 'mine'
@@ -104,13 +139,33 @@ export function FunctionTreePanel({
 
   const treeItems = useMemo(() => {
     const base = items ?? []
-    if (!activeNode) return base.filter(matchesSource)
-    const slugs = descendantSlugs(activeNode)
+    if (!activeRoot) return base.filter(matchesFilters)
+    const slugs = descendantSlugs(activeRoot)
     return base.filter(
-      (item) => matchesSource(item) && itemFunctionSlugs(item).some((s) => slugs.has(s)),
+      (item) => matchesFilters(item) && itemFunctionSlugs(item).some((s) => slugs.has(s)),
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, activeNode, activeSource])
+  }, [items, activeRoot, activeSource, placement])
+
+  // One section per child of the room; items under the room but in no child
+  // close the list as 기타.
+  const sections = useMemo(() => {
+    if (!activeRoot || activeRoot.children.length === 0) {
+      return activeRoot ? [{ slug: activeRoot.slug, name: activeRoot.name, items: treeItems }] : []
+    }
+    const placed = new Set<AssetInput>()
+    const out = activeRoot.children.map((child) => {
+      const slugs = descendantSlugs(child)
+      const childItems = treeItems.filter((item) =>
+        itemFunctionSlugs(item).some((s) => slugs.has(s)),
+      )
+      for (const item of childItems) placed.add(item)
+      return { slug: child.slug, name: child.name, items: childItems }
+    })
+    const rest = treeItems.filter((item) => !placed.has(item))
+    if (rest.length > 0) out.push({ slug: `${activeRoot.slug}.__rest`, name: '기타', items: rest })
+    return out.filter((section) => section.items.length > 0)
+  }, [activeRoot, treeItems])
 
   // Without a server search the query filters the whole catalog locally, by
   // name, tags and the tree node names the item sits under.
@@ -128,7 +183,7 @@ export function FunctionTreePanel({
     if (isServerSearch || !search.trim()) return null
     const query = search.trim().toLowerCase()
     return (items ?? []).filter((item) => {
-      if (!matchesSource(item)) return false
+      if (!matchesFilters(item)) return false
       const haystack = [
         item.name,
         ...(item.tags ?? []),
@@ -137,216 +192,172 @@ export function FunctionTreePanel({
       return haystack.some((text) => text.toLowerCase().includes(query))
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServerSearch, search, items, nodeNames, activeSource])
+  }, [isServerSearch, search, items, nodeNames, activeSource, placement])
 
   const searchItems = useMemo(() => {
     if (!(isServerSearch && search && searchResults)) return null
-    return activeSource ? searchResults.filter(matchesSource) : searchResults
+    return searchResults.filter(matchesFilters)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServerSearch, search, searchResults, activeSource])
+  }, [isServerSearch, search, searchResults, activeSource, placement])
 
-  function selectRoot(slug: string) {
-    setActiveCustomId(null)
-    setActiveRootSlug(slug)
-    setActiveChildSlug(null)
-    setSearch('')
-    onSearchChange?.('')
+  function changeSearch(value: string) {
+    if (value) setActiveCustomId(null)
+    setSearch(value)
+    onSearchChange?.(value)
   }
+
+  function selectRow(id: string) {
+    if (customCategories.some((category) => category.id === id)) {
+      setActiveCustomId(id)
+      return
+    }
+    setActiveCustomId(null)
+    setActiveRootSlug(id)
+    changeSearch('')
+  }
+
+  const rowItems = [
+    ...functionTree.map((root) => ({
+      id: root.slug,
+      label: root.name,
+      icon: <RootIcon node={root} />,
+    })),
+    ...customCategories.map((category) => ({
+      id: category.id,
+      label: category.label,
+      icon: category.icon ?? (
+        <NextImage
+          alt=""
+          className="size-5 object-contain"
+          height={20}
+          src={category.iconSrc ?? ''}
+          width={20}
+        />
+      ),
+    })),
+  ]
+
+  const sourceChips = showSourceFilter ? (
+    <div className="flex rounded-full bg-white/60 p-0.5 dark:bg-white/10">
+      {SOURCE_CHIPS.map((chip) => {
+        const isActive = activeSource === chip.id
+        return (
+          <button
+            className={cn(
+              'rounded-full px-2 py-0.5 font-medium text-[10px] transition-colors',
+              isActive
+                ? 'bg-white text-[#5aa0e0] shadow-sm dark:bg-white/20 dark:text-sky-200'
+                : 'text-[#555] hover:text-[#222] dark:text-neutral-300',
+            )}
+            key={chip.id}
+            onClick={() => setActiveSource(isActive ? null : chip.id)}
+            type="button"
+          >
+            {chip.label}
+          </button>
+        )
+      })}
+    </div>
+  ) : undefined
+
+  const placementFilter = (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          aria-label="배치 위치 필터"
+          aria-pressed={placement !== null}
+          className={cn(CATALOG_BAND_ACTION, placement && 'bg-[#8ec3f2] drop-shadow-none')}
+          type="button"
+        >
+          <Funnel />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-40 rounded-xl border-0 bg-white p-1.5 text-neutral-800 shadow-[0_10px_36px_rgba(0,0,0,0.25)] dark:bg-neutral-900 dark:text-neutral-100"
+        side="right"
+        sideOffset={14}
+      >
+        <div className="px-2 pt-1 pb-1.5 font-semibold text-[11px] text-neutral-500">
+          배치 위치
+        </div>
+        {[{ id: null, label: '전체' } as const, ...PLACEMENTS].map((option) => (
+          <button
+            className={cn(
+              'flex w-full items-center rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
+              placement === option.id
+                ? 'bg-[#e3f1fc] font-semibold text-[#3d8fd6] dark:bg-sky-400/20 dark:text-sky-200'
+                : 'hover:bg-neutral-100 dark:hover:bg-white/10',
+            )}
+            key={option.id ?? 'all'}
+            onClick={() => setPlacement(option.id)}
+            type="button"
+          >
+            {option.label}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  )
+
+  const renderGrid = (list: AssetInput[] | undefined, withLeading: boolean) => (
+    <ItemCatalog
+      category={'furnish' as never}
+      emptyState={emptyState}
+      leadingTile={withLeading ? leadingTile : undefined}
+      overrideItems={list}
+    />
+  )
 
   return (
     <div className="flex h-full flex-col">
-      {/* Root nodes as a category grid — icon when available, otherwise a
-          two-letter abbreviation, with the full name in a hover tooltip.
-          Mirrors the Build tab's tile grid so the two panels read the same. */}
-      <TooltipProvider delayDuration={0} disableHoverableContent>
-        <div className="grid shrink-0 grid-cols-5 gap-1.5 border-border/70 border-b p-2">
-          {functionTree.map((root) => {
-            const isActive = !activeCustom && activeRoot?.slug === root.slug
-            return (
-              <TooltipRoot key={root.slug}>
-                <TooltipTrigger asChild>
-                  <button
-                    className={cn(
-                      'relative flex aspect-square items-center justify-center rounded-xl transition-all duration-200',
-                      isActive
-                        ? 'bg-primary/10 ring-1 ring-primary/50'
-                        : 'bg-muted/40 opacity-70 grayscale hover:bg-muted hover:opacity-100 hover:grayscale-0',
-                    )}
-                    onClick={() => {
-                      triggerSFX('sfx:menu-click')
-                      selectRoot(root.slug)
-                    }}
-                    onMouseEnter={() => triggerSFX('sfx:menu-hover')}
-                    type="button"
-                  >
-                    {root.iconUrl ? (
-                      <span className="flex flex-col items-center gap-0.5">
-                        <NextImage
-                          alt={root.name}
-                          className="size-8 object-contain"
-                          height={32}
-                          src={root.iconUrl}
-                          width={32}
-                        />
-                        <span className="font-semibold text-[10px] text-foreground leading-none">
-                          {root.name}
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="px-0.5 text-center font-semibold text-[11px] text-muted-foreground leading-tight">
-                        {root.name}
-                      </span>
-                    )}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent className="icon-grid-tooltip pointer-events-none" side="top">
-                  {root.name}
-                </TooltipContent>
-              </TooltipRoot>
-            )
-          })}
-          {customCategories.map((category) => (
-            <TooltipRoot key={category.id}>
-              <TooltipTrigger asChild>
-                <button
-                  className={cn(
-                    'relative flex aspect-square items-center justify-center rounded-xl transition-all duration-200',
-                    activeCustomId === category.id
-                      ? 'bg-primary/10 ring-1 ring-primary/50'
-                      : 'bg-muted/40 opacity-70 grayscale hover:bg-muted hover:opacity-100 hover:grayscale-0',
-                  )}
-                  onClick={() => {
-                    triggerSFX('sfx:menu-click')
-                    setActiveCustomId(category.id)
-                  }}
-                  onMouseEnter={() => triggerSFX('sfx:menu-hover')}
-                  type="button"
-                >
-                  <NextImage
-                    alt={category.label}
-                    className="size-7 object-contain"
-                    height={28}
-                    src={category.iconSrc}
-                    width={28}
-                  />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent className="icon-grid-tooltip pointer-events-none" side="top">
-                {category.label}
-              </TooltipContent>
-            </TooltipRoot>
-          ))}
-        </div>
-      </TooltipProvider>
+      <CatalogSearchBand
+        actions={placementFilter}
+        left={sourceChips}
+        onChange={changeSearch}
+        value={search}
+      />
+
+      <CatalogIconRow
+        activeId={activeCustom ? activeCustom.id : search ? null : (activeRoot?.slug ?? null)}
+        items={rowItems}
+        onSelect={selectRow}
+      />
+
+      {renderHero &&
+        !search &&
+        (activeCustom
+          ? renderHero({ slug: activeCustom.id, name: activeCustom.label })
+          : activeRoot && renderHero({ slug: activeRoot.slug, name: activeRoot.name }))}
 
       {activeCustom ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">{activeCustom.content}</div>
+        <div className={CATALOG_SCROLL}>{activeCustom.content}</div>
       ) : (
-        <>
-          {/* Search + source filter */}
-          <div className="flex shrink-0 flex-col gap-2 border-border/70 border-b p-2">
-            <div className="flex items-center gap-1.5">
-              <input
-                className={cn(
-                  'min-w-0 shrink-0 rounded-lg bg-muted px-2.5 py-1.5 text-xs placeholder:text-muted-foreground focus:outline-none',
-                  showSourceFilter ? 'w-1/2' : 'w-full',
-                )}
-                onChange={(e) => {
-                  setSearch(e.target.value)
-                  onSearchChange?.(e.target.value)
-                }}
-                placeholder="검색"
-                type="text"
-                value={search}
-              />
-              {showSourceFilter && (
-                <div className="flex w-1/2 min-w-0 shrink-0 rounded-lg bg-muted p-0.5">
-                  {SOURCE_CHIPS.map((chip) => {
-                    const isActive = activeSource === chip.id
-                    return (
-                      <button
-                        className={cn(
-                          'min-w-0 flex-1 truncate rounded-md px-1 py-1 text-center font-medium text-[10px] transition-colors',
-                          isActive
-                            ? 'bg-background text-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground',
-                        )}
-                        key={chip.id}
-                        onClick={() => setActiveSource(isActive ? null : chip.id)}
-                        type="button"
-                      >
-                        {chip.label}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
+        <div className={cn(CATALOG_SCROLL, 'pb-3')}>
+          {isSearchPending ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="size-5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground" />
             </div>
-
-            {/* Child nodes of the active root as a secondary chip row */}
-            {!search && activeRoot && activeRoot.children.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                <button
-                  className={cn(
-                    'cursor-pointer rounded-md px-2 py-0.5 font-medium text-xs transition-colors',
-                    activeChildSlug === null
-                      ? 'bg-violet-500 text-white'
-                      : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground',
-                  )}
-                  onClick={() => setActiveChildSlug(null)}
-                  type="button"
-                >
-                  전체
-                </button>
-                {activeRoot.children.map((child) => {
-                  const isActive = activeChildSlug === child.slug
-                  return (
-                    <button
-                      className={cn(
-                        'cursor-pointer rounded-md px-2 py-0.5 font-medium text-xs capitalize transition-colors',
-                        isActive
-                          ? 'bg-violet-500 text-white'
-                          : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground',
-                      )}
-                      key={child.slug}
-                      onClick={() => setActiveChildSlug(isActive ? null : child.slug)}
-                      type="button"
-                    >
-                      {child.name}
-                    </button>
-                  )
-                })}
+          ) : isServerSearch && search && searchResults?.length === 0 ? (
+            (emptyState ?? (
+              <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
+                &ldquo;{search}&rdquo; 검색 결과가 없습니다
               </div>
-            )}
-          </div>
-
-          {/* Item grid */}
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            {isSearchPending ? (
-              <div className="flex h-full items-center justify-center">
-                <div className="size-5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground" />
-              </div>
-            ) : isServerSearch && search && searchResults?.length === 0 ? (
-              (emptyState ?? (
-                <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
-                  &ldquo;{search}&rdquo; 검색 결과가 없습니다
-                </div>
-              ))
-            ) : (
-              <ItemCatalog
-                category={'furnish' as never}
-                emptyState={emptyState}
-                key={activeNode?.slug ?? 'all'}
-                leadingTile={leadingTile}
-                overrideItems={
-                  isServerSearch && search
-                    ? (searchItems ?? undefined)
-                    : (localSearchItems ?? treeItems)
-                }
-              />
-            )}
-          </div>
-        </>
+            ))
+          ) : search ? (
+            <div className="px-2.5 pt-2">
+              {renderGrid(isServerSearch ? (searchItems ?? undefined) : (localSearchItems ?? []), true)}
+            </div>
+          ) : sections.length === 0 ? (
+            <div className="px-2.5 pt-2">{renderGrid([], true)}</div>
+          ) : (
+            sections.map((section, index) => (
+              <CatalogSection grid={false} key={section.slug} title={section.name}>
+                {renderGrid(section.items, index === 0)}
+              </CatalogSection>
+            ))
+          )}
+        </div>
       )}
     </div>
   )

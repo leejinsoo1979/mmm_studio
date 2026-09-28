@@ -26,6 +26,15 @@ const FLOORPLAN_WALL_THICKNESS_SCALE = 1.18
 const FLOORPLAN_MIN_VISIBLE_WALL_THICKNESS = 0.13
 const FLOORPLAN_MAX_EXTRA_THICKNESS = 0.035
 
+// The 2D reference's selected wall: a solid violet bar with a soft glow.
+const WALL_SELECTED_FILL = '#7563ff'
+const WALL_SELECTED_GLOW_COLOR = '#8b7dff'
+/** [stroke width px, opacity], widest first. */
+const WALL_SELECTED_GLOW: ReadonlyArray<readonly [number, number]> = [
+  [14, 0.12],
+  [8, 0.22],
+]
+
 function floorplanWallThickness(wall: WallNode): number {
   const baseThickness = wall.thickness ?? 0.1
   // A constructed wall draws its real layers, so it keeps its true thickness.
@@ -116,24 +125,43 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
 
   const points = polygon.map((p) => [p.x, p.y] as FloorplanPoint)
 
-  const fill = isHovered && !isSelected ? '#6557e8' : (palette?.wallFill ?? '#111111')
+  const fill = isSelected
+    ? WALL_SELECTED_FILL
+    : isHovered
+      ? '#6557e8'
+      : (palette?.wallFill ?? '#111111')
 
-  const children: FloorplanGeometry[] = [
-    {
-      kind: 'polygon',
-      points,
-      fill,
-      stroke: isHovered && !isSelected ? '#8b82ff' : 'transparent',
-      strokeWidth: isHovered && !isSelected ? 0.035 : 0,
-      opacity: 1,
-      // Once the wall is selected, the body keeps catching the pointer
-      // so the cursor stays neutral (no drag/pointer affordance from
-      // the slab below leaking through), but only the side-arrows and
-      // endpoint handles should start a drag — the wrapper g's click
-      // handler is a no-op re-select for the already-selected wall.
-      cursor: isSelected ? 'default' : undefined,
-    },
-  ]
+  const children: FloorplanGeometry[] = []
+  // The selected wall's soft violet halo, drawn under the body.
+  if (isSelected) {
+    for (const [width, opacity] of WALL_SELECTED_GLOW) {
+      children.push({
+        kind: 'polygon',
+        points,
+        fill: 'none',
+        stroke: WALL_SELECTED_GLOW_COLOR,
+        strokeWidth: width,
+        strokeOpacity: opacity,
+        strokeLinejoin: 'round',
+        vectorEffect: 'non-scaling-stroke',
+        pointerEvents: 'none',
+      })
+    }
+  }
+  children.push({
+    kind: 'polygon',
+    points,
+    fill,
+    stroke: isHovered && !isSelected ? '#8b82ff' : 'transparent',
+    strokeWidth: isHovered && !isSelected ? 0.035 : 0,
+    opacity: 1,
+    // Once the wall is selected, the body keeps catching the pointer
+    // so the cursor stays neutral (no drag/pointer affordance from
+    // the slab below leaking through), but only the side-arrows and
+    // endpoint handles should start a drag — the wrapper g's click
+    // handler is a no-op re-select for the already-selected wall.
+    cursor: isSelected ? 'default' : undefined,
+  })
 
   if (node.construction && !isCurvedWall(node)) {
     children.push(...constructionLayers(node, points, ctx.children))

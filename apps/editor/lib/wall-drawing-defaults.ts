@@ -6,13 +6,13 @@ import { create } from 'zustand'
 export const DEFAULT_CORE_THICKNESS = 0.1
 
 /** mm-studio wall height presets (m): 온벽 floor to ceiling, 부분벽 half walls. */
-export const FULL_WALL_HEIGHTS = [2.4, 2.7, 3.0]
-export const PARTIAL_WALL_HEIGHTS = [0.9, 1.2, 1.5]
+export const FULL_WALL_HEIGHTS = [2.4, 2.7, 3.0, 3.3]
+export const PARTIAL_WALL_HEIGHTS = [0.9, 1.2, 1.5, 1.8]
 
 /**
  * The construction (mmmcraft `wallConstructionDefault`) and height new walls
- * are drawn with. Walls already drawn are not changed. No height = the
- * wall's default.
+ * are drawn with. Walls already drawn are not changed. The height starts at
+ * the first 온 벽 preset so one height card is always checked.
  */
 export const useWallDrawingDefaults = create<{
   construction: WallConstruction | undefined
@@ -24,7 +24,7 @@ export const useWallDrawingDefaults = create<{
   setCoreThickness: (coreThickness: number) => void
 }>((set) => ({
   construction: undefined,
-  height: undefined,
+  height: FULL_WALL_HEIGHTS[0],
   coreThickness: DEFAULT_CORE_THICKNESS,
   setCoreThickness: (coreThickness) => {
     set({ coreThickness })

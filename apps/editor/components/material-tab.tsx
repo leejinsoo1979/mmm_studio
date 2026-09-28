@@ -1,8 +1,8 @@
 'use client'
 
-import { MaterialPaintPanel, useEditor } from '@pascal-app/editor'
-import { Paintbrush } from 'lucide-react'
+import { CATALOG_SCROLL, MaterialPaintPanel, useEditor } from '@pascal-app/editor'
 import { useEffect } from 'react'
+import { cn } from '@/lib/utils'
 
 export function MaterialTab() {
   useEffect(() => {
@@ -20,25 +20,9 @@ export function MaterialTab() {
   }, [])
 
   return (
-    <div className="flex h-full flex-col bg-sidebar text-foreground">
-      <div className="border-border border-b px-6 py-6">
-        <div className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#7779ff]/15 text-[#8f91ff]">
-            <Paintbrush className="h-5 w-5" />
-          </span>
-          <div>
-            <p className="text-muted-foreground text-[10px] uppercase tracking-[0.16em]">
-              표면 편집
-            </p>
-            <h1 className="font-bold text-3xl tracking-[-0.03em]">재질</h1>
-          </div>
-        </div>
-        <p className="mt-3 text-muted-foreground text-xs leading-5">
-          재질을 고른 뒤 장면의 면을 클릭해 칠합니다.
-        </p>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <div className="rounded-xl border border-border bg-card p-3">
+    <div className="flex h-full flex-col text-foreground">
+      <div className={cn(CATALOG_SCROLL, 'px-2.5 pt-2.5 pb-3')}>
+        <div className="rounded-[10px] bg-[var(--panel-card,#f3f3f3)] p-3 text-[var(--panel-card-fg,#333)]">
           <MaterialPaintPanel />
         </div>
       </div>

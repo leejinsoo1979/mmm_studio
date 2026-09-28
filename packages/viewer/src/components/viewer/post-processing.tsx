@@ -99,7 +99,20 @@ export type HoverStyle = {
   hiddenColor: number
   strength: number
   pulse: boolean
+  /** Edge blur radius (px) of the outline core. */
+  thickness?: number
+  /** Weight of the wide, soft halo around the core (0 = none). */
+  glow?: number
+  /**
+   * `add` brightens the scene under the edge; `over` paints the colour on top,
+   * so the line still reads over light surfaces and the background.
+   */
+  blend?: 'add' | 'over'
+  /** Multiplier on the occluded (behind-geometry) edge. */
+  hiddenOpacity?: number
 }
+
+export type SelectionOutlineStyle = HoverStyle
 
 export type HoverStyles = {
   default: HoverStyle
@@ -114,6 +127,42 @@ const DEFAULT_HOVER_STYLE: HoverStyle = {
 
 export const DEFAULT_HOVER_STYLES: HoverStyles = {
   default: DEFAULT_HOVER_STYLE,
+}
+
+export const DEFAULT_SELECTION_STYLE: SelectionOutlineStyle = {
+  visibleColor: 0xff_ff_ff,
+  hiddenColor: 0xf3_ff_47,
+  strength: 3,
+  pulse: false,
+  thickness: 1,
+  blend: 'add',
+}
+
+const DEFAULT_HOVER_THICKNESS = 1.5
+
+function createOutlineUniforms(style: HoverStyle, thickness: number) {
+  return {
+    visibleColor: uniform(new Color(style.visibleColor)),
+    hiddenColor: uniform(new Color(style.hiddenColor)),
+    strength: uniform(style.strength),
+    thickness: uniform(style.thickness ?? thickness),
+    glow: uniform(style.glow ?? 0),
+    hiddenOpacity: uniform(style.hiddenOpacity ?? 1),
+    overMix: uniform(style.blend === 'over' ? 1 : 0),
+  }
+}
+
+type OutlineUniforms = ReturnType<typeof createOutlineUniforms>
+
+// Pushed from effects, so a style change never rebuilds the pipeline.
+function applyOutlineStyle(target: OutlineUniforms, style: HoverStyle, thickness: number) {
+  target.visibleColor.value.setHex(style.visibleColor)
+  target.hiddenColor.value.setHex(style.hiddenColor)
+  target.strength.value = style.strength
+  target.thickness.value = style.thickness ?? thickness
+  target.glow.value = style.glow ?? 0
+  target.hiddenOpacity.value = style.hiddenOpacity ?? 1
+  target.overMix.value = style.blend === 'over' ? 1 : 0
 }
 
 function sanitizeOutlineObjects(objects: Object3D[]) {
@@ -133,9 +182,11 @@ function sanitizeOutlineObjects(objects: Object3D[]) {
 
 const PostProcessingPasses = ({
   hoverStyles = DEFAULT_HOVER_STYLES,
+  selectionStyle = DEFAULT_SELECTION_STYLE,
   disablePostFx = false,
 }: {
   hoverStyles?: HoverStyles
+  selectionStyle?: SelectionOutlineStyle
   /** Host-controlled equivalent of `?disable=postFx` — see the Viewer prop. */
   disablePostFx?: boolean
 }) => {
@@ -184,10 +235,12 @@ const PostProcessingPasses = ({
     return l
   }, [])
   const hoverHighlightMode = useViewer((s) => s.hoverHighlightMode)
-  const hoverVisibleColor = useMemo(() => uniform(new Color(DEFAULT_HOVER_STYLE.visibleColor)), [])
-  const hoverHiddenColor = useMemo(() => uniform(new Color(DEFAULT_HOVER_STYLE.hiddenColor)), [])
-  const hoverStrength = useMemo(() => uniform(DEFAULT_HOVER_STYLE.strength), [])
+  const hoverUniforms = useMemo(
+    () => createOutlineUniforms(DEFAULT_HOVER_STYLE, DEFAULT_HOVER_THICKNESS),
+    [],
+  )
   const hoverPulseMix = useMemo(() => uniform(DEFAULT_HOVER_STYLE.pulse ? 0 : 1), [])
+  const selectedUniforms = useMemo(() => createOutlineUniforms(DEFAULT_SELECTION_STYLE, 1), [])
 
   // Subscribe to projectId so the pipeline rebuilds on project switch
   const projectId = useViewer((s) => s.projectId)
@@ -238,20 +291,15 @@ const PostProcessingPasses = ({
 
   useEffect(() => {
     const style = hoverStyles[hoverHighlightMode] ?? hoverStyles.default
-    hoverVisibleColor.value.setHex(style.visibleColor)
-    hoverHiddenColor.value.setHex(style.hiddenColor)
-    hoverStrength.value = style.strength
+    applyOutlineStyle(hoverUniforms, style, DEFAULT_HOVER_THICKNESS)
     hoverPulseMix.value = style.pulse ? 0 : 1
     invalidate()
-  }, [
-    hoverHiddenColor,
-    hoverHighlightMode,
-    hoverPulseMix,
-    hoverStrength,
-    hoverStyles,
-    hoverVisibleColor,
-    invalidate,
-  ])
+  }, [hoverHighlightMode, hoverPulseMix, hoverStyles, hoverUniforms, invalidate])
+
+  useEffect(() => {
+    applyOutlineStyle(selectedUniforms, selectionStyle, 1)
+    invalidate()
+  }, [invalidate, selectedUniforms, selectionStyle])
 
   // Build / rebuild the post-processing pipeline
   useEffect(() => {
@@ -463,45 +511,69 @@ const PostProcessingPasses = ({
       const outliner = useViewer.getState().outliner
       let compositeWithOutlines = sceneColor
       let visualAlpha = contentAlpha
+      let composited = mix(bgUniform.current, sceneColor.rgb, contentAlpha)
       if (outlineEnabled) {
         const outlineNode = mergedOutline(scene, camera, {
           primaryObjects: outliner.selectedObjects,
           secondaryObjects: outliner.hoveredObjects,
-          primaryEdgeThickness: uniform(1),
-          secondaryEdgeThickness: uniform(1.5),
+          primaryEdgeThickness: selectedUniforms.thickness,
+          primaryEdgeGlow: selectedUniforms.glow,
+          secondaryEdgeThickness: hoverUniforms.thickness,
+          secondaryEdgeGlow: hoverUniforms.glow,
         })
 
-        // Selected: white visible, yellow hidden
-        const selectedVisibleColor = uniform(new Color(0xff_ff_ff))
-        const selectedHiddenColor = uniform(new Color(0xf3_ff_47))
-        const selectedStrength = uniform(3)
-        const selectedOutline = outlineNode.primaryVisibleEdge
-          .mul(selectedVisibleColor)
-          .add(outlineNode.primaryHiddenEdge.mul(selectedHiddenColor))
-          .mul(selectedStrength)
-
-        // Hovered: blue visible, yellow hidden, pulsing
         const pulsePeriod = uniform(3)
         const oscillating = oscSine(time.div(pulsePeriod).mul(2)).mul(0.5).add(0.5)
         const osc = mix(oscillating, float(1), hoverPulseMix)
-        const hoverOutline = outlineNode.secondaryVisibleEdge
-          .mul(hoverVisibleColor)
-          .add(outlineNode.secondaryHiddenEdge.mul(hoverHiddenColor))
-          .mul(hoverStrength)
-          .mul(osc)
+
+        // Per group: `add` sums the coloured edge onto the scene (inside the
+        // content only, as before); `over` paints it on top with the edge as
+        // alpha, after the background mix, so it also reads on light surfaces
+        // and against the background.
+        const group = (
+          u: OutlineUniforms,
+          visibleEdge: typeof outlineNode.primaryVisibleEdge,
+          hiddenEdge: typeof outlineNode.primaryHiddenEdge,
+          gain: any,
+        ) => {
+          const strength = u.strength.mul(gain)
+          const hidden = hiddenEdge.mul(u.hiddenOpacity)
+          const additive = visibleEdge
+            .mul(u.visibleColor)
+            .add(hidden.mul(u.hiddenColor))
+            .mul(strength)
+            .mul(u.overMix.oneMinus())
+          const visibleAlpha = visibleEdge.mul(strength).clamp(0, 1).mul(u.overMix)
+          const hiddenAlpha = hidden.mul(strength).clamp(0, 1).mul(u.overMix)
+          const paint = (rgb: any) =>
+            mix(mix(rgb, u.hiddenColor, hiddenAlpha), u.visibleColor, visibleAlpha)
+          return { additive, paint }
+        }
+        const hovered = group(
+          hoverUniforms,
+          outlineNode.secondaryVisibleEdge,
+          outlineNode.secondaryHiddenEdge,
+          osc,
+        )
+        const selected = group(
+          selectedUniforms,
+          outlineNode.primaryVisibleEdge,
+          outlineNode.primaryHiddenEdge,
+          float(1),
+        )
 
         const outlineAlpha = outlineNode.primaryVisibleEdge
           .max(outlineNode.primaryHiddenEdge)
           .max(outlineNode.secondaryVisibleEdge)
           .max(outlineNode.secondaryHiddenEdge)
         visualAlpha = visualAlpha.max(outlineAlpha)
-        compositeWithOutlines = vec4(
-          add(sceneColor.rgb, selectedOutline.add(hoverOutline)),
-          sceneColor.a,
+        const withAdditive = add(sceneColor.rgb, selected.additive.add(hovered.additive))
+        compositeWithOutlines = vec4(selected.paint(hovered.paint(withAdditive)), sceneColor.a)
+        composited = selected.paint(
+          hovered.paint(mix(bgUniform.current, withAdditive, contentAlpha)),
         )
       }
 
-      const composited = mix(bgUniform.current, compositeWithOutlines.rgb, contentAlpha)
       // Editor overlays painted on top by their own alpha — they never get inked,
       // AO'd, or outlined, and always read crisp regardless of scene depth.
       const withOverlay = mix(composited, overlayColor.rgb, overlayColor.a)
@@ -554,10 +626,9 @@ const PostProcessingPasses = ({
     // never trigger a rebuild either.
     camera,
     disablePostFx,
-    hoverHiddenColor,
     hoverPulseMix,
-    hoverStrength,
-    hoverVisibleColor,
+    hoverUniforms,
+    selectedUniforms,
     edges,
     inkOpacityOverride,
     pipelineVersion,

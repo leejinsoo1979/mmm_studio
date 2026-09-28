@@ -42,7 +42,7 @@ export const ColumnTreeNode = memo(function ColumnTreeNode({
     [nodeId, setSelection],
   )
 
-  const defaultName = node?.name || 'Column'
+  const defaultName = '기둥'
 
   return (
     <TreeNodeWrapper

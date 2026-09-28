@@ -91,6 +91,7 @@ import { FloorplanGeometryRenderer } from './floorplan-geometry-renderer'
 // dispatcher multiplies by `unitsPerPixel` so handles stay the same on-
 // screen size at any zoom.
 const ENDPOINT_HANDLE_SELECTED_RADIUS_PX = 8
+const ENDPOINT_HANDLE_RING_WIDTH_PX = 2
 const ENDPOINT_HANDLE_ACTIVE_RADIUS_PX = 9
 const ENDPOINT_HANDLE_DOT_RADIUS_PX = 3
 const ENDPOINT_HANDLE_ACTIVE_DOT_RADIUS_PX = 4
@@ -101,6 +102,30 @@ const HOVER_TRANSITION = 'opacity 180ms cubic-bezier(0.2, 0, 0, 1)'
 const DIRECT_DRAG_THRESHOLD_PX = 4
 const DIRECT_ROTATE_EPSILON = 1e-6
 const DIRECT_ROTATE_RADIANS_PER_PIXEL = Math.PI / 180
+
+// The selected wall's violet (its body, halo, corner rings and move arrows).
+const WALL_SELECTION_VIOLET = '#7563ff'
+const WALL_SELECTION_VIOLET_HOVER = '#9d93ff'
+
+const wallHandlePalettes = new WeakMap<FloorplanPalette, FloorplanPalette>()
+
+/** Walls draw their handles in the selection violet instead of the orange set. */
+function wallHandlePalette(palette: FloorplanPalette): FloorplanPalette {
+  let derived = wallHandlePalettes.get(palette)
+  if (!derived) {
+    derived = {
+      ...palette,
+      selectedStroke: WALL_SELECTION_VIOLET,
+      endpointHandleFill: '#ffffff',
+      endpointHandleStroke: WALL_SELECTION_VIOLET,
+      endpointHandleHoverStroke: WALL_SELECTION_VIOLET_HOVER,
+      endpointHandleActiveFill: '#ffffff',
+      endpointHandleActiveStroke: WALL_SELECTION_VIOLET,
+    }
+    wallHandlePalettes.set(palette, derived)
+  }
+  return derived
+}
 
 /**
  * Snapshot of node fields captured at drag-start, used by the single-undo
@@ -1345,7 +1370,7 @@ const FloorplanRegistryEntry = memo(function FloorplanRegistryEntry({
         onHandleHoverChange={onHandleHoverChange}
         onHandlePointerDown={handleHandlePointerDown}
         onMoveHandlePointerDown={handleMoveHandlePointerDown}
-        palette={palette}
+        palette={node.type === 'wall' && palette ? wallHandlePalette(palette) : palette}
         sceneRotationDeg={sceneRotationDeg}
         unitsPerPixel={unitsPerPixel}
       />
@@ -1701,25 +1726,29 @@ const InteractiveGeometry = memo(function InteractiveGeometry({
               style={{ opacity: isHovered || isActive ? 1 : 0, transition: HOVER_TRANSITION }}
               vectorEffect="non-scaling-stroke"
             />
+            {/* Idle: a white disc in a 2px ring (the 2D reference's corner
+                handle); the centre dot marks the handle being dragged. */}
             <circle
               cx={g.point[0]}
               cy={g.point[1]}
               fill={fill}
               fillOpacity={0.96}
               pointerEvents="none"
-              r={outerRadius}
+              r={outerRadius - (ENDPOINT_HANDLE_RING_WIDTH_PX / 2) * unitsPerPixel}
               stroke={stroke}
-              strokeWidth="0.05"
+              strokeWidth={isCurve ? 0.05 : ENDPOINT_HANDLE_RING_WIDTH_PX}
               vectorEffect="non-scaling-stroke"
             />
-            <circle
-              cx={g.point[0]}
-              cy={g.point[1]}
-              fill={stroke}
-              pointerEvents="none"
-              r={dotRadius}
-              vectorEffect="non-scaling-stroke"
-            />
+            {(isCurve || isActive) && (
+              <circle
+                cx={g.point[0]}
+                cy={g.point[1]}
+                fill={stroke}
+                pointerEvents="none"
+                r={dotRadius}
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
             <circle
               cx={g.point[0]}
               cy={g.point[1]}
@@ -1936,10 +1965,10 @@ const InteractiveGeometry = memo(function InteractiveGeometry({
         // body (matches the 3D `HANDLE_OFFSET`).
         const bi = 0.03 // base inset
         const arrowD = `M ${bi},${-sh} L ${bi + sl},${-sh} L ${bi + sl},${-hh} L ${bi + sl + hl},0 L ${bi + sl},${hh} L ${bi + sl},${sh} L ${bi},${sh} Z`
-        // Indigo palette to match the 3D `WallMoveSideHandles` arrows
-        // (`ARROW_COLOR` / `ARROW_HOVER_COLOR`) and the corner-sphere
-        // accent in `floating-action-menu.tsx`.
-        const fill = isHovered ? '#a5b4fc' : '#8381ed'
+        // The selection colour (violet on walls, see `wallHandlePalette`),
+        // matching the 3D arrows; hover lightens it.
+        const fill = palette.selectedStroke
+        const fillOpacity = isHovered ? 0.6 : 1
         const angleDeg = (g.angle * 180) / Math.PI
         const cursor = g.affordance ? 'ew-resize' : 'move'
         const affordance = g.affordance
@@ -1954,7 +1983,7 @@ const InteractiveGeometry = memo(function InteractiveGeometry({
             onClick={(e) => e.stopPropagation()}
             transform={`translate(${g.point[0]} ${g.point[1]}) rotate(${angleDeg})`}
           >
-            <path d={arrowD} fill={fill} pointerEvents="none" />
+            <path d={arrowD} fill={fill} fillOpacity={fillOpacity} pointerEvents="none" />
             <path
               d={arrowD}
               fill="transparent"

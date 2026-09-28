@@ -12,6 +12,11 @@ interface InlineRenameInputProps {
   onStartEditing?: () => void
 }
 
+/** Names the draw tools stamp on new nodes ('Wall 3', 'Shelf'). They carry no
+ *  user intent, so the tree shows its Korean default name instead. */
+const TOOL_STAMPED_NAME =
+  /^(?:(?:Wall|Door|Window|Fence|Elevator|Dormer|Zone|Slab|Ceiling) \d+|Box Vent|Chimney|Cupola|Downspout|Elevator|Eyebrow Vent|Gutter|Ridge Vent|Shelf|Skylight|Solar Panel|Spawn Point|Turbine Vent)$/
+
 export const InlineRenameInput = memo(function InlineRenameInput({
   nodeId,
   isEditing,
@@ -21,7 +26,8 @@ export const InlineRenameInput = memo(function InlineRenameInput({
   onStartEditing,
 }: InlineRenameInputProps) {
   const updateNode = useScene((s) => s.updateNode)
-  const name = useScene((s) => s.nodes[nodeId]?.name)
+  const storedName = useScene((s) => s.nodes[nodeId]?.name)
+  const name = storedName && !TOOL_STAMPED_NAME.test(storedName) ? storedName : undefined
   const [value, setValue] = useState(name || '')
   const inputRef = useRef<HTMLInputElement>(null)
   const inputSize = Math.max((value || defaultName).length, 1)
@@ -41,7 +47,7 @@ export const InlineRenameInput = memo(function InlineRenameInput({
 
   const handleSave = useCallback(() => {
     const trimmed = value.trim()
-    if (trimmed !== name) {
+    if (trimmed !== (name ?? '')) {
       updateNode(nodeId, { name: trimmed || undefined })
     }
     onStopEditing()

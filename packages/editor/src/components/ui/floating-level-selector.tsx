@@ -42,7 +42,7 @@ import {
   type LevelDuplicatePreset,
 } from '../../lib/level-duplication'
 import { getDefaultLevelName, getLevelDisplayName } from '@pascal-app/core'
-import { deleteLevelWithFallbackSelection } from '../../lib/level-selection'
+import { addLevelAbove, deleteLevelWithFallbackSelection } from '../../lib/level-selection'
 import {
   getEditorClipboardSnapshot,
   pasteEditorClipboardToLevel,
@@ -367,16 +367,8 @@ export function FloatingLevelSelector() {
   )
 
   const handleAddAbove = useCallback(() => {
-    if (!resolvedBuildingId) return
-    const maxLevel = levels.length > 0 ? Math.max(...levels.map((l) => l.level)) : -1
-    const newLevel = LevelNode.parse({
-      level: maxLevel + 1,
-      children: [],
-      parentId: resolvedBuildingId,
-    })
-    createNode(newLevel, resolvedBuildingId)
-    setSelection({ buildingId: resolvedBuildingId, levelId: newLevel.id })
-  }, [resolvedBuildingId, levels, createNode, setSelection])
+    if (resolvedBuildingId) addLevelAbove(resolvedBuildingId as BuildingNode['id'])
+  }, [resolvedBuildingId])
 
   const handleAddBelow = useCallback(() => {
     if (!resolvedBuildingId) return

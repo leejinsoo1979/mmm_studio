@@ -49,7 +49,7 @@ export const DormerTreeNode = memo(function DormerTreeNode({
     [nodeId, setSelection],
   )
 
-  const defaultName = node?.name || 'Dormer'
+  const defaultName = '도머'
 
   return (
     <TreeNodeWrapper

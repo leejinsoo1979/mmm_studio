@@ -43,7 +43,7 @@ export const SolarPanelTreeNode = memo(function SolarPanelTreeNode({
     [nodeId, setSelection],
   )
 
-  const defaultName = node?.name || 'Solar Panel'
+  const defaultName = '태양광 패널'
 
   return (
     <TreeNodeWrapper

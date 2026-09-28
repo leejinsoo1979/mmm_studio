@@ -75,6 +75,7 @@ import useInteractionScope, {
   useMovingNode,
 } from '../../store/use-interaction-scope'
 import { passesSelectionFilter } from '../../store/use-selection-filter'
+import { useUiHidden } from '../../store/use-ui-hidden'
 import { boxSelectHandled, suppressBoxSelectForPointer } from '../tools/select/box-select-state'
 import { swallowNextClick } from './node-arrow-handles'
 
@@ -439,8 +440,8 @@ const HIGHLIGHT_PROFILES = {
   },
   selection: {
     // Keep the real material/texture readable: no albedo tint, just a gentle
-    // indigo emissive glow so it reads as selected.
-    color: new Color('#818cf8'),
+    // cyan emissive glow matching the cyan selection outline.
+    color: new Color('#7fd6ff'),
     blend: 0,
     emissiveBlend: 0.4,
     emissiveIntensity: 0.12,
@@ -1968,6 +1969,8 @@ const SelectionMaterialSync = () => {
   const hoveredId = useViewer((s) => s.hoveredId)
   const hoverHighlightMode = useViewer((s) => s.hoverHighlightMode)
   const selectedMaterialTarget = useEditor((s) => s.selectedMaterialTarget)
+  // The paint card judges the real finish: no tint while customizing.
+  const customizing = useUiHidden((s) => s.customizing)
   const activeHighlightKindsRef = useRef(new Map<string, HighlightKind>())
   const highlightedMaterialsRef = useRef(
     new Map<
@@ -2050,7 +2053,7 @@ const SelectionMaterialSync = () => {
       // Keep the logical node selection while its material inspector is open,
       // but restore the original surface material so tint/roughness edits can
       // be judged without the purple selection overlay.
-      if (id === selectedMaterialTarget?.nodeId) continue
+      if (customizing || id === selectedMaterialTarget?.nodeId) continue
       nextHighlightKinds.set(id, 'selection')
     }
 
@@ -2061,6 +2064,7 @@ const SelectionMaterialSync = () => {
     activeHighlightKindsRef.current = nextHighlightKinds
     syncSelectionMaterials()
   }, [
+    customizing,
     hoverHighlightMode,
     hoveredId,
     previewSelectedIds,

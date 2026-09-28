@@ -10,11 +10,18 @@ import { MemorySceneStore } from './memory-scene-store'
  */
 let cachedStore: Promise<SceneStore> | null = null
 let cachedOperations: Promise<SceneOperations> | null = null
+/** Why scenes live in memory only (lost on restart), or null for a durable store. */
+let memoryStoreReason: string | null = null
+
+export function getSceneStoreStatus(): { store: 'memory' | 'durable'; reason: string | null } {
+  return { store: memoryStoreReason ? 'memory' : 'durable', reason: memoryStoreReason }
+}
 
 export function getSceneStore(): Promise<SceneStore> {
   if (!cachedStore) {
     cachedStore = (async () => {
       if (process.env.PASCAL_SCENE_STORE === 'memory') {
+        memoryStoreReason = 'PASCAL_SCENE_STORE=memory'
         return new MemorySceneStore()
       }
 
@@ -30,10 +37,15 @@ export function getSceneStore(): Promise<SceneStore> {
         await store.list({ limit: 0 })
         return store
       } catch (error) {
-        console.warn(
-          '[scene-store] Falling back to in-memory store:',
-          error instanceof Error ? error.message : error,
-        )
+        const reason = error instanceof Error ? error.message : String(error)
+        // In development a silent fallback loses every scene on the next
+        // restart; fail loudly instead so the storage problem gets fixed.
+        if (process.env.NODE_ENV === 'development') {
+          cachedStore = null
+          throw new Error(`[scene-store] Durable scene store unavailable: ${reason}`)
+        }
+        console.warn('[scene-store] Falling back to in-memory store:', reason)
+        memoryStoreReason = reason
         return new MemorySceneStore()
       }
     })()
@@ -44,11 +56,17 @@ export function getSceneStore(): Promise<SceneStore> {
 export function getSceneOperations(): Promise<SceneOperations> {
   if (!cachedOperations) {
     cachedOperations = (async () => {
-      const store = await getSceneStore()
-      const mod = (await import('@pascal-app/mcp/operations')) as {
-        createSceneOperations: (options: { store: SceneStore }) => SceneOperations
+      try {
+        const store = await getSceneStore()
+        const mod = (await import('@pascal-app/mcp/operations')) as {
+          createSceneOperations: (options: { store: SceneStore }) => SceneOperations
+        }
+        return mod.createSceneOperations({ store })
+      } catch (error) {
+        // Don't pin a failed store: the next request retries it.
+        cachedOperations = null
+        throw error
       }
-      return mod.createSceneOperations({ store })
     })()
   }
   return cachedOperations
@@ -61,4 +79,5 @@ export function getSceneOperations(): Promise<SceneOperations> {
 export function __resetSceneStoreForTests(): void {
   cachedStore = null
   cachedOperations = null
+  memoryStoreReason = null
 }

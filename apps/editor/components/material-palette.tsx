@@ -23,6 +23,8 @@ import {
   useEditor,
   useInspectorCollapsed,
   useMovingNode,
+  usePaintFocus,
+  useUiHidden,
 } from '@pascal-app/editor'
 import { type CabinetNode, resolveCabinetNode } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
@@ -378,7 +380,21 @@ export function MaterialPalette() {
 
   useEffect(() => () => restorePreview.current?.(), [])
 
-  if (!node) return <SelectionHint />
+  // inZOI's 건축 커스터마이즈: the rest of the build chrome steps aside.
+  useEffect(() => {
+    if (!nodeId) return
+    useUiHidden.getState().setCustomizing(true)
+    return () => useUiHidden.getState().setCustomizing(false)
+  }, [nodeId])
+
+  // The canvas traces the surface being painted (or the whole room's).
+  useEffect(() => {
+    if (!nodeId) return
+    usePaintFocus.getState().setFocus({ nodeId, role: targetKey, roomScope })
+    return () => usePaintFocus.getState().setFocus(null)
+  }, [nodeId, targetKey, roomScope])
+
+  if (!node) return null
   const canSpread = offersRoomScope(node)
   const targets = paintTargets(node, canSpread && roomScope)
   const target = targets.find((t) => t.key === targetKey) ?? targets[0]
@@ -538,40 +554,5 @@ export function MaterialPalette() {
           document.body,
         )}
     </>
-  )
-}
-
-/**
- * inZOI's bottom-centre line (under the palette's spot, so shown while it is
- * closed): what to do next when nothing is selected, the
- * keys for the selected object otherwise.
- */
-function SelectionHint() {
-  const selectedIds = useViewer((s) => s.selection.selectedIds)
-  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
-  const node = useScene((s) => (selectedId ? (s.nodes[selectedId as AnyNodeId] ?? null) : null))
-  const mode = useEditor((s) => s.mode)
-  const moving = useMovingNode()
-
-  if (mode !== 'select' || moving || selectedIds.length > 1) return null
-  const turnable =
-    !!node &&
-    Array.isArray((node as { rotation?: unknown }).rotation) &&
-    node.type !== 'door' &&
-    node.type !== 'window'
-  const text = !node
-    ? '구조물 또는 가구를 선택하세요.'
-    : `${turnable ? '클릭: 집기 · R / T · 우클릭 45° · Alt + R / T 5° · G 격자 · 더블클릭: 시점 · ' : ''}Delete 삭제 · Esc 선택 해제`
-
-  return (
-    <div
-      className="pointer-events-none fixed bottom-[68px] z-40 -translate-x-1/2 whitespace-nowrap text-center font-medium text-[13px] text-neutral-800 [text-shadow:0_0_4px_rgba(255,255,255,0.95),0_0_2px_rgba(255,255,255,0.95)] dark:text-neutral-100 dark:[text-shadow:0_0_4px_rgba(0,0,0,0.9)]"
-      // Centred over the free scene strip, above the bottom 3D / 2D row.
-      style={{
-        left: 'calc(var(--viewer-left-inset, 0px) + (100% - var(--viewer-left-inset, 0px)) / 2)',
-      }}
-    >
-      {text}
-    </div>
   )
 }

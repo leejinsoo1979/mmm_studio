@@ -1,15 +1,7 @@
 'use client'
 
-import {
-  type AnyNode,
-  type AnyNodeId,
-  nodeRegistry,
-  type ToolHint,
-  useScene,
-} from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { nodeRegistry, type ToolHint } from '@pascal-app/core'
 import { useEffect, useMemo, useState } from 'react'
-import { useShallow } from 'zustand/react/shallow'
 import { useIsMobile } from '../../../hooks/use-mobile'
 import {
   type ContextualShortcutHint,
@@ -17,23 +9,23 @@ import {
   GROUP_ROTATE_DRAG_LABEL,
   ROTATE_HANDLE_DRAG_LABEL,
   resolveRotateHandleHelpHints,
-  resolveSelectModeHelpHints,
 } from '../../../lib/contextual-help'
 import { continuationContextOf } from '../../../lib/continuation'
-import { canDirectMoveNode, canDirectRotateNode } from '../../../lib/direct-manipulation'
 import type { ReshapeKind } from '../../../lib/interaction/scope'
+import { hasActivePaintMaterial } from '../../../lib/material-paint'
+import type { PaintHoverInfo, PaintScope } from '../../../lib/paint-scope'
 import { isFreshPlacementMetadata } from '../../../lib/placement-metadata'
-import { snapContextOf } from '../../../lib/snapping-mode'
 import useEditor, { getActiveContinuationContext } from '../../../store/use-editor'
 import useInteractionScope, {
   useActiveHandleDrag,
   useMovingNode,
 } from '../../../store/use-interaction-scope'
+import { useUiHidden } from '../../../store/use-ui-hidden'
 import { BuildingHelper } from './building-helper'
-import { ContextualHelperPanel } from './contextual-helper-panel'
 import { ItemHelper } from './item-helper'
 import { RegisteredToolHelper } from './registered-tool-helper'
 import { RoofHelper } from './roof-helper'
+import { ToolCursorHints } from './tool-cursor-hints'
 
 // 사각형 방 is a wall drawing mode with no node kind of its own.
 const RECTANGLE_ROOM_HINTS: ToolHint[] = [
@@ -41,62 +33,89 @@ const RECTANGLE_ROOM_HINTS: ToolHint[] = [
   { key: 'Esc', label: '그리기 취소' },
 ]
 
+// The 방 / 플랫폼 presets ride on the wall tool the same way.
+const ROOM_PRESET_HINTS: ToolHint[] = [
+  { key: 'R', label: '90° 회전' },
+  { key: 'Enter', label: '확인' },
+  { key: 'Esc', label: '놓기 취소' },
+]
+
 // Reshaping a selected node's geometry (endpoint / curve / polygon corner). The
-// snapping chip is the main control; these just name the gesture + Esc.
+// tool bar's magnet shows the snapping; these name the gesture + Esc.
+const RESHAPE_LABELS: Record<ReshapeKind, string> = {
+  curve: '곡선 만들기',
+  'control-point': '조절점 옮기기',
+  tangent: '접선 옮기기',
+  endpoint: '끝점 옮기기',
+  boundary: '모서리 옮기기',
+  hole: '구멍 모서리 옮기기',
+}
+
 function reshapingHints(reshape: ReshapeKind): ContextualShortcutHint[] {
-  const action =
-    reshape === 'curve'
-      ? 'Curve'
-      : reshape === 'control-point'
-        ? 'Move control point'
-        : reshape === 'tangent'
-          ? 'Move tangent'
-      : reshape === 'endpoint'
-        ? 'Move endpoint'
-        : 'Move corner'
   return [
-    { keys: ['Drag'], label: action },
-    { keys: ['Esc'], label: 'Cancel' },
+    { keys: ['Left click'], label: `끌어서 ${RESHAPE_LABELS[reshape]}` },
+    { keys: ['Shift'], label: '스냅 모드 전환' },
+    { keys: ['Esc'], label: '취소' },
   ]
 }
 
-type ActiveModifierKeys = {
-  command: boolean
-  shift: boolean
+const ROTATE_LABELS_KO: Record<string, string> = {
+  'Rotating freely (no angle step)': '자유 회전 중 (각도 단계 없음)',
+  'Hold to rotate freely': '누른 채 자유 회전',
 }
 
-function useActiveModifierKeys(): ActiveModifierKeys {
-  const [modifiers, setModifiers] = useState<ActiveModifierKeys>({
-    command: false,
-    shift: false,
-  })
+function paintScopeLabelKo(scope: PaintScope, info: PaintHoverInfo): string {
+  switch (scope) {
+    case 'object':
+      return '사물 전체'
+    case 'matching':
+      return '같은 재질 모두'
+    case 'room':
+      return '방 전체'
+    default:
+      return info.slotLabel || '이 면'
+  }
+}
+
+/** Paint mode's one cursor row: pick a material, then what the click paints (Shift cycles). */
+function PaintScopeHints() {
+  const paintHover = useEditor((s) => s.paintHover)
+  const paintScope = useEditor((s) => s.paintScope)
+  const activePaintMaterial = useEditor((s) => s.activePaintMaterial)
+  const paintEraser = useEditor((s) => s.paintEraser)
+
+  let hint: ContextualShortcutHint
+  if (!(paintEraser || hasActivePaintMaterial(activePaintMaterial))) {
+    hint = { keys: ['ⓘ'], label: '칠할 재질을 고르세요' }
+  } else if (!paintHover) {
+    hint = { keys: ['ⓘ'], label: '칠할 면에 커서를 올리세요' }
+  } else {
+    const effective = paintHover.scopes.includes(paintScope) ? paintScope : 'single'
+    const label = `칠하기: ${paintScopeLabelKo(effective, paintHover)}`
+    hint = paintHover.scopes.length > 1 ? { keys: ['Shift'], label } : { keys: ['ⓘ'], label }
+  }
+  return <ToolCursorHints hints={[hint]} />
+}
+
+function useShiftPressed(): boolean {
+  const [shift, setShift] = useState(false)
 
   useEffect(() => {
-    const updateModifiers = (event: KeyboardEvent) => {
-      const isKeyDown = event.type === 'keydown'
-      setModifiers({
-        command:
-          event.metaKey ||
-          event.ctrlKey ||
-          (isKeyDown && (event.key === 'Meta' || event.key === 'Control')),
-        shift: event.shiftKey || (isKeyDown && event.key === 'Shift'),
-      })
+    const update = (event: KeyboardEvent) => {
+      setShift(event.shiftKey || (event.type === 'keydown' && event.key === 'Shift'))
     }
-    const clearModifiers = () => {
-      setModifiers({ command: false, shift: false })
-    }
-
-    window.addEventListener('keydown', updateModifiers)
-    window.addEventListener('keyup', updateModifiers)
-    window.addEventListener('blur', clearModifiers)
+    const clear = () => setShift(false)
+    window.addEventListener('keydown', update)
+    window.addEventListener('keyup', update)
+    window.addEventListener('blur', clear)
     return () => {
-      window.removeEventListener('keydown', updateModifiers)
-      window.removeEventListener('keyup', updateModifiers)
-      window.removeEventListener('blur', clearModifiers)
+      window.removeEventListener('keydown', update)
+      window.removeEventListener('keyup', update)
+      window.removeEventListener('blur', clear)
     }
   }, [])
 
-  return modifiers
+  return shift
 }
 
 export function HelperManager() {
@@ -106,53 +125,17 @@ export function HelperManager() {
   const scope = useInteractionScope((s) => s.scope)
   const movingNode = useMovingNode()
   const activeHandleDrag = useActiveHandleDrag()
-  const selectedIds = useViewer((s) => s.selection.selectedIds)
+  const customizing = useUiHidden((s) => s.customizing)
   const isMobile = useIsMobile()
-  const modifiers = useActiveModifierKeys()
-  const selectedNodes = useScene(
-    useShallow((s) =>
-      selectedIds
-        .map((id) => s.nodes[id as AnyNodeId])
-        .filter((node): node is AnyNode => node !== undefined),
-    ),
-  )
-  // The snapping context for whatever's active (wall / item / polygon) — drives
-  // which snapping chips the HUD shows, derived once and shared by every branch.
-  const snapContext = useMemo(
-    () =>
-      snapContextOf({
-        scope,
-        mode,
-        tool,
-        profileOf: (typeOrTool) => nodeRegistry.get(typeOrTool)?.snapProfile,
-        draftDirectionalOf: (typeOrTool) => nodeRegistry.get(typeOrTool)?.snapDraftDirectional ?? true,
-      }),
-    [scope, mode, tool],
-  )
-  const continuationContext = useMemo(
-    () => getActiveContinuationContext(),
-    [scope, mode, tool],
-  )
-  const selectModeHints = useMemo(() => {
-    const single = selectedNodes.length === 1 ? selectedNodes[0] : null
-    const mepSelection =
-      single?.type === 'duct-segment' || single?.type === 'pipe-segment'
-        ? 'run'
-        : single?.type === 'duct-fitting' || single?.type === 'pipe-fitting'
-          ? 'fitting'
-          : null
-    return resolveSelectModeHelpHints({
-      selectedCount: selectedNodes.length,
-      hasMovableSelection: selectedNodes.some((node) => canDirectMoveNode(node)),
-      hasRotatableSelection: selectedNodes.some((node) => canDirectRotateNode(node)),
-      commandPressed: modifiers.command,
-      shiftPressed: modifiers.shift,
-      mepSelection,
-    })
-  }, [modifiers.command, modifiers.shift, selectedNodes])
+  const shiftPressed = useShiftPressed()
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the store getter reads the scope / mode / tool it is keyed on
+  const continuationContext = useMemo(() => getActiveContinuationContext(), [scope, mode, tool])
 
   // Helpers are keyboard-driven hints (Esc, R, etc.) — irrelevant on touch.
   if (isMobile) return null
+
+  // The customize card carries its own keys (inZOI hides the build hints).
+  if (customizing) return null
 
   // The studio workspace (compose panel / gallery) has no scene selection or
   // tools — editor shortcut hints would only mislead there.
@@ -166,21 +149,32 @@ export function HelperManager() {
     activeHandleDrag?.label === ROTATE_HANDLE_DRAG_LABEL ||
     activeHandleDrag?.label === GROUP_ROTATE_DRAG_LABEL
   ) {
-    return <ContextualHelperPanel hints={resolveRotateHandleHelpHints(modifiers.shift)} />
+    return (
+      <ToolCursorHints
+        hints={resolveRotateHandleHelpHints(shiftPressed).map((hint) => ({
+          ...hint,
+          label: ROTATE_LABELS_KO[hint.label] ?? hint.label,
+        }))}
+      />
+    )
   }
 
-  // Group-move drag: the drag resolves to the 'item' snap context (see
-  // `snapContextOf`), so surface the snapping chips — mode + grid step, with
-  // their Shift / Ctrl cycle shortcuts — for the duration.
+  // Group-move drag: the tool bar's magnet shows the snapping; name its keys.
   if (activeHandleDrag?.label === GROUP_MOVE_DRAG_LABEL) {
-    return <ContextualHelperPanel hints={[]} snapContext={snapContext} />
+    return (
+      <ToolCursorHints
+        hints={[
+          { keys: ['Shift'], label: '스냅 모드 전환' },
+          { keys: ['Ctrl'], label: '격자 간격 전환' },
+        ]}
+      />
+    )
   }
 
   // Reshaping a node's geometry (endpoint / curve / polygon corner). Checked
-  // before the select branch so the idle "drag selected / add objects" hints
-  // never leak over an in-progress reshape — and it gets its own snapping chip.
+  // before the select branch so an in-progress reshape keeps its keys.
   if (scope.kind === 'reshaping') {
-    return <ContextualHelperPanel hints={reshapingHints(scope.reshape)} snapContext={snapContext} />
+    return <ToolCursorHints hints={reshapingHints(scope.reshape)} />
   }
 
   if (movingNode) {
@@ -198,48 +192,41 @@ export function HelperManager() {
         continuationContext={movingContinuationContext}
         rightClickRotates={movingNode.type === 'item'}
         showForce={nodeRegistry.get(movingNode.type)?.snapProfile !== 'structural'}
-        snapContext={snapContext}
       />
     )
   }
 
-  // Paint mode advertises (and cycles, via Shift) the application scope — the
-  // only contextual control here. The chip hides itself for targets that only
-  // paint one surface, so this renders nothing until a scoped target is active.
-  if (mode === 'material-paint') {
-    return <ContextualHelperPanel hints={[]} showPaintScope />
-  }
+  // Paint mode names what the next click paints (Shift cycles the scope).
+  if (mode === 'material-paint') return <PaintScopeHints />
 
-  // Idle select only — an active scope (handle-drag, box-select, …) must not show
-  // the idle selection hints.
-  if (mode === 'select' && scope.kind === 'idle') {
-    return <ContextualHelperPanel hints={selectModeHints} />
-  }
+  // Idle select: the bottom hint line carries the selection keys.
+  if (mode === 'select') return null
 
   // Legacy fallback — only `roof` remains because it hasn't migrated to
   // `def.tool` / `def.toolHints` yet (no Stage D port). Checked before the
   // generic tool branch so the snap-context fallback below doesn't capture it
   // and drop its bespoke `RoofHelper` hints. When roof migrates, this deletes.
-  if (tool === 'roof') return <RoofHelper snapContext={snapContext} />
+  if (tool === 'roof') return <RoofHelper />
 
-  // Registry-first: a kind renders the generic `RegisteredToolHelper` when it
-  // declares `def.toolHints`, OR whenever its draft resolves to a snap /
-  // continuation context — so a snappable tool with NO hand-written hints (e.g.
-  // `zone`) still advertises the snapping chip it already honors (Shift = cycle).
-  // `RegisteredToolHelper` self-hides when there's genuinely nothing to show.
+  // Registry-first: a kind renders the generic `RegisteredToolHelper` from its
+  // `def.toolHints`, plus its continuation (C) row; the helper self-hides when
+  // there's genuinely nothing to show.
   if (tool) {
     const def = nodeRegistry.get(tool)
-    const hints = def?.toolHints ?? (tool === 'rectangle-room' ? RECTANGLE_ROOM_HINTS : [])
-    if (hints.length > 0 || snapContext || continuationContext) {
-      return (
-        <RegisteredToolHelper
-          continuationContext={continuationContext}
-          hints={hints}
-          shiftPressed={modifiers.shift}
-          snapContext={snapContext}
-        />
-      )
-    }
+    const hints =
+      def?.toolHints ??
+      (tool === 'rectangle-room'
+        ? RECTANGLE_ROOM_HINTS
+        : tool === 'room-preset'
+          ? ROOM_PRESET_HINTS
+          : [])
+    return (
+      <RegisteredToolHelper
+        continuationContext={continuationContext}
+        hints={hints}
+        shiftPressed={shiftPressed}
+      />
+    )
   }
 
   return null

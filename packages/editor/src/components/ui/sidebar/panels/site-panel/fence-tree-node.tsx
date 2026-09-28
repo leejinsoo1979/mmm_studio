@@ -4,6 +4,7 @@ import Image from 'next/image'
 import { memo, useState } from 'react'
 import useEditor from '../../../../../store/use-editor'
 import { InlineRenameInput } from './inline-rename-input'
+import { useSiblingNumber } from './sibling-number'
 import { focusTreeNode, handleTreeSelection, TreeNodeWrapper } from './tree-node'
 import { TreeNodeActions } from './tree-node-actions'
 
@@ -20,6 +21,7 @@ export const FenceTreeNode = memo(function FenceTreeNode({
 }: FenceTreeNodeProps) {
   const node = useScene((state) => state.nodes[nodeId]) as FenceNode | undefined
   const [isEditing, setIsEditing] = useState(false)
+  const number = useSiblingNumber(nodeId as AnyNodeId)
   const selectedIds = useViewer((state) => state.selection.selectedIds)
   const isSelected = selectedIds.includes(nodeId)
   const isHovered = useViewer((state) => state.hoveredId === nodeId)
@@ -51,7 +53,7 @@ export const FenceTreeNode = memo(function FenceTreeNode({
       isVisible={node.visible !== false}
       label={
         <InlineRenameInput
-          defaultName="Fence"
+          defaultName={`울타리 ${number}`}
           isEditing={isEditing}
           nodeId={node.id}
           onStartEditing={() => setIsEditing(true)}

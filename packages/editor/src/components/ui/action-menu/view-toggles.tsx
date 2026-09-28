@@ -24,7 +24,7 @@ import { ActionButton } from './action-button'
 const MAX_FILE_SIZE = 200 * 1024 * 1024 // 200MB
 const ACCEPTED_FILE_TYPES = '.glb,.gltf,image/jpeg,image/png,image/webp,image/gif'
 const REFERENCES_EMPTY_TEXT =
-  'Upload GLB meshes as scan references or blueprint images as guide references.'
+  'GLB 메시는 스캔 참조로, 도면 이미지는 가이드 참조로 올릴 수 있습니다.'
 
 // ── Helper: get guide images for the current level ──────────────────────────
 
@@ -100,7 +100,7 @@ function UploadButton({ onError }: { onError: (message: string | null) => void }
       onError(null)
 
       if (file.size > MAX_FILE_SIZE) {
-        onError('File is too large. Maximum size is 200 MB.')
+        onError('파일이 너무 큽니다. 최대 200 MB까지 올릴 수 있습니다.')
         return
       }
 
@@ -108,7 +108,7 @@ function UploadButton({ onError }: { onError: (message: string | null) => void }
         file.name.toLowerCase().endsWith('.glb') || file.name.toLowerCase().endsWith('.gltf')
       const isImage = file.type.startsWith('image/')
       if (!(isScan || isImage)) {
-        onError('Upload a .glb/.gltf scan or an image.')
+        onError('.glb / .gltf 스캔이나 이미지 파일을 올려 주세요.')
         return
       }
 
@@ -120,7 +120,7 @@ function UploadButton({ onError }: { onError: (message: string | null) => void }
           setSelectedReferenceId(guide.id)
           setSelection({ selectedIds: [], zoneId: null })
         } catch {
-          onError('Could not add that guide image.')
+          onError('가이드 이미지를 추가하지 못했습니다.')
         } finally {
           setIsAddingGuide(false)
         }
@@ -129,13 +129,13 @@ function UploadButton({ onError }: { onError: (message: string | null) => void }
 
       const { uploadHandler } = useUploadStore.getState()
       if (!uploadHandler) {
-        onError('Scan upload is unavailable.')
+        onError('스캔을 올릴 수 없는 환경입니다.')
         return
       }
 
       const projectId = window.location.pathname.split('/editor/')[1]?.split('/')[0]
       if (!projectId) {
-        onError('Open a project before uploading a scan.')
+        onError('스캔을 올리려면 먼저 프로젝트를 여세요.')
         return
       }
 
@@ -148,7 +148,8 @@ function UploadButton({ onError }: { onError: (message: string | null) => void }
   return (
     <>
       <button
-        aria-label="Upload scan or guide image"
+        aria-label="스캔 또는 가이드 이미지 올리기"
+        title="스캔 또는 가이드 이미지 올리기"
         className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border/40 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
         disabled={isAddingGuide}
         onClick={() => fileInputRef.current?.click()}
@@ -570,14 +571,11 @@ function ReferenceListSection({
         <div className="min-w-0 flex-1">
           <p className="font-medium text-foreground text-sm">{title}</p>
           {hasItems && (
-            <p className="text-muted-foreground text-xs">
-              {nodes.length} {noun}
-              {nodes.length !== 1 ? 's' : ''} on this level
-            </p>
+            <p className="text-muted-foreground text-xs">이 층에 {nodes.length}개</p>
           )}
         </div>
         <button
-          aria-label={show ? `Hide ${title.toLowerCase()}` : `Show ${title.toLowerCase()}`}
+          aria-label={show ? `${title} 숨기기` : `${title} 보기`}
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border/40 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
           onClick={() => setShow(!show)}
           type="button"
@@ -611,14 +609,14 @@ function ReferenceListSection({
                     src={iconSrc}
                   />
                   <p className="truncate font-medium text-foreground text-sm">
-                    {node.name || `${noun.charAt(0).toUpperCase()}${noun.slice(1)} ${index + 1}`}
+                    {node.name || `${noun} ${index + 1}`}
                   </p>
                   {selectedReferenceId === node.id && (
                     <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-foreground/80" />
                   )}
                 </button>
                 <button
-                  aria-label={`Delete ${noun}`}
+                  aria-label={`${noun} 삭제`}
                   className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover/item:opacity-100"
                   onClick={(event) => {
                     event.stopPropagation()
@@ -633,7 +631,7 @@ function ReferenceListSection({
                 </button>
               </div>
               <SliderControl
-                label="Opacity"
+                label="불투명도"
                 max={100}
                 min={0}
                 onChange={(value) =>
@@ -669,55 +667,32 @@ function ReferencesControl() {
   const total = scans.length + guides.length
   const anyVisible = showScans || showGuides
 
-  const toggleAll = useCallback(() => {
-    const next = !anyVisible
-    setShowScans(next)
-    setShowGuides(next)
-  }, [anyVisible, setShowScans, setShowGuides])
-
   return (
     <Popover onOpenChange={setIsOpen} open={isOpen}>
-      <div className="flex items-center">
-        <ActionButton
+      <PopoverTrigger asChild>
+        <button
+          aria-expanded={isOpen}
+          aria-label="참조 (스캔 · 도면 이미지)"
           className={cn(
-            'h-8 w-8 rounded-l-full rounded-r-none p-0 text-neutral-600 dark:text-neutral-300',
-            anyVisible
-              ? 'bg-neutral-900/[0.08] text-neutral-900 dark:text-neutral-50'
-              : 'hover:bg-neutral-900/[0.06] dark:hover:bg-white/10 hover:text-neutral-900 dark:hover:text-white',
+            'relative flex size-9 shrink-0 items-center justify-center rounded-full text-[#6b6b6b] transition-colors hover:bg-black/[0.05] dark:text-neutral-300 dark:hover:bg-white/10',
+            isOpen && 'bg-black/[0.05] dark:bg-white/10',
           )}
-          label={`References: ${anyVisible ? 'Visible' : 'Hidden'}`}
-          onClick={toggleAll}
-          size="icon"
-          variant="ghost"
+          title={`참조 (스캔 · 도면 이미지)${total > 0 ? `: ${anyVisible ? '보임' : '숨김'}` : ''}`}
+          type="button"
         >
-          <div className="relative">
-            <Layers2 className="h-[19px] w-[19px]" strokeWidth={1.75} />
-            <span className="absolute -right-1.5 -bottom-1 min-w-[14px] rounded-full bg-foreground/20 px-[3px] text-center font-medium text-[9px] text-foreground/70 leading-[14px]">
+          <Layers2 className="size-[22px]" strokeWidth={1.5} />
+          {total > 0 && (
+            <span
+              className={cn(
+                'absolute right-0.5 bottom-0.5 min-w-[14px] rounded-full px-[3px] text-center font-semibold text-[9px] leading-[14px]',
+                anyVisible ? 'bg-[#bfe0fa] text-[#2f7fd0]' : 'bg-black/10 text-[#6b6b6b]',
+              )}
+            >
               {total}
             </span>
-          </div>
-        </ActionButton>
-
-        <PopoverTrigger asChild>
-          <button
-            aria-expanded={isOpen}
-            aria-label="Reference settings"
-            className={cn(
-              'flex h-8 w-5 items-center justify-center rounded-r-full text-neutral-500 dark:text-neutral-400 transition-colors',
-              anyVisible
-                ? isOpen
-                  ? 'bg-foreground/10'
-                  : 'bg-foreground/5 hover:bg-foreground/8'
-                : isOpen
-                  ? 'bg-foreground/8'
-                  : 'opacity-60 hover:bg-foreground/5 hover:opacity-100',
-            )}
-            type="button"
-          >
-            <ChevronDown className={cn('h-3 w-3 transition-transform', isOpen && 'rotate-180')} />
-          </button>
-        </PopoverTrigger>
-      </div>
+          )}
+        </button>
+      </PopoverTrigger>
 
       <PopoverContent
         align="center"
@@ -735,22 +710,22 @@ function ReferencesControl() {
             emptyText={REFERENCES_EMPTY_TEXT}
             iconSrc="/icons/mesh.webp"
             nodes={scans}
-            noun="scan"
+            noun="스캔"
             onError={setUploadError}
             setShow={setShowScans}
             show={showScans}
-            title="Scans"
+            title="스캔"
           />
           <div className="h-px bg-border/45" />
           <ReferenceListSection
             emptyText={REFERENCES_EMPTY_TEXT}
             iconSrc="/icons/floorplan.webp"
             nodes={guides}
-            noun="guide image"
+            noun="가이드 이미지"
             onError={setUploadError}
             setShow={setShowGuides}
             show={showGuides}
-            title="Guide images"
+            title="가이드 이미지"
           />
         </div>
       </PopoverContent>

@@ -1,17 +1,38 @@
 'use client'
 
 import { type AssetInput, constructionBuildUpMm, nodeRegistry } from '@pascal-app/core'
-import { triggerSFX, useEditor } from '@pascal-app/editor'
+import {
+  CATALOG_SCROLL,
+  CatalogBandPill,
+  CatalogCard,
+  CatalogHero,
+  CatalogIconRow,
+  CatalogSearchBand,
+  CatalogSection,
+  triggerSFX,
+  useEditor,
+} from '@pascal-app/editor'
 import {
   LevelTakeoffSummary,
   useLiquidLineToolOptions,
   WallConstructionFields,
 } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
-import { Check, type LucideIcon, Minus, Search, Spline, Square, X } from 'lucide-react'
+import {
+  AppWindow,
+  BrickWall,
+  DoorOpen,
+  Fence,
+  FileUp,
+  House,
+  Layers2,
+  Minus,
+  PenLine,
+  Spline,
+  Square,
+} from 'lucide-react'
 import Image from 'next/image'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { TooltipProvider } from '@/components/toolbar-tooltip'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import {
   FULL_WALL_HEIGHTS,
@@ -19,12 +40,14 @@ import {
   useWallDrawingDefaults,
   wallDrawingToolDefaults,
 } from '@/lib/wall-drawing-defaults'
-import { CatalogHover } from './catalog-hover-card'
+import { StructureHero } from './catalog/build-hero-art'
+import { useBuildPanelPrefs } from './catalog/build-panel-prefs'
+import { type RailingStyle, RailingThumb, WallHeightThumb } from './catalog/build-thumbnails'
+import { ROOM_PRESET_SECTION_TITLES, RoomPresetSection } from './room-preset-section'
 
 type BuildToolKind =
   | 'wall'
   | 'fence'
-  | 'custom-room'
   | 'slab'
   | 'ceiling'
   | 'roof'
@@ -50,6 +73,8 @@ type MepToolKind =
 type BuildType = {
   id: string
   label: string
+  /** Short card line; defaults to the label. */
+  meta?: string
   description?: string
   iconSrc: string
   asset?: AssetInput
@@ -70,10 +95,108 @@ type MepItem = {
   kind: MepToolKind
 }
 
+type RailingPreset = {
+  id: string
+  label: string
+  style: RailingStyle
+  color: string
+  height: number
+  description: string
+  defaults: Record<string, unknown>
+}
+
+const RAILING_PRESETS: RailingPreset[] = [
+  {
+    id: 'fence-basic',
+    label: '기본 울타리',
+    style: 'slat',
+    color: '#ffffff',
+    height: 1.8,
+    description: '흰색 세로 살 울타리입니다. 바닥을 눌러 이어 그립니다.',
+    defaults: {},
+  },
+  {
+    id: 'rail-metal',
+    label: '철제 난간',
+    style: 'slat',
+    color: '#2e2e2e',
+    height: 1.1,
+    description: '가는 철제 살이 촘촘한 난간입니다. 발코니와 계단참에 어울립니다.',
+    defaults: {
+      style: 'slat',
+      color: '#2e2e2e',
+      height: 1.1,
+      thickness: 0.05,
+      postSpacing: 1.2,
+      baseStyle: 'floating',
+      postCap: 'flat',
+    },
+  },
+  {
+    id: 'rail-wood',
+    label: '목재 난간',
+    style: 'rail',
+    color: '#a57a52',
+    height: 1.0,
+    description: '가로대 두 줄의 목재 난간입니다.',
+    defaults: { style: 'rail', color: '#a57a52', height: 1.0 },
+  },
+  {
+    id: 'rail-white',
+    label: '화이트 난간',
+    style: 'slat',
+    color: '#f2f2f2',
+    height: 1.1,
+    description: '흰색 세로 살 난간입니다. 바닥에서 살짝 떠 있습니다.',
+    defaults: { style: 'slat', color: '#f2f2f2', height: 1.1, baseStyle: 'floating' },
+  },
+  {
+    id: 'privacy-wood',
+    label: '목재 가림막',
+    style: 'privacy',
+    color: '#8a5a3a',
+    height: 1.8,
+    description: '시선을 가리는 높은 목재 판 울타리입니다.',
+    defaults: { style: 'privacy', color: '#8a5a3a', height: 1.8 },
+  },
+  {
+    id: 'louver-charcoal',
+    label: '차콜 루버',
+    style: 'horizontal',
+    color: '#3a3a3a',
+    height: 1.5,
+    description: '가로 판을 틈을 두고 쌓은 차콜색 루버 울타리입니다.',
+    defaults: { style: 'horizontal', color: '#3a3a3a', slatGap: 0.02, height: 1.5 },
+  },
+  {
+    id: 'louver-redwood',
+    label: '레드우드 루버',
+    style: 'horizontal',
+    color: '#8b4a36',
+    height: 1.8,
+    description: '적갈색 가로 판 루버 울타리입니다.',
+    defaults: { style: 'horizontal', color: '#8b4a36', slatGap: 0.02 },
+  },
+  {
+    id: 'picket-low',
+    label: '낮은 울타리',
+    style: 'slat',
+    color: '#c8a27a',
+    height: 0.9,
+    description: '기둥 머리가 뾰족한 낮은 나무 울타리입니다. 화단 경계에 씁니다.',
+    defaults: { style: 'slat', color: '#c8a27a', height: 0.9, postCap: 'pyramid' },
+  },
+]
+
 const IMPORT_ITEMS: BuildType[] = [
-  { id: 'import-3d', label: '3D 모델 가져오기', iconSrc: '/icons/mesh.webp' },
-  { id: 'import-cad', label: 'CAD 가져오기', iconSrc: '/icons/blueprint.webp' },
-  { id: 'import-image', label: '도면 이미지 가져오기', iconSrc: '/icons/floorplan.webp' },
+  { id: 'import-3d', label: '3D 모델 가져오기', meta: '3D 모델', iconSrc: '/icons/mesh.webp' },
+  { id: 'import-cad', label: 'CAD 가져오기', meta: 'CAD', iconSrc: '/icons/blueprint.webp' },
+  {
+    id: 'import-image',
+    label: '도면 이미지 가져오기',
+    meta: '도면 이미지',
+    iconSrc: '/icons/floorplan.webp',
+  },
 ]
 
 const DOOR1_ASSET: AssetInput = {
@@ -91,18 +214,31 @@ const DOOR1_ASSET: AssetInput = {
   tags: ['door', 'wall', 'glb'],
 }
 
+const DRAW_MODE_ICONS: Record<string, typeof Minus> = {
+  wall: Minus,
+  'wall-arc': Spline,
+}
+
 const BUILD_SECTIONS: BuildSection[] = [
   {
     id: 'walls',
     title: '그리기 방식',
     items: [
-      { id: 'wall', label: '직선', iconSrc: '/icons/wall.webp', kind: 'wall' },
-      { id: 'wall-arc', label: '곡선', iconSrc: '/icons/wallcut.webp', kind: 'wall' },
       {
-        id: 'custom-room',
-        label: '사각형 방',
-        iconSrc: '/icons/custom-room.webp',
-        kind: 'custom-room',
+        id: 'wall',
+        label: '직선 벽',
+        meta: '직선',
+        description: '두 점을 눌러 곧은 벽을 이어 그립니다.',
+        iconSrc: '/icons/wall.webp',
+        kind: 'wall',
+      },
+      {
+        id: 'wall-arc',
+        label: '곡선 벽',
+        meta: '곡선',
+        description: '시작점·끝점을 누른 뒤 휘는 정도를 정해 곡선 벽을 그립니다.',
+        iconSrc: '/icons/wallcut.webp',
+        kind: 'wall',
       },
     ],
   },
@@ -131,6 +267,7 @@ const BUILD_SECTIONS: BuildSection[] = [
       {
         id: 'hidden-door',
         label: '히든도어 (목상·떡가베 벽)',
+        meta: '히든도어',
         description: '목상 또는 떡가베로 지은 벽에만 설치할 수 있습니다.',
         iconSrc: '/images/room-library/doors/hidden.jpg',
         kind: 'door',
@@ -139,6 +276,7 @@ const BUILD_SECTIONS: BuildSection[] = [
       {
         id: 'step-door-yerim',
         label: '예림·인쇼 스텝도어',
+        meta: '예림 스텝',
         description: '문틀 깊이가 설치하는 벽의 마감 두께에 맞춰집니다.',
         iconSrc: '/images/room-library/doors/step.jpg',
         kind: 'door',
@@ -147,6 +285,7 @@ const BUILD_SECTIONS: BuildSection[] = [
       {
         id: 'step-door-younglim',
         label: '영림 스텝도어',
+        meta: '영림 스텝',
         description: '문틀 깊이가 설치하는 벽의 마감 두께에 맞춰집니다.',
         iconSrc: '/images/room-library/doors/step.jpg',
         kind: 'door',
@@ -154,7 +293,9 @@ const BUILD_SECTIONS: BuildSection[] = [
       },
       {
         id: 'door1-glb',
-        label: 'Door1 GLB',
+        label: 'GLB 문 (Door1)',
+        meta: 'GLB 문',
+        description: '3D 모델로 만든 문입니다. 벽에 붙여 배치합니다.',
         iconSrc: '/images/room-library/doors/hinged.jpg',
         asset: DOOR1_ASSET,
       },
@@ -219,9 +360,8 @@ const BUILD_SECTIONS: BuildSection[] = [
       { id: 'elevator', label: '엘리베이터', iconSrc: '/icons/elevator.webp', kind: 'elevator' },
       { id: 'column', label: '기둥', iconSrc: '/icons/column.webp', kind: 'column' },
       { id: 'shelf', label: '선반', iconSrc: '/icons/shelf.webp', kind: 'shelf' },
-      { id: 'fence', label: '울타리', iconSrc: '/icons/fence.webp', kind: 'fence' },
       { id: 'spawn', label: '시작 위치', iconSrc: '/icons/spawn-point.webp', kind: 'spawn' },
-      { id: 'mep', label: '설비 (MEP)', iconSrc: '/icons/HVAC.webp' },
+      { id: 'mep', label: '설비 (MEP)', meta: '설비', iconSrc: '/icons/HVAC.webp' },
     ],
   },
 ]
@@ -247,9 +387,30 @@ const MEP_TOOL_KINDS = new Set<string>([
   'pipe-trap',
 ])
 
+/** Tools that draw walls at the chosen wall height. */
+const WALL_HEIGHT_TOOLS = new Set<string>(['wall', 'wall-arc', 'rectangle-room', 'room-preset'])
+
 const ROOF_FEATURE_FALLBACK_ICON = '/icons/roof.webp'
 
 type RoofFeature = { kind: string; label: string; iconSrc: string }
+
+/** Sub-category row: one glyph per catalogue section, in list order. */
+const SECTION_ICONS: Record<string, ReactNode> = {
+  '온 벽': <BrickWall />,
+  '부분 벽': (
+    <span className="grid size-5 place-items-end overflow-hidden">
+      <BrickWall className="origin-bottom scale-y-[0.6]" />
+    </span>
+  ),
+  난간: <Fence />,
+  방: <Square />,
+  플랫폼: <Layers2 />,
+  '그리기 방식': <PenLine />,
+  문: <DoorOpen />,
+  창문: <AppWindow />,
+  구조: <House />,
+  '도면 가져오기': <FileUp />,
+}
 
 function activateBuildTool(
   kind: BuildToolKind | MepToolKind,
@@ -263,20 +424,6 @@ function activateBuildTool(
   if (kind === 'wall') ed.setSnappingMode('wall', 'grid')
   ed.setMode('build')
   ed.setTool(kind)
-}
-
-function activateRectangleRoomTool(): void {
-  const ed = useEditor.getState()
-  ed.setPhase('structure')
-  ed.setStructureLayer('elements')
-  ed.setCatalogCategory(null)
-  ed.setToolDefaults('wall', {
-    placementMode: 'rectangle-room',
-    ...wallDrawingToolDefaults(),
-  })
-  ed.setSnappingMode('wall', 'grid')
-  ed.setMode('build')
-  ed.setTool('rectangle-room')
 }
 
 function activateArcWallTool(): void {
@@ -313,122 +460,55 @@ function activateRoofFeatureTool(kind: string): void {
   ed.setTool(kind as Parameters<typeof ed.setTool>[0])
 }
 
-function BuildTile({
+const isPhoto = (src: string) => src.endsWith('.jpg')
+
+/** A catalogue card for a build tool / MEP / roof feature entry. */
+function BuildCard({
   active,
-  caption,
-  disabled = false,
-  imageClassName,
+  disabled,
   item,
   onClick,
 }: {
   active?: boolean
-  caption?: string
   disabled?: boolean
-  /** Extra classes for a photo thumbnail (e.g. a tint). */
-  imageClassName?: string
   item: BuildType | MepItem | RoofFeature
   onClick?: () => void
 }) {
+  const photo = isPhoto(item.iconSrc)
+  const DrawIcon = 'id' in item ? DRAW_MODE_ICONS[item.id] : undefined
+  const meta = 'meta' in item && item.meta ? item.meta : item.label
   return (
-    <CatalogHover
-      info={{
-        title: item.label,
-        description: 'description' in item ? item.description : undefined,
-        image: isPhoto(item.iconSrc) ? item.iconSrc : undefined,
-        meta: caption,
+    <CatalogCard
+      active={active}
+      disabled={disabled}
+      hover={{
+        description:
+          ('description' in item ? item.description : undefined) ??
+          (disabled ? '준비 중인 기능입니다.' : undefined),
+        meta: meta === item.label ? undefined : meta,
       }}
-    >
-      <button
-        aria-label={item.label}
-        aria-pressed={active}
-        className={cn(
-          'group relative flex aspect-square min-w-0 flex-col items-center justify-center overflow-hidden rounded-lg bg-white dark:bg-neutral-900 shadow-[0_1px_3px_rgba(0,0,0,0.12)] ring-1 transition-all duration-150',
-          active ? 'ring-2 ring-sky-400' : 'ring-black/5 dark:ring-white/10 hover:ring-neutral-400',
-          disabled && 'cursor-not-allowed opacity-50 hover:ring-black/5',
-        )}
-        disabled={disabled}
-        onClick={onClick}
-        onMouseEnter={() => triggerSFX('sfx:menu-hover')}
-        type="button"
-      >
-        {isPhoto(item.iconSrc) ? (
-          <Image
-            alt=""
-            aria-hidden
-            className={cn(
-              'object-cover transition-transform duration-200 group-hover:scale-105',
-              imageClassName,
-            )}
-            fill
-            sizes="80px"
-            src={item.iconSrc}
-          />
-        ) : (
-          <Image
-            alt=""
-            aria-hidden
-            className="mb-3 h-[50%] w-[50%] object-contain transition-transform duration-150 group-hover:scale-105"
-            height={48}
-            src={item.iconSrc}
-            width={48}
-          />
-        )}
-        {caption ? (
-          <span className="absolute bottom-1 left-1.5 font-bold text-[11px] text-neutral-700 tabular-nums [text-shadow:0_0_3px_#fff,0_0_3px_#fff]">
-            {caption}
-          </span>
-        ) : (
-          <span className="absolute inset-x-0 bottom-0 line-clamp-2 bg-gradient-to-t from-white/95 via-white/85 to-white/0 px-1 pt-2 pb-1 text-center font-medium text-[9.5px] text-neutral-700 leading-[1.15] dark:from-neutral-900/95 dark:via-neutral-900/85 dark:to-neutral-900/0 dark:text-neutral-200">
-            {item.label}
-          </span>
-        )}
-        {active && (
-          <span className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full bg-sky-400 text-white">
-            <Check className="size-3" strokeWidth={3} />
-          </span>
-        )}
-      </button>
-    </CatalogHover>
-  )
-}
-
-const isPhoto = (src: string) => src.endsWith('.jpg')
-
-/** inZOI catalog group: grey header bar over a 4-up grid of square cards. */
-function Section({ children, title }: { children: React.ReactNode; title: string }) {
-  return (
-    <section className="scroll-mt-1 px-2 pt-3" data-build-section={title}>
-      <h2 className="mb-2 rounded-md bg-neutral-200/80 dark:bg-white/10 px-3 py-1.5 font-semibold text-[12px] text-neutral-600 dark:text-neutral-300 leading-none">
-        {title}
-      </h2>
-      {children}
-    </section>
-  )
-}
-
-const CARD_GRID = 'grid grid-cols-4 gap-1.5'
-
-const DRAW_MODE_ICONS: Record<string, LucideIcon> = {
-  wall: Minus,
-  'wall-arc': Spline,
-  'custom-room': Square,
-}
-
-/** mmmcraft: the construction new walls are drawn with (existing walls are
- *  changed in their own panel). */
-function NewWallConstruction() {
-  const construction = useWallDrawingDefaults((s) => s.construction)
-  const setConstruction = useWallDrawingDefaults((s) => s.setConstruction)
-  return (
-    <div className="rounded-lg bg-white dark:bg-neutral-900 p-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
-      <div className="mb-2 text-muted-foreground text-xs">새로 그릴 벽</div>
-      <NewWallThickness />
-      <WallConstructionFields onChange={setConstruction} value={construction} />
-    </div>
+      image={DrawIcon ? undefined : item.iconSrc}
+      imageClassName={photo ? undefined : 'p-[8%]'}
+      imageFit={photo ? 'cover' : 'contain'}
+      label={item.label}
+      meta={meta}
+      onClick={onClick}
+      thumb={
+        DrawIcon ? (
+          <DrawIcon className="size-7 text-[#555] dark:text-neutral-300" strokeWidth={1.5} />
+        ) : undefined
+      }
+    />
   )
 }
 
 const CORE_THICKNESS_PRESETS_MM = [100, 150, 200]
+
+const CONSTRUCTION_LABELS: Record<string, string> = {
+  timber: '목상',
+  steel: '경량',
+  bonded: '떡가베',
+}
 
 /** mmmcraft 벽 두께 / 벽체 두께 (mm) for new walls; finishes add on top. */
 function NewWallThickness() {
@@ -455,7 +535,7 @@ function NewWallThickness() {
             className={cn(
               'rounded-md px-2 py-1 text-xs tabular-nums transition-colors',
               coreMm === mm
-                ? 'bg-neutral-800 text-white dark:bg-neutral-100 dark:text-neutral-900'
+                ? 'bg-[#8ec3f2] font-semibold text-white'
                 : 'bg-muted text-foreground hover:bg-accent',
             )}
             key={mm}
@@ -493,29 +573,51 @@ function NewWallThickness() {
   )
 }
 
-/** Level-wide 자재 산출 of the 목상 / 경량 / 떡가베 walls. */
-function LevelWallTakeoff() {
+/** The band pill summarising how new walls are built; opens their settings
+ *  (thickness, construction) and the level's 자재 산출 beside the panel. */
+function WallSettingsPill() {
+  const construction = useWallDrawingDefaults((s) => s.construction)
+  const coreThickness = useWallDrawingDefaults((s) => s.coreThickness)
+  const setConstruction = useWallDrawingDefaults((s) => s.setConstruction)
   const levelId = useViewer((s) => s.selection.levelId)
+  const kindLabel = construction ? (CONSTRUCTION_LABELS[construction.kind] ?? '일반 벽') : '일반 벽'
   return (
-    <div className="mt-1.5 rounded-lg bg-white dark:bg-neutral-900 p-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
-      <div className="mb-2 text-muted-foreground text-xs">벽 마감 자재 산출 (현재 층)</div>
-      <LevelTakeoffSummary levelId={levelId ?? null} />
-    </div>
+    <CatalogBandPill label={`벽 ${Math.round(coreThickness * 1000)} mm · ${kindLabel}`}>
+      <div className="mb-2 font-semibold text-[13px]">새로 그릴 벽</div>
+      <NewWallThickness />
+      <WallConstructionFields onChange={setConstruction} value={construction} />
+      <div className="mt-3 border-neutral-200 border-t pt-3 dark:border-white/10">
+        <div className="mb-2 font-semibold text-[13px]">벽 마감 자재 산출 (현재 층)</div>
+        <LevelTakeoffSummary levelId={levelId ?? null} />
+      </div>
+    </CatalogBandPill>
   )
 }
 
 export function BuildTab() {
   const activeTool = useEditor((s) => s.tool)
   const wallPlacementMode = useEditor((s) => s.toolDefaults.wall?.placementMode)
+  // Platforms are wall-less slabs, so a wall height card switches to walls.
+  const platformArmed = useEditor(
+    (s) =>
+      s.tool === 'room-preset' &&
+      (s.toolDefaults.wall?.roomPreset as { kind?: string } | undefined)?.kind === 'platform',
+  )
   const mode = useEditor((s) => s.mode)
   const selectedItem = useEditor((s) => s.selectedItem)
   const doorDefaults = useEditor(
     (s) => s.toolDefaults.door as { stepProduct?: string; hidden?: boolean } | null | undefined,
   )
+  const fencePresetId = useEditor(
+    (s) => (s.toolDefaults.fence as { presetId?: string } | null | undefined)?.presetId,
+  )
   const follow = useLiquidLineToolOptions((s) => s.follow)
   const toggleFollow = useLiquidLineToolOptions((s) => s.toggleFollow)
   const wallHeight = useWallDrawingDefaults((s) => s.height)
+  const heroCollapsed = useBuildPanelPrefs((s) => s.heroCollapsed)
+  const toggleHero = useBuildPanelPrefs((s) => s.toggleHero)
   const [query, setQuery] = useState('')
+  const [activeSection, setActiveSection] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const needle = query.trim()
   const matches = (text: string) => !needle || text.includes(needle)
@@ -552,7 +654,6 @@ export function BuildTab() {
     if (type.id === 'mep') return isMepActive
     if (type.id === 'roof')
       return mode === 'build' && (activeTool === 'roof' || isRoofFeatureActive)
-    if (type.id === 'custom-room') return mode === 'build' && activeTool === 'rectangle-room'
     if (type.id === 'wall-arc') return mode === 'build' && activeTool === 'wall-arc'
     if (type.id === 'wall')
       return mode === 'build' && activeTool === 'wall' && wallPlacementMode !== 'rectangle-room'
@@ -587,10 +688,6 @@ export function BuildTab() {
       activateBuildTool('duct-segment')
       return
     }
-    if (type.id === 'custom-room') {
-      activateRectangleRoomTool()
-      return
-    }
     if (type.id === 'wall-arc') {
       activateArcWallTool()
       return
@@ -607,269 +704,268 @@ export function BuildTab() {
     activateBuildTool('wall')
   }, [])
 
-  const heightCard = (h: number) => {
-    const item = {
-      id: `wall-${h}`,
-      label: `${h.toFixed(1)} m 벽 그리기`,
-      description: `${FULL_WALL_HEIGHTS.includes(h) ? '온 벽' : '부분 벽'} · 누르면 바로 이 높이로 벽을 그립니다. 새로 그리는 벽에만 적용됩니다.`,
-      iconSrc: '/images/room-library/construction/plain.jpg',
-    }
-    const active =
-      mode === 'build' &&
-      activeTool === 'wall' &&
-      wallPlacementMode !== 'rectangle-room' &&
-      wallHeight === h
+  // The height check stays on while walls are drawn (straight, curved, room
+  // shapes) or nothing is armed; any other build tool carries its own check.
+  const wallToolArmed =
+    mode === 'build' && !!activeTool && WALL_HEIGHT_TOOLS.has(activeTool) && !platformArmed
+  const wallHeightShown = mode !== 'build' || !activeTool || wallToolArmed
+  const heightCard = (partial: boolean) => (h: number) => {
+    const heights = partial ? PARTIAL_WALL_HEIGHTS : FULL_WALL_HEIGHTS
+    const label = `${Number.isInteger(h * 10) ? h.toFixed(1) : h.toFixed(2)}m`
     return (
-      <BuildTile
-        active={active}
-        caption={`${h.toFixed(1)}m`}
-        // New walls are off-white matte paint; tint the concrete block photo to match.
-        imageClassName="brightness-[1.5] contrast-[0.8] sepia-[0.25]"
-        item={item}
-        key={item.id}
-        onClick={() => {
-          triggerSFX('sfx:menu-click')
-          useWallDrawingDefaults.getState().setHeight(active ? undefined : h)
-          activateBuildTool('wall')
+      <CatalogCard
+        active={wallHeightShown && wallHeight === h}
+        caption={
+          <span className="pointer-events-none absolute inset-x-0 bottom-[7%] text-center font-bold text-[12px] text-[#7c7c74] tabular-nums leading-none dark:text-neutral-300">
+            {label}
+          </span>
+        }
+        hover={{
+          description: `${partial ? '부분 벽' : '온 벽'} · 누르면 바로 이 높이로 벽을 그립니다. 새로 그리는 벽에만 적용됩니다.`,
+          meta: `높이 ${Math.round(h * 1000)} mm`,
         }}
+        key={h}
+        label={`${label} ${partial ? '부분 벽' : '온 벽'}`}
+        onClick={() => {
+          // An armed wall-drawing tool keeps its shape and picks the height up
+          // for the next wall; anything else switches to straight walls.
+          useWallDrawingDefaults.getState().setHeight(h)
+          if (!wallToolArmed) activateBuildTool('wall')
+        }}
+        thumb={
+          <span className="-translate-y-[12%] block h-full w-full">
+            <WallHeightThumb height={h} max={heights[heights.length - 1]!} partial={partial} />
+          </span>
+        }
       />
     )
   }
-  const showWallHeights = matches('온 벽') || matches('부분 벽') || matches('벽')
+
+  const showFullWalls = matches('온 벽') || matches('벽')
+  const showPartialWalls = matches('부분 벽') || matches('벽')
+  const visibleRailings = RAILING_PRESETS.filter(
+    (preset) => matches('난간') || matches('울타리') || matches(preset.label),
+  )
   const visibleSections = BUILD_SECTIONS.map((section) => ({
     ...section,
-    items: matches(section.title) ? section.items : section.items.filter((t) => matches(t.label)),
+    items: matches(section.title)
+      ? section.items
+      : section.items.filter((t) => matches(t.label) || matches(t.meta ?? '')),
   })).filter((section) => section.items.length > 0)
   const visibleImports = IMPORT_ITEMS.filter(
     (item) => matches('도면 가져오기') || matches(item.label),
   )
-  // inZOI's sub-category row: one chip per visible group, jumping to it.
   const jumpTitles = [
-    ...(showWallHeights ? ['온 벽', '부분 벽'] : []),
+    ...(showFullWalls ? ['온 벽'] : []),
+    ...(showPartialWalls ? ['부분 벽'] : []),
+    ...(visibleRailings.length > 0 ? ['난간'] : []),
+    ...ROOM_PRESET_SECTION_TITLES.filter((title) => matches(title) || !needle),
     ...visibleSections.map((section) => section.title),
     ...(visibleImports.length > 0 ? ['도면 가져오기'] : []),
   ]
+  const jumpKey = jumpTitles.join('|')
+
+  // Scroll spy: the section whose header last passed the list's top edge.
+  const syncActiveSection = useCallback(() => {
+    const root = scrollRef.current
+    if (!root) return
+    const sections = [
+      ...root.querySelectorAll<HTMLElement>('[data-catalog-section],[data-build-section]'),
+    ]
+    if (sections.length === 0) return
+    const rootTop = root.getBoundingClientRect().top
+    let current = sections[0]!
+    for (const section of sections) {
+      if (section.getBoundingClientRect().top - rootTop <= 24) current = section
+    }
+    if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2)
+      current = sections[sections.length - 1]!
+    setActiveSection(current.dataset.catalogSection ?? current.dataset.buildSection ?? null)
+  }, [])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-sync when the visible sections change
+  useEffect(() => syncActiveSection(), [jumpKey, syncActiveSection])
+
+  const jumpTo = (title: string) => {
+    setActiveSection(title)
+    scrollRef.current
+      ?.querySelector(`[data-catalog-section="${title}"],[data-build-section="${title}"]`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   return (
     <div className="flex h-full flex-col text-foreground">
-      <div className="shrink-0 px-2 pt-3 pb-1">
-        <label className="flex h-9 items-center gap-2 rounded-lg bg-white dark:bg-neutral-900 px-3 shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
-          <input
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-neutral-800 dark:text-neutral-100 outline-none placeholder:text-neutral-400"
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              e.stopPropagation()
-              if (e.key === 'Escape') setQuery('')
-            }}
-            placeholder="검색"
-            type="text"
-            value={query}
-          />
-          {query ? (
-            <button aria-label="검색 지우기" onClick={() => setQuery('')} type="button">
-              <X className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
-            </button>
-          ) : (
-            <Search className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
-          )}
-        </label>
-      </div>
+      <CatalogSearchBand left={<WallSettingsPill />} onChange={setQuery} value={query} />
 
       {jumpTitles.length > 1 && (
-        <div className="no-scrollbar flex shrink-0 gap-1 overflow-x-auto px-2 pt-1 pb-1.5">
-          {jumpTitles.map((title) => (
-            <button
-              className="shrink-0 rounded-full bg-white px-2.5 py-1 font-medium text-[11px] text-neutral-600 shadow-[0_1px_2px_rgba(0,0,0,0.1)] transition-colors hover:bg-sky-100 hover:text-sky-800 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-sky-400/20 dark:hover:text-sky-100"
-              key={title}
-              onClick={() => {
-                triggerSFX('sfx:menu-click')
-                scrollRef.current
-                  ?.querySelector(`[data-build-section="${title}"]`)
-                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-              }}
-              type="button"
-            >
-              {title}
-            </button>
-          ))}
-        </div>
+        <CatalogIconRow
+          activeId={activeSection}
+          items={jumpTitles.map((title) => ({
+            id: title,
+            label: title,
+            icon: SECTION_ICONS[title],
+          }))}
+          onSelect={jumpTo}
+        />
       )}
 
-      <div className="dark-scrollbar min-h-0 flex-1 overflow-y-auto pb-3" ref={scrollRef}>
-        <TooltipProvider delayDuration={0} disableHoverableContent>
-          {showWallHeights && (
-            <>
-              <Section title="온 벽">
-                <div className={CARD_GRID}>{FULL_WALL_HEIGHTS.map(heightCard)}</div>
-              </Section>
-              <Section title="부분 벽">
-                <div className={CARD_GRID}>{PARTIAL_WALL_HEIGHTS.map(heightCard)}</div>
-              </Section>
-            </>
-          )}
+      {!needle && (
+        <CatalogHero collapsed={heroCollapsed} label="집" onToggle={toggleHero}>
+          <StructureHero />
+        </CatalogHero>
+      )}
 
-          {visibleSections.map((section) =>
-            section.id === 'walls' ? (
-              <Section key={section.id} title={section.title}>
-                <div className="flex gap-1 rounded-lg bg-white p-1 shadow-[0_1px_3px_rgba(0,0,0,0.12)] dark:bg-neutral-900">
-                  {section.items.map((type) => {
-                    const ModeIcon = DRAW_MODE_ICONS[type.id] ?? Minus
-                    const active = isTypeActive(type)
-                    return (
-                      <button
-                        aria-pressed={active}
-                        className={cn(
-                          'flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[12px] transition-colors',
-                          active
-                            ? 'bg-neutral-800 font-semibold text-white dark:bg-neutral-100 dark:text-neutral-900'
-                            : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-white/10',
-                        )}
-                        key={type.id}
-                        onClick={() => {
-                          triggerSFX('sfx:menu-click')
-                          handleTypeClick(type)
-                        }}
-                        type="button"
-                      >
-                        <ModeIcon className="h-3.5 w-3.5" />
-                        {type.label}
-                      </button>
+      <div
+        className={cn(CATALOG_SCROLL, 'pb-3')}
+        onScroll={() => requestAnimationFrame(syncActiveSection)}
+        ref={scrollRef}
+      >
+        {showFullWalls && (
+          <CatalogSection title="온 벽">{FULL_WALL_HEIGHTS.map(heightCard(false))}</CatalogSection>
+        )}
+        {showPartialWalls && (
+          <CatalogSection title="부분 벽">
+            {PARTIAL_WALL_HEIGHTS.map(heightCard(true))}
+          </CatalogSection>
+        )}
+
+        {visibleRailings.length > 0 && (
+          <CatalogSection title="난간">
+            {visibleRailings.map((preset) => (
+              <CatalogCard
+                active={
+                  mode === 'build' &&
+                  activeTool === 'fence' &&
+                  (fencePresetId ?? 'fence-basic') === preset.id
+                }
+                hover={{
+                  description: preset.description,
+                  meta: `높이 ${Math.round(preset.height * 1000)} mm`,
+                }}
+                key={preset.id}
+                label={preset.label}
+                meta={`${preset.height.toFixed(1)}m`}
+                onClick={() =>
+                  activateBuildTool('fence', { ...preset.defaults, presetId: preset.id })
+                }
+                thumb={
+                  <RailingThumb color={preset.color} height={preset.height} style={preset.style} />
+                }
+              />
+            ))}
+          </CatalogSection>
+        )}
+
+        <RoomPresetSection needle={needle} />
+
+        {visibleSections.map((section) => (
+          <CatalogSection key={section.id} title={section.title}>
+            {section.items.map((type) => (
+              <BuildCard
+                active={isTypeActive(type)}
+                item={type}
+                key={type.id}
+                onClick={() => handleTypeClick(type)}
+              />
+            ))}
+          </CatalogSection>
+        ))}
+
+        {visibleImports.length > 0 && (
+          <CatalogSection title="도면 가져오기">
+            {visibleImports.map((item) => (
+              <BuildCard disabled item={item} key={item.id} />
+            ))}
+          </CatalogSection>
+        )}
+
+        {mode === 'build' &&
+        (activeTool === 'roof' || isRoofFeatureActive) &&
+        roofFeatures.length > 0 ? (
+          <CatalogSection title="지붕 요소">
+            {roofFeatures.map((feature) => (
+              <BuildCard
+                active={mode === 'build' && activeTool === feature.kind}
+                item={feature}
+                key={feature.kind}
+                onClick={() => activateRoofFeatureTool(feature.kind)}
+              />
+            ))}
+          </CatalogSection>
+        ) : null}
+
+        {isMepActive ? (
+          <>
+            <CatalogSection title="설비 (MEP)">
+              {MEP_ITEMS.map((item) => (
+                <BuildCard
+                  active={isMepItemActive(item)}
+                  item={item}
+                  key={item.id}
+                  onClick={() => activateBuildTool(item.kind)}
+                />
+              ))}
+            </CatalogSection>
+
+            {ductContext ? (
+              <div className="mt-2 grid grid-cols-2 gap-[5px] px-2.5">
+                <ActionButton
+                  active={activeTool === 'duct-fitting'}
+                  iconSrc="/icons/duct-fitting.webp"
+                  label="피팅 추가"
+                  onClick={() =>
+                    activateBuildTool(
+                      activeTool === 'duct-fitting' ? 'duct-segment' : 'duct-fitting',
                     )
-                  })}
-                </div>
-                {!needle && (
-                  <div className="mt-3">
-                    <NewWallConstruction />
-                    <LevelWallTakeoff />
-                  </div>
-                )}
-              </Section>
-            ) : (
-              <Section key={section.id} title={section.title}>
-                <div className={CARD_GRID}>
-                  {section.items.map((type) => (
-                    <BuildTile
-                      active={isTypeActive(type)}
-                      item={type}
-                      key={type.id}
-                      onClick={() => {
-                        triggerSFX('sfx:menu-click')
-                        handleTypeClick(type)
-                      }}
-                    />
-                  ))}
-                </div>
-              </Section>
-            ),
-          )}
-
-          {visibleImports.length > 0 && (
-            <Section title="도면 가져오기">
-              <div className={CARD_GRID}>
-                {visibleImports.map((item) => (
-                  <BuildTile disabled item={item} key={item.id} />
-                ))}
+                  }
+                />
               </div>
-            </Section>
-          )}
+            ) : null}
 
-          {mode === 'build' &&
-          (activeTool === 'roof' || isRoofFeatureActive) &&
-          roofFeatures.length > 0 ? (
-            <Section title="지붕 요소">
-              <div className={CARD_GRID}>
-                {roofFeatures.map((feature) => (
-                  <BuildTile
-                    active={mode === 'build' && activeTool === feature.kind}
-                    item={feature}
-                    key={feature.kind}
-                    onClick={() => {
-                      triggerSFX('sfx:menu-click')
-                      activateRoofFeatureTool(feature.kind)
-                    }}
-                  />
-                ))}
+            {pipeContext ? (
+              <div className="mt-2 grid grid-cols-2 gap-[5px] px-2.5">
+                <ActionButton
+                  active={activeTool === 'pipe-fitting'}
+                  iconSrc="/icons/duct-fitting.webp"
+                  label="피팅 추가"
+                  onClick={() =>
+                    activateBuildTool(
+                      activeTool === 'pipe-fitting' ? 'pipe-segment' : 'pipe-fitting',
+                    )
+                  }
+                />
+                <ActionButton
+                  active={activeTool === 'pipe-trap'}
+                  iconSrc="/icons/dwv-pipes.webp"
+                  label="트랩 추가"
+                  onClick={() =>
+                    activateBuildTool(activeTool === 'pipe-trap' ? 'pipe-segment' : 'pipe-trap')
+                  }
+                />
               </div>
-            </Section>
-          ) : null}
+            ) : null}
 
-          {isMepActive ? (
-            <Section title="설비 (MEP)">
-              <div className={CARD_GRID}>
-                {MEP_ITEMS.map((item) => (
-                  <BuildTile
-                    active={isMepItemActive(item)}
-                    item={item}
-                    key={item.id}
-                    onClick={() => {
-                      triggerSFX('sfx:menu-click')
-                      activateBuildTool(item.kind)
-                    }}
-                  />
-                ))}
+            {liquidLineContext ? (
+              <div className="mt-2 px-2.5">
+                <button
+                  className={cn(
+                    'flex w-full items-center justify-between rounded-[10px] px-3 py-2 text-left text-xs transition-colors',
+                    follow
+                      ? 'bg-[#8ec3f2] text-white'
+                      : 'bg-[var(--panel-card)] text-[var(--panel-card-fg)]',
+                  )}
+                  onClick={() => {
+                    triggerSFX('sfx:menu-click')
+                    toggleFollow()
+                  }}
+                  type="button"
+                >
+                  <span>냉매 배관 따라가기</span>
+                  <span className="text-xs opacity-80">{follow ? '켜짐' : '꺼짐'}</span>
+                </button>
               </div>
-
-              {ductContext ? (
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <ActionButton
-                    active={activeTool === 'duct-fitting'}
-                    iconSrc="/icons/duct-fitting.webp"
-                    label="피팅 추가"
-                    onClick={() =>
-                      activateBuildTool(
-                        activeTool === 'duct-fitting' ? 'duct-segment' : 'duct-fitting',
-                      )
-                    }
-                  />
-                </div>
-              ) : null}
-
-              {pipeContext ? (
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <ActionButton
-                    active={activeTool === 'pipe-fitting'}
-                    iconSrc="/icons/duct-fitting.webp"
-                    label="피팅 추가"
-                    onClick={() =>
-                      activateBuildTool(
-                        activeTool === 'pipe-fitting' ? 'pipe-segment' : 'pipe-fitting',
-                      )
-                    }
-                  />
-                  <ActionButton
-                    active={activeTool === 'pipe-trap'}
-                    iconSrc="/icons/dwv-pipes.webp"
-                    label="트랩 추가"
-                    onClick={() =>
-                      activateBuildTool(activeTool === 'pipe-trap' ? 'pipe-segment' : 'pipe-trap')
-                    }
-                  />
-                </div>
-              ) : null}
-
-              {liquidLineContext ? (
-                <div className="mt-4">
-                  <button
-                    className={cn(
-                      'flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-left text-xs transition-colors',
-                      follow ? 'bg-[#eceeff] text-[#3c3fc4]' : 'bg-card text-muted-foreground',
-                    )}
-                    onClick={() => {
-                      triggerSFX('sfx:menu-click')
-                      toggleFollow()
-                    }}
-                    type="button"
-                  >
-                    <span>냉매 배관 따라가기</span>
-                    <span className="text-muted-foreground text-xs">
-                      {follow ? '켜짐' : '꺼짐'}
-                    </span>
-                  </button>
-                </div>
-              ) : null}
-            </Section>
-          ) : null}
-        </TooltipProvider>
+            ) : null}
+          </>
+        ) : null}
       </div>
     </div>
   )
@@ -888,9 +984,12 @@ function ActionButton({
 }) {
   return (
     <button
+      aria-pressed={active}
       className={cn(
-        'flex items-center gap-2 rounded-md border border-border px-2.5 py-2 text-left text-xs transition-colors',
-        active ? 'bg-[#eceeff] text-[#3c3fc4]' : 'bg-card text-muted-foreground hover:bg-card',
+        'flex items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-xs transition-colors',
+        active
+          ? 'bg-[#8ec3f2] font-semibold text-white'
+          : 'bg-[var(--panel-card)] text-[var(--panel-card-fg)] hover:bg-[var(--panel-card-hover)]',
       )}
       onClick={() => {
         triggerSFX('sfx:menu-click')

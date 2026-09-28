@@ -7,6 +7,7 @@ import { memo, useCallback, useState } from 'react'
 import { resolveNodeSnapTarget, SnapTargetIcon } from '../../../snap-target-badge'
 import useEditor from './../../../../../store/use-editor'
 import { InlineRenameInput } from './inline-rename-input'
+import { useSiblingNumber } from './sibling-number'
 import { focusTreeNode, handleTreeSelection, TreeNodeWrapper } from './tree-node'
 import { TreeNodeActions } from './tree-node-actions'
 
@@ -22,6 +23,7 @@ export const WindowTreeNode = memo(function WindowTreeNode({
   isLast,
 }: WindowTreeNodeProps) {
   const [isEditing, setIsEditing] = useState(false)
+  const number = useSiblingNumber(nodeId as AnyNodeId)
   const isVisible = useScene((s) => s.nodes[nodeId as AnyNodeId]?.visible !== false)
   const node = useScene((s) => s.nodes[nodeId] as WindowNode | undefined)
   const isSelected = useViewer((state) => state.selection.selectedIds.includes(nodeId))
@@ -66,7 +68,7 @@ export const WindowTreeNode = memo(function WindowTreeNode({
       isVisible={isVisible}
       label={
         <InlineRenameInput
-          defaultName="Window"
+          defaultName={`창문 ${number}`}
           isEditing={isEditing}
           nodeId={nodeId as AnyNodeId}
           onStartEditing={handleStartEditing}

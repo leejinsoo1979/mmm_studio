@@ -31,7 +31,12 @@ import { SceneRenderer } from '../renderers/scene-renderer'
 import FrameLimiter from './frame-limiter'
 import { Lights } from './lights'
 import { PerfMonitor } from './perf-monitor'
-import PostProcessing, { DEFAULT_HOVER_STYLES, type HoverStyles } from './post-processing'
+import PostProcessing, {
+  DEFAULT_HOVER_STYLES,
+  DEFAULT_SELECTION_STYLE,
+  type HoverStyles,
+  type SelectionOutlineStyle,
+} from './post-processing'
 import { RegisteredSystems } from './registered-systems'
 import { SceneBvh } from './scene-bvh'
 import { SelectionManager } from './selection-manager'
@@ -319,6 +324,10 @@ function SceneReadyTracker({
 interface ViewerProps {
   children?: React.ReactNode
   hoverStyles?: HoverStyles
+  /** Outline drawn around the selected objects (colour, width, blend). */
+  selectionStyle?: SelectionOutlineStyle
+  /** Tint selected walls (default). Off when the host draws its own wall selection. */
+  wallSelectionTint?: boolean
   selectionManager?: 'default' | 'custom'
   perf?: boolean
   useBvh?: boolean
@@ -371,6 +380,8 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   {
     children,
     hoverStyles = DEFAULT_HOVER_STYLES,
+    selectionStyle = DEFAULT_SELECTION_STYLE,
+    wallSelectionTint = true,
     selectionManager = 'default',
     perf = false,
     useBvh = true,
@@ -419,6 +430,11 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   const isDark = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
   const shading = useViewer((state) => state.shading)
   const transparentBackground = useViewer((state) => state.transparentBackground)
+  useLayoutEffect(() => {
+    useViewer.getState().setWallSelectionTint(wallSelectionTint)
+    return () => useViewer.getState().setWallSelectionTint(true)
+  }, [wallSelectionTint])
+
   useLayoutEffect(() => {
     if (transparent === undefined) return
 
@@ -570,7 +586,11 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
             kind's `def.system` is loaded via lazy() and rendered here,
             ordered by `system.priority`. */}
         <RegisteredSystems />
-        <PostProcessing disablePostFx={disablePostFx} hoverStyles={hoverStyles} />
+        <PostProcessing
+          disablePostFx={disablePostFx}
+          hoverStyles={hoverStyles}
+          selectionStyle={selectionStyle}
+        />
         {selectionManager === 'default' && <SelectionManager />}
         {(perf || PERF_OVERLAY_ENABLED) && <PerfMonitor />}
         {children}

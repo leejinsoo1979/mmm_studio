@@ -36,7 +36,7 @@ export const ZoneTreeNode = memo(function ZoneTreeNode({
   const handleStartEditing = useCallback(() => setIsEditing(true), [])
   const handleStopEditing = useCallback(() => setIsEditing(false), [])
 
-  const defaultName = `Zone (${formatAreaLabel(calculatePolygonArea(polygon), unit)})`
+  const defaultName = `방 (${formatAreaLabel(calculatePolygonArea(polygon), unit)})`
 
   return (
     <TreeNodeWrapper

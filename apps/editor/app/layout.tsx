@@ -4,6 +4,14 @@ import localFont from 'next/font/local'
 import { ClientBootstrap } from './client-bootstrap'
 import './globals.css'
 
+// Pretendard (SIL OFL 1.1, see fonts/Pretendard-LICENSE.txt): one geometric
+// sans for Hangul and Latin, like inZOI's UI.
+const pretendard = localFont({
+  src: './fonts/PretendardVariable.woff2',
+  variable: '--font-pretendard',
+  weight: '45 920',
+  display: 'swap',
+})
 const geistSans = localFont({
   src: './fonts/GeistVF.woff',
   variable: '--font-geist-sans',
@@ -29,7 +37,10 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html className={`${geistSans.variable} ${geistMono.variable} ${barlow.variable}`} lang="en">
+    <html
+      className={`${pretendard.variable} ${geistSans.variable} ${geistMono.variable} ${barlow.variable}`}
+      lang="ko"
+    >
       <head />
       <body className="font-sans">
         <ClientBootstrap>{children}</ClientBootstrap>

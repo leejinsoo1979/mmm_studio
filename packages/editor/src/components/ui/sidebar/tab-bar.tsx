@@ -1,5 +1,6 @@
 'use client'
 
+import { Root as TooltipRoot } from '@radix-ui/react-tooltip'
 import type { ReactNode } from 'react'
 import { triggerSFX } from './../../../lib/sfx-bus'
 import { cn } from './../../../lib/utils'
@@ -103,22 +104,27 @@ export function IconRail({ tabs, activeTab, collapsed, onIconClick }: IconRailPr
 
 /**
  * inZOI-style tab row across the top of the floating build panel: the same
- * tabs as `IconRail`, laid out horizontally. Clicking the open tab collapses
- * the panel to just this row.
+ * tabs as `IconRail`, laid out horizontally. The open tab sits in a sky-blue
+ * disc; hovering another blooms a soft glow and grows its glyph. Clicking the
+ * open tab collapses the panel to just this row.
  */
 export function IconTabRow({ tabs, activeTab, collapsed, onIconClick }: IconRailProps) {
   return (
-    <TooltipProvider delayDuration={0} disableHoverableContent>
-      <div className="flex h-12 shrink-0 items-center border-black/5 border-b px-1 dark:border-white/10">
+    <TooltipProvider delayDuration={400} disableHoverableContent>
+      <div className="flex h-[50px] shrink-0 items-center bg-[var(--panel-tabs,#f8f8f8)] px-1.5">
         {tabs.map((tab) => {
           const showActive = activeTab === tab.id && !collapsed
           return (
-            <Tooltip key={tab.id}>
+            <TooltipRoot key={tab.id}>
               <TooltipTrigger asChild>
                 <button
                   aria-label={tab.label}
                   aria-pressed={showActive}
-                  className="group flex min-w-0 flex-1 items-center justify-center"
+                  className={cn(
+                    'group relative flex h-full min-w-0 flex-1 items-center justify-center',
+                    !showActive &&
+                      'before:pointer-events-none before:absolute before:inset-0 before:bg-[radial-gradient(closest-side,rgba(191,221,245,0.65),transparent)] before:opacity-0 before:transition-opacity before:duration-150 hover:before:opacity-100',
+                  )}
                   onClick={() => {
                     triggerSFX('sfx:menu-click')
                     onIconClick(tab.id)
@@ -128,10 +134,10 @@ export function IconTabRow({ tabs, activeTab, collapsed, onIconClick }: IconRail
                 >
                   <span
                     className={cn(
-                      'flex size-8 items-center justify-center rounded-full transition-colors [&_img]:h-[18px] [&_img]:w-[18px] [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.9]',
+                      'relative flex size-11 items-center justify-center rounded-full transition-[background-color,color,transform] duration-150 ease-out [&_img]:size-6 [&_svg]:size-6 [&_svg]:stroke-[1.5]',
                       showActive
-                        ? 'bg-sky-300/80 text-sky-800 dark:bg-sky-400/40 dark:text-sky-100'
-                        : 'text-muted-foreground group-hover:bg-foreground/8 group-hover:text-foreground [&_img]:opacity-55 [&_img]:grayscale group-hover:[&_img]:opacity-100 group-hover:[&_img]:grayscale-0',
+                        ? 'bg-[#a1d3f8] text-white dark:bg-sky-400/60'
+                        : 'text-[#555] group-hover:scale-[1.3] group-hover:text-[#6a7a8a] dark:text-neutral-300 dark:group-hover:text-sky-200 [&_img]:opacity-55 [&_img]:grayscale group-hover:[&_img]:opacity-100 group-hover:[&_img]:grayscale-0',
                     )}
                   >
                     {tab.icon ?? tab.label.charAt(0)}
@@ -139,7 +145,7 @@ export function IconTabRow({ tabs, activeTab, collapsed, onIconClick }: IconRail
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom">{tab.label}</TooltipContent>
-            </Tooltip>
+            </TooltipRoot>
           )
         })}
       </div>

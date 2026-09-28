@@ -2,12 +2,12 @@
 
 import type { AssetInput } from '@pascal-app/core'
 import { resolveCdnUrl, useViewer } from '@pascal-app/viewer'
-import { useEffect } from 'react'
-import { triggerSFX } from './../../../lib/sfx-bus'
-import { cn } from './../../../lib/utils'
 import useEditor, { type CatalogCategory } from './../../../store/use-editor'
 import { resolveAssetSnapTarget, SnapTargetBadge } from '../snap-target-badge'
+import { CatalogCard } from './catalog-card'
+import { formatCatalogSize, formatCatalogSizeFull } from './catalog-format'
 import { CATALOG_ITEMS } from './catalog-items'
+import { CATALOG_GRID } from './catalog-section'
 
 export function ItemCatalog({
   category,
@@ -32,6 +32,8 @@ export function ItemCatalog({
   emptyState?: React.ReactNode
 }) {
   const selectedItem = useEditor((state) => state.selectedItem)
+  const mode = useEditor((state) => state.mode)
+  const tool = useEditor((state) => state.tool)
   const setSelectedItem = useEditor((state) => state.setSelectedItem)
   const setMode = useEditor((state) => state.setMode)
   const setTool = useEditor((state) => state.setTool)
@@ -57,24 +59,24 @@ export function ItemCatalog({
     return <>{emptyState}</>
   }
 
+  const placing = mode === 'build' && tool === 'item'
+
   return (
-    <div
-      className="grid gap-2"
-      style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))' }}
-    >
+    <div className={CATALOG_GRID}>
       {leadingTile}
       {filteredItems.map((item, index) => {
-        const isSelected = selectedItem?.src === item?.src
         const snapTarget = resolveAssetSnapTarget(item?.attachTo)
+        const image = resolveCdnUrl(item.thumbnail)
         return (
-          <button
-            className={cn(
-              'group relative flex flex-col gap-1.5 rounded-xl p-1.5 transition-colors hover:cursor-pointer hover:bg-sidebar-accent',
-              isSelected && 'bg-sidebar-accent ring-2 ring-primary-foreground',
-            )}
-            key={index}
+          <CatalogCard
+            active={placing && selectedItem?.src === item.src}
+            badge={snapTarget ? <SnapTargetBadge size="tree" target={snapTarget} /> : undefined}
+            hover={{ meta: formatCatalogSizeFull(item.dimensions) }}
+            image={image}
+            key={`${item.id}-${index}`}
+            label={item.name}
+            meta={formatCatalogSize(item.dimensions)}
             onClick={() => {
-              triggerSFX('sfx:menu-click')
               // Drop the current selection before arming placement — keeping
               // it would route shortcuts (rotate & co) to both the ghost and
               // the selected node.
@@ -83,30 +85,7 @@ export function ItemCatalog({
               setTool('item')
               setMode('build')
             }}
-            onMouseEnter={() => triggerSFX('sfx:menu-hover')}
-            type="button"
-          >
-            <div className="relative aspect-square w-full overflow-hidden rounded-lg">
-              <img
-                alt={item.name}
-                className="h-full w-full object-cover"
-                loading="eager"
-                src={resolveCdnUrl(item.thumbnail) || ''}
-              />
-              {snapTarget && (
-                <SnapTargetBadge className="absolute right-1 bottom-1" target={snapTarget} />
-              )}
-            </div>
-            <span className="truncate px-0.5 text-left font-medium text-[11px] text-muted-foreground group-hover:text-foreground">
-              {item.name}
-            </span>
-            {item.dimensions && (
-              // inZOI's line under the name (its price) — here the size, W×H×D mm.
-              <span className="-mt-1 truncate px-0.5 text-left text-[10px] text-muted-foreground/70 tabular-nums">
-                {item.dimensions.map((m) => Math.round(m * 1000)).join('×')}
-              </span>
-            )}
-          </button>
+          />
         )
       })}
     </div>

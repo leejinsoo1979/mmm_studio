@@ -1,14 +1,12 @@
-import type { SnapContext } from '../../../lib/snapping-mode'
-import { ContextualHelperPanel } from './contextual-helper-panel'
+import { ToolCursorHints } from './tool-cursor-hints'
 
-export function RoofHelper({ snapContext }: { snapContext?: SnapContext | null }) {
+export function RoofHelper() {
   return (
-    <ContextualHelperPanel
+    <ToolCursorHints
       hints={[
-        { keys: ['Left click'], label: 'Set corner' },
-        { keys: ['Esc'], label: 'Cancel' },
+        { keys: ['Left click'], label: '모서리 지정' },
+        { keys: ['Esc'], label: '취소' },
       ]}
-      snapContext={snapContext}
     />
   )
 }

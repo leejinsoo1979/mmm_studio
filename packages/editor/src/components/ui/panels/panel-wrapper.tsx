@@ -1,11 +1,14 @@
 'use client'
 
-import { ChevronDown, ChevronLeft, GripHorizontal, RotateCcw, X } from 'lucide-react'
+import { type AnyNodeId, useScene } from '@pascal-app/core'
+import { useViewer } from '@pascal-app/viewer'
+import { ChevronDown, ChevronLeft, RotateCcw, X } from 'lucide-react'
 import Image from 'next/image'
 import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -13,6 +16,8 @@ import {
 import { useIsMobile } from '../../../hooks/use-mobile'
 import { cn } from '../../../lib/utils'
 import { useInspectorCollapsed } from '../../../store/use-inspector-collapsed'
+import { useUiHidden } from '../../../store/use-ui-hidden'
+import { hasFloatingActionMenu } from '../../editor/floating-action-menu'
 
 const DRAG_MARGIN = 8
 // Pointer travel (px) below which a header press is treated as a click
@@ -68,6 +73,20 @@ interface PanelWrapperProps {
   width?: number | string
 }
 
+const HEADER_BUTTON_CLASS =
+  'flex size-7 items-center justify-center rounded-full bg-[#efefef] text-neutral-500 transition-colors hover:bg-[#e4e4e4] hover:text-neutral-800 dark:bg-white/10 dark:text-neutral-300 dark:hover:bg-white/15 dark:hover:text-white'
+
+/** True when the selection is one object whose floating action menu has 속성. */
+function useOpensFromActionMenu(): boolean {
+  const selectedId = useViewer((s) =>
+    s.selection.selectedIds.length === 1 ? s.selection.selectedIds[0] : null,
+  )
+  return useScene((s) => {
+    const node = selectedId ? s.nodes[selectedId as AnyNodeId] : null
+    return !!node && hasFloatingActionMenu(node.type)
+  })
+}
+
 export function PanelWrapper({
   title,
   icon,
@@ -91,6 +110,25 @@ export function PanelWrapper({
   // related panels preserves whether the user left the inspector open.
   const collapsed = useInspectorCollapsed((s) => s.collapsed)
   const setCollapsed = useInspectorCollapsed((s) => s.setCollapsed)
+  // A single object with a floating action menu opens its inspector from the
+  // menu's 속성 (or the paint card's 외형), so its folded card is not drawn at
+  // all — inZOI shows only the menu over the object. Other selections (zones,
+  // several objects, references) keep the folded header as their way in.
+  const opensFromMenu = useOpensFromActionMenu()
+  const customizing = useUiHidden((s) => s.customizing)
+  const hiddenWhileCollapsed = !isMobile && collapsed && (opensFromMenu || customizing)
+
+  // Esc folds an open card away before it reaches the selection.
+  useEffect(() => {
+    if (isMobile || collapsed || !opensFromMenu) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.stopImmediatePropagation()
+      setCollapsed(true)
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [collapsed, isMobile, opensFromMenu, setCollapsed])
 
   // Drag-to-reposition from the header. `offset` is a translation applied on
   // top of the default `top-20 right-4` anchor; null until first dragged.
@@ -156,15 +194,20 @@ export function PanelWrapper({
     setOffset({ x: drag.baseX + (left - drag.rectLeft), y: drag.baseY + (top - drag.rectTop) })
   }, [])
 
-  const handleHeaderPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current
-    if (!drag) return
-    dragRef.current = null
-    setIsDragging(false)
-    e.currentTarget.releasePointerCapture(e.pointerId)
-    // A press that never turned into a drag is a click → toggle collapse.
-    if (!drag.moved) setCollapsed((c) => !c)
-  }, [])
+  const handleHeaderPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current
+      if (!drag) return
+      dragRef.current = null
+      setIsDragging(false)
+      e.currentTarget.releasePointerCapture(e.pointerId)
+      // A press that never turned into a drag is a click → toggle collapse.
+      // A card opened from the action menu has no folded state to show, so
+      // a click on its title must not make it vanish; its X closes it.
+      if (!(drag.moved || opensFromMenu)) setCollapsed((c) => !c)
+    },
+    [opensFromMenu, setCollapsed],
+  )
 
   // Expanding can grow the panel past an edge if it was dragged there while
   // collapsed — nudge it back inside the viewer bounds.
@@ -183,19 +226,19 @@ export function PanelWrapper({
     }
   }, [collapsed, isMobile])
 
+  if (hiddenWhileCollapsed) return null
+
+  const closeCard = opensFromMenu ? () => setCollapsed(true) : onClose
+
   return (
     <div
       className={cn(
         isMobile
           ? 'flex h-full w-full flex-col overflow-hidden bg-transparent dark:text-foreground'
-          // Cap height at `100dvh - 154px` so a tall panel's bottom edge
-          // aligns flush with the top of the floating bottom action bar.
-          // Combined with `top-20` (80px), the panel's bottom sits at
-          // `100dvh - 74px` — just clearing the bar without leaving a
-          // visible gap. The inner `flex-1 overflow-y-auto` content area
-          // (below) handles vertical scrolling when content exceeds the
-          // cap.
-          : 'pointer-events-auto fixed top-20 right-4 z-50 flex max-h-[calc(100dvh-154px)] flex-col overflow-hidden rounded-xl border border-border/50 bg-sidebar/95 shadow-2xl backdrop-blur-xl dark:text-foreground',
+          // inZOI card: light surface, no border, soft shadow, under the
+          // top-right cluster. The height cap keeps its bottom clear of the
+          // bottom bar; the body below scrolls past it.
+          : 'pointer-events-auto fixed top-[72px] right-4 z-50 flex max-h-[calc(100dvh-160px)] flex-col overflow-hidden rounded-[14px] bg-[#f9f9f9]/95 shadow-[0_6px_20px_rgba(0,0,0,0.12)] backdrop-blur-xl dark:bg-neutral-900/95 dark:text-foreground',
         className,
       )}
       ref={panelRef}
@@ -213,8 +256,8 @@ export function PanelWrapper({
       {!isMobile && (
         <div
           className={cn(
-            'relative flex select-none items-center justify-between px-3 py-3',
-            !collapsed && 'border-border/50 border-b',
+            'relative flex h-11 shrink-0 select-none items-center justify-between pr-2 pl-4',
+            !collapsed && 'border-black/5 border-b dark:border-white/10',
             isDragging ? 'cursor-grabbing' : 'cursor-grab',
           )}
           onPointerDown={handleHeaderPointerDown}
@@ -243,39 +286,40 @@ export function PanelWrapper({
               ) : (
                 <span className="flex shrink-0 items-center justify-center">{icon}</span>
               ))}
-            <h2 className="truncate font-semibold text-foreground text-sm tracking-tight">
+            <h2 className="truncate font-semibold text-[#222] text-[15px] tracking-tight dark:text-foreground">
               {title}
             </h2>
           </div>
 
-          {/* Centered grip — purely a visual drag affordance. */}
-          <GripHorizontal className="-translate-x-1/2 pointer-events-none absolute left-1/2 h-4 w-4 text-muted-foreground/40" />
-
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             {onReset && (
               <button
-                className="flex h-7 w-7 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                aria-label="초기화"
+                className={HEADER_BUTTON_CLASS}
                 onClick={onReset}
                 type="button"
               >
-                <RotateCcw className="h-4 w-4" />
+                <RotateCcw className="h-3.5 w-3.5" />
               </button>
             )}
-            <button
-              aria-expanded={!collapsed}
-              aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
-              className="flex h-7 w-7 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              onClick={() => setCollapsed((c) => !c)}
-              type="button"
-            >
-              <ChevronDown
-                className={cn('h-4 w-4 transition-transform', collapsed ? '' : 'rotate-180')}
-              />
-            </button>
-            {onClose && (
+            {!opensFromMenu && (
               <button
-                className="flex h-7 w-7 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                onClick={onClose}
+                aria-expanded={!collapsed}
+                aria-label={collapsed ? '펼치기' : '접기'}
+                className={HEADER_BUTTON_CLASS}
+                onClick={() => setCollapsed((c) => !c)}
+                type="button"
+              >
+                <ChevronDown
+                  className={cn('h-4 w-4 transition-transform', collapsed ? '' : 'rotate-180')}
+                />
+              </button>
+            )}
+            {closeCard && (
+              <button
+                aria-label="닫기"
+                className={HEADER_BUTTON_CLASS}
+                onClick={closeCard}
                 type="button"
               >
                 <X className="h-4 w-4" />
@@ -291,7 +335,9 @@ export function PanelWrapper({
       )}
 
       {resolvedFooter && !(collapsed && !isMobile) && (
-        <div className="shrink-0 border-border/50 border-t p-3">{resolvedFooter}</div>
+        <div className="shrink-0 border-black/5 border-t p-3 dark:border-white/10">
+          {resolvedFooter}
+        </div>
       )}
     </div>
   )

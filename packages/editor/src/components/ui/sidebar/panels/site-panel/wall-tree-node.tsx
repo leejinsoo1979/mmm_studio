@@ -5,6 +5,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import useEditor from './../../../../../store/use-editor'
 import { InlineRenameInput } from './inline-rename-input'
+import { useSiblingNumber } from './sibling-number'
 import { focusTreeNode, handleTreeSelection, TreeNode, TreeNodeWrapper } from './tree-node'
 import { TreeNodeActions } from './tree-node-actions'
 
@@ -21,6 +22,11 @@ export const WallTreeNode = memo(function WallTreeNode({
 }: WallTreeNodeProps) {
   const [expanded, setExpanded] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
+  const number = useSiblingNumber(nodeId)
+  const length = useScene((s) => {
+    const wall = s.nodes[nodeId as AnyNodeId] as WallNode | undefined
+    return wall ? Math.hypot(wall.end[0] - wall.start[0], wall.end[1] - wall.start[1]) : 0
+  })
   const isVisible = useScene((s) => s.nodes[nodeId as AnyNodeId]?.visible !== false)
   const children = useScene(
     useShallow((s) => (s.nodes[nodeId as AnyNodeId] as WallNode | undefined)?.children ?? []),
@@ -87,7 +93,7 @@ export const WallTreeNode = memo(function WallTreeNode({
       isVisible={isVisible}
       label={
         <InlineRenameInput
-          defaultName="Wall"
+          defaultName={`벽 ${number} · ${length.toFixed(2)} m`}
           isEditing={isEditing}
           nodeId={nodeId as AnyNodeId}
           onStartEditing={handleStartEditing}

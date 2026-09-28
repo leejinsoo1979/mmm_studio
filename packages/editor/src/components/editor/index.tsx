@@ -2,6 +2,7 @@
 
 import { Icon } from '@iconify/react'
 import {
+  emitter,
   getCatalogMaterialById,
   getLibraryMaterialIdFromRef,
   getSceneMaterialIdFromRef,
@@ -10,18 +11,14 @@ import {
   spatialGridManager,
   useScene,
 } from '@pascal-app/core'
-import {
-  type HoverStyles,
-  InteractiveSystem,
-  SceneEnvironment,
-  useViewer,
-  Viewer,
-} from '@pascal-app/viewer'
-import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { InteractiveSystem, SceneEnvironment, useViewer, Viewer } from '@pascal-app/viewer'
+import { Move, Video } from 'lucide-react'
+import { Fragment, memo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { ViewerOverlay } from '../../components/viewer-overlay'
 import { ViewerZoneSystem } from '../../components/viewer-zone-system'
 import { type SaveStatus, useAutoSave } from '../../hooks/use-auto-save'
 import { useKeyboard } from '../../hooks/use-keyboard'
+import { HUD_KEYCAP, HUD_TEXT } from '../../lib/hud'
 import { type ActivePaintMaterial, hasActivePaintMaterial } from '../../lib/material-paint'
 import {
   applySceneGraphToEditor,
@@ -29,7 +26,9 @@ import {
   type SceneGraph,
   writePersistedSelection,
 } from '../../lib/scene'
+import { computeSceneBoundsXZ } from '../../lib/scene-bounds'
 import { initSFXBus } from '../../lib/sfx-bus'
+import { cn } from '../../lib/utils'
 import useEditor from '../../store/use-editor'
 import { useUiHidden } from '../../store/use-ui-hidden'
 import { useUiTheme } from '../../store/use-ui-theme'
@@ -45,10 +44,11 @@ import { ToolManager } from '../tools/tool-manager'
 import { ActionMenu } from '../ui/action-menu'
 import { CommandPalette, type CommandPaletteEmptyAction } from '../ui/command-palette'
 import { EditorCommands } from '../ui/command-palette/editor-commands'
-import { FloatingLevelSelector } from '../ui/floating-level-selector'
 import { HelperManager } from '../ui/helpers/helper-manager'
+import { HintLine } from '../ui/helpers/hint-line'
 import { PanelManager } from '../ui/panels/panel-manager'
 import { ErrorBoundary } from '../ui/primitives/error-boundary'
+import { type MouseButton, MouseGlyph } from '../ui/primitives/mouse-glyph'
 import { useSidebarStore } from '../ui/primitives/sidebar'
 import { SceneLoader } from '../ui/scene-loader'
 import { AppSidebar } from '../ui/sidebar/app-sidebar'
@@ -72,7 +72,9 @@ import { GroupRotateHandle } from './group-rotate-handle'
 import { NodeArrowHandles } from './node-arrow-handles'
 import { RiserDiagramPanel } from './riser-diagram-panel'
 import { RuntimePresenceAvatars } from './runtime-presence-avatars'
+import { SelectedWallGlass } from './selected-wall-glass'
 import { SelectionManager } from './selection-manager'
+import { EDITOR_HOVER_STYLES, EDITOR_SELECTION_STYLE } from './selection-styles'
 import { SiteEdgeLabels } from './site-edge-labels'
 import { SlabHoleHighlights } from './slab-hole-highlights'
 import { SnapshotCaptureOverlay } from './snapshot-capture-overlay'
@@ -91,17 +93,6 @@ const PAINT_CURSOR_BADGE_OFFSET_X = 14
 const PAINT_CURSOR_BADGE_OFFSET_Y = 14
 const SCENE_READY_FALLBACK_MS = 8000
 type PaintCursorBadgeState = 'empty' | 'ready' | 'blocked'
-const EDITOR_HOVER_STYLES: HoverStyles = {
-  default: { visibleColor: 0x00_aa_ff, hiddenColor: 0xf3_ff_47, strength: 5, pulse: true },
-  delete: { visibleColor: 0xef_44_44, hiddenColor: 0x99_1b_1b, strength: 6, pulse: false },
-  'paint-ready': { visibleColor: 0xf5_9e_0b, hiddenColor: 0xfd_e0_68, strength: 5, pulse: true },
-  'paint-disabled': {
-    visibleColor: 0x94_a3_b8,
-    hiddenColor: 0x47_55_69,
-    strength: 4,
-    pulse: false,
-  },
-}
 const EDITOR_DEFAULT_RENDER = { shading: 'solid' } as const
 
 /**
@@ -158,6 +149,8 @@ export interface EditorProps {
   // Persistence — defaults to localStorage when omitted
   onLoad?: () => Promise<SceneGraph | null>
   onSave?: (scene: SceneGraph, options?: { keepalive?: boolean }) => Promise<void>
+  /** localStorage key for a client-side copy of every save (see `useAutoSave`). */
+  saveBackupKey?: string
   onDirty?: () => void
   onSaveStatusChange?: (status: SaveStatus) => void
 
@@ -348,25 +341,29 @@ function SelectionPersistenceManager({ enabled }: { enabled: boolean }) {
   return null
 }
 
-type MouseButton = 'left' | 'right' | 'wheel'
-
 type CameraControlHint =
-  | { button: MouseButton; gesture: string; action: string }
-  | { keys: string[]; action: string }
+  | { button: MouseButton; drag?: boolean; action: string; title?: string }
+  | { keys: string[]; together?: boolean; action: string }
 
+// inZOI's order: UI toggle first, then the mouse, then the wall / floor keys.
 const EDITOR_CAMERA_CONTROL_HINTS: CameraControlHint[] = [
-  { button: 'right', gesture: '드래그', action: '카메라 회전' },
-  { button: 'wheel', gesture: '드래그', action: '화면 이동 (Space + 좌클릭, W A S D)' },
-  { button: 'wheel', gesture: '스크롤', action: '확대 · 축소' },
+  { keys: ['Ctrl', 'Shift', 'U'], together: true, action: 'UI 숨기기' },
+  { button: 'right', drag: true, action: '카메라 회전' },
+  {
+    button: 'wheel',
+    drag: true,
+    action: '화면 이동',
+    title: '가운데 버튼 드래그 · Space + 좌클릭 · W A S D',
+  },
+  { button: 'wheel', action: '확대 · 축소' },
   { keys: ['Home', 'End'], action: '벽 보기 변경' },
   { keys: ['PgUp', 'PgDn'], action: '층 위 / 층 아래' },
-  { keys: ['Ctrl', 'Shift', 'U'], action: 'UI 숨기기' },
 ]
 
 const PREVIEW_CAMERA_CONTROL_HINTS: CameraControlHint[] = [
-  { button: 'left', gesture: '드래그', action: '화면 이동' },
-  { button: 'right', gesture: '드래그', action: '카메라 회전' },
-  { button: 'wheel', gesture: '스크롤', action: '확대 · 축소' },
+  { button: 'left', drag: true, action: '화면 이동' },
+  { button: 'right', drag: true, action: '카메라 회전' },
+  { button: 'wheel', action: '확대 · 축소' },
 ]
 
 function readCameraControlsHintDismissed(): boolean {
@@ -396,30 +393,7 @@ function writeCameraControlsHintDismissed(dismissed: boolean) {
   } catch {}
 }
 
-/** A mouse outline with the button in use filled in. */
-function MouseIcon({ button }: { button: MouseButton }) {
-  const fill = 'currentColor'
-  return (
-    <svg aria-hidden="true" className="h-[22px] w-4 shrink-0" fill="none" viewBox="0 0 16 22">
-      <rect height="20" rx="7" stroke="currentColor" strokeWidth="1.5" width="14" x="1" y="1" />
-      <path d="M8 1v8M1.5 9h13" stroke="currentColor" strokeWidth="1.2" />
-      {button === 'left' ? <path d="M8 1.75H7A5.25 5.25 0 0 0 1.75 7v2H8z" fill={fill} /> : null}
-      {button === 'right' ? <path d="M8 1.75h1A5.25 5.25 0 0 1 14.25 7v2H8z" fill={fill} /> : null}
-      <rect
-        fill={button === 'wheel' ? fill : 'none'}
-        height="4.5"
-        rx="1.25"
-        stroke="currentColor"
-        strokeWidth="1"
-        width="2.5"
-        x="6.75"
-        y="3.5"
-      />
-    </svg>
-  )
-}
-
-/** inZOI-style camera legend in the top-right corner of the canvas. */
+/** inZOI-style camera legend at the top right, under the 기본 카메라 row. */
 function ViewerCanvasControlsHint({
   isPreviewMode,
   onDismiss,
@@ -431,37 +405,48 @@ function ViewerCanvasControlsHint({
   const hasSelection = useViewer((s) => s.selection.selectedIds.length > 0)
   if (hasSelection) return null
 
+  // z-20 keeps the scene HUD under the overlay layer (z-30), so cards opened
+  // over the scene (the inspector, the Archiple stage) cover it.
   return (
-    <div className="pointer-events-none absolute top-16 right-4 z-40">
+    <div className="pointer-events-none absolute top-[112px] right-4 z-20">
       <section
         aria-label="카메라 조작 안내"
-        className="group pointer-events-auto relative flex flex-col items-end gap-1.5 text-neutral-700 [text-shadow:0_0_4px_rgba(255,255,255,0.95)]"
+        className={cn(
+          'group pointer-events-auto relative flex flex-col items-end gap-2.5',
+          HUD_TEXT,
+        )}
+        data-hud-avoid
       >
         {hints.map((hint) => (
-          <div className="flex items-center gap-2" key={hint.action}>
+          <div
+            className="flex items-center gap-1.5"
+            key={hint.action}
+            title={'title' in hint ? hint.title : undefined}
+          >
             {'button' in hint ? (
               <>
-                <MouseIcon button={hint.button} />
-                <span className="rounded bg-neutral-200 dark:bg-neutral-700 px-1.5 py-px font-semibold text-[10px] text-neutral-700 dark:text-neutral-200">
-                  {hint.gesture}
-                </span>
+                <MouseGlyph button={hint.button} className="h-[20px] w-[15px] shrink-0" />
+                {hint.drag && (
+                  <>
+                    <span className="text-[10px]">+</span>
+                    <Move className="size-4" strokeWidth={1.75} />
+                  </>
+                )}
               </>
             ) : (
-              hint.keys.map((key) => (
-                <span
-                  className="rounded border border-neutral-300 bg-white dark:bg-neutral-900 px-1 py-px font-semibold text-[10px] text-neutral-700 dark:text-neutral-200"
-                  key={key}
-                >
-                  {key}
-                </span>
+              hint.keys.map((key, index) => (
+                <Fragment key={key}>
+                  {hint.together && index > 0 && <span className="text-[10px]">+</span>}
+                  <span className={HUD_KEYCAP}>{key}</span>
+                </Fragment>
               ))
             )}
-            <span className="whitespace-nowrap font-medium text-xs">{hint.action}</span>
+            <span className="ml-1 whitespace-nowrap font-medium text-[12px]">{hint.action}</span>
           </div>
         ))}
         <button
           aria-label="카메라 조작 안내 닫기"
-          className="-left-2 -top-2 absolute flex size-5 items-center justify-center rounded-full bg-neutral-700 text-white opacity-0 shadow transition-opacity hover:bg-neutral-900 group-hover:opacity-100"
+          className="-left-2 -top-2 absolute flex size-5 items-center justify-center rounded-full bg-neutral-700 text-white opacity-0 shadow transition-opacity [text-shadow:none] hover:bg-neutral-900 group-hover:opacity-100"
           onClick={onDismiss}
           title="닫기"
           type="button"
@@ -469,6 +454,30 @@ function ViewerCanvasControlsHint({
           <Icon aria-hidden="true" color="currentColor" height={12} icon="lucide:x" width={12} />
         </button>
       </section>
+    </div>
+  )
+}
+
+/** inZOI's 'Default Camera' row under the top-right cluster: fits the scene. */
+function DefaultCameraButton() {
+  const hasSelection = useViewer((s) => s.selection.selectedIds.length > 0)
+  if (hasSelection) return null
+  return (
+    <div className="pointer-events-none absolute top-16 right-3 z-20 flex items-center gap-2">
+      <span className={cn('font-medium text-[15px]', HUD_TEXT)}>기본 카메라</span>
+      <button
+        aria-label="기본 카메라"
+        className="pointer-events-auto flex size-10 items-center justify-center rounded-full bg-[#f8f8f8] text-[#555968] shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition-colors hover:bg-white"
+        data-hud-avoid
+        onClick={() => {
+          const bounds = computeSceneBoundsXZ(useScene.getState().nodes)
+          emitter.emit('camera-controls:fit-scene', bounds ? { bounds } : {})
+        }}
+        title="기본 카메라"
+        type="button"
+      >
+        <Video className="size-5" strokeWidth={1.5} />
+      </button>
     </div>
   )
 }
@@ -686,6 +695,7 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
       {!noEditing && <GroupMoveHandle />}
       {!noEditing && <WallOpeningHighlights />}
       {!noEditing && <SlabHoleHighlights />}
+      {!noEditing && <SelectedWallGlass />}
       {!noEditing && <WallMoveSideHandles />}
       {!noEditing && <FenceTangentLines3D />}
       {!noEditing && <FloatingActionMenu />}
@@ -1023,6 +1033,9 @@ const ViewerCanvas = memo(function ViewerCanvas({
             containerRef={viewer3dRef}
             isVersionPreviewMode={isVersionPreviewMode}
           />
+          {!showLoader && !isFirstPersonMode && !uiHidden && !isPreviewMode && viewMode !== '2d' ? (
+            <DefaultCameraButton />
+          ) : null}
           {!showLoader && isCameraControlsHintVisible && !isFirstPersonMode && !uiHidden ? (
             <ViewerCanvasControlsHint
               isPreviewMode={isPreviewMode}
@@ -1037,6 +1050,10 @@ const ViewerCanvas = memo(function ViewerCanvas({
             renderContext="editor"
             sceneReadyKey={sceneReadyKey}
             selectionManager={isFirstPersonMode ? 'default' : 'custom'}
+            selectionStyle={EDITOR_SELECTION_STYLE}
+            // SelectedWallGlass marks selected walls while editing; the modes
+            // that don't mount it keep the viewer's tint.
+            wallSelectionTint={isFirstPersonMode || isVersionPreviewMode}
           >
             <ViewerSceneContent
               isFirstPersonMode={isFirstPersonMode}
@@ -1066,6 +1083,7 @@ export default function Editor({
   projectId,
   onLoad,
   onSave,
+  saveBackupKey,
   onDirty,
   onSaveStatusChange,
   previewScene,
@@ -1090,6 +1108,7 @@ export default function Editor({
     onDirty,
     onSaveStatusChange,
     isVersionPreviewMode,
+    backupKey: saveBackupKey,
   })
 
   const [isSceneLoading, setIsSceneLoading] = useState(false)
@@ -1254,6 +1273,7 @@ export default function Editor({
       hoverStyles={EDITOR_HOVER_STYLES}
       renderContext="editor"
       selectionManager="default"
+      selectionStyle={EDITOR_SELECTION_STYLE}
     >
       <ExportManager />
       <ViewerZoneSystem />
@@ -1354,7 +1374,6 @@ export default function Editor({
               navbarSlot={navbarSlot}
               overlays={
                 <>
-                  {!(isCaptureMode || stageOverlay) && <FloatingLevelSelector />}
                   {!(isVersionPreviewMode || isCaptureMode || isStudioMode) && (
                     <div className="pointer-events-auto">
                       <ActionMenu />
@@ -1370,6 +1389,7 @@ export default function Editor({
                       <HelperManager />
                     </div>
                   )}
+                  {!(isCaptureMode || isVersionPreviewMode || isStudioMode) && <HintLine />}
                   {isFirstPersonMode && (
                     <FirstPersonOverlay
                       onExit={() => useEditor.getState().setFirstPersonMode(false)}

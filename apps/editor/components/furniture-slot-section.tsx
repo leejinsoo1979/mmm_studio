@@ -32,12 +32,12 @@ export function FurnitureSlotSection({ selectedWall }: { selectedWall: WallNode 
   const limits = columnCountLimits(internal)
 
   return (
-    <section className="mt-2 rounded-xl border border-border bg-card p-3">
+    <section className="rounded-[10px] bg-[var(--panel-card,#f3f3f3)] p-3 text-[var(--panel-card-fg,#333)]">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-sm">슬롯 가이드</h3>
         <button
           className={`h-7 rounded-lg px-3 font-medium text-xs ${
-            slot.enabled ? 'bg-[#7564ed] text-white' : 'border border-border bg-muted'
+            slot.enabled ? 'bg-[#8ec3f2] text-white' : 'bg-white/80 dark:bg-white/10'
           }`}
           onClick={() => {
             setMessage(null)
@@ -56,14 +56,14 @@ export function FurnitureSlotSection({ selectedWall }: { selectedWall: WallNode 
         <p className="mt-1 text-muted-foreground text-xs">벽을 클릭해 기준 벽을 정하세요.</p>
       ) : (
         <div className="mt-2 flex flex-col gap-2 text-xs">
-          <p className="text-[#d7d7ff]">
+          <p className="font-semibold text-[#3d8fd6] dark:text-sky-300">
             기준 벽 {guide.wallNumber}
             {guide.segments.length > 1 ? `-${guide.segment + 1}` : ''} · 내경 {fmt(guide.lengthMm)}{' '}
             mm
           </p>
           {guide.segments.length > 1 && (
             <select
-              className="h-8 rounded-lg border border-border bg-muted px-2"
+              className="h-8 rounded-lg bg-white/80 px-2 dark:bg-white/10"
               onChange={(e) => slot.setSegment(Number(e.target.value))}
               value={guide.segment}
             >
@@ -99,7 +99,9 @@ export function FurnitureSlotSection({ selectedWall }: { selectedWall: WallNode 
             {(['surround', 'no-surround'] as const).map((mode) => (
               <button
                 className={`h-7 flex-1 rounded-lg border ${
-                  slot.frameMode === mode ? 'border-[#7564ed] bg-muted' : 'border-border bg-muted'
+                  slot.frameMode === mode
+                    ? 'border-[#8ec3f2] bg-[#e3f1fc] text-[#3d8fd6] dark:bg-sky-400/20 dark:text-sky-200'
+                    : 'border-transparent bg-white/80 dark:bg-white/10'
                 }`}
                 key={mode}
                 onClick={() => slot.setFrameMode(mode)}
@@ -116,7 +118,7 @@ export function FurnitureSlotSection({ selectedWall }: { selectedWall: WallNode 
           </p>
         </div>
       )}
-      {message && <p className="mt-2 text-[#b7b9ff] text-xs">{message}</p>}
+      {message && <p className="mt-2 text-[#3d8fd6] text-xs dark:text-sky-300">{message}</p>}
     </section>
   )
 }

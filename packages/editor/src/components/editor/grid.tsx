@@ -31,6 +31,7 @@ const FLOOR_DRAFT_TOOLS = new Set<string>([
   'wall',
   'wall-arc',
   'rectangle-room',
+  'room-preset',
   'slab',
   'ceiling',
   'fence',

@@ -2,6 +2,7 @@
 
 import { useViewer } from '@pascal-app/viewer'
 import { motion } from 'motion/react'
+import { type CSSProperties, useEffect, useRef, useState } from 'react'
 import { TooltipProvider } from './../../../components/ui/primitives/tooltip'
 import { useIsMobile } from './../../../hooks/use-mobile'
 import { useReducedMotion } from './../../../hooks/use-reduced-motion'
@@ -16,12 +17,10 @@ import { SecondaryToggles } from './view-toggles'
 // just above that strip instead of inside it.
 const MOBILE_BOTTOM_OFFSET = 24
 
-// Centre of the free strip between the floating build panel and the view
-// controls at the top right, so the bar never runs under either.
-const TOP_RIGHT_RESERVE = '360px'
-// On narrow screens the bar stops short of the floor pill beside the panel
-// (~96px) — 380px is that pill plus half the bar's width.
-const DESKTOP_CENTER = `max(calc(var(--viewer-left-inset, 0px) + 380px), calc(var(--viewer-left-inset, 0px) + (100% - var(--viewer-left-inset, 0px) - ${TOP_RIGHT_RESERVE}) / 2))`
+// inZOI centres the bar on the screen; on narrow screens it slides right just
+// far enough to clear the floating build panel.
+const DESKTOP_CENTER =
+  'max(50%, calc(var(--viewer-left-inset, 0px) + 16px + var(--action-menu-half, 400px)))'
 
 export function ActionMenu({ className }: { className?: string }) {
   const isMobile = useIsMobile()
@@ -32,6 +31,18 @@ export function ActionMenu({ className }: { className?: string }) {
     (s) => isMobile && CONTEXTUAL_TABS.has(s.activeSidebarPanel),
   )
   const reducedMotion = useReducedMotion()
+  const barRef = useRef<HTMLDivElement>(null)
+  const [barWidth, setBarWidth] = useState<number | null>(null)
+
+  useEffect(() => {
+    const el = barRef.current
+    if (!el) return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setBarWidth(entry.contentRect.width)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   // On mobile, defer the bottom rail to the selection bar when something
   // is selected — the contextual actions take priority over mode controls.
@@ -55,8 +66,17 @@ export function ActionMenu({ className }: { className?: string }) {
           'transition-colors duration-200 ease-out',
           className,
         )}
+        data-hud-avoid
         layout
-        style={isMobile ? { bottom: MOBILE_BOTTOM_OFFSET } : { left: DESKTOP_CENTER }}
+        ref={barRef}
+        style={
+          isMobile
+            ? { bottom: MOBILE_BOTTOM_OFFSET }
+            : ({
+                left: DESKTOP_CENTER,
+                ...(barWidth ? { '--action-menu-half': `${barWidth / 2}px` } : {}),
+              } as CSSProperties)
+        }
         transition={transition}
       >
         {isMobile ? (

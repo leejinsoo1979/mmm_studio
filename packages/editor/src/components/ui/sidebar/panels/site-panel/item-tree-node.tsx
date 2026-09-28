@@ -90,7 +90,7 @@ export const ItemTreeNode = memo(function ItemTreeNode({
 
   const iconSrc = CATEGORY_ICONS[asset?.category ?? ''] || '/icons/couch.webp'
   const snapTarget = resolveNodeSnapTarget(node)
-  const defaultName = asset?.name || 'Item'
+  const defaultName = asset?.name || '사물'
   const hasChildren = children.length > 0
 
   return (

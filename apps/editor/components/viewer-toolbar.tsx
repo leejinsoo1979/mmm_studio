@@ -1,5 +1,6 @@
 'use client'
 
+import { useScene } from '@pascal-app/core'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,7 +12,7 @@ import {
   DropdownMenuTrigger,
   Slider,
   useEditor,
-  type ViewMode,
+  useUiTheme,
 } from '@pascal-app/editor'
 import {
   CLAY_PALETTE,
@@ -22,8 +23,8 @@ import {
 } from '@pascal-app/viewer'
 import {
   Box,
+  Camera,
   Check,
-  Columns2,
   Contrast,
   Diamond,
   Eye,
@@ -35,6 +36,7 @@ import {
   Layers,
   Layers3,
   Magnet,
+  Map as MapIcon,
   Moon,
   Palette,
   PenLine,
@@ -42,20 +44,19 @@ import {
   SlidersHorizontal,
   Sparkles,
   Square,
+  Sun,
   SunMedium,
   SwatchBook,
 } from 'lucide-react'
-import Image from 'next/image'
-import { type ReactNode, useCallback } from 'react'
+import type { ReactNode } from 'react'
 import { flushSync } from 'react-dom'
-import { cn } from '@/lib/utils'
+import { useArchipleBridge } from './archiple-floorplan-bridge'
+import { ExportCenter } from './export-center'
 import { Tooltip, TooltipContent, TooltipTrigger } from './toolbar-tooltip'
 
-const TOOLBAR_CONTAINER =
-  'inline-flex h-11 items-center gap-0.5 overflow-hidden rounded-full border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 px-1.5 text-neutral-700 dark:text-neutral-200 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md'
-
-const TOOLBAR_BTN =
-  'flex size-9 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-foreground/8 hover:text-foreground dark:text-neutral-300'
+// inZOI's round avatar-slot buttons at the top right.
+const ROUND_BTN =
+  'flex size-[38px] shrink-0 items-center justify-center rounded-full bg-[#f5f5f5]/95 text-[#6b6b6b] shadow-[0_2px_8px_rgba(0,0,0,0.15)] backdrop-blur-md transition-colors hover:bg-white hover:text-[#333] dark:bg-neutral-900/90 dark:text-neutral-300 dark:hover:bg-neutral-800'
 
 function requestWalkthroughPointerLock() {
   const canvas = document.querySelector<HTMLCanvasElement>('[data-pascal-viewer-3d] canvas')
@@ -84,56 +85,6 @@ function ToolbarTooltip({ children, label }: { children: ReactNode; label: strin
   )
 }
 
-const VIEW_MODES: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
-  {
-    id: '3d',
-    label: '3D',
-    icon: (
-      <Image
-        alt=""
-        className="h-3.5 w-3.5 object-contain"
-        height={14}
-        src="/icons/building.webp"
-        width={14}
-      />
-    ),
-  },
-  {
-    id: '2d',
-    label: '2D',
-    icon: (
-      <Image
-        alt=""
-        className="h-3.5 w-3.5 object-contain"
-        height={14}
-        src="/icons/blueprint.webp"
-        width={14}
-      />
-    ),
-  },
-  {
-    id: 'split',
-    label: '분할',
-    icon: <Columns2 className="h-3 w-3" />,
-  },
-]
-
-const levelModeOrder = ['stacked', 'exploded', 'solo'] as const
-const levelModeLabels: Record<string, string> = {
-  manual: '층 쌓기',
-  stacked: '층 쌓기',
-  exploded: '층 펼치기',
-  solo: '한 층만',
-}
-
-const wallModeOrder = ['cutaway', 'up', 'down', 'translucent'] as const
-const wallModeConfig: Record<string, { icon: string; label: string }> = {
-  up: { icon: '/icons/room.webp', label: '벽 올리기' },
-  cutaway: { icon: '/icons/wallcut.webp', label: '벽 자르기' },
-  down: { icon: '/icons/walllow.webp', label: '벽 내리기' },
-  translucent: { icon: '/icons/wall.webp', label: '반투명 벽' },
-}
-
 const SHADING_OPTIONS = [
   {
     id: 'performance',
@@ -157,99 +108,46 @@ const TEXTURE_OPTIONS = [
   { id: 'monochrome', name: '단색', detail: '용도별 클레이 표면', icon: Square },
 ] as const
 
-function ViewModeControl() {
-  const viewMode = useEditor((state) => state.viewMode)
-  const setViewMode = useEditor((state) => state.setViewMode)
+const LEVEL_MODES = [
+  { id: 'stacked', label: '층 쌓기', icon: Layers },
+  { id: 'exploded', label: '층 펼치기', icon: Layers3 },
+  { id: 'solo', label: '한 층만', icon: Diamond },
+] as const
 
-  return (
-    <div className={TOOLBAR_CONTAINER}>
-      {VIEW_MODES.map((mode) => {
-        const isActive = viewMode === mode.id
-        return (
-          <ToolbarTooltip key={mode.id} label={mode.label}>
-            <button
-              aria-label={mode.label}
-              aria-pressed={isActive}
-              className={cn(
-                'flex h-9 items-center justify-center gap-1.5 rounded-full px-3 font-medium text-xs transition-colors',
-                isActive
-                  ? 'bg-sky-300/80 text-sky-800 dark:bg-sky-400/40 dark:text-sky-100'
-                  : 'text-neutral-600 hover:bg-foreground/8 hover:text-foreground dark:text-neutral-300',
-              )}
-              onClick={() => setViewMode(mode.id)}
-              type="button"
-            >
-              {mode.icon}
-              <span>{mode.label}</span>
-            </button>
-          </ToolbarTooltip>
-        )
-      })}
-    </div>
+/** Saves the current view as a walkthrough camera in the scene's experience. */
+function saveCameraView() {
+  window.dispatchEvent(
+    new CustomEvent('mmm-camera-capture', {
+      detail: (snapshot: {
+        position: [number, number, number]
+        target: [number, number, number]
+        fov?: number
+      }) => {
+        const { experience, setExperience } = useScene.getState()
+        setExperience({
+          ...experience,
+          cameras: [
+            ...experience.cameras,
+            {
+              id: crypto.randomUUID(),
+              label: `시점 ${experience.cameras.length + 1}`,
+              ...snapshot,
+            },
+          ],
+        })
+      },
+    }),
   )
 }
 
-function LevelModeToggle() {
-  const levelMode = useViewer((state) => state.levelMode)
-  const setLevelMode = useViewer((state) => state.setLevelMode)
-  const isDefault = levelMode === 'stacked' || levelMode === 'manual'
-
-  const cycle = () => {
-    if (levelMode === 'manual') {
-      setLevelMode('stacked')
-      return
-    }
-
-    const index = levelModeOrder.indexOf(levelMode as (typeof levelModeOrder)[number])
-    const next = levelModeOrder[(index + 1) % levelModeOrder.length]
-    if (next) setLevelMode(next)
+function startWalkthrough() {
+  const { isFirstPersonMode, setFirstPersonMode } = useEditor.getState()
+  if (isFirstPersonMode) {
+    setFirstPersonMode(false)
+    return
   }
-
-  const label = `층 보기: ${levelMode === 'manual' ? '수동' : (levelModeLabels[levelMode] ?? '층 쌓기')}`
-
-  return (
-    <ToolbarTooltip label={label}>
-      <button
-        aria-label={label}
-        className={cn(TOOLBAR_BTN, !isDefault && 'bg-foreground/10 text-foreground/90')}
-        onClick={cycle}
-        type="button"
-      >
-        {levelMode === 'solo' ? (
-          <Diamond className="h-4 w-4" />
-        ) : levelMode === 'exploded' ? (
-          <Layers3 className="h-4 w-4" />
-        ) : (
-          <Layers className="h-4 w-4" />
-        )}
-      </button>
-    </ToolbarTooltip>
-  )
-}
-
-function WallModeToggle() {
-  const wallMode = useViewer((state) => state.wallMode)
-  const setWallMode = useViewer((state) => state.setWallMode)
-  const config = wallModeConfig[wallMode] ?? wallModeConfig.cutaway!
-
-  const cycle = () => {
-    const index = wallModeOrder.indexOf(wallMode as (typeof wallModeOrder)[number])
-    const next = wallModeOrder[(index + 1) % wallModeOrder.length]
-    if (next) setWallMode(next)
-  }
-
-  return (
-    <ToolbarTooltip label={`벽 보기: ${config.label}`}>
-      <button
-        aria-label={`벽 보기: ${config.label}`}
-        className={cn(TOOLBAR_BTN, wallMode !== 'cutaway' && 'bg-foreground/10')}
-        onClick={cycle}
-        type="button"
-      >
-        <Image alt="" className="h-4 w-4 object-contain" height={16} src={config.icon} width={16} />
-      </button>
-    </ToolbarTooltip>
-  )
+  flushSync(() => setFirstPersonMode(true))
+  requestWalkthroughPointerLock()
 }
 
 // One dropdown that gathers every "how the scene looks" control: grid, shadows,
@@ -331,12 +229,19 @@ function DisplayMenu() {
   const setMagneticSnap = useEditor((state) => state.setMagneticSnap)
   const showDimensions = useEditor((state) => state.showDimensions)
   const setShowDimensions = useEditor((state) => state.setShowDimensions)
+  const isFirstPersonMode = useEditor((state) => state.isFirstPersonMode)
+  const levelMode = useViewer((state) => state.levelMode)
+  const setLevelMode = useViewer((state) => state.setLevelMode)
+  const savedCameraCount = useScene((state) => state.experience.cameras.length)
+  const uiTheme = useUiTheme((state) => state.theme)
+  const toggleUiTheme = useUiTheme((state) => state.toggle)
 
   const activeShading =
     SHADING_OPTIONS.find((option) => option.id === shading) ?? SHADING_OPTIONS[0]
   const activeEdges = EDGE_OPTIONS.find((option) => option.id === edges) ?? EDGE_OPTIONS[0]
   const activeTheme = getSceneTheme(sceneTheme)
   const activeUnit = UNIT_OPTIONS.find((option) => option.id === unit) ?? UNIT_OPTIONS[0]
+  const activeLevelMode = LEVEL_MODES.find((option) => option.id === levelMode) ?? LEVEL_MODES[0]
   const nextUnit =
     UNIT_OPTIONS[(UNIT_OPTIONS.findIndex((option) => option.id === unit) + 1) % UNIT_OPTIONS.length]
       ?.id ?? 'millimeter'
@@ -351,21 +256,45 @@ function DisplayMenu() {
     <DropdownMenu>
       <ToolbarTooltip label="보기 설정">
         <DropdownMenuTrigger asChild>
-          <button
-            aria-label="보기 설정"
-            className={cn(TOOLBAR_BTN, 'text-foreground/90')}
-            type="button"
-          >
-            <SlidersHorizontal className="h-4 w-4 shrink-0" />
+          <button aria-label="보기 설정" className={ROUND_BTN} type="button">
+            <SlidersHorizontal className="size-5 shrink-0" strokeWidth={1.5} />
           </button>
         </DropdownMenuTrigger>
       </ToolbarTooltip>
       <DropdownMenuContent
         align="end"
         className="w-60 rounded-xl border-border/45 bg-popover/95 backdrop-blur-xl"
+        // Walkthrough locks the pointer to the canvas; don't pull focus back.
+        onCloseAutoFocus={(event) => event.preventDefault()}
         side="bottom"
         sideOffset={8}
       >
+        <DropdownMenuItem onSelect={startWalkthrough}>
+          <Footprints className="h-4 w-4" />
+          <span>{isFirstPersonMode ? '1인칭 투어 끝내기' : '1인칭 투어'}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => useEditor.getState().setPreviewMode(true)}>
+          <Eye className="h-4 w-4" />
+          <span>미리보기</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={saveCameraView}>
+          <Camera className="h-4 w-4" />
+          <span>현재 시점 저장</span>
+          <span className="ml-auto text-muted-foreground text-xs tabular-nums">
+            {savedCameraCount}개
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={(e) => keepOpen(e, toggleUiTheme)}>
+          {uiTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          <span>{uiTheme === 'dark' ? '밝은 화면' : '어두운 화면'}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => useArchipleBridge.getState().setOpen(true)}>
+          <MapIcon className="h-4 w-4" />
+          <span>Archiple 2D 도면 (실험)</span>
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator />
+
         <DropdownMenuItem onSelect={(e) => keepOpen(e, () => setShowGrid(!showGrid))}>
           <Grid2X2 className="h-4 w-4" />
           <span>격자</span>
@@ -420,6 +349,25 @@ function DisplayMenu() {
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
+
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <activeLevelMode.icon className="h-4 w-4" />
+            <span>층 보기</span>
+            <span className="ml-auto text-muted-foreground text-xs">{activeLevelMode.label}</span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className={SUBMENU_CONTENT_CLASS}>
+            {LEVEL_MODES.map((option) => (
+              <DropdownMenuItem key={option.id} onSelect={() => setLevelMode(option.id)}>
+                <option.icon className="h-4 w-4" />
+                <span className="text-foreground">{option.label}</span>
+                {activeLevelMode.id === option.id ? (
+                  <Check className="ml-auto h-4 w-4 text-foreground" />
+                ) : null}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
 
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
@@ -580,54 +528,6 @@ function DisplayMenu() {
   )
 }
 
-function WalkthroughButton() {
-  const isFirstPersonMode = useEditor((state) => state.isFirstPersonMode)
-  const setFirstPersonMode = useEditor((state) => state.setFirstPersonMode)
-  const handleClick = useCallback(() => {
-    if (isFirstPersonMode) {
-      setFirstPersonMode(false)
-      return
-    }
-
-    flushSync(() => setFirstPersonMode(true))
-    requestWalkthroughPointerLock()
-  }, [isFirstPersonMode, setFirstPersonMode])
-
-  return (
-    <ToolbarTooltip label="1인칭 투어">
-      <button
-        className={cn(
-          TOOLBAR_BTN,
-          isFirstPersonMode && 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/20',
-        )}
-        onClick={handleClick}
-        type="button"
-      >
-        <Footprints className="h-4 w-4" />
-      </button>
-    </ToolbarTooltip>
-  )
-}
-
-function PreviewButton() {
-  return (
-    <ToolbarTooltip label="미리보기">
-      <button
-        aria-label="미리보기"
-        className={TOOLBAR_BTN}
-        onClick={() => useEditor.getState().setPreviewMode(true)}
-        type="button"
-      >
-        <Eye className="h-4 w-4 shrink-0" />
-      </button>
-    </ToolbarTooltip>
-  )
-}
-
-export function CommunityViewerToolbarLeft() {
-  return <ViewModeControl />
-}
-
 /** Theme shown for each part of the day; daytime keeps the user's theme. */
 function themeForTime(time: number): 'night' | 'twilight' | null {
   if (time < 5.5 || time >= 19.5) return 'night'
@@ -659,37 +559,42 @@ function TimeOfDaySlider() {
   const mm = Math.round((sunTime - hh) * 60)
   return (
     <div
-      className="hidden h-11 items-center gap-1.5 px-1.5 min-[1400px]:flex"
+      className="flex h-11 items-center gap-2"
       onKeyDown={(event) => event.stopPropagation()}
       title={`시간대 ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`}
     >
-      <SunMedium className="h-4 w-4 shrink-0 text-amber-400" />
+      <SunMedium className="size-5 shrink-0 fill-[#f5b41e] text-[#f5b41e] drop-shadow-[0_0_6px_rgba(245,180,30,0.75)]" />
       <Slider
         aria-label="시간대"
-        className="w-20"
+        className="w-16 min-[1500px]:w-28 min-[1600px]:w-44 min-[1800px]:w-56 [&_[data-slot=slider-range]]:bg-transparent [&_[data-slot=slider-thumb]]:size-5 [&_[data-slot=slider-thumb]]:border-2 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-thumb]]:bg-[#ddd2a3] [&_[data-slot=slider-thumb]]:shadow-[0_1px_3px_rgba(0,0,0,0.3)] [&_[data-slot=slider-track]]:h-1.5 [&_[data-slot=slider-track]]:bg-[linear-gradient(90deg,#ebd964,#dedece_50%,#7ba6ef)]"
         max={24}
         min={0}
         onValueChange={([next]) => next !== undefined && setTime(next)}
         step={0.25}
         value={[sunTime]}
       />
-      <Moon className="h-4 w-4 shrink-0 text-indigo-300" />
+      <Moon className="size-5 shrink-0 fill-[#5f8fe0] text-[#5f8fe0] drop-shadow-[0_0_6px_rgba(95,143,224,0.75)]" />
     </div>
   )
 }
 
-export function CommunityViewerToolbarRight() {
+/**
+ * inZOI's top right: a free-floating day / night slider, then round buttons in
+ * the avatar slot (export, and the settings menu that also holds the tour,
+ * preview, saved views, UI theme and the Archiple floor plan).
+ */
+export function CommunityViewerToolbarRight({
+  sceneId,
+  sceneName,
+}: {
+  sceneId: string
+  sceneName: string
+}) {
   return (
-    <div className={TOOLBAR_CONTAINER}>
+    <div className="flex h-11 items-center gap-2 min-[1500px]:gap-3">
       <TimeOfDaySlider />
-      <div className="mx-1 hidden h-5 w-px bg-neutral-300/70 min-[1400px]:block dark:bg-white/15" />
-      <LevelModeToggle />
-      <WallModeToggle />
-      <div className="mx-1 h-5 w-px bg-neutral-300/70 dark:bg-white/15" />
+      <ExportCenter sceneId={sceneId} sceneName={sceneName} />
       <DisplayMenu />
-      <div className="mx-1 h-5 w-px bg-neutral-300/70 dark:bg-white/15" />
-      <WalkthroughButton />
-      <PreviewButton />
     </div>
   )
 }

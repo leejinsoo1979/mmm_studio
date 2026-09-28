@@ -1,5 +1,4 @@
-import type { AnyNodeId, BuildingNode, LevelNode } from '@pascal-app/core'
-import { useScene } from '@pascal-app/core'
+import { type AnyNodeId, type BuildingNode, LevelNode, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 
 function getAdjacentLevelIdForDeletion(levelId: AnyNodeId): LevelNode['id'] | null {
@@ -28,4 +27,19 @@ export function deleteLevelWithFallbackSelection(levelId: AnyNodeId) {
   if (isSelectedLevel) {
     useViewer.getState().setSelection({ levelId: nextLevelId })
   }
+}
+
+/** Adds a level on top of the building's highest one and selects it. */
+export function addLevelAbove(buildingId: BuildingNode['id']): LevelNode['id'] | null {
+  const { nodes, createNode } = useScene.getState()
+  const building = nodes[buildingId]
+  if (building?.type !== 'building') return null
+  const levels = building.children
+    .map((id) => nodes[id as AnyNodeId])
+    .filter((node): node is LevelNode => node?.type === 'level')
+  const maxLevel = levels.length > 0 ? Math.max(...levels.map((l) => l.level)) : -1
+  const newLevel = LevelNode.parse({ level: maxLevel + 1, children: [], parentId: buildingId })
+  createNode(newLevel, buildingId)
+  useViewer.getState().setSelection({ buildingId, levelId: newLevel.id })
+  return newLevel.id
 }

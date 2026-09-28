@@ -50,6 +50,7 @@ import { Html } from '@react-three/drei'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { BufferGeometry, DoubleSide, type Group, Vector3 } from 'three'
 import { DraftWallSlab } from './draft-wall-slab'
+import { RoomPresetTool } from './room-preset-tool'
 
 /**
  * Phase 5 Stage D — wall placement tool (kind-owned).
@@ -540,7 +541,8 @@ export const WallTool: React.FC = () => {
       // Switching from the straight-wall renderer to RectangleRoomTool
       // unmounts this component while `tool` itself remains `wall`. Preserve
       // the newly selected mode instead of immediately deleting it here.
-      if (useEditor.getState().toolDefaults.wall?.placementMode !== 'rectangle-room') {
+      const mode = useEditor.getState().toolDefaults.wall?.placementMode
+      if (mode !== 'rectangle-room' && mode !== 'room-preset') {
         useEditor.getState().setToolDefaults('wall', null)
       }
     },
@@ -1046,7 +1048,7 @@ const RectangleRoomTool: React.FC = () => {
   useEffect(
     () => () => {
       const { tool } = useEditor.getState()
-      if (tool !== 'rectangle-room' && tool !== 'wall') {
+      if (tool !== 'rectangle-room' && tool !== 'wall' && tool !== 'room-preset') {
         useEditor.getState().setToolDefaults('wall', null)
       }
     },
@@ -1212,6 +1214,10 @@ const RectangleRoomTool: React.FC = () => {
 
 const WallToolRouter: React.FC = () => {
   const placementMode = useEditor((state) => state.toolDefaults.wall?.placementMode)
+  const tool = useEditor((state) => state.tool)
+  // Keyed on the tool, not the seeded mode: B (`setTool('wall')`) leaves the
+  // preset's defaults behind, and must still get the plain wall tool.
+  if (tool === 'room-preset') return <RoomPresetTool />
   return placementMode === 'rectangle-room' ? <RectangleRoomTool /> : <WallTool />
 }
 

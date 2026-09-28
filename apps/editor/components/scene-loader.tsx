@@ -13,6 +13,8 @@ import {
 } from '@pascal-app/core'
 import {
   applySceneGraphToEditor,
+  CatalogCard,
+  CatalogHero,
   Editor,
   ItemsPanel,
   type SceneGraph,
@@ -24,18 +26,14 @@ import { CabinetDoorControls } from '@pascal-app/nodes'
 import TreesPanel from '@pascal-app/plugin-trees/panel'
 import {
   Archive,
-  Bot,
-  Box,
-  Brush,
-  DraftingCompass,
-  Layers,
-  Lightbulb,
+  DoorOpen,
+  Flower2,
+  LampCeiling,
+  LandPlot,
   Loader2,
-  PanelTop,
-  Sparkles,
-  SwatchBook,
+  PaintRoller,
+  Sofa,
   Upload,
-  UserRound,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -58,15 +56,18 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { getStudioAuthHeaders } from '@/lib/auth-client'
 import { CATALOG_ROOM_TREE, withMyModelTag, withRoomTags } from '@/lib/catalog-rooms'
+import { SCENE_BACKUP_PREFIX } from '@/lib/scene-backup'
 import { ArchipleFloorplanBridge } from './archiple-floorplan-bridge'
 import { BuildTab } from './build-tab'
+import { RoomHero } from './catalog/build-hero-art'
+import { useBuildPanelPrefs } from './catalog/build-panel-prefs'
 import { EditorHeader } from './editor-header'
 import { FurnitureTab } from './furniture-tab'
 import { LightingTab } from './lighting-tab'
 import { MaterialPalette } from './material-palette'
 import { MaterialSurfaceInspector } from './material-surface-inspector'
 import { MaterialTab } from './material-tab'
-import { CommunityViewerToolbarLeft, CommunityViewerToolbarRight } from './viewer-toolbar'
+import { CommunityViewerToolbarRight } from './viewer-toolbar'
 
 export interface SceneMeta {
   id: string
@@ -87,24 +88,24 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
     label: '장면',
     component: () => null,
     mobileDefaultSnap: 0.5,
-    mobileIcon: <Layers className="h-5 w-5" />,
-    icon: <Layers />,
+    mobileIcon: <LandPlot className="h-5 w-5" />,
+    icon: <LandPlot />,
   },
   {
     id: 'draw',
     label: '짓기',
     component: BuildTab,
     mobileDefaultSnap: 0.5,
-    mobileIcon: <DraftingCompass className="h-5 w-5" />,
-    icon: <DraftingCompass />,
+    mobileIcon: <DoorOpen className="h-5 w-5" />,
+    icon: <DoorOpen />,
   },
   {
     id: 'asset',
     label: '사물',
     component: AssetTab,
     mobileDefaultSnap: 0.5,
-    mobileIcon: <Box className="h-5 w-5" />,
-    icon: <Box />,
+    mobileIcon: <Sofa className="h-5 w-5" />,
+    icon: <Sofa />,
   },
   {
     id: 'furniture',
@@ -119,48 +120,16 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
     label: '재질',
     component: MaterialTab,
     mobileDefaultSnap: 0.5,
-    mobileIcon: <SwatchBook className="h-5 w-5" />,
-    icon: <SwatchBook />,
+    mobileIcon: <PaintRoller className="h-5 w-5" />,
+    icon: <PaintRoller />,
   },
   {
     id: 'lighting',
     label: '조명',
     component: LightingTab,
     mobileDefaultSnap: 0.5,
-    mobileIcon: <Lightbulb className="h-5 w-5" />,
-    icon: <Lightbulb />,
-  },
-  {
-    id: 'public',
-    label: '공용',
-    component: () => <CategoryPanel title="공용" />,
-    mobileDefaultSnap: 0.5,
-    mobileIcon: <PanelTop className="h-5 w-5" />,
-    icon: <PanelTop />,
-  },
-  {
-    id: 'advanced-tool',
-    label: '고급 도구',
-    component: () => <CategoryPanel title="고급 도구" />,
-    mobileDefaultSnap: 0.5,
-    mobileIcon: <Sparkles className="h-5 w-5" />,
-    icon: <Sparkles />,
-  },
-  {
-    id: 'ai',
-    label: 'AI',
-    component: () => <CategoryPanel title="AI" />,
-    mobileDefaultSnap: 0.5,
-    mobileIcon: <Bot className="h-5 w-5" />,
-    icon: <Bot />,
-  },
-  {
-    id: 'my-page',
-    label: '내 정보',
-    component: () => <CategoryPanel title="내 정보" />,
-    mobileDefaultSnap: 0.5,
-    mobileIcon: <UserRound className="h-5 w-5" />,
-    icon: <UserRound />,
+    mobileIcon: <LampCeiling className="h-5 w-5" />,
+    icon: <LampCeiling />,
   },
 ]
 
@@ -679,6 +648,16 @@ async function createLocalGlbItem(file: File): Promise<AssetInput> {
 
 const ROOM_TAGGED_CATALOG = withRoomTags(CATALOG_ITEMS)
 
+function AssetHero({ name }: { name: string }) {
+  const collapsed = useBuildPanelPrefs((s) => s.heroCollapsed)
+  const toggle = useBuildPanelPrefs((s) => s.toggleHero)
+  return (
+    <CatalogHero collapsed={collapsed} label={name.split(' ')[0]!} onToggle={toggle}>
+      <RoomHero />
+    </CatalogHero>
+  )
+}
+
 /** Left-rail asset catalog, browsed inZOI-style: room tabs, then kinds. */
 function AssetTab() {
   const [localItems, setLocalItems] = useState<AssetInput[]>([])
@@ -706,20 +685,20 @@ function AssetTab() {
       useEditor.getState().setTool('item')
       useEditor.getState().setMode('build')
     } catch (error) {
-      setUploadError(error instanceof Error ? error.message : 'Could not import that GLB.')
+      setUploadError(error instanceof Error ? error.message : 'GLB를 가져오지 못했습니다.')
     } finally {
       setUploading(false)
     }
   }
 
   return (
-    <div className="h-full bg-sidebar text-foreground">
+    <div className="flex h-full flex-col text-foreground">
       <ItemsPanel
         customCategories={[
           {
             id: 'nature',
             label: '자연 (나무·꽃·풀)',
-            iconSrc: '/icons/tree.webp',
+            icon: <Flower2 />,
             content: <TreesPanel />,
           },
         ]}
@@ -727,22 +706,21 @@ function AssetTab() {
         functionTree={CATALOG_ROOM_TREE}
         items={ROOM_TAGGED_CATALOG}
         leadingTile={
-          <button
-            className="group relative flex min-h-[122px] flex-col gap-1.5 rounded-xl border border-dashed border-border bg-card p-1.5 text-left transition-colors hover:border-[#7779ff] hover:bg-muted"
-            disabled={uploading}
-            onClick={() => inputRef.current?.click()}
-            type="button"
-          >
-            <div className="flex aspect-square w-full items-center justify-center rounded-lg bg-[#202035] text-[#9a9cff]">
-              {uploading ? (
-                <Loader2 className="h-7 w-7 animate-spin" />
-              ) : (
-                <Upload className="h-7 w-7" />
-              )}
-            </div>
-            <span className="truncate px-0.5 font-medium text-[11px] text-foreground">
-              {uploading ? '가져오는 중…' : 'GLB 가져오기'}
-            </span>
+          <>
+            <CatalogCard
+              disabled={uploading}
+              hover={{ description: '내 컴퓨터의 GLB 모델을 가져와 바로 배치합니다.' }}
+              label={uploading ? '가져오는 중…' : 'GLB 가져오기'}
+              meta="GLB"
+              onClick={() => inputRef.current?.click()}
+              thumb={
+                uploading ? (
+                  <Loader2 className="size-7 animate-spin text-[#555]" strokeWidth={1.5} />
+                ) : (
+                  <Upload className="size-7 text-[#555] dark:text-neutral-300" strokeWidth={1.5} />
+                )
+              }
+            />
             <input
               accept=".glb,model/gltf-binary"
               className="hidden"
@@ -750,33 +728,17 @@ function AssetTab() {
               ref={inputRef}
               type="file"
             />
-          </button>
+          </>
         }
+        renderHero={(room) => <AssetHero name={room.name} />}
         showSourceFilter={false}
         showTagFilters={false}
       />
       {uploadError && (
-        <div className="border-border border-t bg-card px-3 py-2 text-[#ff9a9a] text-xs">
+        <div className="mx-2.5 mb-2 shrink-0 rounded-lg bg-white/90 px-3 py-2 text-[#d64545] text-xs dark:bg-neutral-900/90 dark:text-[#ff9a9a]">
           {uploadError}
         </div>
       )}
-    </div>
-  )
-}
-
-function CategoryPanel({ title }: { title: string }) {
-  return (
-    <div className="flex h-full flex-col bg-sidebar text-foreground">
-      <div className="flex h-[124px] shrink-0 items-center border-border border-b px-8">
-        <h1 className="font-bold text-[32px] tracking-[-0.02em]">{title}</h1>
-      </div>
-      <div className="flex flex-1 items-center justify-center px-8 text-center">
-        <div className="max-w-[320px] rounded-[10px] border border-border bg-card px-6 py-8 text-muted-foreground">
-          <Brush className="mx-auto mb-4 h-9 w-9 text-[#7779ff]" />
-          <p className="font-semibold text-lg text-foreground">{title}</p>
-          <p className="mt-2 text-sm">준비 중인 메뉴입니다.</p>
-        </div>
-      </div>
     </div>
   )
 }
@@ -1137,11 +1099,10 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
       <LocalGlbFloorPlanSync />
       <Editor
         layoutVersion="v2"
-        navbarSlot={
-          <EditorHeader onRename={handleRename} sceneId={meta.id} sceneName={sceneName} />
-        }
+        navbarSlot={<EditorHeader onRename={handleRename} sceneName={sceneName} />}
         onLoad={handleLoad}
         onSave={handleSave}
+        saveBackupKey={`${SCENE_BACKUP_PREFIX}${meta.id}`}
         onThumbnailCapture={handleThumb}
         projectId={meta.projectId ?? 'default'}
         sidebarTabs={SIDEBAR_TABS}
@@ -1152,8 +1113,7 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
             <MaterialPalette />
           </>
         }
-        viewerToolbarLeft={<CommunityViewerToolbarLeft />}
-        viewerToolbarRight={<CommunityViewerToolbarRight />}
+        viewerToolbarRight={<CommunityViewerToolbarRight sceneId={meta.id} sceneName={sceneName} />}
       />
     </div>
   )

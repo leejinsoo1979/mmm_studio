@@ -62,14 +62,17 @@ export const WallCutout = () => {
     const previewSelectedIds = useViewer.getState().previewSelectedIds
     const hoveredId = useViewer.getState().hoveredId
     const hoverHighlightMode = useViewer.getState().hoverHighlightMode
+    const wallSelectionTint = useViewer.getState().wallSelectionTint
     const currentTime = clock.elapsedTime
     const currentCameraPosition = camera.position
     camera.getWorldDirection(tmpVec)
     tmpVec.add(currentCameraPosition)
     const highlightedWallIds = new Set(
-      [...selectedIds, ...previewSelectedIds].filter(
-        (id) => useScene.getState().nodes[id as AnyNodeId]?.type === 'wall',
-      ),
+      wallSelectionTint
+        ? [...selectedIds, ...previewSelectedIds].filter(
+            (id) => useScene.getState().nodes[id as AnyNodeId]?.type === 'wall',
+          )
+        : [],
     )
     const deleteHoveredWallId =
       hoverHighlightMode === 'delete' &&

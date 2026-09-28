@@ -6,6 +6,7 @@ import Image from 'next/image'
 import { memo, useCallback, useEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { InlineRenameInput } from './inline-rename-input'
+import { useSiblingNumber } from './sibling-number'
 import {
   focusTreeNode,
   handleTreeSelection,
@@ -34,6 +35,7 @@ export const ShelfTreeNode = memo(function ShelfTreeNode({
   isLast,
 }: ShelfTreeNodeProps) {
   const [isEditing, setIsEditing] = useState(false)
+  const number = useSiblingNumber(nodeId as AnyNodeId)
   const [expanded, setExpanded] = useState(true)
   const isVisible = useScene((s) => s.nodes[nodeId]?.visible !== false)
   const children = useScene(
@@ -104,7 +106,7 @@ export const ShelfTreeNode = memo(function ShelfTreeNode({
       isVisible={isVisible}
       label={
         <InlineRenameInput
-          defaultName="Shelf"
+          defaultName={`선반 ${number}`}
           isEditing={isEditing}
           nodeId={nodeId}
           onStartEditing={handleStartEditing}
