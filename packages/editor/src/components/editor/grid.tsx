@@ -19,7 +19,21 @@ import { getMovingNode } from '../../store/use-interaction-scope'
 const PLACEMENT_REVEAL_RADIUS = 12
 // Drawing walls / slabs / zones (a build tool armed, nothing in flight) lays the
 // grid over the whole working area, as inZOI does while building.
-const DRAFT_REVEAL_RADIUS = 40
+const DRAFT_REVEAL_RADIUS = 60
+// inZOI's building lattice: bright white lines over a darkened lot, so the grid
+// reads on a pale ground the way inZOI's reads on grass.
+const DRAFT_LINE_COLOR = '#ffffff'
+const DRAFT_LOT_COLOR = '#5d6d7e'
+const DRAFT_LOT_ALPHA = 0.85
+const FLOOR_DRAFT_TOOLS = new Set<string>([
+  'wall',
+  'wall-arc',
+  'rectangle-room',
+  'slab',
+  'ceiling',
+  'fence',
+  'zone',
+])
 
 const UP = new Vector3(0, 1, 0)
 // PlaneGeometry faces +Z; this is the orientation that lays it flat (its normal
@@ -79,6 +93,8 @@ export const Grid = ({
   // biome-ignore lint/correctness/useExhaustiveDependencies: created once on purpose; `.value` is driven each frame.
   const cellSizeUniform = useMemo(() => uniform(cellSize), [])
   const patchAlphaUniform = useMemo(() => uniform(1), [])
+  // 0 = placement patch look, 1 = inZOI drafting lattice (white on a tinted lot).
+  const draftMixUniform = useMemo(() => uniform(0), [])
 
   const material = useMemo(() => {
     // Use xy since plane geometry is in XY space (before rotation)
@@ -136,10 +152,17 @@ export const Grid = ({
     const boostedAlpha = alpha.mul(patchAlphaUniform).min(1)
     const finalAlpha = mix(boostedAlpha.mul(0.75), boostedAlpha, g2)
 
+    // Drafting: every line the same bright white over a tinted lot that fades
+    // out with the reveal, instead of grey lines on the pale ground.
+    const lineMask = getGrid(cellSizeUniform, 1.25).min(1)
+    const reveal = fade.mul(cursorFade)
+    const draftColor = mix(color(DRAFT_LOT_COLOR), color(DRAFT_LINE_COLOR), lineMask)
+    const draftAlpha = lineMask.mul(0.9).max(float(DRAFT_LOT_ALPHA)).mul(reveal)
+
     return new MeshBasicNodeMaterial({
       transparent: true,
-      colorNode: gridColor,
-      opacityNode: finalAlpha,
+      colorNode: mix(gridColor, draftColor, draftMixUniform),
+      opacityNode: mix(finalAlpha, draftAlpha, draftMixUniform),
       depthWrite: false,
       // `depthTest` is toggled per-frame in `useFrame`: ON for the floor lattice
       // (so the ground occludes a sub-floor grid) and OFF on a wall (so the
@@ -162,6 +185,7 @@ export const Grid = ({
     baseAlphaUniform,
     cellSizeUniform,
     patchAlphaUniform,
+    draftMixUniform,
   ])
 
   const gridRef = useRef<Mesh>(null!)
@@ -292,12 +316,20 @@ export const Grid = ({
     // that context resolves to grid, so it IS the gate. (Previously this also
     // required a ghost in flight, so a merely-armed draft tool showed nothing.)
     const snapPatchVisible = isGridSnapActive()
-    const drafting = !(surfacePoint || useEditor.getState().mode !== 'build')
-    revealRadiusUniform.value = drafting ? DRAFT_REVEAL_RADIUS : PLACEMENT_REVEAL_RADIUS
+    const { mode, tool } = useEditor.getState()
+    const drafting = !(surfacePoint || mode !== 'build')
+    // The white lattice stays for the whole draw (armed and mid-drag), only for
+    // tools that draw on the floor.
+    const floorDrafting = mode === 'build' && tool !== null && FLOOR_DRAFT_TOOLS.has(tool)
+    revealRadiusUniform.value =
+      drafting || floorDrafting ? DRAFT_REVEAL_RADIUS : PLACEMENT_REVEAL_RADIUS
+    draftMixUniform.value = floorDrafting && !onWall ? 1 : 0
     baseAlphaUniform.value = 0
     cellSizeUniform.value = useEditor.getState().gridSnapStep
     patchAlphaUniform.value = 1.5
-    gridRef.current.visible = snapPatchVisible
+    // inZOI keeps the building lattice up the whole time a draw tool is armed,
+    // whatever the snapping mode.
+    gridRef.current.visible = snapPatchVisible || floorDrafting
   })
 
   // Pass the geometry as a prop instead of a JSX child so the mesh

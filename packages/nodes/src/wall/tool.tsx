@@ -1004,14 +1004,14 @@ export const WallTool: React.FC = () => {
         labelColor={measurementColor}
         labelShadowColor={measurementShadowColor}
       />
-      <CursorSphere height={previewHeight} ref={cursorRef} />
+      <CursorSphere color={DRAFT_WALL_COLOR} height={previewHeight} pillar ref={cursorRef} />
       <mesh layers={EDITOR_LAYER} ref={wallPreviewRef} renderOrder={1} visible={false}>
         <shapeGeometry />
         <meshBasicMaterial
           color={DRAFT_WALL_COLOR}
           depthTest={false}
           depthWrite={false}
-          opacity={0.55}
+          opacity={DRAFT_WALL_OPACITY}
           side={DoubleSide}
           transparent
         />
@@ -1146,7 +1146,7 @@ function RectanglePreviewWall({
         color={DRAFT_WALL_COLOR}
         depthTest={false}
         depthWrite={false}
-        opacity={0.55}
+        opacity={DRAFT_WALL_OPACITY}
         transparent
       />
       <lineSegments frustumCulled={false} geometry={glow} layers={EDITOR_LAYER} renderOrder={2}>
@@ -1162,9 +1162,12 @@ function RectanglePreviewWall({
   )
 }
 
-/** inZOI draws the wall being placed as a glowing sky-blue pane. */
-const DRAFT_WALL_COLOR = '#38d6f2'
-const DRAFT_WALL_GLOW_COLOR = '#e8fdff'
+/** inZOI draws the wall being placed as a pale blue glass pane with glowing white edges. */
+const DRAFT_WALL_COLOR = '#8fdcf7'
+const DRAFT_WALL_OPACITY = 0.55
+const DRAFT_WALL_GLOW_COLOR = '#ffffff'
+/** inZOI's rectangle-room preview fills the floor it will enclose. */
+const DRAFT_FLOOR_COLOR = '#38d6f2'
 
 const RectangleRoomTool: React.FC = () => {
   const unit = useViewer((state) => state.unit)
@@ -1181,7 +1184,17 @@ const RectangleRoomTool: React.FC = () => {
   const color = isDark ? '#ffffff' : '#111111'
   const shadowColor = isDark ? '#111111' : '#ffffff'
 
-  useEffect(() => () => useEditor.getState().setToolDefaults('wall', null), [])
+  // Clear the rectangle mode only when the tool is really put away — a remount
+  // (StrictMode's double effect run) keeps the tool active and must keep it.
+  useEffect(
+    () => () => {
+      const { tool } = useEditor.getState()
+      if (tool !== 'rectangle-room' && tool !== 'wall') {
+        useEditor.getState().setToolDefaults('wall', null)
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     const snap = (event: GridEvent): WallPlanPoint => {
@@ -1247,7 +1260,25 @@ const RectangleRoomTool: React.FC = () => {
 
   return (
     <group>
-      <CursorSphere height={height} ref={cursorRef} />
+      <CursorSphere color={DRAFT_WALL_COLOR} height={height} pillar ref={cursorRef} />
+      {start && end && (
+        <mesh
+          layers={EDITOR_LAYER}
+          position={[(start[0] + end[0]) / 2, 0.02, (start[1] + end[1]) / 2]}
+          renderOrder={1}
+          rotation={[-Math.PI / 2, 0, 0]}
+        >
+          <planeGeometry args={[Math.abs(end[0] - start[0]), Math.abs(end[1] - start[1])]} />
+          <meshBasicMaterial
+            color={DRAFT_FLOOR_COLOR}
+            depthTest={false}
+            depthWrite={false}
+            opacity={0.45}
+            side={DoubleSide}
+            transparent
+          />
+        </mesh>
+      )}
       {segments.map(([segmentStart, segmentEnd], index) => (
         <RectanglePreviewWall
           end={segmentEnd}

@@ -23,7 +23,15 @@ interface CursorSphereProps extends Omit<ThreeElements['group'], 'ref'> {
   dotAtTip?: boolean
   /** Custom tooltip content — overrides the auto-detected build tool icon */
   tooltipContent?: React.ReactNode
+  /**
+   * inZOI's wall-start marker: a glowing translucent pillar of the wall's
+   * height with a bright cap, instead of the thin line and tool badge.
+   */
+  pillar?: boolean
 }
+
+const PILLAR_WIDTH = 0.14
+const PILLAR_COLOR = '#5fd4f5'
 
 export const CursorSphere = forwardRef<Group, CursorSphereProps>(function CursorSphere(
   {
@@ -33,6 +41,7 @@ export const CursorSphere = forwardRef<Group, CursorSphereProps>(function Cursor
     dotAtTip = false,
     visible = true,
     tooltipContent,
+    pillar = false,
     ...props
   },
   ref,
@@ -93,8 +102,27 @@ export const CursorSphere = forwardRef<Group, CursorSphereProps>(function Cursor
         </group>
       )}
 
+      {pillar && height > 0 && (
+        <group>
+          <mesh layers={EDITOR_LAYER} position={[0, height / 2, 0]} renderOrder={2}>
+            <boxGeometry args={[PILLAR_WIDTH, height, PILLAR_WIDTH]} />
+            <meshBasicMaterial
+              color={PILLAR_COLOR}
+              depthTest={false}
+              depthWrite={false}
+              opacity={0.75}
+              transparent
+            />
+          </mesh>
+          <mesh layers={EDITOR_LAYER} position={[0, height, 0]} renderOrder={3}>
+            <boxGeometry args={[PILLAR_WIDTH * 1.15, 0.05, PILLAR_WIDTH * 1.15]} />
+            <meshBasicMaterial color="#ffffff" depthTest={false} depthWrite={false} />
+          </mesh>
+        </group>
+      )}
+
       {/* Vertical line */}
-      {height > 0 && (
+      {height > 0 && !pillar && (
         <mesh layers={EDITOR_LAYER} position={[0, height / 2, 0]} renderOrder={2}>
           <cylinderGeometry args={[0.01, 0.01, height, 8]} />
           <meshBasicMaterial
@@ -117,7 +145,7 @@ export const CursorSphere = forwardRef<Group, CursorSphereProps>(function Cursor
       )}
 
       {/* Tool Icon Tooltip at the top of the line */}
-      {isVisible && showTooltip && (activeToolConfig || tooltipContent) && (
+      {isVisible && showTooltip && !pillar && (activeToolConfig || tooltipContent) && (
         <Html
           center
           position={[0, height > 0 ? height + 0.2 : 0.6, 0]}

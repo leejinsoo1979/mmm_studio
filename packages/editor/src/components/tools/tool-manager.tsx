@@ -37,9 +37,13 @@ import { ZoneTool } from './zone/zone-tool'
 // re-invoked across renders.
 const lazyToolCache = new WeakMap<() => Promise<unknown>, ComponentType>()
 
+// Draw modes that ride on another kind's tool: the rectangle room is the wall
+// tool in its `placementMode: 'rectangle-room'` (set with the tool defaults).
+const TOOL_KIND_ALIASES: Partial<Record<Tool, string>> = { 'rectangle-room': 'wall' }
+
 function getRegistryTool(tool: Tool | null): ComponentType | null {
   if (!tool) return null
-  const def = nodeRegistry.get(tool)
+  const def = nodeRegistry.get(TOOL_KIND_ALIASES[tool] ?? tool)
   if (!def?.tool) return null
   const cached = lazyToolCache.get(def.tool)
   if (cached) return cached
