@@ -79,10 +79,10 @@ export const ductTerminalDefinition: NodeDefinition<typeof DuctTerminalNode> = {
 
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Click', label: 'Place register' },
-    { key: 'M', label: 'Mount: floor / ceiling / wall' },
-    { key: 'R / T', label: 'Rotate ±45° (floor / ceiling)' },
-    { key: 'Esc', label: 'Exit' },
+    { key: 'Left click', label: '디퓨저 배치' },
+    { key: 'M', label: '설치 위치: 바닥 / 천장 / 벽' },
+    { key: 'R / T', label: '±45° 회전 (바닥 / 천장)' },
+    { key: 'Esc', label: '종료' },
   ],
 
   presentation: {

@@ -113,10 +113,10 @@ export const linesetDefinition: NodeDefinition<typeof LinesetNode> = {
 
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Click', label: 'Start lineset' },
-    { key: 'Click again', label: 'Place it (locked to 45°)' },
-    { key: 'Alt + drag', label: 'Go vertical ↕, click to place' },
-    { key: 'Esc', label: 'Cancel start point' },
+    { key: 'Left click', label: '냉매관 시작' },
+    { key: '다시 클릭', label: '배치 (45° 고정)' },
+    { key: 'Alt + 드래그', label: '수직 ↕ 전환, 클릭하여 배치' },
+    { key: 'Esc', label: '시작점 취소' },
   ],
 
   presentation: {

@@ -18,7 +18,7 @@ export type FlowerPresetSpec = {
 export const FLOWER_PRESETS: Record<FlowerPreset, FlowerPresetSpec> = {
   daisy: {
     id: 'daisy',
-    label: 'Daisy',
+    label: '데이지',
     petalColor: '#fcfcf2',
     centerColor: '#f4c430',
     stemColor: '#4f7942',
@@ -28,7 +28,7 @@ export const FLOWER_PRESETS: Record<FlowerPreset, FlowerPresetSpec> = {
   },
   tulip: {
     id: 'tulip',
-    label: 'Tulip',
+    label: '튤립',
     petalColor: '#e0457b',
     centerColor: '#c43160',
     stemColor: '#3f7a3a',
@@ -38,7 +38,7 @@ export const FLOWER_PRESETS: Record<FlowerPreset, FlowerPresetSpec> = {
   },
   lavender: {
     id: 'lavender',
-    label: 'Lavender',
+    label: '라벤더',
     petalColor: '#9b6fd4',
     centerColor: '#7d52b8',
     stemColor: '#5a7a4a',

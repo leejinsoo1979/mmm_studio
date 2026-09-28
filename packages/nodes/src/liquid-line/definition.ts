@@ -104,11 +104,11 @@ export const liquidLineDefinition: NodeDefinition<typeof LiquidLineNode> = {
 
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Click', label: 'Start liquid line' },
-    { key: 'Click again', label: 'Place it (locked to 45°)' },
-    { key: 'Alt + drag', label: 'Go vertical ↕, click to place' },
-    { key: 'F', label: 'Follow: trace a lineset' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '액관 시작' },
+    { key: '다시 클릭', label: '배치 (45° 고정)' },
+    { key: 'Alt + 드래그', label: '수직 ↕ 전환, 클릭하여 배치' },
+    { key: 'F', label: '냉매관 따라 그리기' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

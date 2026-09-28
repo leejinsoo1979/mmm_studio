@@ -431,9 +431,9 @@ export const stairDefinition: NodeDefinition<typeof StairNode> = {
   // snapping chip shows during placement.
   snapDraftDirectional: false,
   toolHints: [
-    { key: 'Left click', label: 'Place stairs' },
-    { key: 'R / T', label: 'Rotate' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '계단 배치' },
+    { key: 'R / T', label: '회전' },
+    { key: 'Esc', label: '취소' },
   ],
   surfaceRole: 'joinery',
 

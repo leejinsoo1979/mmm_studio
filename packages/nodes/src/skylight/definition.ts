@@ -264,8 +264,8 @@ export const skylightDefinition: NodeDefinition<typeof SkylightNode> = {
     move: () => import('./move-tool'),
   },
   toolHints: [
-    { key: 'Left click', label: 'Place skylight on roof' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '지붕에 천창 배치' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

@@ -64,8 +64,8 @@ export const grassDefinition: NodeDefinition<typeof GrassNode> = {
   preview: () => import('./grass-preview'),
   tool: () => import('./grass-tool'),
   toolHints: [
-    { key: 'Left click', label: 'Plant grass' },
-    { key: 'Esc', label: 'Stop' },
+    { key: 'Left click', label: '풀 심기' },
+    { key: 'Esc', label: '종료' },
   ],
 
   presentation: {

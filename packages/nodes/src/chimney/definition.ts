@@ -402,8 +402,8 @@ export const chimneyDefinition: NodeDefinition<typeof ChimneyNode> = {
 
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Left click', label: 'Place chimney on roof' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '지붕에 굴뚝 배치' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

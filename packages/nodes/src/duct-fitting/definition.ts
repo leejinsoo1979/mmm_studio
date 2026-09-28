@@ -117,11 +117,11 @@ export const ductFittingDefinition: NodeDefinition<typeof DuctFittingNode> = {
 
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Click', label: 'Place fitting' },
-    { key: 'Hover a duct end', label: 'Snap onto the run' },
-    { key: 'R / T', label: 'Rotate ±45°' },
-    { key: 'Alt', label: 'Switch rotation axis (Y → X → Z)' },
-    { key: 'Esc', label: 'Exit' },
+    { key: 'Left click', label: '피팅 배치' },
+    { key: '덕트 끝에 올리기', label: '배관 끝에 붙이기' },
+    { key: 'R / T', label: '±45° 회전' },
+    { key: 'Alt', label: '회전 축 전환 (Y → X → Z)' },
+    { key: 'Esc', label: '종료' },
   ],
 
   presentation: {

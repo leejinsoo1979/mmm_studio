@@ -180,13 +180,18 @@ export function FunctionTreePanel({
                     type="button"
                   >
                     {root.iconUrl ? (
-                      <NextImage
-                        alt={root.name}
-                        className="size-7 object-contain"
-                        height={28}
-                        src={root.iconUrl}
-                        width={28}
-                      />
+                      <span className="flex flex-col items-center gap-0.5">
+                        <NextImage
+                          alt={root.name}
+                          className="size-8 object-contain"
+                          height={32}
+                          src={root.iconUrl}
+                          width={32}
+                        />
+                        <span className="font-semibold text-[10px] text-foreground leading-none">
+                          {root.name}
+                        </span>
+                      </span>
                     ) : (
                       <span className="px-0.5 text-center font-semibold text-[11px] text-muted-foreground leading-tight">
                         {root.name}
@@ -250,7 +255,7 @@ export function FunctionTreePanel({
                   setSearch(e.target.value)
                   onSearchChange?.(e.target.value)
                 }}
-                placeholder="Search..."
+                placeholder="검색"
                 type="text"
                 value={search}
               />
@@ -291,7 +296,7 @@ export function FunctionTreePanel({
                   onClick={() => setActiveChildSlug(null)}
                   type="button"
                 >
-                  All
+                  전체
                 </button>
                 {activeRoot.children.map((child) => {
                   const isActive = activeChildSlug === child.slug
@@ -324,7 +329,7 @@ export function FunctionTreePanel({
             ) : isServerSearch && search && searchResults?.length === 0 ? (
               (emptyState ?? (
                 <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
-                  No results for &ldquo;{search}&rdquo;
+                  &ldquo;{search}&rdquo; 검색 결과가 없습니다
                 </div>
               ))
             ) : (

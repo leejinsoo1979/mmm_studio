@@ -17,7 +17,7 @@ export type GrassPresetSpec = {
 export const GRASS_PRESETS: Record<GrassPreset, GrassPresetSpec> = {
   meadow: {
     id: 'meadow',
-    label: 'Meadow',
+    label: '들풀',
     bladeColor: '#5a8f3c',
     blades: 10,
     defaultHeight: 0.4,
@@ -26,7 +26,7 @@ export const GRASS_PRESETS: Record<GrassPreset, GrassPresetSpec> = {
   },
   fescue: {
     id: 'fescue',
-    label: 'Fescue',
+    label: '김의털',
     bladeColor: '#7fae55',
     blades: 8,
     defaultHeight: 0.7,
@@ -35,7 +35,7 @@ export const GRASS_PRESETS: Record<GrassPreset, GrassPresetSpec> = {
   },
   reed: {
     id: 'reed',
-    label: 'Reed',
+    label: '갈대',
     bladeColor: '#4a7d63',
     blades: 6,
     defaultHeight: 1.1,

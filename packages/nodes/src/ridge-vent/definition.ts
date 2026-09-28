@@ -198,8 +198,8 @@ export const ridgeVentDefinition: NodeDefinition<typeof RidgeVentNode> = {
     move: () => import('./move-tool'),
   },
   toolHints: [
-    { key: 'Left click', label: 'Place ridge vent on roof' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '용마루 환기구 배치' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

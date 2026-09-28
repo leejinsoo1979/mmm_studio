@@ -252,10 +252,10 @@ export const doorDefinition: NodeDefinition<typeof DoorNode> = {
   },
 
   toolHints: [
-    { key: 'Left click', label: 'Place door on wall' },
-    { key: 'R', label: 'Flip side' },
-    { key: 'Alt', label: 'Force place' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '벽에 문 배치' },
+    { key: 'R', label: '방향 뒤집기' },
+    { key: 'Alt', label: '강제 배치' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

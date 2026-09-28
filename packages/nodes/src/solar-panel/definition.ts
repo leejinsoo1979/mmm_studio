@@ -265,8 +265,8 @@ export const solarPanelDefinition: NodeDefinition<typeof SolarPanelNode> = {
     move: () => import('./move-tool'),
   },
   toolHints: [
-    { key: 'Left click', label: 'Place solar panel array on roof' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '지붕에 태양광 패널 배치' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

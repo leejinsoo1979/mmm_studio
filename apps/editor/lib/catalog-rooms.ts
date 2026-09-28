@@ -1,17 +1,20 @@
 import type { AssetInput } from '@pascal-app/core'
 import type { FunctionTreeNode } from '@pascal-app/editor'
+import { CATALOG_KO_NAMES } from './catalog-ko-names'
 
 /**
  * inZOI-style catalog browse: rooms first (the top tabs), then the kind of
  * object within the room (the chip row). Items are filed by catalog id; an
  * id missing here (a new catalog item) lands in 장식·기타 › 소품.
  */
-type Room = { slug: string; name: string; kinds: [slug: string, name: string][] }
+/** `icon` is the catalog id whose thumbnail stands for the room tab. */
+type Room = { slug: string; name: string; icon: string; kinds: [slug: string, name: string][] }
 
 const ROOMS: Room[] = [
   {
     slug: 'bedroom',
     name: '침실',
+    icon: 'double-bed',
     kinds: [
       ['bed', '침대'],
       ['storage', '수납'],
@@ -21,6 +24,7 @@ const ROOMS: Room[] = [
   {
     slug: 'living',
     name: '거실',
+    icon: 'sofa',
     kinds: [
       ['sofa', '소파·의자'],
       ['table', '테이블'],
@@ -33,6 +37,7 @@ const ROOMS: Room[] = [
   {
     slug: 'kitchen',
     name: '주방',
+    icon: 'fridge',
     kinds: [
       ['table', '식탁·의자'],
       ['cabinet', '주방가구'],
@@ -43,6 +48,7 @@ const ROOMS: Room[] = [
   {
     slug: 'bathroom',
     name: '욕실',
+    icon: 'bathtub',
     kinds: [
       ['fixture', '욕실설비'],
       ['laundry', '세탁'],
@@ -52,6 +58,7 @@ const ROOMS: Room[] = [
   {
     slug: 'study',
     name: '서재',
+    icon: 'bookshelf',
     kinds: [
       ['desk', '책상·의자'],
       ['storage', '책장·수납'],
@@ -61,6 +68,7 @@ const ROOMS: Room[] = [
   {
     slug: 'hobby',
     name: '취미',
+    icon: 'piano',
     kinds: [
       ['fitness', '운동'],
       ['art', '음악·공예'],
@@ -70,6 +78,7 @@ const ROOMS: Room[] = [
   {
     slug: 'outdoor',
     name: '야외',
+    icon: 'patio-umbrella',
     kinds: [
       ['landscape', '조경'],
       ['leisure', '레저'],
@@ -80,6 +89,7 @@ const ROOMS: Room[] = [
   {
     slug: 'utility',
     name: '설비',
+    icon: 'air-conditioning',
     kinds: [
       ['climate', '냉난방'],
       ['electric', '전기'],
@@ -91,6 +101,7 @@ const ROOMS: Room[] = [
   {
     slug: 'decor',
     name: '장식·기타',
+    icon: 'indoor-plant',
     kinds: [
       ['plant', '식물'],
       ['wall', '벽장식'],
@@ -230,18 +241,23 @@ export const CATALOG_ROOM_TREE: FunctionTreeNode[] = [
   ...ROOMS.map((room) => ({
     slug: room.slug,
     name: room.name,
+    iconUrl: `/items/${room.icon}/thumbnail.webp`,
     children: room.kinds.map(([kind, name]) => ({
       slug: `${room.slug}.${kind}`,
       name,
       children: [],
     })),
   })),
-  { slug: MY_MODELS_SLUG, name: '내 모델', children: [] },
+  { slug: MY_MODELS_SLUG, name: '내 모델', iconUrl: '/icons/item.webp', children: [] },
 ]
 
 /** File catalog items under their room / kind. */
 export function withRoomTags(items: AssetInput[]): AssetInput[] {
-  return items.map((item) => ({ ...item, functionTags: [ITEM_ROOMS[item.id] ?? FALLBACK] }))
+  return items.map((item) => ({
+    ...item,
+    name: CATALOG_KO_NAMES[item.id] ?? item.name,
+    functionTags: [ITEM_ROOMS[item.id] ?? FALLBACK],
+  }))
 }
 
 /** The user's imported GLBs go under 내 모델. */

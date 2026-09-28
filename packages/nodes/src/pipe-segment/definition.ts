@@ -109,12 +109,12 @@ export const pipeSegmentDefinition: NodeDefinition<typeof PipeSegmentNode> = {
 
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Click', label: 'Start run' },
-    { key: 'Click again', label: 'Place it (waste falls ¼″/ft)' },
-    { key: 'Q', label: 'Waste / vent' },
-    { key: '[ / ]', label: 'Pipe size down / up' },
-    { key: 'Alt + drag', label: 'Vertical stack ↕, click to place' },
-    { key: 'Esc', label: 'Cancel start point' },
+    { key: 'Left click', label: '배관 시작' },
+    { key: '다시 클릭', label: '배치 (배수 구배 적용)' },
+    { key: 'Q', label: '배수 / 통기' },
+    { key: '[ / ]', label: '관경 작게 / 크게' },
+    { key: 'Alt + 드래그', label: '수직관 ↕, 클릭하여 배치' },
+    { key: 'Esc', label: '시작점 취소' },
   ],
 
   presentation: {

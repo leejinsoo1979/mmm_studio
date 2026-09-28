@@ -301,8 +301,8 @@ export const fenceDefinition: NodeDefinition<typeof FenceNode> = {
   },
 
   toolHints: [
-    { key: 'Left click', label: 'Set fence start / end' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '울타리 시작점 / 끝점' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

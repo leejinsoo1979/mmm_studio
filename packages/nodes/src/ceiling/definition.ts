@@ -155,9 +155,9 @@ export const ceilingDefinition: NodeDefinition<typeof CeilingNode> = {
   },
 
   toolHints: [
-    { key: 'Left click', label: 'Trace ceiling outline' },
-    { key: 'Enter', label: 'Finish ceiling', minDraftVertices: 3 },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '천장 외곽 그리기' },
+    { key: 'Enter', label: '천장 완성', minDraftVertices: 3 },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

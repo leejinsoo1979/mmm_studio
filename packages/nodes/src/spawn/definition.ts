@@ -100,8 +100,8 @@ export const spawnDefinition: NodeDefinition<typeof SpawnNode> = {
   },
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Left click', label: 'Place spawn point' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '시작 지점 배치' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

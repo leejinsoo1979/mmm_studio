@@ -45,17 +45,19 @@ import {
   LineBasicMaterial,
   LineSegments,
   Matrix4,
+  type Mesh,
   MeshBasicMaterial,
+  type Object3D,
   OrthographicCamera,
   Quaternion,
   Scene,
   Vector3,
   WebGLRenderer,
-  type Mesh,
-  type Object3D,
 } from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { getStudioAuthHeaders } from '@/lib/auth-client'
+import { CATALOG_ROOM_TREE, withMyModelTag, withRoomTags } from '@/lib/catalog-rooms'
 import { ArchipleFloorplanBridge } from './archiple-floorplan-bridge'
 import { BuildTab } from './build-tab'
 import { EditorHeader } from './editor-header'
@@ -65,8 +67,6 @@ import { MaterialPalette } from './material-palette'
 import { MaterialSurfaceInspector } from './material-surface-inspector'
 import { MaterialTab } from './material-tab'
 import { CommunityViewerToolbarLeft, CommunityViewerToolbarRight } from './viewer-toolbar'
-import { getStudioAuthHeaders } from '@/lib/auth-client'
-import { CATALOG_ROOM_TREE, withMyModelTag, withRoomTags } from '@/lib/catalog-rooms'
 
 export interface SceneMeta {
   id: string
@@ -84,7 +84,7 @@ export interface SceneMeta {
 const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
   {
     id: 'site',
-    label: 'Scene',
+    label: '장면',
     component: () => null,
     mobileDefaultSnap: 0.5,
     mobileIcon: <Layers className="h-5 w-5" />,
@@ -92,7 +92,7 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
   },
   {
     id: 'draw',
-    label: 'Draw',
+    label: '짓기',
     component: BuildTab,
     mobileDefaultSnap: 0.5,
     mobileIcon: <DraftingCompass className="h-5 w-5" />,
@@ -100,7 +100,7 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
   },
   {
     id: 'asset',
-    label: 'Asset',
+    label: '사물',
     component: AssetTab,
     mobileDefaultSnap: 0.5,
     mobileIcon: <Box className="h-5 w-5" />,
@@ -116,7 +116,7 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
   },
   {
     id: 'material',
-    label: 'Material',
+    label: '재질',
     component: MaterialTab,
     mobileDefaultSnap: 0.5,
     mobileIcon: <SwatchBook className="h-5 w-5" />,
@@ -124,7 +124,7 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
   },
   {
     id: 'lighting',
-    label: 'Lighting',
+    label: '조명',
     component: LightingTab,
     mobileDefaultSnap: 0.5,
     mobileIcon: <Lightbulb className="h-5 w-5" />,
@@ -132,16 +132,16 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
   },
   {
     id: 'public',
-    label: 'Public',
-    component: () => <CategoryPanel title="Public" />,
+    label: '공용',
+    component: () => <CategoryPanel title="공용" />,
     mobileDefaultSnap: 0.5,
     mobileIcon: <PanelTop className="h-5 w-5" />,
     icon: <PanelTop />,
   },
   {
     id: 'advanced-tool',
-    label: 'Advanced Tool',
-    component: () => <CategoryPanel title="Advanced Tool" />,
+    label: '고급 도구',
+    component: () => <CategoryPanel title="고급 도구" />,
     mobileDefaultSnap: 0.5,
     mobileIcon: <Sparkles className="h-5 w-5" />,
     icon: <Sparkles />,
@@ -156,8 +156,8 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
   },
   {
     id: 'my-page',
-    label: 'My Page',
-    component: () => <CategoryPanel title="My Page" />,
+    label: '내 정보',
+    component: () => <CategoryPanel title="내 정보" />,
     mobileDefaultSnap: 0.5,
     mobileIcon: <UserRound className="h-5 w-5" />,
     icon: <UserRound />,
@@ -371,9 +371,7 @@ function inspectGlbJsonBounds(buffer: ArrayBuffer): Box3 | null {
   const box = new Box3()
   let hasBounds = false
   const sceneIndex = json.scene ?? 0
-  const rootNodeIds =
-    json.scenes?.[sceneIndex]?.nodes ??
-    json.nodes.map((_node, index) => index)
+  const rootNodeIds = json.scenes?.[sceneIndex]?.nodes ?? json.nodes.map((_node, index) => index)
 
   const visitNode = (nodeIndex: number, parentMatrix: Matrix4) => {
     const node = json.nodes?.[nodeIndex]
@@ -509,7 +507,12 @@ function renderTopViewFloorPlanImage(source: Object3D): string | null {
   return dataUrl
 }
 
-function pointToSvg(point: Vector3, bounds: Box3, scale: number, padding: number): [number, number] {
+function pointToSvg(
+  point: Vector3,
+  bounds: Box3,
+  scale: number,
+  padding: number,
+): [number, number] {
   return [(point.x - bounds.min.x + padding) * scale, (point.z - bounds.min.z + padding) * scale]
 }
 
@@ -585,7 +588,9 @@ function renderTopViewFloorPlanSvg(source: Object3D): string | null {
       const [ax, ay] = pointToSvg(a, bounds, scale, padding)
       const [bx, by] = pointToSvg(b, bounds, scale, padding)
       const [cx, cy] = pointToSvg(c, bounds, scale, padding)
-      fillPaths.push(`M${ax.toFixed(2)} ${ay.toFixed(2)}L${bx.toFixed(2)} ${by.toFixed(2)}L${cx.toFixed(2)} ${cy.toFixed(2)}Z`)
+      fillPaths.push(
+        `M${ax.toFixed(2)} ${ay.toFixed(2)}L${bx.toFixed(2)} ${by.toFixed(2)}L${cx.toFixed(2)} ${cy.toFixed(2)}Z`,
+      )
       addBoundaryEdge(a, b)
       addBoundaryEdge(b, c)
       addBoundaryEdge(c, a)
@@ -736,7 +741,7 @@ function AssetTab() {
               )}
             </div>
             <span className="truncate px-0.5 font-medium text-[11px] text-foreground">
-              {uploading ? 'Importing...' : 'Import GLB'}
+              {uploading ? '가져오는 중…' : 'GLB 가져오기'}
             </span>
             <input
               accept=".glb,model/gltf-binary"
@@ -769,7 +774,7 @@ function CategoryPanel({ title }: { title: string }) {
         <div className="max-w-[320px] rounded-[10px] border border-border bg-card px-6 py-8 text-muted-foreground">
           <Brush className="mx-auto mb-4 h-9 w-9 text-[#7779ff]" />
           <p className="font-semibold text-lg text-foreground">{title}</p>
-          <p className="mt-2 text-sm">This category is ready for its tools.</p>
+          <p className="mt-2 text-sm">준비 중인 메뉴입니다.</p>
         </div>
       </div>
     </div>
@@ -827,9 +832,12 @@ function LocalGlbFloorPlanSync() {
             return
           }
 
-          useScene.getState().updateNode(node.id as AnyNodeId, {
-            asset: { ...current.asset, floorPlanUrl },
-          } as Partial<ItemNode>)
+          useScene.getState().updateNode(
+            node.id as AnyNodeId,
+            {
+              asset: { ...current.asset, floorPlanUrl },
+            } as Partial<ItemNode>,
+          )
         } finally {
           generatingRef.current.delete(node.id)
         }

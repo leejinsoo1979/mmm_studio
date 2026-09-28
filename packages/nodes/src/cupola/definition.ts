@@ -146,8 +146,8 @@ export const cupolaDefinition: NodeDefinition<typeof CupolaNode> = {
     move: () => import('./move-tool'),
   },
   toolHints: [
-    { key: 'Left click', label: 'Place cupola on roof' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '지붕에 큐폴라 배치' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

@@ -265,8 +265,8 @@ export const shelfDefinition: NodeDefinition<typeof ShelfNode> = {
   preview: () => import('./preview'),
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Left click', label: 'Place shelf' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '선반 배치' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

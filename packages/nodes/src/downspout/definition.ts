@@ -189,9 +189,9 @@ export const downspoutDefinition: NodeDefinition<typeof DownspoutNode> = {
   preview: () => import('./preview'),
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Hover gutter', label: 'Highlight outlet' },
-    { key: 'Left click', label: 'Drop downspout from outlet' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: '물받이에 올리기', label: '배수구 강조' },
+    { key: 'Left click', label: '배수구에서 선홈통 내리기' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

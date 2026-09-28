@@ -125,8 +125,8 @@ export const treeDefinition: NodeDefinition<typeof TreeNode> = {
   preview: () => import('./preview'),
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Left click', label: 'Plant tree' },
-    { key: 'Esc', label: 'Stop' },
+    { key: 'Left click', label: '나무 심기' },
+    { key: 'Esc', label: '종료' },
   ],
 
   presentation: {

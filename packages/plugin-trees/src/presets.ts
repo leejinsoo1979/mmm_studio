@@ -30,7 +30,7 @@ function ezSizes(family: string): Record<TreeSize, string> {
 export const TREE_PRESETS: Record<TreePreset, TreePresetSpec> = {
   oak: {
     id: 'oak',
-    label: 'Oak',
+    label: '참나무',
     ez: ezSizes('Oak'),
     height: { small: 5, medium: 7, large: 11 },
     sized: true,
@@ -39,7 +39,7 @@ export const TREE_PRESETS: Record<TreePreset, TreePresetSpec> = {
   },
   pine: {
     id: 'pine',
-    label: 'Pine',
+    label: '소나무',
     ez: ezSizes('Pine'),
     height: { small: 6, medium: 9, large: 14 },
     sized: true,
@@ -48,7 +48,7 @@ export const TREE_PRESETS: Record<TreePreset, TreePresetSpec> = {
   },
   aspen: {
     id: 'aspen',
-    label: 'Aspen',
+    label: '사시나무',
     ez: ezSizes('Aspen'),
     height: { small: 5, medium: 8, large: 12 },
     sized: true,
@@ -57,7 +57,7 @@ export const TREE_PRESETS: Record<TreePreset, TreePresetSpec> = {
   },
   ash: {
     id: 'ash',
-    label: 'Ash',
+    label: '물푸레나무',
     ez: ezSizes('Ash'),
     height: { small: 5, medium: 8, large: 12 },
     sized: true,
@@ -66,7 +66,7 @@ export const TREE_PRESETS: Record<TreePreset, TreePresetSpec> = {
   },
   bush: {
     id: 'bush',
-    label: 'Bush',
+    label: '관목',
     ez: { small: 'Bush 1', medium: 'Bush 2', large: 'Bush 3' },
     height: { small: 1.2, medium: 1.5, large: 1.8 },
     sized: true,
@@ -75,7 +75,7 @@ export const TREE_PRESETS: Record<TreePreset, TreePresetSpec> = {
   },
   trellis: {
     id: 'trellis',
-    label: 'Trellis',
+    label: '덩굴 격자',
     ez: { small: 'Trellis', medium: 'Trellis', large: 'Trellis' },
     height: { small: 3, medium: 3, large: 3 },
     sized: false,

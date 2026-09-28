@@ -64,8 +64,8 @@ export const flowerDefinition: NodeDefinition<typeof FlowerNode> = {
   preview: () => import('./flower-preview'),
   tool: () => import('./flower-tool'),
   toolHints: [
-    { key: 'Left click', label: 'Plant flower' },
-    { key: 'Esc', label: 'Stop' },
+    { key: 'Left click', label: '꽃 심기' },
+    { key: 'Esc', label: '종료' },
   ],
 
   presentation: {

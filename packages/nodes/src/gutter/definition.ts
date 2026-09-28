@@ -175,8 +175,8 @@ export const gutterDefinition: NodeDefinition<typeof GutterNode> = {
     move: () => import('./move-tool'),
   },
   toolHints: [
-    { key: 'Left click', label: 'Place gutter on roof eave' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '처마에 물받이 배치' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

@@ -15,7 +15,7 @@ const KIND: Record<Mode, string> = {
   flowers: 'trees:flower',
   grass: 'trees:grass',
 }
-const NOUN: Record<Mode, string> = { trees: 'tree', flowers: 'flower', grass: 'grass' }
+const NOUN: Record<Mode, string> = { trees: '나무를', flowers: '꽃을', grass: '풀을' }
 
 /**
  * The plugin's left-rail panel. A Trees / Flowers / Grass segmented control
@@ -41,24 +41,24 @@ export default function TreesPanel() {
     <div className="flex flex-col gap-4 p-4 text-sidebar-foreground">
       <header className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-base">Nature</h2>
+          <h2 className="font-semibold text-base">자연</h2>
           <span className="rounded-full bg-sidebar-accent px-2 py-0.5 text-sidebar-foreground/70 text-xs">
-            {count} planted
+            {count}개 심음
           </span>
         </div>
         <SegmentedControl
           onChange={setMode}
           options={[
-            { label: 'Trees', value: 'trees' },
-            { label: 'Flowers', value: 'flowers' },
-            { label: 'Grass', value: 'grass' },
+            { label: '나무', value: 'trees' },
+            { label: '꽃', value: 'flowers' },
+            { label: '풀', value: 'grass' },
           ]}
           value={mode}
         />
         <p className="text-sidebar-foreground/50 text-xs">
           {arming
-            ? 'Click the ground to plant. Press Esc to stop.'
-            : `Pick ${mode === 'grass' ? 'a grass' : `a ${NOUN[mode]}`}, then click the ground.`}
+            ? '땅을 클릭해 심습니다. Esc로 종료합니다.'
+            : `${NOUN[mode]} 고른 뒤 땅을 클릭하세요.`}
         </p>
       </header>
 

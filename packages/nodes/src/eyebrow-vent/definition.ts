@@ -153,8 +153,8 @@ export const eyebrowVentDefinition: NodeDefinition<typeof EyebrowVentNode> = {
     move: () => import('./move-tool'),
   },
   toolHints: [
-    { key: 'Left click', label: 'Place eyebrow vent on roof' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '지붕에 아이브로 환기구 배치' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

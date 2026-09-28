@@ -213,8 +213,8 @@ export const boxVentDefinition: NodeDefinition<typeof BoxVentNode> = {
     move: () => import('./move-tool'),
   },
   toolHints: [
-    { key: 'Left click', label: 'Place box vent on roof' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '지붕에 박스 환기구 배치' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

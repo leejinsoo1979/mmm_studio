@@ -206,9 +206,9 @@ export const slabDefinition: NodeDefinition<typeof SlabNode> = {
   },
 
   toolHints: [
-    { key: 'Left click', label: 'Trace slab outline' },
-    { key: 'Enter', label: 'Finish slab', minDraftVertices: 3 },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '바닥 외곽 그리기' },
+    { key: 'Enter', label: '바닥 완성', minDraftVertices: 3 },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

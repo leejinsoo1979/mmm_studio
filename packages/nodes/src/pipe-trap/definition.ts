@@ -51,9 +51,9 @@ export const pipeTrapDefinition: NodeDefinition<typeof PipeTrapNode> = {
 
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Click', label: 'Place trap' },
-    { key: 'R / T', label: 'Rotate ±45°' },
-    { key: 'Esc', label: 'Exit' },
+    { key: 'Left click', label: '트랩 배치' },
+    { key: 'R / T', label: '±45° 회전' },
+    { key: 'Esc', label: '종료' },
   ],
 
   presentation: {

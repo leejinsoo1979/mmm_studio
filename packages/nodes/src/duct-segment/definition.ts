@@ -175,13 +175,13 @@ export const ductSegmentDefinition: NodeDefinition<typeof DuctSegmentNode> = {
 
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Click', label: 'Start segment' },
-    { key: 'Click again', label: 'Place and continue' },
-    { key: 'Alt + drag', label: 'Go vertical ↕, click to place' },
-    { key: '[ / ]', label: 'Duct diameter down / up' },
-    { key: 'Q', label: 'Round / rect trunk' },
-    { key: 'C', label: 'Ceiling / floor height' },
-    { key: 'Esc', label: 'Cancel start point' },
+    { key: 'Left click', label: '덕트 시작' },
+    { key: '다시 클릭', label: '배치하고 이어서' },
+    { key: 'Alt + 드래그', label: '수직 ↕ 전환, 클릭하여 배치' },
+    { key: '[ / ]', label: '덕트 지름 작게 / 크게' },
+    { key: 'Q', label: '원형 / 사각 덕트' },
+    { key: 'C', label: '천장 / 바닥 높이' },
+    { key: 'Esc', label: '시작점 취소' },
   ],
 
   presentation: {

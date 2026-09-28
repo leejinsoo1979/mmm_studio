@@ -315,12 +315,12 @@ export const itemDefinition: NodeDefinition<typeof ItemNode> = {
   floorplanMoveTarget: itemFloorplanMoveTarget,
 
   toolHints: [
-    { key: 'Left click', label: 'Place item' },
-    { key: 'R / T · Right click', label: '45° 회전' },
+    { key: 'Left click', label: '클릭하여 배치' },
+    { key: 'R / T / 우클릭', label: '45° 회전' },
     { key: 'Alt + R / T', label: '5° 미세 회전' },
-    { key: 'Shift', label: 'Cycle snapping mode' },
-    { key: 'Alt', label: 'Force place' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Shift', label: '스냅 모드 전환' },
+    { key: 'Alt', label: '자유 배치' },
+    { key: 'Esc', label: '선택 취소' },
   ],
 
   presentation: {

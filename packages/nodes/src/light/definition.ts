@@ -59,8 +59,8 @@ export const lightDefinition: NodeDefinition<typeof LightNode> = {
   computeFloorplanLevelData: ({ nodes }) => solveElectrical(nodes),
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Left click', label: 'Place light' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '조명 배치' },
+    { key: 'Esc', label: '취소' },
   ],
   presentation: {
     label: 'Light',

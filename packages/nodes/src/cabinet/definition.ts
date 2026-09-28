@@ -190,9 +190,9 @@ export const cabinetDefinition: NodeDefinition<typeof CabinetNode> = {
   system: { module: () => import('./cabinet-system') },
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Left click', label: 'Place cabinet (snaps to walls)' },
-    { key: 'R', label: 'Rotate (away from walls)' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '가구 배치 (벽에 붙음)' },
+    { key: 'R', label: '회전 (벽 반대 방향)' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {
@@ -275,8 +275,8 @@ export const countertopDefinition: NodeDefinition<typeof CountertopNode> = {
 
   tool: () => import('./countertop-tool'),
   toolHints: [
-    { key: 'Left click', label: 'Place countertop (snaps to walls)' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '상판 배치 (벽에 붙음)' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {

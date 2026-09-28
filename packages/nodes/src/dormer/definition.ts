@@ -501,9 +501,9 @@ export const dormerDefinition: NodeDefinition<typeof DormerNode> = {
 
   tool: () => import('./tool'),
   toolHints: [
-    { key: 'Left click', label: 'Place dormer on roof' },
-    { key: 'R / Shift+R', label: 'Rotate ghost ±15°' },
-    { key: 'Esc', label: 'Cancel' },
+    { key: 'Left click', label: '지붕에 도머 배치' },
+    { key: 'R / Shift+R', label: '±15° 회전' },
+    { key: 'Esc', label: '취소' },
   ],
 
   presentation: {
