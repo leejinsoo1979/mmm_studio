@@ -20,13 +20,15 @@ import {
   type WallMiterData,
   type WallNode,
 } from '@pascal-app/core'
-import { getSceneTheme, useViewer } from '@pascal-app/viewer'
+import { CUTAWAY_STUB_HEIGHT, getSceneTheme, useViewer } from '@pascal-app/viewer'
 import { Html } from '@react-three/drei'
 import { createPortal, useFrame } from '@react-three/fiber'
 import { useMemo, useState } from 'react'
 import * as THREE from 'three'
+import { useWallCutaway } from '../../hooks/use-wall-cutaway'
 import { formatLinearMeasurement } from '../../lib/measurements'
 import useEditor from '../../store/use-editor'
+import { useUiHidden } from '../../store/use-ui-hidden'
 import { MeasurementChip } from './measurement-pill'
 
 const GUIDE_Y_OFFSET = 0.08
@@ -67,6 +69,8 @@ export function WallMeasurementLabel() {
   const levelId = useViewer((state) => state.selection.levelId)
   const nodes = useScene((state) => state.nodes)
   const showDimensions = useEditor((state) => state.showDimensions)
+  // The paint card judges the finish alone, as inZOI's customize view does.
+  const customizing = useUiHidden((state) => state.customizing)
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
   const selectedNode = selectedId ? nodes[selectedId as AnyNodeId] : null
@@ -88,7 +92,7 @@ export function WallMeasurementLabel() {
     return [...byId.values()]
   }, [roomWalls, selectedWall])
 
-  if (walls.length === 0) return null
+  if (customizing || walls.length === 0) return null
 
   return (
     <>
@@ -417,14 +421,19 @@ function WallMeasurementAnnotation({ wall, showHeight }: { wall: WallNode; showH
   const unit = useViewer((state) => state.unit)
   const isNight = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
   const color = isNight ? '#ffffff' : '#111111'
+  // A wall seen as its cutaway stub is measured along the stub; its full
+  // height has nothing drawn to point at, so the height guide steps aside.
+  const cutaway = useWallCutaway(wall.id)
 
   const guide = useMemo(
     () =>
       buildMeasurementGuide(
-        wall,
+        cutaway
+          ? { ...wall, height: Math.min(wall.height ?? DEFAULT_WALL_HEIGHT, CUTAWAY_STUB_HEIGHT) }
+          : wall,
         nodes as Record<string, WallNode | { type: string; children?: string[] }>,
       ),
-    [nodes, wall],
+    [cutaway, nodes, wall],
   )
   const length = useMemo(() => {
     if (!guide?.guidePath?.length || guide.guidePath.length < 2) {
@@ -443,13 +452,14 @@ function WallMeasurementAnnotation({ wall, showHeight }: { wall: WallNode; showH
   const heightLabel = `H ${formatLinearMeasurement(wall.height ?? DEFAULT_WALL_HEIGHT, unit)}`
 
   if (!(guide && Number.isFinite(length) && length >= 0.01)) return null
+  const heightShown = showHeight && !cutaway
 
   return (
     <group>
       <MeasurementPath color={color} path={guide.guidePath} />
       <MeasurementBar color={color} end={guide.extStartEnd} start={guide.extStartStart} />
       <MeasurementBar color={color} end={guide.extEndEnd} start={guide.extEndStart} />
-      {showHeight && (
+      {heightShown && (
         <>
           <MeasurementBar color={color} end={guide.heightEnd} start={guide.heightStart} />
           <MeasurementBar
@@ -466,7 +476,7 @@ function WallMeasurementAnnotation({ wall, showHeight }: { wall: WallNode; showH
       )}
 
       <MeasurementLabel label={label} position={guide.labelPosition} />
-      {showHeight && <MeasurementLabel label={heightLabel} position={guide.heightLabelPosition} />}
+      {heightShown && <MeasurementLabel label={heightLabel} position={guide.heightLabelPosition} />}
     </group>
   )
 }

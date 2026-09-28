@@ -10,12 +10,31 @@ function refreshSceneAfterHistoryJump() {
   }
 }
 
-export function runUndo() {
-  useScene.temporal.getState().undo()
+let historyJumpDepth = 0
+
+/**
+ * True while an undo / redo applies its snapshot. Scene subscribers run
+ * synchronously inside it, so they can tell a deliberate history step from
+ * any other change.
+ */
+export function isApplyingHistoryJump(): boolean {
+  return historyJumpDepth > 0
+}
+
+function jump(apply: () => void) {
+  historyJumpDepth += 1
+  try {
+    apply()
+  } finally {
+    historyJumpDepth -= 1
+  }
   refreshSceneAfterHistoryJump()
 }
 
+export function runUndo() {
+  jump(() => useScene.temporal.getState().undo())
+}
+
 export function runRedo() {
-  useScene.temporal.getState().redo()
-  refreshSceneAfterHistoryJump()
+  jump(() => useScene.temporal.getState().redo())
 }

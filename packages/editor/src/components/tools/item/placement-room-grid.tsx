@@ -16,6 +16,13 @@ import { createRoomGridMaterial } from '../shared/placement-ghost-materials'
 const NO_RAYCAST = () => null
 const GRID_LIFT = 0.003
 
+// The room-clipped grid replaces the ground grid's cursor patch while it
+// shows; the ground grid reads this each frame to hide the patch.
+let roomGridShown = false
+export function isPlacementRoomGridShown(): boolean {
+  return roomGridShown
+}
+
 function findSlabAt(levelId: string, x: number, z: number): SlabNode | null {
   const nodes = useScene.getState().nodes
   const level = nodes[levelId as AnyNodeId]
@@ -63,6 +70,12 @@ export function PlacementRoomGrid({ isActive }: { isActive: () => boolean }) {
     return next
   }, [slab])
   useEffect(() => () => geometry?.dispose(), [geometry])
+  useEffect(
+    () => () => {
+      roomGridShown = false
+    },
+    [],
+  )
 
   useFrame(() => {
     const surface = getPlacementSurface()
@@ -72,6 +85,7 @@ export function PlacementRoomGrid({ isActive }: { isActive: () => boolean }) {
         ? findSlabAt(levelId, surface.point.x, surface.point.z)
         : null
     const nextId = found?.id ?? null
+    roomGridShown = nextId !== null
     if (nextId !== slabIdRef.current) {
       slabIdRef.current = nextId
       setSlabId(nextId)

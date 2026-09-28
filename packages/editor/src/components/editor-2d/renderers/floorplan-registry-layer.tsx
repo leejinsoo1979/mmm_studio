@@ -103,26 +103,27 @@ const DIRECT_DRAG_THRESHOLD_PX = 4
 const DIRECT_ROTATE_EPSILON = 1e-6
 const DIRECT_ROTATE_RADIANS_PER_PIXEL = Math.PI / 180
 
-// The selected wall's violet (its body, halo, corner rings and move arrows).
-const WALL_SELECTION_VIOLET = '#7563ff'
-const WALL_SELECTION_VIOLET_HOVER = '#9d93ff'
+// The selection blue of every handle (corner rings, move dots and arrows),
+// the same as the 3D gizmos, so a selection reads alike in both views.
+const SELECTION_BLUE = '#3d9fe0'
+const SELECTION_BLUE_HOVER = '#7fc3ef'
 
-const wallHandlePalettes = new WeakMap<FloorplanPalette, FloorplanPalette>()
+const selectionHandlePalettes = new WeakMap<FloorplanPalette, FloorplanPalette>()
 
-/** Walls draw their handles in the selection violet instead of the orange set. */
-function wallHandlePalette(palette: FloorplanPalette): FloorplanPalette {
-  let derived = wallHandlePalettes.get(palette)
+/** Handles draw in the selection blue instead of the legacy orange set. */
+function selectionHandlePalette(palette: FloorplanPalette): FloorplanPalette {
+  let derived = selectionHandlePalettes.get(palette)
   if (!derived) {
     derived = {
       ...palette,
-      selectedStroke: WALL_SELECTION_VIOLET,
+      selectedStroke: SELECTION_BLUE,
       endpointHandleFill: '#ffffff',
-      endpointHandleStroke: WALL_SELECTION_VIOLET,
-      endpointHandleHoverStroke: WALL_SELECTION_VIOLET_HOVER,
+      endpointHandleStroke: SELECTION_BLUE,
+      endpointHandleHoverStroke: SELECTION_BLUE_HOVER,
       endpointHandleActiveFill: '#ffffff',
-      endpointHandleActiveStroke: WALL_SELECTION_VIOLET,
+      endpointHandleActiveStroke: SELECTION_BLUE,
     }
-    wallHandlePalettes.set(palette, derived)
+    selectionHandlePalettes.set(palette, derived)
   }
   return derived
 }
@@ -1370,7 +1371,7 @@ const FloorplanRegistryEntry = memo(function FloorplanRegistryEntry({
         onHandleHoverChange={onHandleHoverChange}
         onHandlePointerDown={handleHandlePointerDown}
         onMoveHandlePointerDown={handleMoveHandlePointerDown}
-        palette={node.type === 'wall' && palette ? wallHandlePalette(palette) : palette}
+        palette={palette ? selectionHandlePalette(palette) : palette}
         sceneRotationDeg={sceneRotationDeg}
         unitsPerPixel={unitsPerPixel}
       />
@@ -1965,7 +1966,7 @@ const InteractiveGeometry = memo(function InteractiveGeometry({
         // body (matches the 3D `HANDLE_OFFSET`).
         const bi = 0.03 // base inset
         const arrowD = `M ${bi},${-sh} L ${bi + sl},${-sh} L ${bi + sl},${-hh} L ${bi + sl + hl},0 L ${bi + sl},${hh} L ${bi + sl},${sh} L ${bi},${sh} Z`
-        // The selection colour (violet on walls, see `wallHandlePalette`),
+        // The selection colour (see `selectionHandlePalette`),
         // matching the 3D arrows; hover lightens it.
         const fill = palette.selectedStroke
         const fillOpacity = isHovered ? 0.6 : 1

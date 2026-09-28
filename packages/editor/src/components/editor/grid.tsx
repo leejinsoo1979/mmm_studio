@@ -1,17 +1,34 @@
 'use client'
 
-import { type AnyNodeId, emitter, type GridEvent, sceneRegistry } from '@pascal-app/core'
+import {
+  type AnyNodeId,
+  emitter,
+  type GridEvent,
+  type SiteNode,
+  sceneRegistry,
+  useScene,
+} from '@pascal-app/core'
 import { GRID_LAYER, getSceneTheme, useViewer } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { DoubleSide, type Mesh, PlaneGeometry, Quaternion, Vector2, Vector3 } from 'three'
+import {
+  DoubleSide,
+  type Mesh,
+  PlaneGeometry,
+  Quaternion,
+  Shape,
+  ShapeGeometry,
+  Vector2,
+  Vector3,
+} from 'three'
 import { color, float, fract, fwidth, mix, positionLocal, uniform } from 'three/tsl'
-import { MeshBasicNodeMaterial } from 'three/webgpu'
+import { MeshBasicNodeMaterial, type Node } from 'three/webgpu'
 import { useCeilingEvents } from '../../hooks/use-ceiling-events'
 import { useGridEvents } from '../../hooks/use-grid-events'
 import { getPlacementSurface } from '../../lib/active-placement-surface'
 import useEditor, { isGridSnapActive } from '../../store/use-editor'
 import { getMovingNode } from '../../store/use-interaction-scope'
+import { isPlacementRoomGridShown } from '../tools/item/placement-room-grid'
 import { RoomFloorBuildOverlay } from './room-floor-build-overlay'
 import { WallCapOutlines } from './wall-cap-outlines'
 
@@ -43,6 +60,40 @@ const UP = new Vector3(0, 1, 0)
 // → world +Y), equivalent to the old `rotation-x={-π/2}`.
 const PLANE_LOCAL_NORMAL = new Vector3(0, 0, 1)
 const HORIZONTAL_QUATERNION = new Quaternion().setFromUnitVectors(PLANE_LOCAL_NORMAL, UP)
+
+// Grid line mask on the plane-local XY, anti-aliased with fwidth: 1 on a line.
+function gridLines(size: number | Node<'float'>, thickness: number) {
+  const r = positionLocal.xy.div(size)
+  const fw = fwidth(r)
+  const grid = fract(r.sub(0.5)).sub(0.5).abs()
+  const lineX = float(1).sub(
+    grid.x
+      .div(fw.x)
+      .add(1 - thickness)
+      .min(1),
+  )
+  const lineY = float(1).sub(
+    grid.y
+      .div(fw.y)
+      .add(1 - thickness)
+      .min(1),
+  )
+  return lineX.max(lineY)
+}
+
+/** The lot (site polygon) the building lattice is laid over while drawing. */
+function useLotPoints(): SiteNode['polygon']['points'] | null {
+  return useScene((state) => {
+    for (const id of state.rootNodeIds) {
+      const node = state.nodes[id]
+      if (node?.type === 'site') {
+        const points = (node as SiteNode).polygon?.points
+        return points && points.length >= 3 ? points : null
+      }
+    }
+    return null
+  })
+}
 
 export const Grid = ({
   cellSize = 0.5,
@@ -106,32 +157,8 @@ export const Grid = ({
     // Cursor position uniform
     const cursorPos = uniform(cursorPositionRef.current)
 
-    // Grid line function using fwidth for anti-aliasing
-    // Returns 1 on grid lines, 0 elsewhere
-    const getGrid = (size: number | typeof cellSizeUniform, thickness: number) => {
-      const r = pos.div(size)
-      const fw = fwidth(r)
-      // Distance to nearest grid line for each axis
-      const grid = fract(r.sub(0.5)).sub(0.5).abs()
-      // Anti-aliased step: divide by fwidth and clamp
-      const lineX = float(1).sub(
-        grid.x
-          .div(fw.x)
-          .add(1 - thickness)
-          .min(1),
-      )
-      const lineY = float(1).sub(
-        grid.y
-          .div(fw.y)
-          .add(1 - thickness)
-          .min(1),
-      )
-      // Combine both axes - max gives us lines in both directions
-      return lineX.max(lineY)
-    }
-
-    const g1 = getGrid(cellSizeUniform, cellThickness)
-    const g2 = getGrid(sectionSize, sectionThickness)
+    const g1 = gridLines(cellSizeUniform, cellThickness)
+    const g2 = gridLines(sectionSize, sectionThickness)
 
     // Distance fade from center
     const dist = pos.length()
@@ -157,7 +184,7 @@ export const Grid = ({
 
     // Drafting: every line the same bright white over a tinted lot that fades
     // out with the reveal, instead of grey lines on the pale ground.
-    const lineMask = getGrid(cellSizeUniform, 1.25).min(1)
+    const lineMask = gridLines(cellSizeUniform, 1.25).min(1)
     const reveal = fade.mul(cursorFade)
     const draftColor = mix(color(DRAFT_LOT_COLOR), color(DRAFT_LINE_COLOR), lineMask)
     const draftAlpha = lineMask.mul(0.9).max(float(DRAFT_LOT_ALPHA)).mul(reveal)
@@ -190,6 +217,29 @@ export const Grid = ({
     patchAlphaUniform,
     draftMixUniform,
   ])
+
+  // inZOI's building lattice covers the lot, not the whole ground: a mesh in
+  // the site polygon's shape carries it while a floor draw tool is armed.
+  const lotMaterial = useMemo(() => {
+    const lineMask = gridLines(cellSizeUniform, 1.25).min(1)
+    return new MeshBasicNodeMaterial({
+      transparent: true,
+      colorNode: mix(color(DRAFT_LOT_COLOR), color(DRAFT_LINE_COLOR), lineMask),
+      opacityNode: lineMask.mul(0.9).max(float(DRAFT_LOT_ALPHA)),
+      depthWrite: false,
+      side: DoubleSide,
+    })
+  }, [cellSizeUniform])
+  useEffect(() => () => lotMaterial.dispose(), [lotMaterial])
+  const lotPoints = useLotPoints()
+  const lotGeometry = useMemo(() => {
+    if (!lotPoints) return null
+    // Plane-local XY = world (x, -z), the same frame as the ground grid, so
+    // both lattices share their lines.
+    return new ShapeGeometry(new Shape(lotPoints.map(([x, z]) => new Vector2(x, -z))))
+  }, [lotPoints])
+  useEffect(() => () => lotGeometry?.dispose(), [lotGeometry])
+  const lotRef = useRef<Mesh>(null)
 
   const gridRef = useRef<Mesh>(null!)
   const [gridY, setGridY] = useState(0)
@@ -326,13 +376,22 @@ export const Grid = ({
     const floorDrafting = mode === 'build' && tool !== null && FLOOR_DRAFT_TOOLS.has(tool)
     revealRadiusUniform.value =
       drafting || floorDrafting ? DRAFT_REVEAL_RADIUS : PLACEMENT_REVEAL_RADIUS
+    const lotMesh = lotRef.current
+    const lotLattice = floorDrafting && !onWall && lotMesh !== null
+    if (lotMesh) {
+      lotMesh.visible = lotLattice
+      lotMesh.position.set(0, gridMesh.position.y, 0)
+    }
     draftMixUniform.value = floorDrafting && !onWall ? 1 : 0
     baseAlphaUniform.value = 0
     cellSizeUniform.value = useEditor.getState().gridSnapStep
     patchAlphaUniform.value = 1.5
     // inZOI keeps the building lattice up the whole time a draw tool is armed,
     // whatever the snapping mode.
-    gridRef.current.visible = snapPatchVisible || floorDrafting
+    // The lot lattice replaces the ground-wide one, and a held item's room grid
+    // replaces the cursor patch (inZOI shows only the room's own grid).
+    gridRef.current.visible =
+      (snapPatchVisible || floorDrafting) && !lotLattice && !isPlacementRoomGridShown()
   })
 
   // Pass the geometry as a prop instead of a JSX child so the mesh
@@ -358,6 +417,17 @@ export const Grid = ({
         ref={gridRef}
         renderOrder={1}
       />
+      {lotGeometry && (
+        <mesh
+          geometry={lotGeometry}
+          layers={GRID_LAYER}
+          material={lotMaterial}
+          quaternion={HORIZONTAL_QUATERNION}
+          ref={lotRef}
+          renderOrder={1}
+          visible={false}
+        />
+      )}
       {/* inZOI's build-mode floor fill and cap outlines ride with the lattice. */}
       <RoomFloorBuildOverlay />
       <WallCapOutlines />

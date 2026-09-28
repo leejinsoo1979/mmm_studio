@@ -54,16 +54,19 @@ function LeftColumn({
     }
   }, [isCollapsed, setWidth, width])
 
-  // Ensure active panel is a valid tab
+  // Ensure active panel is a valid tab; a generic panel id opens the tab
+  // standing in for it.
   useEffect(() => {
     if (tabs.length > 0 && !tabs.some((t) => t.id === activePanel)) {
-      setActivePanel(tabs[0]!.id)
+      setActivePanel((tabs.find((t) => t.aliases?.includes(activePanel)) ?? tabs[0]!).id)
     }
   }, [tabs, activePanel, setActivePanel])
 
   // Leaving the items tab while furnishing should drop back to select mode
+  const itemsTabId = tabs.find((t) => t.aliases?.includes('items'))?.id ?? 'items'
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs on tab changes only
   useEffect(() => {
-    if (activePanel === 'items') return
+    if (activePanel === 'items' || activePanel === itemsTabId) return
     const { phase, mode, setMode } = useEditor.getState()
     if (phase === 'furnish' && mode === 'build') {
       setMode('select')
@@ -189,6 +192,7 @@ function RightColumn({
         <div
           className="pointer-events-auto absolute top-3 right-3 z-20 flex h-11 items-center gap-2"
           data-hud-avoid
+          data-toolbar-right
         >
           {toolbarRight}
         </div>
@@ -309,7 +313,7 @@ export function EditorLayoutV2({
             // inZOI panel bands: opaque tabs, frosted search band, light
             // sub-row, frosted grey body, translucent headers, near-white cards.
             '[--panel-accent:#8ec3f2] [--panel-band:rgba(170,170,178,0.55)] [--panel-body:rgba(176,177,181,0.55)] [--panel-card-fg:#4a4a4a] [--panel-card-hover:#ffffff] [--panel-card:rgba(247,247,247,0.94)] [--panel-header:rgba(80,80,90,0.3)] [--panel-hero:#edebea] [--panel-subrow:#f2f2f2] [--panel-tabs:#f8f8f8]',
-            'dark:[--panel-band:rgba(44,44,48,0.62)] dark:[--panel-body:rgba(26,26,28,0.62)] dark:[--panel-card-fg:#e5e5e5] dark:[--panel-card-hover:rgba(72,72,74,0.96)] dark:[--panel-card:rgba(56,56,58,0.94)] dark:[--panel-header:rgba(255,255,255,0.12)] dark:[--panel-hero:#2c2c2c] dark:[--panel-subrow:#262626] dark:[--panel-tabs:#242424]',
+            'dark:[--panel-band:rgba(44,44,48,0.62)] dark:[--panel-body:rgba(30,30,32,0.9)] dark:[--panel-card-fg:#e5e5e5] dark:[--panel-card-hover:rgba(72,72,74,0.96)] dark:[--panel-card:rgba(56,56,58,0.94)] dark:[--panel-header:rgba(255,255,255,0.12)] dark:[--panel-hero:#2c2c2c] dark:[--panel-subrow:#262626] dark:[--panel-tabs:#242424]',
           )}
           style={{
             top: PANEL_TOP,

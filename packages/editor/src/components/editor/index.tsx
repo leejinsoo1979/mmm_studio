@@ -402,8 +402,8 @@ function ViewerCanvasControlsHint({
   onDismiss: () => void
 }) {
   const hints = isPreviewMode ? PREVIEW_CAMERA_CONTROL_HINTS : EDITOR_CAMERA_CONTROL_HINTS
-  const hasSelection = useViewer((s) => s.selection.selectedIds.length > 0)
-  if (hasSelection) return null
+  const makesRoomForSelection = useMakesRoomForSelection()
+  if (makesRoomForSelection) return null
 
   // z-20 keeps the scene HUD under the overlay layer (z-30), so cards opened
   // over the scene (the inspector, the Archiple stage) cover it.
@@ -458,16 +458,26 @@ function ViewerCanvasControlsHint({
   )
 }
 
+/**
+ * The camera row and legend step aside for a selection's inspector at the
+ * right, but stay while customizing (inZOI keeps them beside the paint card).
+ */
+function useMakesRoomForSelection(): boolean {
+  const hasSelection = useViewer((s) => s.selection.selectedIds.length > 0)
+  const customizing = useUiHidden((s) => s.customizing)
+  return hasSelection && !customizing
+}
+
 /** inZOI's 'Default Camera' row under the top-right cluster: fits the scene. */
 function DefaultCameraButton() {
-  const hasSelection = useViewer((s) => s.selection.selectedIds.length > 0)
-  if (hasSelection) return null
+  const makesRoomForSelection = useMakesRoomForSelection()
+  if (makesRoomForSelection) return null
   return (
     <div className="pointer-events-none absolute top-16 right-3 z-20 flex items-center gap-2">
       <span className={cn('font-medium text-[15px]', HUD_TEXT)}>기본 카메라</span>
       <button
         aria-label="기본 카메라"
-        className="pointer-events-auto flex size-10 items-center justify-center rounded-full bg-[#f8f8f8] text-[#555968] shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition-colors hover:bg-white"
+        className="pointer-events-auto flex size-10 items-center justify-center rounded-full bg-[#f8f8f8] text-[#555968] shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition-colors hover:bg-white dark:bg-neutral-900/90 dark:text-neutral-300 dark:hover:bg-neutral-800"
         data-hud-avoid
         onClick={() => {
           const bounds = computeSceneBoundsXZ(useScene.getState().nodes)
@@ -1331,12 +1341,13 @@ export default function Editor({
     }
 
     const tabBarTabs = [
-      ...(sidebarTabs?.map(({ id, label, mobileDefaultSnap, mobileIcon, icon }) => ({
+      ...(sidebarTabs?.map(({ id, label, mobileDefaultSnap, mobileIcon, icon, aliases }) => ({
         id,
         label,
         mobileDefaultSnap,
         mobileIcon,
         icon,
+        aliases,
       })) ?? []),
       // Plugin panels appear after the host's tabs in the rail. The icon
       // doubles as the mobile icon; a half-height sheet is a sensible default.

@@ -33,12 +33,14 @@ export function ColorSection({
   original,
   onPreview,
   onCommit,
+  onRestore,
   onClear,
 }: {
   value: string
   original?: string
   onPreview: (hex: string) => void
   onCommit: (hex: string) => void
+  onRestore?: () => void
   onClear?: () => void
 }) {
   const [saved, setSaved] = useState(readSaved)
@@ -90,6 +92,7 @@ export function ColorSection({
           setPicked(hex)
           onPreview(hex)
         }}
+        onRestore={onRestore}
         original={original}
         value={value}
       />

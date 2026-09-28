@@ -11,7 +11,6 @@ import {
   type MaterialSurface,
   nodeRegistry,
   sceneRegistry,
-  slotLabelFromId,
   toLibraryMaterialRef,
   useScene,
 } from '@pascal-app/core'
@@ -30,15 +29,19 @@ import { type CabinetNode, resolveCabinetNode } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
+import type { Material, Mesh, MeshStandardMaterial } from 'three'
+import { CATALOG_KO_NAMES } from '@/lib/catalog-ko-names'
 import { ColorSection } from './customize/color-section'
 import { ColumnDivider, CustomizeDock } from './customize/customize-dock'
 import { MaterialColumn } from './customize/material-column'
-import { resolveSchema, withColor } from './customize/material-schema'
+import { customColorMaterial, resolveSchema, withColor } from './customize/material-schema'
 import { MaterialSphere, type SphereMaterial } from './customize/material-sphere'
 import { PaintHints } from './customize/paint-hints'
 import { PaintPickPin } from './customize/paint-pick-pin'
 import { PartList } from './customize/part-list'
+import { furniturePartName } from './customize/part-names'
 import { PropertiesSection } from './customize/properties-section'
+import { textureColor, useTextureColors } from './customize/texture-color'
 
 /**
  * inZOI-style material palette. The paint button on the selected object's
@@ -99,6 +102,8 @@ type Target = {
   label: string
   /** The applied finish as a ref (`library:` / `scene:`) or `#hex`, for matching swatches. */
   current?: string
+  /** The part's own slot value (undefined while it shows the kind's default). */
+  slot?: string
   /** The applied finish as an editable schema (null when it can't be tuned). */
   base: MaterialSchema | null
   apply: (material: MaterialCatalogItem) => void
@@ -110,14 +115,32 @@ type Target = {
   previewSchema?: (material: MaterialSchema) => (() => void) | null
   /** Back to the kind's default finish. */
   clear?: () => void
+  /** Puts a slot value back as it was (a ref, or none for the default). */
+  applyRef?: (ref: string | undefined) => void
 }
+
+/** The part as the model draws it before any paint (a furniture GLB's own material). */
+type MeshFinish = (role: string) => MaterialSchema | null
 
 /** Kinds whose paint can spread to the whole room (walls, floors). */
 function offersRoomScope(node: AnyNode): boolean {
   return nodeRegistry.get(node.type)?.capabilities?.paint?.roomScope === true
 }
 
-function slotTargets(node: AnyNode, slotIds: string[], roomScope: boolean): Target[] {
+function partLabel(node: AnyNode, role: string, index: number): string {
+  const furniture = node.type === 'item' || node.type === 'shelf'
+  return (
+    (furniture ? furniturePartName(role) : (SLOT_LABELS[role] ?? furniturePartName(role))) ??
+    `부분 ${index + 1}`
+  )
+}
+
+function slotTargets(
+  node: AnyNode,
+  slotIds: string[],
+  roomScope: boolean,
+  meshFinish: MeshFinish,
+): Target[] {
   const def = nodeRegistry.get(node.type)
   const paint = def?.capabilities?.paint
   if (!paint) return []
@@ -167,9 +190,9 @@ function slotTargets(node: AnyNode, slotIds: string[], roomScope: boolean): Targ
       for (const restore of restores) restore()
     }
   }
-  return slotIds.map((role) => {
+  return slotIds.map((role, index) => {
     // The finish the face shows now: its slot, a pre-migration inline
-    // material, else the kind's declared default.
+    // material, the kind's declared default, else the model's own material.
     const effective = slots?.[role]
       ? null
       : paint.getEffectiveMaterial?.({ node, role, nodes: useScene.getState().nodes })
@@ -177,11 +200,13 @@ function slotTargets(node: AnyNode, slotIds: string[], roomScope: boolean): Targ
       slots?.[role] ??
       effective?.materialPreset ??
       (effective?.material ? undefined : defaults.get(role))
-    const base = effective?.material ?? resolveSchema(current)
+    const base =
+      effective?.material ?? resolveSchema(current) ?? (current ? null : meshFinish(role))
     return {
       key: role,
-      label: SLOT_LABELS[role] ?? slotLabelFromId(role),
+      label: partLabel(node, role, index),
       current,
+      slot: slots?.[role],
       base,
       apply: (material) => commit(role, undefined, toLibraryMaterialRef(material.id)),
       preview: (material) => preview(role, undefined, toLibraryMaterialRef(material.id)),
@@ -190,6 +215,7 @@ function slotTargets(node: AnyNode, slotIds: string[], roomScope: boolean): Targ
       applySchema: (material) => commit(role, material),
       previewSchema: (material) => preview(role, material),
       clear: () => commit(role, undefined, undefined),
+      applyRef: (ref) => commit(role, undefined, ref),
     }
   })
 }
@@ -218,29 +244,72 @@ function cabinetTargets(node: AnyNode): Target[] {
   ]
 }
 
+/** A mesh's slot tag: one id, or one per material of a multi-material mesh. */
+function slotTagOf(object: { userData: unknown }): (string | null)[] {
+  const tag = (object.userData as { slotId?: unknown }).slotId
+  if (typeof tag === 'string') return [tag]
+  return Array.isArray(tag) ? tag.map((id) => (typeof id === 'string' ? id : null)) : []
+}
+
 /** The slot ids a node's mesh is tagged with (a furniture model's `slot_` materials). */
 function meshSlotIds(node: AnyNode): string[] {
   const found = new Set<string>()
   sceneRegistry.nodes.get(node.id)?.traverse((object) => {
-    const slotId = (object.userData as { slotId?: unknown }).slotId
-    if (typeof slotId === 'string') found.add(slotId)
+    for (const id of slotTagOf(object)) if (id) found.add(id)
   })
   return [...found]
 }
 
-function paintTargets(node: AnyNode, roomScope: boolean): Target[] {
+/**
+ * The colour and gloss the model gives a part it hasn't been painted, so the
+ * card starts from what the user sees. Null for a textured part: a flat
+ * colour can't stand for it.
+ */
+function modelFinish(node: AnyNode, role: string): MaterialSchema | null {
+  let found: Material | undefined
+  sceneRegistry.nodes.get(node.id)?.traverse((object) => {
+    const mesh = object as Mesh
+    if (found || !mesh.isMesh) return
+    const index = slotTagOf(mesh).indexOf(role)
+    if (index < 0) return
+    found = Array.isArray(mesh.material) ? mesh.material[index] : mesh.material
+  })
+  const standard = found as MeshStandardMaterial | undefined
+  if (!standard?.color || standard.map) return null
+  const base = customColorMaterial(`#${standard.color.getHexString()}`, standard.roughness ?? 0.5)
+  return { ...base, properties: { ...base.properties!, metalness: standard.metalness ?? 0 } }
+}
+
+function paintTargets(node: AnyNode, roomScope: boolean, meshFinish: MeshFinish): Target[] {
   if ((node.type as string) === 'cabinet') return cabinetTargets(node)
   const def = nodeRegistry.get(node.type)
   if (!def?.capabilities?.paint) return []
   const declared = def.capabilities.slots?.(node).map((slot) => slot.slotId)
-  return slotTargets(node, declared ?? meshSlotIds(node), roomScope)
+  return slotTargets(node, declared ?? meshSlotIds(node), roomScope, meshFinish)
 }
 
+/** Furniture is paintable part by part, so only a model with tagged parts offers it. */
 export function canPaintNode(node: AnyNode): boolean {
   if ((node.type as string) === 'cabinet') return true
   const def = nodeRegistry.get(node.type)
   if (!def?.capabilities?.paint) return false
-  return node.type === 'item' || (def.capabilities.slots?.(node).length ?? 0) > 0
+  const declared = def.capabilities.slots?.(node)
+  return declared ? declared.length > 0 : meshSlotIds(node).length > 0
+}
+
+/** The name the object goes by: its own, its catalog item's, else its kind. */
+function objectName(node: AnyNode): string {
+  const own = (node as { name?: string }).name
+  if (own) return own
+  const asset = (node as { asset?: { id?: string; name?: string } }).asset
+  const catalog = asset?.id ? CATALOG_KO_NAMES[asset.id] : undefined
+  return (
+    catalog ||
+    asset?.name ||
+    KIND_NAMES[node.type] ||
+    nodeRegistry.get(node.type)?.presentation?.label ||
+    node.type
+  )
 }
 
 function materialsFor(node: AnyNode, section: Section): MaterialCatalogItem[] {
@@ -313,8 +382,11 @@ export function MaterialPalette() {
   const faceClickAt = useRef(Number.NEGATIVE_INFINITY)
   // Where the history stood when the card opened, and each part's colour then.
   const openedAt = useRef<HistoryMark>({ entry: undefined, length: 0 })
-  const originals = useRef(new Map<string, string | undefined>())
+  const originals = useRef(new Map<string, { hex?: string; slot?: string }>())
+  // Each unpainted part's model finish, read once before any preview swaps it.
+  const modelFinishes = useRef(new Map<string, MaterialSchema | null>())
   const stepsSinceOpen = useStepsSince(openedAt.current)
+  useTextureColors()
 
   useEffect(() => {
     useEditor.getState().setCanPaintNode(canPaintNode)
@@ -326,6 +398,7 @@ export function MaterialPalette() {
       setRoomScope(false)
       openedAt.current = markHistory()
       originals.current.clear()
+      modelFinishes.current.clear()
     }
     emitter.on('selection:paint-node' as never, open as never)
     return () => {
@@ -352,6 +425,7 @@ export function MaterialPalette() {
   }
 
   // The palette belongs to the selected object: closes with the selection.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `close` is recreated every render; the selection values are the triggers.
   useEffect(() => {
     if (!nodeId) return
     // Clicking the object picks a part here; select mode's click-to-pick-up
@@ -363,9 +437,9 @@ export function MaterialPalette() {
       return
     }
     if (selectedIds.length !== 1 || selectedIds[0] !== nodeId || moving) close()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIds, moving, nodeId])
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `close` is recreated every render; the listener only needs re-binding per node.
   useEffect(() => {
     if (!nodeId) return
     const onKey = (e: KeyboardEvent) => {
@@ -375,7 +449,6 @@ export function MaterialPalette() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeId])
 
   useEffect(() => () => restorePreview.current?.(), [])
@@ -396,31 +469,39 @@ export function MaterialPalette() {
 
   if (!node) return null
   const canSpread = offersRoomScope(node)
-  const targets = paintTargets(node, canSpread && roomScope)
+  const meshFinish: MeshFinish = (role) => {
+    const key = `${node.id}:${role}`
+    if (!modelFinishes.current.has(key)) modelFinishes.current.set(key, modelFinish(node, role))
+    return modelFinishes.current.get(key) ?? null
+  }
+  const targets = paintTargets(node, canSpread && roomScope, meshFinish)
   const target = targets.find((t) => t.key === targetKey) ?? targets[0]
-  const def = nodeRegistry.get(node.type)
-  const name =
-    (node as { name?: string }).name ||
-    KIND_NAMES[node.type] ||
-    def?.presentation?.label ||
-    node.type
+  const name = objectName(node)
   const sections = target
     ? SECTIONS.map((section) => ({ ...section, materials: materialsFor(node, section) })).filter(
         (section) => section.materials.length > 0,
       )
     : []
-  const currentItem = sections.flatMap((s) => s.materials).find((m) => isCurrent(target, m))
+  const allMaterials = sections.flatMap((s) => s.materials)
+  const currentItem = allMaterials.find((m) => isCurrent(target, m))
+  // A textured finish's own colour is only a tint (often white): show the
+  // texture's average colour instead.
+  const texture = target?.base?.texture
   const currentHex = target?.current?.startsWith('#')
     ? target.current
-    : (target?.base?.properties?.color ?? currentItem?.previewColor)
+    : texture
+      ? (currentItem?.previewColor ?? textureColor(texture.url))
+      : (target?.base?.properties?.color ?? currentItem?.previewColor)
   const current: SphereMaterial | undefined = currentItem ?? {
     previewColor: currentHex,
     previewThumbnailUrl: target?.base?.texture?.url,
   }
   const shown = hovered ?? current
   const originalKey = target ? `${node.id}:${target.key}` : ''
-  if (target && !originals.current.has(originalKey)) {
-    originals.current.set(originalKey, currentHex)
+  const known = originals.current.get(originalKey)
+  // A texture's colour arrives a moment after the card opens.
+  if (target && (!known || (!known.hex && known.slot === target.slot))) {
+    originals.current.set(originalKey, { hex: currentHex, slot: target.slot })
   }
   const original = originals.current.get(originalKey)
   const hasPartList = targets.length > 1
@@ -487,7 +568,14 @@ export function MaterialPalette() {
                 triggerSFX('sfx:menu-click')
               }}
               onPreview={(hex) => showPreview(target.previewColor?.(hex))}
-              original={original}
+              onRestore={() => {
+                endPreview()
+                // The finish the part had, as it was stored: a catalog
+                // finish stays one instead of turning into a custom colour.
+                if (target.applyRef) target.applyRef(original?.slot)
+                else if (original?.hex) target.applyColor(original.hex)
+              }}
+              original={original?.hex}
               value={currentHex ?? '#FFFFFF'}
             />
             <ColumnDivider />
@@ -504,7 +592,7 @@ export function MaterialPalette() {
         )}
         <MaterialColumn
           emptyText="칠할 수 있는 부분이 없습니다"
-          isSelected={(m) => hovered?.id === m.id || isCurrent(target, m)}
+          isSelected={(m) => isCurrent(target, m)}
           onApply={(material) => {
             if (!target) return
             endPreview()
@@ -529,7 +617,7 @@ export function MaterialPalette() {
           sections={sections}
         />
       </CustomizeDock>
-      <PaintHints wall={node.type === 'wall'} />
+      <PaintHints roomScope={canSpread} wall={node.type === 'wall'} />
       <PaintPickPin
         node={node}
         onFaceClick={(role) => {

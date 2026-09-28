@@ -180,8 +180,8 @@ export {
   buildOpeningCutoutGeometry,
   hasFlatOpeningCutoutBottom,
 } from './systems/wall/opening-cutout-geometry'
-export { WallCutout } from './systems/wall/wall-cutout'
-export { getVisibleWallMaterials } from './systems/wall/wall-materials'
+export { isWallCutaway, WallCutout } from './systems/wall/wall-cutout'
+export { CUTAWAY_STUB_HEIGHT, getVisibleWallMaterials } from './systems/wall/wall-materials'
 // Wall internals re-exported so `@pascal-app/nodes`' registry-driven wall
 // definition can compose them into `def.system` without duplicating the
 // 800+ lines of CSG / mitering logic during Phase 3. These exports are

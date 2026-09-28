@@ -1,6 +1,7 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { SearchX } from 'lucide-react'
+import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 import { cn } from '../../../lib/utils'
 
 /** Tailwind classes of the inZOI 4-up card grid. */
@@ -24,18 +25,29 @@ export function CatalogSection({
   children,
   grid = true,
   className,
+  ...rest
 }: {
   title: string
   children: ReactNode
   grid?: boolean
   className?: string
-}) {
+} & Omit<ComponentPropsWithoutRef<'section'>, 'title' | 'children'>) {
   return (
-    <section className={cn('scroll-mt-1 pt-2', className)} data-catalog-section={title}>
+    <section {...rest} className={cn('scroll-mt-1 pt-2', className)} data-catalog-section={title}>
       <h2 className="mx-2.5 mb-1.5 flex h-[26px] items-center rounded-md bg-[var(--panel-header,rgba(80,80,90,0.3))] px-2.5 font-semibold text-[12px] text-white leading-none">
         {title}
       </h2>
       <div className={cn('px-2.5', grid && CATALOG_GRID)}>{children}</div>
     </section>
+  )
+}
+
+/** The catalogue's line for a search or filter that matches nothing. */
+export function CatalogEmpty({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center gap-2 px-6 pt-10 pb-6 text-center font-medium text-[12px] text-white leading-relaxed [text-shadow:0_1px_2px_rgba(0,0,0,0.35)]">
+      <SearchX aria-hidden className="size-7 opacity-80" strokeWidth={1.5} />
+      {children}
+    </div>
   )
 }

@@ -66,6 +66,7 @@ import {
   useSelectionFilter,
 } from '../../../store/use-selection-filter'
 import { useUiHidden } from '../../../store/use-ui-hidden'
+import { FloatingLevelSelector } from '../floating-level-selector'
 import { Popover, PopoverContent, PopoverTrigger } from '../primitives/popover'
 import { SecondaryToggles } from './view-toggles'
 
@@ -178,7 +179,7 @@ function useBuildingLevels(): { buildingId: BuildingNode['id'] | null; levels: L
 
 /**
  * inZOI's stairs ▲▼ with the current floor: up / down a floor, and ▲ on the
- * top floor builds a new one. Adding / reordering floors stays in 장면.
+ * top floor builds a new one. The floor name opens the floor list.
  */
 function LevelStepper() {
   const levelId = useViewer((s) => s.selection.levelId)
@@ -221,12 +222,19 @@ function LevelStepper() {
           <ChevronDown className="size-3.5" strokeWidth={2} />
         </button>
       </div>
-      <span
-        className="min-w-6 max-w-16 truncate whitespace-nowrap font-semibold text-[#555] text-[12px] tabular-nums dark:text-neutral-300"
-        title={current ? getLevelDisplayName(current) : undefined}
-      >
-        {current ? getLevelDisplayName(current) : '—'}
-      </span>
+      <FloatingLevelSelector>
+        <button
+          aria-label="층 관리"
+          className="flex h-7 min-w-6 max-w-20 items-center gap-0.5 rounded-full pr-1 pl-1.5 font-semibold text-[#555] text-[12px] tabular-nums transition-colors hover:bg-black/[0.05] dark:text-neutral-300 dark:hover:bg-white/10"
+          title={`${current ? getLevelDisplayName(current) : '층'} · 층 추가 · 순서 · 복제 · 붙여넣기 · 삭제`}
+          type="button"
+        >
+          <span className="truncate whitespace-nowrap">
+            {current ? getLevelDisplayName(current) : '—'}
+          </span>
+          <ChevronDown className="size-3 shrink-0 opacity-60" strokeWidth={2} />
+        </button>
+      </FloatingLevelSelector>
     </div>
   )
 }
@@ -321,6 +329,8 @@ function SnapToolButton() {
       <PopoverContent
         align="center"
         className="w-44 rounded-xl border-0 bg-[#f5f5f5]/95 p-2 shadow-[0_2px_8px_rgba(0,0,0,0.15)] backdrop-blur-md dark:bg-neutral-900/95"
+        // Esc closes the popover only; the editor would also disarm the tool.
+        onEscapeKeyDown={(event) => event.stopPropagation()}
         side="bottom"
         sideOffset={10}
       >
@@ -421,7 +431,7 @@ function KindChip({ kind, disabled }: { kind: StructureKind; disabled: boolean }
       className={cn(
         'flex size-6 items-center justify-center rounded-[4px] border transition-colors [text-shadow:none] disabled:opacity-40',
         on
-          ? 'border-white/80 bg-[#a8cbe3] text-white'
+          ? 'border-white/90 bg-[#4f9ad8] text-white shadow-[0_1px_2px_rgba(0,0,0,0.25)]'
           : 'border-[color:var(--hud-muted)] bg-white/15 text-[color:var(--hud-muted)]',
       )}
       disabled={disabled}
@@ -500,7 +510,7 @@ function SelectionFilterBar() {
         </span>
         현재 층만 적용
         {levelName && (
-          <span className="font-bold text-[#5aa8e6] text-[11px] [text-shadow:none]">
+          <span className="rounded-full bg-[#4f9ad8] px-1.5 py-px font-bold text-[11px] text-white shadow-[0_1px_2px_rgba(0,0,0,0.25)] [text-shadow:none]">
             {levelName}
           </span>
         )}

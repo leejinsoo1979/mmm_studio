@@ -33,10 +33,10 @@ import {
   WallNode,
   WindowNode,
 } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { CUTAWAY_STUB_HEIGHT, isWallCutaway, useViewer } from '@pascal-app/viewer'
 import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { resolveOverlayPolicy } from '../../lib/interaction/overlay-policy'
 import { curveReshapeScope, holeEditScope } from '../../lib/interaction/scope'
@@ -58,7 +58,7 @@ import useInteractionScope, {
 } from '../../store/use-interaction-scope'
 import { useUiHidden } from '../../store/use-ui-hidden'
 import { formatMeasurement, MeasurementPill } from './measurement-pill'
-import { flashAbove, NodeActionMenu } from './node-action-menu'
+import { flashAbove, hasConfirmAction, NodeActionMenu } from './node-action-menu'
 import {
   canRotateNode,
   duplicateFlashText,
@@ -105,8 +105,6 @@ export function hasFloatingActionMenu(type: string): boolean {
 }
 const DELETE_ONLY_TYPES: string[] = []
 const HOLE_TYPES = ['slab', 'ceiling']
-// Kinds edited through in-world gizmos get inZOI's blue '확인' pill.
-const CONFIRM_TYPES = ['item', 'cabinet', 'shelf', 'door', 'window']
 
 // Menu scales with camera zoom so it feels anchored to the object, but is
 // clamped on both ends so it stays readable when zoomed way out and doesn't
@@ -146,6 +144,23 @@ const MENU_Y_OFFSETS: Record<string, number> = {
 const MENU_Y_OFFSET_HEIGHT_HANDLE = 0.45
 // Screen-space gap between the pill's tail tip and the anchor.
 const MENU_PIXEL_OFFSET = 10
+// Gap between the anchor and the menu box (the tail fills the last 8px).
+const MENU_GAP = MENU_PIXEL_OFFSET + 8
+// Keeps the menu this far inside the canvas edges.
+const MENU_EDGE_MARGIN = 8
+// HUD chrome is re-measured this often (frames), not on every frame.
+const HUD_REFRESH_FRAMES = 15
+
+type ScreenRect = { left: number; top: number; right: number; bottom: number }
+
+const overlaps = (a: ScreenRect, b: ScreenRect) =>
+  a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+
+function measureHudRects(): ScreenRect[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-hud-avoid]'), (el) =>
+    el.getBoundingClientRect(),
+  ).filter((rect) => rect.width > 0 && rect.height > 0)
+}
 
 function hasVerticalHandle(node: AnyNode): boolean {
   const handles = nodeRegistry.get(node.type)?.handles
@@ -177,6 +192,7 @@ function getAttributeVersion(
 // dragged node doesn't allocate a fresh Box3 + Vector3 every frame.
 const _anchorBox = new THREE.Box3()
 const _anchorCenter = new THREE.Vector3()
+const _projected = new THREE.Vector3()
 
 function getObjectGeometryKey(object: THREE.Object3D): string {
   const parts: string[] = []
@@ -264,7 +280,13 @@ export function FloatingActionMenu() {
   const menuStepBack = resolveOverlayPolicy(scope).conflictingControls === 'hidden'
 
   const groupRef = useRef<THREE.Group>(null)
+  const placeRef = useRef<HTMLDivElement>(null)
   const menuScaleRef = useRef<HTMLDivElement>(null)
+  // Flipped under the object when above it the menu would leave the canvas or
+  // slide under the top HUD (tool bar, selection filter row).
+  const [below, setBelow] = useState(false)
+  const hudRectsRef = useRef<{ frame: number; rects: ScreenRect[] }>({ frame: 0, rects: [] })
+  const menuScaleValueRef = useRef(1)
   const pillHeightRef = useRef<HTMLSpanElement>(null)
 
   // Cached world anchor. The anchor is derived from `Box3.setFromObject`,
@@ -276,16 +298,20 @@ export function FloatingActionMenu() {
   // reuse the cached anchor otherwise. (Also removes a per-frame
   // `setFromObject` for every selection.)
   const anchorRef = useRef(new THREE.Vector3())
+  // World Y of the object's bottom, where a flipped menu hangs from.
+  const anchorBottomRef = useRef(0)
   const hasAnchorRef = useRef(false)
   const lastMatrixRef = useRef(new THREE.Matrix4())
   const lastAnchorKeyRef = useRef<{
     id: string | null
     node: AnyNode | null
     geometryKey: string | null
+    cutaway: boolean
   }>({
     id: null,
     node: null,
     geometryKey: null,
+    cutaway: false,
   })
 
   // Only show for single selection of specific types
@@ -342,6 +368,7 @@ export function FloatingActionMenu() {
             Math.max(state.camera.position.distanceTo(groupRef.current.position), 0.001)
       const scale = Math.min(MAX_MENU_SCALE, Math.max(MIN_MENU_SCALE, raw))
       menuScaleRef.current.style.transform = `scale(${scale})`
+      menuScaleValueRef.current = scale
     }
 
     // Live height readout for the drag pill. The dragged height lands in
@@ -379,8 +406,12 @@ export function FloatingActionMenu() {
       // geometry-only change is the only thing left that could move the anchor.
       const overrideActive = useLiveNodeOverrides.getState().overrides.get(selectedId) != null
       const dragActive = activeHandleDrag?.nodeId === selectedId
+      // A wall seen as its cutaway stub anchors on the stub, not its hidden top.
+      const cutaway = node.type === 'wall' && isWallCutaway(obj)
       const selectionChanged =
-        lastAnchorKeyRef.current.id !== selectedId || lastAnchorKeyRef.current.node !== node
+        lastAnchorKeyRef.current.id !== selectedId ||
+        lastAnchorKeyRef.current.node !== node ||
+        lastAnchorKeyRef.current.cutaway !== cutaway
       const matrixChanged = !lastMatrixRef.current.equals(obj.matrixWorld)
 
       let geometryKey = lastAnchorKeyRef.current.geometryKey
@@ -402,27 +433,88 @@ export function FloatingActionMenu() {
           _anchorBox.setFromObject(obj)
           if (!_anchorBox.isEmpty()) {
             _anchorBox.getCenter(_anchorCenter)
+            const top = cutaway
+              ? Math.min(_anchorBox.max.y, obj.getWorldPosition(_projected).y + CUTAWAY_STUB_HEIGHT)
+              : _anchorBox.max.y
             // Position above the object. Per-type offsets clear each kind's
             // in-world chrome (height-resize arrows, measurement labels).
             anchorRef.current.set(
               _anchorCenter.x,
-              _anchorBox.max.y + getMenuYOffset(effectiveNode),
+              top + getMenuYOffset(effectiveNode),
               _anchorCenter.z,
             )
+            anchorBottomRef.current = _anchorBox.min.y
             hasAnchorRef.current = true
           }
         } else {
+          anchorBottomRef.current = obj.getWorldPosition(_projected).y
           hasAnchorRef.current = true
         }
         lastMatrixRef.current.copy(obj.matrixWorld)
-        lastAnchorKeyRef.current = { id: selectedId, node, geometryKey }
+        lastAnchorKeyRef.current = { id: selectedId, node, geometryKey, cutaway }
       }
 
       if (hasAnchorRef.current) {
         groupRef.current.position.copy(anchorRef.current)
+        placeMenu(state.camera, state.gl.domElement)
       }
     }
   })
+
+  // Keeps the menu on the canvas and clear of the HUD: above the object when
+  // it fits, else hanging under the object, else pushed just below the HUD.
+  const placeMenu = (camera: THREE.Camera, canvas: HTMLCanvasElement) => {
+    const place = placeRef.current
+    const menu = menuScaleRef.current
+    if (!(place && menu)) return
+    const hud = hudRectsRef.current
+    if (hud.frame-- <= 0) {
+      hud.rects = measureHudRects()
+      hud.frame = HUD_REFRESH_FRAMES
+    }
+    const bounds = canvas.getBoundingClientRect()
+    const toScreen = (y: number) => {
+      _projected.set(anchorRef.current.x, y, anchorRef.current.z).project(camera)
+      return {
+        x: bounds.left + ((_projected.x + 1) / 2) * bounds.width,
+        y: bounds.top + ((1 - _projected.y) / 2) * bounds.height,
+      }
+    }
+    const scale = menuScaleValueRef.current
+    const width = menu.offsetWidth * scale
+    const height = menu.offsetHeight * scale
+    const anchor = toScreen(anchorRef.current.y)
+    const left = Math.min(
+      Math.max(anchor.x - width / 2, bounds.left + MENU_EDGE_MARGIN),
+      bounds.right - MENU_EDGE_MARGIN - width,
+    )
+    const box = (top: number) => ({ left, top, right: left + width, bottom: top + height })
+    const fits = (top: number) =>
+      top >= bounds.top + MENU_EDGE_MARGIN &&
+      top + height <= bounds.bottom - MENU_EDGE_MARGIN &&
+      !hud.rects.some((rect) => overlaps(rect, box(top)))
+
+    const aboveTop = anchor.y - MENU_GAP - height
+    let top = aboveTop
+    let flip = false
+    if (!fits(aboveTop)) {
+      const belowTop = toScreen(anchorBottomRef.current).y + MENU_GAP
+      if (fits(belowTop)) {
+        top = belowTop
+        flip = true
+      } else {
+        const blocking = hud.rects.filter((rect) => overlaps(rect, box(aboveTop)))
+        top = Math.max(bounds.top + MENU_EDGE_MARGIN, ...blocking.map((rect) => rect.bottom + 4))
+      }
+    }
+    const dx = left - (anchor.x - width / 2)
+    const dy = flip ? top - anchor.y : top - aboveTop
+    place.style.transform = flip
+      ? `translate(calc(-50% + ${dx}px), ${dy}px)`
+      : `translate(calc(-50% + ${dx}px), calc(-100% - ${MENU_GAP}px + ${dy}px))`
+    menu.style.transformOrigin = flip ? 'top center' : 'bottom center'
+    if (flip !== below) setBelow(flip)
+  }
 
   const handleCurve = useCallback(
     (e: React.MouseEvent) => {
@@ -763,15 +855,17 @@ export function FloatingActionMenu() {
           zIndexRange={[25, 0]}
         >
           {/* Bottom-centre (the tail tip) sits a fixed few pixels above the
-              anchor, so the gap to the object doesn't change with zoom. */}
-          <div style={{ transform: `translate(-50%, calc(-100% - ${MENU_PIXEL_OFFSET + 8}px))` }}>
+              anchor, so the gap to the object doesn't change with zoom.
+              `placeMenu` refines this every frame. */}
+          <div ref={placeRef} style={{ transform: `translate(-50%, calc(-100% - ${MENU_GAP}px))` }}>
             <div
               className="relative"
               ref={menuScaleRef}
               style={{ transformOrigin: 'bottom center' }}
             >
               <NodeActionMenu
-                onConfirm={node && CONFIRM_TYPES.includes(node.type) ? handleConfirm : undefined}
+                onConfirm={node && hasConfirmAction(node.type) ? handleConfirm : undefined}
+                tail={below ? 'up' : 'down'}
                 onFind={node && canFindNode ? handleFind : undefined}
                 onAddHole={node && HOLE_TYPES.includes(node.type) ? handleAddHole : undefined}
                 onCurve={
@@ -840,16 +934,16 @@ export function FloatingActionMenu() {
                   {hasAxisCycling(node.type) ? (
                     <div className="flex items-center gap-2 whitespace-nowrap rounded-full border border-border/60 bg-background/90 px-4 py-1.5 text-xs tabular-nums shadow-sm backdrop-blur">
                       <span className="font-medium text-foreground">
-                        Axis {rotationAxis.toUpperCase()}
+                        회전축 {rotationAxis.toUpperCase()}
                       </span>
                       <span aria-hidden className="text-muted-foreground">
                         ·
                       </span>
-                      <span className="text-muted-foreground">R/T rotate</span>
+                      <span className="text-muted-foreground">R/T 회전</span>
                       <span aria-hidden className="text-muted-foreground">
                         ·
                       </span>
-                      <span className="text-muted-foreground">⌥ axis</span>
+                      <span className="text-muted-foreground">⌥ 축 전환</span>
                     </div>
                   ) : null}
                 </div>
@@ -860,6 +954,14 @@ export function FloatingActionMenu() {
       </group>
     </group>
   )
+}
+
+const SYSTEM_NAMES: Record<string, string> = {
+  supply: '급기',
+  return: '환기',
+  refrigerant: '냉매',
+  waste: '배수',
+  vent: '통기',
 }
 
 /**
@@ -879,8 +981,8 @@ function SystemSummaryPill({ nodeId, unit }: { nodeId: AnyNodeId; unit: LinearUn
     <div className="flex items-center gap-2 whitespace-nowrap rounded-full border border-border/60 bg-background/90 px-4 py-1.5 text-xs tabular-nums shadow-sm backdrop-blur">
       <span className="font-medium text-foreground">
         {summary.systems.length > 0
-          ? summary.systems.map((sys) => sys[0]!.toUpperCase() + sys.slice(1)).join(' + ')
-          : 'System'}
+          ? summary.systems.map((sys) => SYSTEM_NAMES[sys] ?? sys).join(' + ')
+          : '계통'}
       </span>
       {summary.runCount > 0 ? (
         <>
@@ -888,8 +990,7 @@ function SystemSummaryPill({ nodeId, unit }: { nodeId: AnyNodeId; unit: LinearUn
             ·
           </span>
           <span className="text-muted-foreground">
-            {formatMeasurement(summary.runLengthM, unit)} · {summary.runCount}{' '}
-            {summary.runCount === 1 ? 'run' : 'runs'}
+            {formatMeasurement(summary.runLengthM, unit)} · 구간 {summary.runCount}개
           </span>
         </>
       ) : null}
@@ -898,9 +999,7 @@ function SystemSummaryPill({ nodeId, unit }: { nodeId: AnyNodeId; unit: LinearUn
           <span aria-hidden className="text-muted-foreground">
             ·
           </span>
-          <span className="text-muted-foreground">
-            {summary.terminalCount} {summary.terminalCount === 1 ? 'register' : 'registers'}
-          </span>
+          <span className="text-muted-foreground">토출구 {summary.terminalCount}개</span>
         </>
       ) : null}
       {summary.connectedToEquipment ? null : (
@@ -908,7 +1007,7 @@ function SystemSummaryPill({ nodeId, unit }: { nodeId: AnyNodeId; unit: LinearUn
           <span aria-hidden className="text-muted-foreground">
             ·
           </span>
-          <span className="font-medium text-amber-500">⚠ no equipment</span>
+          <span className="font-medium text-amber-500">⚠ 장비 미연결</span>
         </>
       )}
     </div>

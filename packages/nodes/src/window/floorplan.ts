@@ -10,6 +10,7 @@ import {
   type WallNode,
   type WindowNode,
 } from '@pascal-app/core'
+import { SELECTION_ACCENT, SELECTION_FILL } from '../shared/floorplan-selection'
 import { buildOpeningPlacementDimensions } from '../shared/opening-placement-dimensions'
 
 /**
@@ -66,9 +67,9 @@ export function buildWindowFloorplan(
   const showSelectedChrome = isSelected || isHighlighted
 
   // Same selection treatment as door — selected windows get a full
-  // orange body + outline so they read as the active target.
-  const accentColor = showSelectedChrome ? '#f97316' : 'rgba(31, 41, 55, 0.92)'
-  const fillColor = showSelectedChrome ? '#fed7aa' : 'rgba(255, 255, 255, 0.96)'
+  // selection-blue body + outline so they read as the active target.
+  const accentColor = showSelectedChrome ? SELECTION_ACCENT : 'rgba(31, 41, 55, 0.92)'
+  const fillColor = showSelectedChrome ? SELECTION_FILL : 'rgba(255, 255, 255, 0.96)'
 
   // Inner inset rectangle (the glass pane outline). Tangent inset
   // pulls the long sides in slightly; normal inset reduces the depth.
@@ -201,7 +202,7 @@ function lxWindowSymbol(
     cx + (dirX * x - dirZ * z) / 1000,
     cz + (dirZ * x + dirX * z) / 1000,
   ]
-  const stroke = selected ? '#f97316' : '#536078'
+  const stroke = selected ? SELECTION_ACCENT : '#536078'
   const line = { stroke, strokeWidth: 0.7, vectorEffect: 'non-scaling-stroke' as const }
   const base: FloorplanGeometry = { kind: 'polygon', points: footprint, fill: LX_PLAN_BACKGROUND }
   if (lxWindowError(node) || !node.windowSystem) {

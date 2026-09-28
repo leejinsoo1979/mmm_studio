@@ -55,7 +55,11 @@ import {
   ZoneNode as ZoneNodeSchema,
   type ZoneNode as ZoneNodeType,
 } from '@pascal-app/core'
-import { useSegmentDraftChain, useWallSnapIndicator } from '@pascal-app/editor'
+import {
+  markToolCancelConsumed,
+  useSegmentDraftChain,
+  useWallSnapIndicator,
+} from '@pascal-app/editor'
 import { getSceneTheme, useViewer } from '@pascal-app/viewer'
 import { Command, Ruler } from 'lucide-react'
 import {
@@ -8364,6 +8368,9 @@ export function FloorplanPanel({
 
   useEffect(() => {
     const handleCancel = () => {
+      // Esc on an open wall / rectangle-room draft cancels only the draft and
+      // keeps the tool armed, as the 3D tools do.
+      if (useSegmentDraftChain.getState().wall) markToolCancelConsumed()
       clearDraft()
     }
 

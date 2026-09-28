@@ -74,6 +74,8 @@ const GraphSchema = z.object({
   nodes: z.record(z.string(), z.unknown()),
   rootNodeIds: z.array(z.string()),
   collections: z.record(z.string(), z.unknown()).optional(),
+  // Scene materials that painted slots refer to by `scene:` ref.
+  materials: z.record(z.string(), z.unknown()).optional(),
 })
 
 /**

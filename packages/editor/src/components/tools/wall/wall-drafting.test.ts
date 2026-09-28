@@ -282,6 +282,65 @@ describe('wall draft commit', () => {
     undo()
     expect(levelWalls()).toHaveLength(1)
   })
+
+  test('a room dropped against a wall shares it: the host splits at the corners, no doubled wall', () => {
+    useWallSnapping('grid')
+    const corners: WallPlanPoint[] = [
+      [1, 0],
+      [3, 0],
+      [3, 2],
+      [1, 2],
+    ]
+    const created = createWallSegmentsOnCurrentLevel(
+      corners.map((corner, index) => [corner, corners[(index + 1) % corners.length]!]),
+    )
+
+    expect(created).toHaveLength(3)
+    expect(
+      levelWalls()
+        .filter((wall) => wall.start[1] === 0 && wall.end[1] === 0)
+        .map((wall) => [wall.start, wall.end])
+        .sort((a, b) => a[0]![0] - b[0]![0]),
+    ).toEqual([
+      [
+        [0, 0],
+        [1, 0],
+      ],
+      [
+        [1, 0],
+        [3, 0],
+      ],
+      [
+        [3, 0],
+        [4, 0],
+      ],
+    ])
+    expect(levelNodesOfType('slab')).toHaveLength(1)
+    expect(historySteps()).toBe(1)
+
+    undo()
+    expect(levelWalls().map((wall) => [wall.id, wall.start, wall.end])).toEqual([
+      ['wall_a', [0, 0], [4, 0]],
+    ])
+  })
+
+  test('only the stretch past an existing wall is built', () => {
+    useWallSnapping('grid')
+    const created = createWallSegmentsOnCurrentLevel([
+      [
+        [-1, 0],
+        [2, 0],
+      ],
+    ])
+
+    expect(created.map((wall) => [wall.start, wall.end])).toEqual([
+      [
+        [-1, 0],
+        [0, 0],
+      ],
+    ])
+    expect(levelWalls()).toHaveLength(3)
+  })
 })
 
 describe('wall draft alignment', () => {

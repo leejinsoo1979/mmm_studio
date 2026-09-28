@@ -87,9 +87,14 @@ function useMemoryStoreWarning(): boolean {
   return memory
 }
 
-/** The palette's own Esc handler closes it, exactly like its 확인 button. */
+/**
+ * The palette's own Esc handler closes it, exactly like its 확인 button. The
+ * key starts where a real one would, so the palette's capture listener takes
+ * it before the editor's Esc (which would also drop the selection).
+ */
 function leaveCustomize() {
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  const target = document.activeElement ?? document.body
+  target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
 }
 
 function BackButton({ customizing }: { customizing: boolean }) {

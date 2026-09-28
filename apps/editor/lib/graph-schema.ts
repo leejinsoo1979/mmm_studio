@@ -1,4 +1,4 @@
-import { AnyNode } from '@pascal-app/core/schema'
+import { AnyNode, SceneMaterial } from '@pascal-app/core/schema'
 import { CabinetNode, CountertopNode } from '@pascal-app/nodes/cabinet/schema'
 import { z } from 'zod'
 
@@ -44,6 +44,20 @@ export const apiGraphSchema = z
     nodes: z.record(z.string(), z.unknown()),
     rootNodeIds: z.array(z.string()),
     collections: z.unknown().optional(),
+    // Custom colours and tuned finishes live here; node slots hold `scene:` refs
+    // to them. An entry that fails validation (e.g. a disallowed texture URL) is
+    // dropped rather than rejecting the whole save.
+    materials: z
+      .record(z.string(), z.unknown())
+      .transform((materials) =>
+        Object.fromEntries(
+          Object.entries(materials).flatMap(([id, material]) => {
+            const res = SceneMaterial.safeParse(material)
+            return res.success ? [[id, res.data]] : []
+          }),
+        ),
+      )
+      .optional(),
   })
   .superRefine((value, ctx) => {
     for (const [nodeId, node] of Object.entries(value.nodes)) {

@@ -2,11 +2,11 @@ import { type AnyNodeId, type SlabNode, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import Image from 'next/image'
 import { memo, useCallback, useState } from 'react'
-import { formatAreaLabel } from './../../../../../lib/measurements'
 import useEditor from './../../../../../store/use-editor'
 import { InlineRenameInput } from './inline-rename-input'
 import { focusTreeNode, handleTreeSelection, TreeNodeWrapper } from './tree-node'
 import { TreeNodeActions } from './tree-node-actions'
+import { formatFloorArea } from './area-label'
 
 interface SlabTreeNodeProps {
   nodeId: AnyNodeId
@@ -47,7 +47,7 @@ export const SlabTreeNode = memo(function SlabTreeNode({
   const handleStartEditing = useCallback(() => setIsEditing(true), [])
   const handleStopEditing = useCallback(() => setIsEditing(false), [])
 
-  const defaultName = `바닥 (${formatAreaLabel(calculatePolygonArea(polygon), unit)})`
+  const defaultName = `바닥 (${formatFloorArea(calculatePolygonArea(polygon), unit)})`
 
   return (
     <TreeNodeWrapper

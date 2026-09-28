@@ -64,13 +64,15 @@ export function useDrag(
  * part had when the card opened and a clear button on top; a saturation /
  * brightness square and a hue bar below, with `extra` (saved colours) beside
  * them. Dragging calls `onPreview`; letting go (or Enter in the field) calls
- * `onCommit`, so a drag is one change.
+ * `onCommit`, so a drag is one change. The original chip calls `onRestore`
+ * when given (to put back the finish itself, not just its colour).
  */
 export function ColorPicker({
   value,
   original,
   onPreview,
   onCommit,
+  onRestore,
   onClear,
   extra,
 }: {
@@ -78,6 +80,7 @@ export function ColorPicker({
   original?: string
   onPreview: (hex: string) => void
   onCommit: (hex: string) => void
+  onRestore?: () => void
   onClear?: () => void
   extra?: ReactNode
 }) {
@@ -131,7 +134,7 @@ export function ColorPicker({
           <button
             aria-label="처음 색으로"
             className="size-4 shrink-0 rounded-[4px] ring-1 ring-black/10 transition-transform hover:scale-110"
-            onClick={() => onCommit(original)}
+            onClick={() => (onRestore ? onRestore() : onCommit(original))}
             style={{ background: original }}
             title="처음 색으로"
             type="button"

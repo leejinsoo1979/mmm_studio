@@ -12,7 +12,7 @@ import {
   useScene,
   type WallNode,
 } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { CUTAWAY_STUB_HEIGHT, useViewer } from '@pascal-app/viewer'
 import { createPortal, type ThreeEvent, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -32,6 +32,7 @@ import {
 } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
+import { useWallCutaway } from '../../hooks/use-wall-cutaway'
 import { endpointReshapeScope } from '../../lib/interaction/scope'
 import { sfxEmitter } from '../../lib/sfx-bus'
 import useEditor from '../../store/use-editor'
@@ -40,7 +41,12 @@ import useInteractionScope, {
   useIsCurveReshape,
   useMovingNode,
 } from '../../store/use-interaction-scope'
+import { useUiHidden } from '../../store/use-ui-hidden'
 import { suppressBoxSelectForPointer } from '../tools/select/box-select-state'
+import {
+  ARROW_COLOR as SELECTION_HANDLE_COLOR,
+  ARROW_HOVER_COLOR as SELECTION_HANDLE_HOVER_COLOR,
+} from './handles/handle-arrow'
 import {
   createArrowHitAreaGeometry,
   createEndpointHitAreaGeometry,
@@ -55,9 +61,9 @@ const HANDLE_MIN_HEIGHT = 0.4
 const HANDLE_TOP_INSET = 0.08
 const HEIGHT_HANDLE_OFFSET = 0.26
 const MIN_WALL_HEIGHT = 0.5
-// The selected wall's violet, shared with the 2D plan's wall handles.
-const ARROW_COLOR = '#7563ff'
-const ARROW_HOVER_COLOR = '#9d93ff'
+// The selection blue every in-world handle uses, shared with the 2D plan.
+const ARROW_COLOR = SELECTION_HANDLE_COLOR
+const ARROW_HOVER_COLOR = SELECTION_HANDLE_HOVER_COLOR
 const CORNER_FILL_COLOR = '#ffffff'
 // Match the door arrows: scale the rendered chevron down to ~two-thirds
 // so the in-world handles read as a single UI family.
@@ -129,6 +135,7 @@ export function WallMoveSideHandles() {
   const movingNode = useMovingNode()
   const endpointReshape = useEndpointReshape()
   const isCurveReshape = useIsCurveReshape()
+  const customizing = useUiHidden((state) => state.customizing)
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
   // Fence side-move / height / corner-pickers now flow through the
@@ -147,7 +154,8 @@ export function WallMoveSideHandles() {
     mode !== 'delete' &&
     !movingNode &&
     !endpointReshape &&
-    !isCurveReshape
+    !isCurveReshape &&
+    !customizing
 
   if (!shouldRender || !selectedNode) return null
 
@@ -161,9 +169,22 @@ function WallMoveSideHandlesForWall({ wall }: { wall: WallNode }) {
   // until commit, so reading `wall` alone would freeze them. Same pattern
   // as node-arrow-handles.
   const liveOverride = useLiveNodeOverrides((state) => state.overrides.get(wall.id))
+  // A wall seen as its cutaway stub keeps its handles on the stub; its height
+  // arrow would point at a top that isn't drawn, so it waits for a full view.
+  const cutaway = useWallCutaway(wall.id)
   const effectiveWall = useMemo(
     () => (liveOverride ? ({ ...wall, ...liveOverride } as WallNode) : wall),
     [wall, liveOverride],
+  )
+  const shownWall = useMemo(
+    () =>
+      cutaway
+        ? {
+            ...effectiveWall,
+            height: Math.min(effectiveWall.height ?? DEFAULT_WALL_HEIGHT, CUTAWAY_STUB_HEIGHT),
+          }
+        : effectiveWall,
+    [cutaway, effectiveWall],
   )
 
   const [levelObject, setLevelObject] = useState<Object3D | null>(() =>
@@ -198,7 +219,7 @@ function WallMoveSideHandlesForWall({ wall }: { wall: WallNode }) {
     }
   }, [wall.parentId])
 
-  const handles = useMemo(() => getWallMoveHandles(effectiveWall), [effectiveWall])
+  const handles = useMemo(() => getWallMoveHandles(shownWall), [shownWall])
 
   if (!levelObject || handles.length === 0) return null
 
@@ -207,9 +228,9 @@ function WallMoveSideHandlesForWall({ wall }: { wall: WallNode }) {
       {handles.map((handle) => (
         <WallMoveArrowHandle handle={handle} key={handle.key} wall={effectiveWall} />
       ))}
-      <WallHeightArrowHandle wall={effectiveWall} />
-      <WallCornerLeaderHandle endpoint="start" wall={effectiveWall} />
-      <WallCornerLeaderHandle endpoint="end" wall={effectiveWall} />
+      {!cutaway && <WallHeightArrowHandle wall={effectiveWall} />}
+      <WallCornerLeaderHandle endpoint="start" wall={shownWall} />
+      <WallCornerLeaderHandle endpoint="end" wall={shownWall} />
     </group>,
     levelObject,
   )

@@ -11,7 +11,7 @@
 // already consume `triggerSFX`. Producers clear on commit, cancel, and
 // unmount.
 
-import type { AnyNode } from '@pascal-app/core'
+import type { AnyNode, FloorplanGeometry } from '@pascal-app/core'
 import { create } from 'zustand'
 
 type PlacementPreviewState = {
@@ -25,15 +25,22 @@ type PlacementPreviewState = {
    *  the faithful blueprint symbol instead of a bare rectangle. `null` for
    *  self-contained kinds (column / elevator). */
   parentNode: AnyNode | null
+  /** A tool's own ready-made plan ghost, drawn as given (no kind builder, no
+   *  fade) — for a preview that is no single node, e.g. a 방 preset's ring of
+   *  walls. */
+  geometry: FloorplanGeometry | null
   set(node: AnyNode | null, parentNode?: AnyNode | null): void
+  setGeometry(geometry: FloorplanGeometry | null): void
   clear(): void
 }
 
 const usePlacementPreview = create<PlacementPreviewState>((set) => ({
   node: null,
   parentNode: null,
+  geometry: null,
   set: (node, parentNode = null) => set({ node, parentNode }),
-  clear: () => set({ node: null, parentNode: null }),
+  setGeometry: (geometry) => set({ geometry }),
+  clear: () => set({ node: null, parentNode: null, geometry: null }),
 }))
 
 export default usePlacementPreview

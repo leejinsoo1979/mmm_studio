@@ -57,7 +57,7 @@ export const TreeNodeActions = memo(function TreeNodeActions({ nodeId }: TreeNod
       <button
         className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-foreground/10"
         onClick={toggleVisibility}
-        title={isVisible ? 'Hide' : 'Show'}
+        title={isVisible ? '숨기기' : '보이기'}
       >
         {isVisible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3 opacity-50" />}
       </button>
@@ -67,7 +67,7 @@ export const TreeNodeActions = memo(function TreeNodeActions({ nodeId }: TreeNod
           <button
             className="relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-foreground/10"
             onClick={(e) => e.stopPropagation()}
-            title="Camera snapshot"
+            title="카메라 스냅샷"
           >
             <Camera className="h-3 w-3" />
             {hasCamera && (
@@ -88,7 +88,7 @@ export const TreeNodeActions = memo(function TreeNodeActions({ nodeId }: TreeNod
                 onClick={handleViewCamera}
               >
                 <Camera className="h-3.5 w-3.5" />
-                View snapshot
+                스냅샷 보기
               </button>
             )}
             <button
@@ -96,7 +96,7 @@ export const TreeNodeActions = memo(function TreeNodeActions({ nodeId }: TreeNod
               onClick={handleCaptureCamera}
             >
               <Camera className="h-3.5 w-3.5" />
-              {hasCamera ? 'Update snapshot' : 'Take snapshot'}
+              {hasCamera ? '스냅샷 갱신' : '스냅샷 찍기'}
             </button>
             {hasCamera && (
               <button
@@ -104,7 +104,7 @@ export const TreeNodeActions = memo(function TreeNodeActions({ nodeId }: TreeNod
                 onClick={handleClearCamera}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Clear snapshot
+                스냅샷 지우기
               </button>
             )}
           </div>

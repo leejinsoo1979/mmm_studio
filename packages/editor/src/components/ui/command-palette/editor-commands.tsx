@@ -78,72 +78,72 @@ export function EditorCommands() {
       // ── Scene ────────────────────────────────────────────────────────────
       {
         id: 'editor.tool.wall',
-        label: 'Wall Tool',
-        group: 'Scene',
+        label: '벽 그리기',
+        group: '장면',
         icon: <Square className="h-4 w-4" />,
         keywords: ['draw', 'build', 'structure'],
         execute: () => activateTool('wall'),
       },
       {
         id: 'editor.tool.slab',
-        label: 'Slab Tool',
-        group: 'Scene',
+        label: '바닥 그리기',
+        group: '장면',
         icon: <Layers className="h-4 w-4" />,
         keywords: ['floor', 'build'],
         execute: () => activateTool('slab'),
       },
       {
         id: 'editor.tool.ceiling',
-        label: 'Ceiling Tool',
-        group: 'Scene',
+        label: '천장 그리기',
+        group: '장면',
         icon: <Grid3X3 className="h-4 w-4" />,
         keywords: ['top', 'build'],
         execute: () => activateTool('ceiling'),
       },
       {
         id: 'editor.tool.door',
-        label: 'Door Tool',
-        group: 'Scene',
+        label: '문 달기',
+        group: '장면',
         icon: <DoorOpen className="h-4 w-4" />,
         keywords: ['opening', 'entrance'],
         execute: () => activateTool('door'),
       },
       {
         id: 'editor.tool.window',
-        label: 'Window Tool',
-        group: 'Scene',
+        label: '창문 달기',
+        group: '장면',
         icon: <AppWindow className="h-4 w-4" />,
         keywords: ['opening', 'glass'],
         execute: () => activateTool('window'),
       },
       {
         id: 'editor.tool.item',
-        label: 'Item Tool',
-        group: 'Scene',
+        label: '사물 배치',
+        group: '장면',
         icon: <Package className="h-4 w-4" />,
         keywords: ['furniture', 'object', 'asset', 'furnish'],
         execute: () => activateTool('item'),
       },
       {
         id: 'editor.tool.stair',
-        label: 'Stair Tool',
-        group: 'Scene',
+        label: '계단 놓기',
+        group: '장면',
         icon: <ArrowRight className="h-4 w-4" />,
         keywords: ['stairs', 'staircase', 'flight', 'landing', 'steps'],
         execute: () => activateTool('stair'),
       },
       {
         id: 'editor.tool.zone',
-        label: 'Zone Tool',
-        group: 'Scene',
+        label: '방 · 구역',
+        group: '장면',
         icon: <Hexagon className="h-4 w-4" />,
         keywords: ['area', 'room', 'space'],
         execute: () => activateTool('zone'),
       },
       {
         id: 'editor.delete-selection',
-        label: 'Delete Selection',
-        group: 'Scene',
+        label: '선택 항목 삭제',
+        group: '장면',
         icon: <Trash2 className="h-4 w-4" />,
         keywords: ['remove', 'erase'],
         shortcut: ['⌫'],
@@ -156,8 +156,8 @@ export function EditorCommands() {
       },
       {
         id: 'editor.mode.material-paint',
-        label: 'Material Paint',
-        group: 'Scene',
+        label: '재질 칠하기',
+        group: '장면',
         icon: <PaintBucket className="h-4 w-4" />,
         keywords: ['paint', 'material', 'texture', 'bucket', 'surface'],
         shortcut: ['P'],
@@ -173,8 +173,8 @@ export function EditorCommands() {
       // ── Levels ───────────────────────────────────────────────────────────
       {
         id: 'editor.level.goto',
-        label: 'Go to Level',
-        group: 'Levels',
+        label: '층 이동',
+        group: '층',
         icon: <ArrowRight className="h-4 w-4" />,
         keywords: ['level', 'floor', 'go', 'navigate', 'switch', 'select'],
         navigate: true,
@@ -183,8 +183,8 @@ export function EditorCommands() {
       },
       {
         id: 'editor.level.add',
-        label: 'Add Level',
-        group: 'Levels',
+        label: '층 추가',
+        group: '층',
         icon: <Plus className="h-4 w-4" />,
         keywords: ['level', 'floor', 'add', 'create', 'new'],
         execute: () =>
@@ -206,8 +206,8 @@ export function EditorCommands() {
       },
       {
         id: 'editor.level.rename',
-        label: 'Rename Level',
-        group: 'Levels',
+        label: '층 이름 바꾸기',
+        group: '층',
         icon: <PencilLine className="h-4 w-4" />,
         keywords: ['level', 'floor', 'rename', 'name'],
         navigate: true,
@@ -222,8 +222,8 @@ export function EditorCommands() {
       },
       {
         id: 'editor.level.delete',
-        label: 'Delete Level',
-        group: 'Levels',
+        label: '층 삭제',
+        group: '층',
         icon: <Trash2 className="h-4 w-4" />,
         keywords: ['level', 'floor', 'delete', 'remove'],
         when: () => {
@@ -243,26 +243,26 @@ export function EditorCommands() {
       // ── Viewer Controls ──────────────────────────────────────────────────
       {
         id: 'editor.viewer.wall-mode',
-        label: 'Wall Mode',
-        group: 'Viewer Controls',
+        label: '벽 보기',
+        group: '보기 조절',
         icon: <Layers className="h-4 w-4" />,
         keywords: ['wall', 'cutaway', 'up', 'down', 'translucent', 'view'],
         badge: () => {
           const mode = useViewer.getState().wallMode
-          return { cutaway: 'Cutaway', up: 'Up', down: 'Down', translucent: 'Translucent' }[mode]
+          return { cutaway: '벽 자르기', up: '벽 올리기', down: '벽 내리기', translucent: '반투명 벽' }[mode]
         },
         navigate: true,
         execute: () => navigateTo('wall-mode'),
       },
       {
         id: 'editor.viewer.level-mode',
-        label: 'Level Mode',
-        group: 'Viewer Controls',
+        label: '층 보기',
+        group: '보기 조절',
         icon: <SquareStack className="h-4 w-4" />,
         keywords: ['level', 'floor', 'exploded', 'stacked', 'solo'],
         badge: () => {
           const mode = useViewer.getState().levelMode
-          return { manual: 'Manual', stacked: 'Stacked', exploded: 'Exploded', solo: 'Solo' }[mode]
+          return { manual: '직접', stacked: '층 쌓기', exploded: '층 펼치기', solo: '한 층만' }[mode]
         },
         navigate: true,
         execute: () => navigateTo('level-mode'),
@@ -271,9 +271,9 @@ export function EditorCommands() {
         id: 'editor.viewer.camera-mode',
         label: () => {
           const mode = useViewer.getState().cameraMode
-          return `Camera: Switch to ${mode === 'perspective' ? 'Orthographic' : 'Perspective'}`
+          return `카메라: ${mode === 'perspective' ? '평행 투영으로' : '원근으로'} 바꾸기`
         },
-        group: 'Viewer Controls',
+        group: '보기 조절',
         icon: <Video className="h-4 w-4" />,
         keywords: ['camera', 'ortho', 'perspective', '2d', '3d', 'view'],
         execute: () =>
@@ -284,32 +284,32 @@ export function EditorCommands() {
       },
       {
         id: 'editor.viewer.shading-solid',
-        label: 'Switch to Solid',
-        group: 'Viewer Controls',
+        label: '렌더: 단색',
+        group: '보기 조절',
         icon: <Box className="h-4 w-4" />,
         keywords: ['solid', 'shading', 'render', 'mode', 'performance'],
         execute: () => run(() => useViewer.getState().setShading('solid')),
       },
       {
         id: 'editor.viewer.shading-rendered',
-        label: 'Switch to Rendered',
-        group: 'Viewer Controls',
+        label: '렌더: 기본',
+        group: '보기 조절',
         icon: <Sparkles className="h-4 w-4" />,
         keywords: ['rendered', 'shading', 'render', 'mode', 'quality'],
         execute: () => run(() => useViewer.getState().setShading('rendered')),
       },
       {
         id: 'editor.viewer.shading-hyper',
-        label: 'Switch to Hyper Render',
-        group: 'Viewer Controls',
+        label: '렌더: 고품질',
+        group: '보기 조절',
         icon: <Gem className="h-4 w-4" />,
         keywords: ['hyper', 'shading', 'render', 'mode', 'quality', 'ultra'],
         execute: () => run(() => useViewer.getState().setShading('hyper')),
       },
       {
         id: 'editor.viewer.camera-snapshot',
-        label: 'Take Snapshot',
-        group: 'Viewer Controls',
+        label: '카메라 스냅샷 찍기',
+        group: '보기 조절',
         icon: <Camera className="h-4 w-4" />,
         keywords: ['camera', 'snapshot', 'capture', 'save', 'view', 'bookmark'],
         execute: () => {
@@ -321,16 +321,16 @@ export function EditorCommands() {
       // ── View ─────────────────────────────────────────────────────────────
       {
         id: 'editor.view.preview',
-        label: () => (isPreviewMode ? 'Exit Preview' : 'Enter Preview'),
-        group: 'View',
+        label: () => (isPreviewMode ? '미리보기 끝내기' : '미리보기'),
+        group: '보기',
         icon: isPreviewMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />,
         keywords: ['preview', 'view', 'read-only', 'present'],
         execute: () => run(() => setPreviewMode(!isPreviewMode)),
       },
       {
         id: 'editor.view.fullscreen',
-        label: 'Toggle Fullscreen',
-        group: 'View',
+        label: '전체 화면 전환',
+        group: '보기',
         icon: <Maximize2 className="h-4 w-4" />,
         keywords: ['fullscreen', 'maximize', 'expand', 'window'],
         execute: () =>
@@ -343,16 +343,16 @@ export function EditorCommands() {
       // ── History ──────────────────────────────────────────────────────────
       {
         id: 'editor.history.undo',
-        label: 'Undo',
-        group: 'History',
+        label: '되돌리기',
+        group: '기록',
         icon: <Undo2 className="h-4 w-4" />,
         keywords: ['undo', 'revert', 'back'],
         execute: () => run(() => runUndo()),
       },
       {
         id: 'editor.history.redo',
-        label: 'Redo',
-        group: 'History',
+        label: '다시하기',
+        group: '기록',
         icon: <Redo2 className="h-4 w-4" />,
         keywords: ['redo', 'forward', 'repeat'],
         execute: () => run(() => runRedo()),
@@ -361,8 +361,8 @@ export function EditorCommands() {
       // ── Export & Share ───────────────────────────────────────────────────
       {
         id: 'editor.export.json',
-        label: 'Export Scene (JSON)',
-        group: 'Export & Share',
+        label: '장면 내보내기 (JSON)',
+        group: '내보내기 · 공유',
         icon: <FileJson className="h-4 w-4" />,
         keywords: ['export', 'download', 'json', 'save', 'data'],
         execute: () =>
@@ -383,8 +383,8 @@ export function EditorCommands() {
         ? [
             {
               id: 'editor.export.glb',
-              label: 'Export 3D Model (GLB)',
-              group: 'Export & Share',
+              label: '3D 모델 내보내기 (GLB)',
+              group: '내보내기 · 공유',
               icon: <Box className="h-4 w-4" />,
               keywords: ['export', 'glb', 'gltf', '3d', 'model', 'download'],
               execute: () => run(() => exportScene()),
@@ -393,16 +393,16 @@ export function EditorCommands() {
         : []),
       {
         id: 'editor.export.share-link',
-        label: 'Copy Share Link',
-        group: 'Export & Share',
+        label: '공유 링크 복사',
+        group: '내보내기 · 공유',
         icon: <Copy className="h-4 w-4" />,
         keywords: ['share', 'copy', 'url', 'link'],
         execute: () => run(() => navigator.clipboard.writeText(window.location.href)),
       },
       {
         id: 'editor.export.screenshot',
-        label: 'Take Screenshot',
-        group: 'Export & Share',
+        label: '스크린샷 찍기',
+        group: '내보내기 · 공유',
         icon: <Camera className="h-4 w-4" />,
         keywords: ['screenshot', 'capture', 'image', 'photo', 'png'],
         execute: () =>

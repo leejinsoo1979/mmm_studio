@@ -599,16 +599,21 @@ export const WallTool: React.FC = () => {
     // exactly that length along the aim. Shown in the cursor readout.
     let typedBuffer = ''
     const typedUnitSuffix = unit === 'imperial' ? 'ft' : unit === 'centimeter' ? 'cm' : 'mm'
-    // Running total of the chain drawn so far plus the live segment — the
-    // readout next to the cursor (inZOI's cost line).
+    // The readout next to the cursor: the wall being drawn, then (once a chain
+    // has segments) the labelled running total of the whole chain.
     let chainLength = 0
     let segmentLength = 0
     const publishReadout = () => {
       const readout = useDraftReadout.getState()
       if (buildingState.current !== 1) readout.set(null)
       else if (typedBuffer) readout.set(`${typedBuffer}${typedUnitSuffix} ⏎`)
-      else if (chainLength + segmentLength < 0.01) readout.set(null)
-      else readout.set(formatLinearMeasurement(chainLength + segmentLength, unit))
+      else if (segmentLength < 0.01) readout.set(null)
+      else if (chainLength < 0.01) readout.set(formatLinearMeasurement(segmentLength, unit))
+      else {
+        readout.set(
+          `${formatLinearMeasurement(segmentLength, unit)} · 합계 ${formatLinearMeasurement(chainLength + segmentLength, unit)}`,
+        )
+      }
     }
     const clearTypedLength = () => {
       typedBuffer = ''

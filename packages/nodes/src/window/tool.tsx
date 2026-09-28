@@ -76,6 +76,14 @@ const roofFallbackPoint = new Vector3()
 type HostKind = 'wall' | 'roof' | null
 
 /**
+ * The window node fields a catalogue tile seeds in `toolDefaults.window`
+ * (쌍창's windowType, 아치창's openingShape …). Parsing strips the tile's own keys.
+ */
+function tileWindowFields(): Record<string, unknown> {
+  return useEditor.getState().toolDefaults.window ?? {}
+}
+
+/**
  * Window tool — places WindowNodes on walls and on roof-segment wall
  * faces (the generated base walls under a roof, including coplanar gable
  * ends — a window can sit in the gable pediment).
@@ -101,15 +109,17 @@ const WindowTool: React.FC = () => {
     side: WindowNode['side']
   } | null>(null)
 
+  const tileDefaults = useEditor((s) => s.toolDefaults.window)
   // Ghost preview node — zeroed transform + the live facing side (rebuilds on R).
   const ghostStub = useMemo(
     () =>
       WindowNode.parse({
+        ...tileDefaults,
         position: [0, 0, 0],
         rotation: [0, 0, 0],
         side: fallbackPose?.side ?? 'front',
       }),
-    [fallbackPose?.side],
+    [fallbackPose?.side, tileDefaults],
   )
   // The frame depth is a fixed parse default (the `side` flip doesn't change
   // it); a ref lets the facing-pose publish inside the setup effect read it
@@ -184,6 +194,10 @@ const WindowTool: React.FC = () => {
       group.visible = true
       group.position.set(...worldPosition)
       group.rotation.y = cursorRotationY
+      // The outline is built at the fallback size; fit it to the tile's draft.
+      const draft = draftRef.current
+      if (draft && edgesRef.current)
+        edgesRef.current.scale.set(draft.width / FALLBACK_WIDTH, draft.height / FALLBACK_HEIGHT, 1)
       edgeMaterial.color.setHex(valid ? 0x22_c5_5e : 0xef_44_44)
       // Forward-facing triangle (editor-side overlay). The cursor group is
       // already yawed so +Z faces out of the wall, so the window's front is +Z.
@@ -309,6 +323,7 @@ const WindowTool: React.FC = () => {
 
       if (!draftRef.current) {
         const node = WindowNode.parse({
+          ...tileWindowFields(),
           position: [0, DEFAULT_SILL_CENTER_Y, 0],
           rotation: [0, itemRotation, 0],
           side,
@@ -405,6 +420,7 @@ const WindowTool: React.FC = () => {
       }).length
 
       const node = WindowNode.parse({
+        ...tileWindowFields(),
         name: `Window ${windowCount + 1}`,
         position: [clampedX, clampedY, 0],
         rotation: [0, itemRotation, 0],
@@ -581,6 +597,7 @@ const WindowTool: React.FC = () => {
         })
       } else {
         const node = WindowNode.parse({
+          ...tileWindowFields(),
           position,
           rotation: [0, 0, 0],
           side: 'front',
@@ -619,6 +636,7 @@ const WindowTool: React.FC = () => {
       ).length
 
       const node = WindowNode.parse({
+        ...tileWindowFields(),
         name: `Window ${windowCount + 1}`,
         position,
         rotation: [0, 0, 0],
@@ -692,6 +710,11 @@ const WindowTool: React.FC = () => {
       // else: no preview yet — `sideFlip` is set, so the first hover/follow uses it.
     }
 
+    // Another window tile picked mid-placement: the next hover rebuilds the draft from it.
+    const unsubscribeTile = useEditor.subscribe((state, prev) => {
+      if (state.toolDefaults.window !== prev.toolDefaults.window) destroyDraft()
+    })
+
     emitter.on('wall:enter', onWallHover)
     emitter.on('wall:move', onWallHover)
     emitter.on('wall:click', onWallClick)
@@ -705,6 +728,7 @@ const WindowTool: React.FC = () => {
     window.addEventListener('keydown', onKeyDown)
 
     return () => {
+      unsubscribeTile()
       destroyDraft()
       hideCursor()
       useAlignmentGuides.getState().clear()

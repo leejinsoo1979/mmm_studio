@@ -11,6 +11,7 @@ import {
   roofFacePointToSegment,
   useLiveTransforms,
 } from '@pascal-app/core'
+import { SELECTION_ACCENT } from '../shared/floorplan-selection'
 
 /**
  * Stage C floor-plan builder for item.
@@ -241,7 +242,22 @@ export function buildItemFloorplan(node: ItemNode, ctx: GeometryContext): Floorp
     })
   }
 
-  // Move handle — orange dot at the item center. Only when selected and not
+  // Selected / hovered outline in the selection blue, over the plan image so
+  // it reads on any symbol — the 2D twin of the 3D selection edge.
+  const isHovered = ctx.viewState?.hovered ?? false
+  if (isSelected || isHovered) {
+    children.push({
+      kind: 'polygon',
+      points,
+      fill: 'none',
+      stroke: isSelected ? SELECTION_ACCENT : '#7fc3ef',
+      strokeWidth: isSelected ? 2 : 1.5,
+      vectorEffect: 'non-scaling-stroke',
+      pointerEvents: 'none',
+    })
+  }
+
+  // Move handle — a dot at the item center. Only when selected and not
   // already moving: during a move the dot sits under the cursor, so a release
   // over it would re-arm the move (and re-enter edit) instead of committing.
   if (isSelected && !isMoving) {

@@ -27,7 +27,7 @@ import { sfxEmitter } from '../../lib/sfx-bus'
 import useEditor from '../../store/use-editor'
 import { useMovingNode } from '../../store/use-interaction-scope'
 import { useUiHidden } from '../../store/use-ui-hidden'
-import { flashAbove, NodeActionMenu } from '../editor/node-action-menu'
+import { flashAbove, hasConfirmAction, NodeActionMenu } from '../editor/node-action-menu'
 import {
   canRotateNode,
   duplicateFlashText,
@@ -381,6 +381,14 @@ export function FloorplanRegistryActionMenu() {
       }}
     >
       <NodeActionMenu
+        onConfirm={
+          hasConfirmAction(node.type)
+            ? stop(() => {
+                sfxEmitter.emit('sfx:item-place')
+                useViewer.getState().setSelection({ selectedIds: [] })
+              })
+            : undefined
+        }
         onFind={canFindNode ? stop(() => findNode(node)) : undefined}
         onInspect={stop(toggleInspector)}
         onPaint={canPaintNode?.(node) ? stop(() => paintNode(node)) : undefined}

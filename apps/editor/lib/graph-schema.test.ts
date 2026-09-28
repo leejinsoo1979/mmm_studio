@@ -49,3 +49,34 @@ describe('apiGraphSchema level children', () => {
     expect(result.error?.issues ?? []).toEqual([])
   })
 })
+
+describe('apiGraphSchema scene materials', () => {
+  const cabinet = CabinetNode.parse({})
+  const material = (url?: string) => ({
+    id: 'mat_a',
+    name: '사용자 색',
+    material: {
+      preset: 'custom',
+      properties: { color: '#1e8449', roughness: 0.4 },
+      ...(url ? { texture: { url } } : {}),
+    },
+  })
+
+  test('keeps the materials that painted slots refer to', () => {
+    const result = apiGraphSchema.safeParse({
+      ...graphWith(cabinet),
+      materials: { mat_a: material() },
+    })
+    expect(result.success).toBe(true)
+    expect(result.data?.materials?.mat_a?.material.properties?.color).toBe('#1e8449')
+  })
+
+  test('drops a material with a disallowed texture URL without rejecting the save', () => {
+    const result = apiGraphSchema.safeParse({
+      ...graphWith(cabinet),
+      materials: { mat_a: material('/material/wood/a.webp'), mat_b: material('javascript:x') },
+    })
+    expect(result.success).toBe(true)
+    expect(Object.keys(result.data?.materials ?? {})).toEqual(['mat_a'])
+  })
+})

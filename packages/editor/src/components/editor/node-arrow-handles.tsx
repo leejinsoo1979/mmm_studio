@@ -55,6 +55,7 @@ import useInteractionScope, {
   useMovingNode,
 } from '../../store/use-interaction-scope'
 import useOpeningGuides from '../../store/use-opening-guides'
+import { useUiHidden } from '../../store/use-ui-hidden'
 import { formatAngleRadians } from '../tools/shared/segment-angle'
 import {
   ARROW_COLOR,
@@ -187,6 +188,8 @@ export function NodeArrowHandles() {
   // on the legacy wall handles (`WallMoveSideHandles`).
   const endpointReshape = useEndpointReshape()
   const isCurveReshape = useIsCurveReshape()
+  // The paint card judges the finish alone, as inZOI's customize view does.
+  const customizing = useUiHidden((state) => state.customizing)
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : activeRotateNodeId
   const rawNode = useScene((state) =>
@@ -228,7 +231,8 @@ export function NodeArrowHandles() {
     // sets `activeHandleDrag`, not `movingNode`, so those are unaffected.
     !movingNode &&
     !endpointReshape &&
-    !isCurveReshape
+    !isCurveReshape &&
+    !customizing
 
   if (!shouldRender || !node || !descriptors) return null
   // Key by the selected node id so switching selection REMOUNTS the rig.

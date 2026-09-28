@@ -172,8 +172,10 @@ export function snapContextOf(args: {
         ? contextForProfile(profileOf(scope.tool), draftDirectionalOf?.(scope.tool) ?? true)
         : null
     default:
-      return mode === 'build' && tool
-        ? contextForProfile(profileOf(tool), draftDirectionalOf?.(tool) ?? true)
-        : null
+      if (mode !== 'build' || !tool) return null
+      // The rectangle room is a wall placement mode, not a kind of its own:
+      // it snaps (and shows the magnet) exactly like drawing walls.
+      if (tool === 'rectangle-room') return 'wall'
+      return contextForProfile(profileOf(tool), draftDirectionalOf?.(tool) ?? true)
   }
 }

@@ -42,18 +42,16 @@ import {
 import { getDefaultLevelName } from '@pascal-app/core'
 import { deleteLevelWithFallbackSelection } from './../../../../../lib/level-selection'
 import {
-  formatAreaLabel,
-  getAreaUnitLabel,
   getLinearUnitLabel,
   linearUnitToMeters,
   metersToLinearUnit,
-  squareMetersToAreaUnit,
 } from './../../../../../lib/measurements'
 import { createLocalGuideImage } from './../../../../../lib/local-guide-image'
 import { cn } from './../../../../../lib/utils'
 import useEditor from './../../../../../store/use-editor'
 import { useUploadStore } from '../../../../../store/use-upload'
 import { LevelDuplicateDialog } from '../../../level-duplicate-dialog'
+import { formatFloorArea } from './area-label'
 import { InlineRenameInput } from './inline-rename-input'
 import { focusTreeNode, TreeNode } from './tree-node'
 import { TreeNodeDragProvider } from './tree-node-drag'
@@ -117,7 +115,6 @@ const PropertyLineSection = memo(function PropertyLineSection() {
   const linearLabel = getLinearUnitLabel(viewerUnit)
   const toDisplayLinear = (meters: number) => metersToLinearUnit(meters, viewerUnit)
   const toStoredLinear = (display: number) => linearUnitToMeters(display, viewerUnit)
-  const displayArea = squareMetersToAreaUnit(area, viewerUnit)
   const displayPerimeter = toDisplayLinear(perimeter)
 
   const handleToggleEdit = () => {
@@ -167,7 +164,7 @@ const PropertyLineSection = memo(function PropertyLineSection() {
 
         <div className="flex items-center gap-2">
           <Pentagon className="h-4 w-4 text-muted-foreground" />
-          <span className="font-medium text-sm">Property Line</span>
+          <span className="font-medium text-sm">대지 경계선</span>
         </div>
         <button
           className={cn(
@@ -185,13 +182,10 @@ const PropertyLineSection = memo(function PropertyLineSection() {
       {/* Measurements */}
       <div className="relative flex gap-3 pr-3 pb-2 pl-10">
         <div className="text-muted-foreground text-xs">
-          Area:{' '}
-          <span className="text-foreground">
-            {displayArea.toFixed(1)} {getAreaUnitLabel(viewerUnit)}
-          </span>
+          면적: <span className="text-foreground">{formatFloorArea(area, viewerUnit)}</span>
         </div>
         <div className="text-muted-foreground text-xs">
-          Perimeter:{' '}
+          둘레:{' '}
           <span className="text-foreground">
             {displayPerimeter.toFixed(1)} {linearLabel}
           </span>
@@ -245,7 +239,7 @@ const PropertyLineSection = memo(function PropertyLineSection() {
             onClick={handleAddPoint}
           >
             <Plus className="h-3 w-3" />
-            Add point
+            점 추가
           </button>
         </div>
       )}
@@ -379,13 +373,13 @@ const ReferenceItem = memo(function ReferenceItem({
       <div className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 py-0 pl-[60px] text-muted-foreground group-hover/ref:text-foreground">
         {refNode.type === 'scan' ? (
           <img
-            alt="Scan"
+            alt="스캔"
             className="h-3.5 w-3.5 shrink-0 object-contain opacity-70 transition-opacity group-hover/ref:opacity-100"
             src="/icons/mesh.webp"
           />
         ) : (
           <img
-            alt="Guide"
+            alt="가이드 이미지"
             className="h-3.5 w-3.5 shrink-0 object-contain opacity-70 transition-opacity group-hover/ref:opacity-100"
             src="/icons/floorplan.webp"
           />
@@ -467,7 +461,7 @@ const LevelReferences = memo(function LevelReferences({
       useUploadStore.getState().startUpload(levelId, type, file.name)
       useUploadStore
         .getState()
-        .setError(levelId, 'Invalid file type. Please upload a .glb/.gltf scan or an image.')
+        .setError(levelId, '지원하지 않는 파일입니다. .glb/.gltf 스캔 또는 이미지를 올려 주세요.')
       return
     }
 
@@ -477,7 +471,7 @@ const LevelReferences = memo(function LevelReferences({
         .getState()
         .setError(
           levelId,
-          `File is too large (${(file.size / 1024 / 1024).toFixed(0)} MB). Maximum size is 200 MB.`,
+          `파일이 너무 큽니다 (${(file.size / 1024 / 1024).toFixed(0)} MB). 최대 200 MB까지 올릴 수 있습니다.`,
         )
       return
     }
@@ -740,7 +734,7 @@ const LevelItem = memo(function LevelItem({
 
         <div className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 py-0 pl-0.5 text-sm">
           <img
-            alt="Level"
+            alt="층"
             className={cn(
               'h-4 w-4 shrink-0 object-contain transition-all duration-200',
               !isSelected && 'opacity-60 grayscale',
@@ -1134,7 +1128,7 @@ const ZoneItem = memo(function ZoneItem({ zone, isLast }: { zone: ZoneNode; isLa
     }
   }, [isSelected])
 
-  const defaultName = `방 (${formatAreaLabel(calculatePolygonArea(zone.polygon), unit)})`
+  const defaultName = `방 (${formatFloorArea(calculatePolygonArea(zone.polygon), unit)})`
 
   const handleClick = () => {
     setSelection({ zoneId: zone.id })
@@ -1325,7 +1319,7 @@ const ContentSection = memo(function ContentSection() {
 
   if (!level) {
     return (
-      <div className="px-3 py-4 text-muted-foreground text-sm">Select a level to view content</div>
+      <div className="px-3 py-4 text-muted-foreground text-sm">층을 선택하면 내용이 보입니다</div>
     )
   }
 
@@ -1432,7 +1426,7 @@ const BuildingItem = memo(function BuildingItem({
       >
         <div className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 py-2 pl-3">
           <img
-            alt="Building"
+            alt="건물"
             className={cn(
               'h-5 w-5 object-contain transition-all',
               !isBuildingActive && 'opacity-60 grayscale',
@@ -1588,7 +1582,7 @@ export function SitePanel({ projectId, onUploadAsset, onDeleteAsset }: SitePanel
           >
             <div className="flex items-center gap-2">
               <img
-                alt="Site"
+                alt="대지"
                 className={cn(
                   'h-5 w-5 object-contain transition-all',
                   phase !== 'site' && 'opacity-60 grayscale',

@@ -15,6 +15,7 @@ import {
   type WallNode,
   wallLeftNormal,
 } from '@pascal-app/core'
+import { SELECTION_ACCENT, SELECTION_FILL } from '../shared/floorplan-selection'
 import { buildOpeningPlacementDimensions } from '../shared/opening-placement-dimensions'
 
 /**
@@ -106,13 +107,12 @@ export function buildDoorFloorplan(node: DoorNode, ctx: GeometryContext): Floorp
   const isHighlighted = view?.highlighted ?? false
   const showSelectedChrome = isSelected || isHighlighted
 
-  // Match the legacy floor-plan door render: unselected is a quiet
-  // grey accent so the door reads as a hole in the wall, selected is
-  // a full orange treatment (body + outline) so the user can see at
-  // a glance which door is targeted by the inspector / move handle.
-  const accentColor = showSelectedChrome ? '#f97316' : 'rgba(100, 116, 139, 0.82)'
+  // Unselected is a quiet grey accent so the door reads as a hole in the
+  // wall; selected takes the selection blue (body + outline) so the user
+  // can see at a glance which door the inspector / move handle targets.
+  const accentColor = showSelectedChrome ? SELECTION_ACCENT : 'rgba(100, 116, 139, 0.82)'
   const accentMuted = accentColor
-  const fillColor = showSelectedChrome ? '#fed7aa' : '#ffffff'
+  const fillColor = showSelectedChrome ? SELECTION_FILL : '#ffffff'
 
   const children: FloorplanGeometry[] = [
     // Background — the cutout is filled white so the swing arc sits on
@@ -757,7 +757,7 @@ function hiddenDoorSymbol(node: DoorNode, wall: WallNode, selected: boolean): Fl
     sx + u[0] * (c + xMm / 1000) + n[0] * (offsetMm / 1000),
     sz + u[1] * (c + xMm / 1000) + n[1] * (offsetMm / 1000),
   ]
-  const stroke = selected ? '#f97316' : '#536078'
+  const stroke = selected ? SELECTION_ACCENT : '#536078'
   const line = { stroke, strokeWidth: 1, vectorEffect: 'non-scaling-stroke' as const }
   const error = hiddenDoorError(node, wall)
   if (error) {
@@ -852,7 +852,7 @@ function stepDoorSymbol(node: DoorNode, wall: WallNode, selected: boolean): Floo
     sx + u[0] * (c + (s * xMm) / 1000) - u[1] * ((s * zMm) / 1000),
     sz + u[1] * (c + (s * xMm) / 1000) + u[0] * ((s * zMm) / 1000),
   ]
-  const stroke = selected ? '#f97316' : '#536078'
+  const stroke = selected ? SELECTION_ACCENT : '#536078'
   const line = { stroke, strokeWidth: 1, vectorEffect: 'non-scaling-stroke' as const }
   if (stepDoorError(node, wall)) {
     const half = node.width * 500

@@ -1,6 +1,6 @@
 'use client'
 
-import { Info, MousePointerClick, Redo2, Undo2 } from 'lucide-react'
+import { Brush, Info, MousePointerClick, PaintRoller, Redo2, Undo2 } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
 const OFFSET_X = 36
@@ -10,7 +10,7 @@ const OFFSET_Y = -14
  * inZOI's unboxed paint hints riding beside the cursor while customizing:
  * shown over the scene only, hidden over the card and other controls.
  */
-export function PaintHints({ wall }: { wall: boolean }) {
+export function PaintHints({ wall, roomScope }: { wall: boolean; roomScope: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -50,8 +50,8 @@ export function PaintHints({ wall }: { wall: boolean }) {
   return (
     <div
       aria-hidden="true"
-      // Dark text with a white halo: the scene stays light in either UI theme.
-      className="pointer-events-none fixed top-0 left-0 z-40 flex-col gap-[9px] font-medium text-[12px] text-neutral-800 [text-shadow:0_0_4px_rgba(255,255,255,0.95),0_0_2px_rgba(255,255,255,0.95)]"
+      // inZOI: white text on a dark halo, readable over light and painted-dark surfaces.
+      className="pointer-events-none fixed top-0 left-0 z-40 flex-col gap-[9px] font-medium text-[12px] text-white [filter:drop-shadow(0_0_1.5px_rgba(0,0,0,0.9))_drop-shadow(0_1px_3px_rgba(0,0,0,0.55))]"
       ref={ref}
       style={{ display: 'none' }}
     >
@@ -59,6 +59,15 @@ export function PaintHints({ wall }: { wall: boolean }) {
         <MousePointerClick className={icon} strokeWidth={1.8} />
         클릭: 칠할 부분 선택
       </span>
+      {roomScope && (
+        <span className={row}>
+          <Brush className={icon} strokeWidth={1.8} />
+          칠하기 영역 선택 (단일)
+          <span className="opacity-70">/</span>
+          <PaintRoller className={icon} strokeWidth={1.8} />
+          칠하기 영역 선택 (방 단위)
+        </span>
+      )}
       <span className={row}>
         <Undo2 className={icon} strokeWidth={1.8} />
         실행 취소 (Ctrl+Z)

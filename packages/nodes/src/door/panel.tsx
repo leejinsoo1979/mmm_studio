@@ -40,13 +40,13 @@ import { MmField } from '../cabinet/panel-fields'
 import { scaleHandleHeight } from './door-math'
 
 const doorTypeOptions = [
-  { label: 'Hinged', value: 'hinged', available: true },
-  { label: 'Double', value: 'double', available: true },
-  { label: 'French', value: 'french', available: true },
-  { label: 'Folding', value: 'folding', available: true },
-  { label: 'Pocket', value: 'pocket', available: true },
-  { label: 'Barn', value: 'barn', available: true },
-  { label: 'Sliding', value: 'sliding', available: true },
+  { label: '여닫이', value: 'hinged', available: true },
+  { label: '양개', value: 'double', available: true },
+  { label: '프렌치', value: 'french', available: true },
+  { label: '폴딩', value: 'folding', available: true },
+  { label: '포켓', value: 'pocket', available: true },
+  { label: '행거', value: 'barn', available: true },
+  { label: '미닫이', value: 'sliding', available: true },
   // Available only on a 목상 / 떡가베 wall (see `hostConstruction` below).
   { label: '히든도어', value: 'hidden', available: true },
   // Placed from its product tile only (see `doorTypeOptions` filter below).
@@ -58,9 +58,9 @@ const doorTypeOptions = [
 }[]
 
 const garageDoorTypeOptions = [
-  { label: 'Sectional', value: 'garage-sectional', available: true },
-  { label: 'Roll-up', value: 'garage-rollup', available: true },
-  { label: 'Tilt-up', value: 'garage-tiltup', available: true },
+  { label: '섹셔널', value: 'garage-sectional', available: true },
+  { label: '롤업', value: 'garage-rollup', available: true },
+  { label: '틸트업', value: 'garage-tiltup', available: true },
 ] satisfies {
   label: string
   value: DoorNode['doorType']
@@ -597,10 +597,10 @@ export default function DoorPanel() {
     <PanelWrapper
       icon="/icons/door.webp"
       onClose={handleClose}
-      title={node.name || 'Door'}
+      title={node.name || '문'}
       width={320}
     >
-      <PanelSection title="Type">
+      <PanelSection title="종류">
         <div className="flex flex-col gap-2 px-1 pb-1">
           <SegmentedControl
             onChange={(v) =>
@@ -627,9 +627,9 @@ export default function DoorPanel() {
               )
             }
             options={[
-              { label: 'Door', value: 'door' },
-              { label: 'Opening', value: 'opening' },
-              { label: 'Garage', value: 'garage' },
+              { label: '문', value: 'door' },
+              { label: '개구부', value: 'opening' },
+              { label: '차고문', value: 'garage' },
             ]}
             value={typeMode}
           />
@@ -669,11 +669,11 @@ export default function DoorPanel() {
         )}
       </PanelSection>
 
-      <PanelSection title="Position">
+      <PanelSection title="위치">
         <SliderControl
           label={
             <>
-              X<sub className="ml-[1px] text-[11px] opacity-70">wall</sub>
+              X<sub className="ml-[1px] text-[11px] opacity-70">벽</sub>
             </>
           }
           max={10}
@@ -689,7 +689,7 @@ export default function DoorPanel() {
             <ActionButton
               className="w-full"
               icon={<FlipHorizontal2 className="h-4 w-4" />}
-              label="Flip Side"
+              label="방향 뒤집기"
               onClick={handleFlip}
             />
           </div>
@@ -697,7 +697,7 @@ export default function DoorPanel() {
       </PanelSection>
 
       {showFoldSection && (
-        <PanelSection title="Fold">
+        <PanelSection title="접이">
           <div className="flex flex-col gap-2 px-1 pb-1">
             <div className="space-y-1">
               <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
@@ -714,7 +714,7 @@ export default function DoorPanel() {
             </div>
           </div>
           <SliderControl
-            label="Open"
+            label="열림"
             max={100}
             min={0}
             onChange={(v) => handleUpdate({ operationState: v / 100 })}
@@ -728,24 +728,24 @@ export default function DoorPanel() {
       )}
 
       {showSlideSection && (
-        <PanelSection title="Slide">
+        <PanelSection title="슬라이드">
           <div className="flex flex-col gap-2 px-1 pb-1">
             <div className="space-y-1">
               <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
-                {doorType === 'pocket' ? 'Pocket' : doorType === 'barn' ? 'Rail' : 'Panel'}
+                {doorType === 'pocket' ? '포켓' : doorType === 'barn' ? '레일' : '패널'}
               </span>
               <SegmentedControl
                 onChange={(v) => handleUpdate({ slideDirection: v })}
                 options={[
-                  { label: 'Left', value: 'left' },
-                  { label: 'Right', value: 'right' },
+                  { label: '왼쪽', value: 'left' },
+                  { label: '오른쪽', value: 'right' },
                 ]}
                 value={node.slideDirection ?? 'left'}
               />
             </div>
           </div>
           <SliderControl
-            label="Open"
+            label="열림"
             max={100}
             min={0}
             onChange={(v) => handleUpdate({ operationState: v / 100 })}
@@ -759,9 +759,9 @@ export default function DoorPanel() {
       )}
 
       {showGarageSection && (
-        <PanelSection title="Garage">
+        <PanelSection title="차고문">
           <SliderControl
-            label="Open"
+            label="열림"
             max={100}
             min={0}
             onChange={(v) => handleUpdate({ operationState: v / 100 })}
@@ -773,7 +773,7 @@ export default function DoorPanel() {
           />
           {isSectionalGarageDoor && (
             <SliderControl
-              label="Panels"
+              label="패널 수"
               max={8}
               min={3}
               onChange={(v) => handleUpdate({ garagePanelCount: Math.round(v) })}
@@ -786,9 +786,9 @@ export default function DoorPanel() {
         </PanelSection>
       )}
 
-      <PanelSection title="Dimensions">
+      <PanelSection title="치수">
         <SliderControl
-          label="Width"
+          label="폭"
           max={maxDoorWidth}
           min={0.5}
           onChange={(v) => handleUpdate({ width: v })}
@@ -799,7 +799,7 @@ export default function DoorPanel() {
           value={Math.round(node.width * 100) / 100}
         />
         <SliderControl
-          label="Height"
+          label="높이"
           max={4}
           min={1.0}
           onChange={(v) =>
@@ -820,7 +820,7 @@ export default function DoorPanel() {
       </PanelSection>
 
       {showDoorShapeSection && (
-        <PanelSection title="Top Shape">
+        <PanelSection title="상부 모양">
           <div className="flex flex-col gap-2 px-1 pb-1">
             <SegmentedControl
               onChange={(v) =>
@@ -838,9 +838,9 @@ export default function DoorPanel() {
                 })
               }
               options={[
-                { label: 'Rect', value: 'rectangle' },
-                { label: 'Rounded', value: 'rounded' },
-                { label: 'Arch', value: 'arch' },
+                { label: '사각', value: 'rectangle' },
+                { label: '둥근 모서리', value: 'rounded' },
+                { label: '아치', value: 'arch' },
               ]}
               value={doorShape}
             />
@@ -853,15 +853,15 @@ export default function DoorPanel() {
                     handleUpdate({ openingRadiusMode: v as DoorNode['openingRadiusMode'] })
                   }
                   options={[
-                    { label: 'All', value: 'all' },
-                    { label: 'Individual', value: 'individual' },
+                    { label: '전체', value: 'all' },
+                    { label: '개별', value: 'individual' },
                   ]}
                   value={openingRadiusMode}
                 />
               </div>
               {openingRadiusMode === 'all' ? (
                 <SliderControl
-                  label="Corner Radius"
+                  label="모서리 반경"
                   max={maxRoundedRadius}
                   min={0}
                   onChange={(v) => previewDoorUpdate('cornerRadius', v)}
@@ -874,8 +874,8 @@ export default function DoorPanel() {
               ) : (
                 <>
                   {[
-                    ['Top Left', 0],
-                    ['Top Right', 1],
+                    ['왼쪽 위', 0],
+                    ['오른쪽 위', 1],
                   ].map(([label, index]) => (
                     <SliderControl
                       key={label}
@@ -893,7 +893,7 @@ export default function DoorPanel() {
                 </>
               )}
               <SliderControl
-                label="Reveal Radius"
+                label="안쪽 반경"
                 max={0.08}
                 min={0}
                 onChange={(v) => previewDoorUpdate('openingRevealRadius', v)}
@@ -907,7 +907,7 @@ export default function DoorPanel() {
           )}
           {doorShape === 'arch' && (
             <SliderControl
-              label="Arch Height"
+              label="아치 높이"
               max={node.height}
               min={0.05}
               onChange={(v) => handleUpdate({ archHeight: v })}
@@ -922,7 +922,7 @@ export default function DoorPanel() {
       )}
 
       {showOpeningShapeSection && (
-        <PanelSection title="Opening Shape">
+        <PanelSection title="개구부 모양">
           <div className="flex flex-col gap-2 px-1 pb-1">
             <SegmentedControl
               onChange={(v) =>
@@ -935,9 +935,9 @@ export default function DoorPanel() {
                 })
               }
               options={[
-                { label: 'Rect', value: 'rectangle' },
-                { label: 'Rounded', value: 'rounded' },
-                { label: 'Arch', value: 'arch' },
+                { label: '사각', value: 'rectangle' },
+                { label: '둥근 모서리', value: 'rounded' },
+                { label: '아치', value: 'arch' },
               ]}
               value={openingShape}
             />
@@ -950,15 +950,15 @@ export default function DoorPanel() {
                     handleUpdate({ openingRadiusMode: v as DoorNode['openingRadiusMode'] })
                   }
                   options={[
-                    { label: 'All', value: 'all' },
-                    { label: 'Individual', value: 'individual' },
+                    { label: '전체', value: 'all' },
+                    { label: '개별', value: 'individual' },
                   ]}
                   value={openingRadiusMode}
                 />
               </div>
               {openingRadiusMode === 'all' ? (
                 <SliderControl
-                  label="Corner Radius"
+                  label="모서리 반경"
                   max={maxRoundedRadius}
                   min={0}
                   onChange={(v) => previewDoorUpdate('cornerRadius', v)}
@@ -971,8 +971,8 @@ export default function DoorPanel() {
               ) : (
                 <>
                   {[
-                    ['Top Left', 0],
-                    ['Top Right', 1],
+                    ['왼쪽 위', 0],
+                    ['오른쪽 위', 1],
                   ].map(([label, index]) => (
                     <SliderControl
                       key={label}
@@ -990,7 +990,7 @@ export default function DoorPanel() {
                 </>
               )}
               <SliderControl
-                label="Reveal Radius"
+                label="안쪽 반경"
                 max={0.08}
                 min={0}
                 onChange={(v) => previewDoorUpdate('openingRevealRadius', v)}
@@ -1004,7 +1004,7 @@ export default function DoorPanel() {
           )}
           {openingShape === 'arch' && (
             <SliderControl
-              label="Arch Height"
+              label="아치 높이"
               max={node.height}
               min={0.05}
               onChange={(v) => handleUpdate({ archHeight: v })}
@@ -1021,9 +1021,9 @@ export default function DoorPanel() {
       {!isCutoutOnly && (
         <>
           {showFrameSection && (
-            <PanelSection title="Frame">
+            <PanelSection title="문틀">
               <SliderControl
-                label="Thickness"
+                label="두께"
                 max={0.2}
                 min={0.01}
                 onChange={(v) => handleUpdate({ frameThickness: v })}
@@ -1033,7 +1033,7 @@ export default function DoorPanel() {
                 value={Math.round(node.frameThickness * 1000) / 1000}
               />
               <SliderControl
-                label="Depth"
+                label="깊이"
                 max={0.3}
                 min={0.01}
                 onChange={(v) => handleUpdate({ frameDepth: v })}
@@ -1046,9 +1046,9 @@ export default function DoorPanel() {
           )}
 
           {showContentPaddingSection && (
-            <PanelSection title="Content Padding">
+            <PanelSection title="내부 여백">
               <SliderControl
-                label="Horizontal"
+                label="가로"
                 max={0.2}
                 min={0}
                 onChange={(v) => handleUpdate({ contentPadding: [v, node.contentPadding[1]] })}
@@ -1058,7 +1058,7 @@ export default function DoorPanel() {
                 value={Math.round(node.contentPadding[0] * 1000) / 1000}
               />
               <SliderControl
-                label="Vertical"
+                label="세로"
                 max={0.2}
                 min={0}
                 onChange={(v) => handleUpdate({ contentPadding: [node.contentPadding[0], v] })}
@@ -1225,7 +1225,7 @@ export default function DoorPanel() {
           )}
 
           {showSwingSection && (
-            <PanelSection title="Swing">
+            <PanelSection title="열림 방향">
               <div className="flex flex-col gap-2 px-1 pb-1">
                 {supportsHingeSide && (
                   <div className="space-y-1">
@@ -1235,8 +1235,8 @@ export default function DoorPanel() {
                     <SegmentedControl
                       onChange={(v) => handleUpdate({ hingesSide: v })}
                       options={[
-                        { label: 'Left', value: 'left' },
-                        { label: 'Right', value: 'right' },
+                        { label: '왼쪽', value: 'left' },
+                        { label: '오른쪽', value: 'right' },
                       ]}
                       value={node.hingesSide}
                     />
@@ -1249,8 +1249,8 @@ export default function DoorPanel() {
                   <SegmentedControl
                     onChange={(v) => handleUpdate({ swingDirection: v })}
                     options={[
-                      { label: 'Inward', value: 'inward' },
-                      { label: 'Outward', value: 'outward' },
+                      { label: '안쪽', value: 'inward' },
+                      { label: '바깥쪽', value: 'outward' },
                     ]}
                     value={node.swingDirection}
                   />
@@ -1260,16 +1260,16 @@ export default function DoorPanel() {
           )}
 
           {showThresholdSection && (
-            <PanelSection title="Threshold">
+            <PanelSection title="문턱">
               <ToggleControl
                 checked={node.threshold}
-                label="Enable Threshold"
+                label="문턱 사용"
                 onChange={(checked) => handleUpdate({ threshold: checked })}
               />
               {node.threshold && (
                 <div className="mt-1 flex flex-col gap-1">
                   <SliderControl
-                    label="Height"
+                    label="높이"
                     max={0.1}
                     min={0.005}
                     onChange={(v) => handleUpdate({ thresholdHeight: v })}
@@ -1284,18 +1284,18 @@ export default function DoorPanel() {
           )}
 
           {showHandleSection && (
-            <PanelSection title="Handle">
+            <PanelSection title="손잡이">
               {isSwingDoor && (
                 <ToggleControl
                   checked={node.handle}
-                  label="Enable Handle"
+                  label="손잡이 사용"
                   onChange={(checked) => handleUpdate({ handle: checked })}
                 />
               )}
               {(node.handle || !isSwingDoor) && (
                 <div className="mt-1 flex flex-col gap-1">
                   <SliderControl
-                    label="Height"
+                    label="높이"
                     max={node.height - 0.1}
                     min={0.5}
                     onChange={(v) => handleUpdate({ handleHeight: v })}
@@ -1312,8 +1312,8 @@ export default function DoorPanel() {
                       <SegmentedControl
                         onChange={(v) => handleUpdate({ handleSide: v })}
                         options={[
-                          { label: 'Left', value: 'left' },
-                          { label: 'Right', value: 'right' },
+                          { label: '왼쪽', value: 'left' },
+                          { label: '오른쪽', value: 'right' },
                         ]}
                         value={node.handleSide}
                       />
@@ -1325,21 +1325,21 @@ export default function DoorPanel() {
           )}
 
           {showHardwareSection && (
-            <PanelSection title="Hardware">
+            <PanelSection title="부속 철물">
               <ToggleControl
                 checked={node.doorCloser}
-                label="Door Closer"
+                label="도어 클로저"
                 onChange={(checked) => handleUpdate({ doorCloser: checked })}
               />
               <ToggleControl
                 checked={node.panicBar}
-                label="Panic Bar"
+                label="패닉바"
                 onChange={(checked) => handleUpdate({ panicBar: checked })}
               />
               {node.panicBar && (
                 <div className="mt-1 flex flex-col gap-1">
                   <SliderControl
-                    label="Bar Height"
+                    label="바 높이"
                     max={node.height - 0.1}
                     min={0.5}
                     onChange={(v) => handleUpdate({ panicBarHeight: v })}
@@ -1354,7 +1354,7 @@ export default function DoorPanel() {
           )}
 
           {showSegmentsSection && (
-            <PanelSection title="Segments">
+            <PanelSection title="구획">
               {node.segments.map((seg, i) => {
                 const numCols = seg.columnRatios.length
                 const colSum = seg.columnRatios.reduce((a, b) => a + b, 0)
@@ -1375,15 +1375,15 @@ export default function DoorPanel() {
                         handleUpdate({ segments: updated })
                       }}
                       options={[
-                        { label: 'Panel', value: 'panel' },
-                        { label: 'Glass', value: 'glass' },
-                        { label: 'Empty', value: 'empty' },
+                        { label: '패널', value: 'panel' },
+                        { label: '유리', value: 'glass' },
+                        { label: '빈칸', value: 'empty' },
                       ]}
                       value={seg.type}
                     />
 
                     <SliderControl
-                      label="Height"
+                      label="높이"
                       max={95}
                       min={5}
                       onChange={(v) => setSegmentHeightRatio(i, v / 100)}
@@ -1394,7 +1394,7 @@ export default function DoorPanel() {
                     />
 
                     <SliderControl
-                      label="Columns"
+                      label="열 수"
                       max={8}
                       min={1}
                       onChange={(v) => {
@@ -1425,7 +1425,7 @@ export default function DoorPanel() {
                           />
                         ))}
                         <SliderControl
-                          label="Divider"
+                          label="칸막이"
                           max={0.1}
                           min={0.005}
                           onChange={(v) => {
@@ -1445,7 +1445,7 @@ export default function DoorPanel() {
                     {seg.type === 'panel' && (
                       <div className="mt-1 border-border/50 border-t pt-1">
                         <SliderControl
-                          label="Inset"
+                          label="인셋"
                           max={0.1}
                           min={0}
                           onChange={(v) => {
@@ -1460,7 +1460,7 @@ export default function DoorPanel() {
                           value={Math.round(seg.panelInset * 1000) / 1000}
                         />
                         <SliderControl
-                          label="Depth"
+                          label="깊이"
                           max={0.1}
                           min={0}
                           onChange={(v) => {
@@ -1482,7 +1482,7 @@ export default function DoorPanel() {
 
               <div className="flex gap-1.5 px-1 pt-1">
                 <ActionButton
-                  label="+ Add Segment"
+                  label="+ 구획 추가"
                   onClick={() => {
                     const updated = [
                       ...node.segments,
@@ -1501,7 +1501,7 @@ export default function DoorPanel() {
                 {node.segments.length > 1 && (
                   <ActionButton
                     className="text-foreground/60 hover:text-foreground"
-                    label="- Remove"
+                    label="- 삭제"
                     onClick={() => handleUpdate({ segments: node.segments.slice(0, -1) })}
                   />
                 )}
@@ -1511,18 +1511,18 @@ export default function DoorPanel() {
         </>
       )}
 
-      <PanelSection title="Actions">
+      <PanelSection title="동작">
         <ActionGroup>
-          <ActionButton icon={<Move className="h-3.5 w-3.5" />} label="Move" onClick={handleMove} />
+          <ActionButton icon={<Move className="h-3.5 w-3.5" />} label="이동" onClick={handleMove} />
           <ActionButton
             icon={<Copy className="h-3.5 w-3.5" />}
-            label="Duplicate"
+            label="복제"
             onClick={handleDuplicate}
           />
           <ActionButton
             className="hover:bg-red-500/20"
             icon={<Trash2 className="h-3.5 w-3.5 text-red-400" />}
-            label="Delete"
+            label="삭제"
             onClick={handleDelete}
           />
         </ActionGroup>

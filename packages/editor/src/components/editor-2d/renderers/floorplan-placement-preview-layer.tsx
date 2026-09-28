@@ -28,6 +28,14 @@ import { FloorplanGeometryRenderer } from './floorplan-geometry-renderer'
 export const FloorplanPlacementPreviewLayer = memo(function FloorplanPlacementPreviewLayer() {
   const node = usePlacementPreview((s) => s.node)
   const parentNode = usePlacementPreview((s) => s.parentNode)
+  const toolGeometry = usePlacementPreview((s) => s.geometry)
+  if (toolGeometry) {
+    return (
+      <g data-floorplan-placement-preview pointerEvents="none">
+        <FloorplanGeometryRenderer geometry={toolGeometry} />
+      </g>
+    )
+  }
   if (!node) return null
 
   const builder = nodeRegistry.get(node.type)?.floorplan

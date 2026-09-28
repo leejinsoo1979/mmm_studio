@@ -1,12 +1,14 @@
 'use client'
 
-import { cloneElement, type ReactElement, useEffect, useRef, useState } from 'react'
+import { cloneElement, type ReactElement, type ReactNode, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 export type CatalogHoverInfo = {
   title: string
   description?: string
   image?: string
+  /** Drawn thumbnail shown in the picture slot when there is no `image`. */
+  thumb?: ReactNode
   /** Bottom-right line — size or another short fact (inZOI shows the price). */
   meta?: string
 }
@@ -77,9 +79,13 @@ export function CatalogHover({
               )}
             </div>
             <div className="flex shrink-0 flex-col items-end">
-              {info.image && (
+              {info.image ? (
                 <img alt="" className="h-28 w-36 rounded-lg object-contain" src={info.image} />
-              )}
+              ) : info.thumb ? (
+                <div className="grid h-24 w-28 place-items-center [&_svg.lucide]:size-12">
+                  {info.thumb}
+                </div>
+              ) : null}
               {info.meta && (
                 <div className="mt-auto pt-1.5 font-bold text-[17px] tabular-nums leading-none">
                   {info.meta}

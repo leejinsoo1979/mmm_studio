@@ -1,6 +1,5 @@
 'use client'
 
-import { Icon } from '@iconify/react'
 import {
   Check,
   Copy,
@@ -15,6 +14,7 @@ import {
   Search,
   SlidersHorizontal,
   Spline,
+  SquareDashed,
   Trash2,
 } from 'lucide-react'
 import type { MouseEventHandler, PointerEventHandler, ReactNode } from 'react'
@@ -52,6 +52,13 @@ type NodeActionMenuProps = {
 const ICON_CLASS = 'size-5'
 const ICON_STROKE = 1.5
 
+// Kinds edited through in-world gizmos get inZOI's blue '확인' bubble.
+const CONFIRM_TYPES = new Set(['item', 'cabinet', 'shelf', 'door', 'window'])
+
+export function hasConfirmAction(type: string): boolean {
+  return CONFIRM_TYPES.has(type)
+}
+
 function MenuButton({
   label,
   onClick,
@@ -83,6 +90,24 @@ function MenuButton({
   )
 }
 
+/**
+ * inZOI's '✓ 확인' bubble: its own small pill floating just off the action
+ * pill, on the side away from the object.
+ */
+function ConfirmBubble({ onClick }: { onClick: MouseEventHandler<HTMLButtonElement> }) {
+  return (
+    <button
+      className="pointer-events-auto inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[#2B8CE8] px-3 font-semibold text-white text-xs shadow-[0_2px_8px_rgba(0,0,0,0.25)] ring-2 ring-white hover:bg-[#1f7fd9]"
+      onClick={onClick}
+      title="확인 (Enter)"
+      type="button"
+    >
+      <Check className="size-3.5" strokeWidth={2.5} />
+      확인
+    </button>
+  )
+}
+
 /** inZOI-style white pill of actions floating above the selected object. */
 export function NodeActionMenu({
   onConfirm,
@@ -106,14 +131,64 @@ export function NodeActionMenu({
   onPointerEnter,
   onPointerLeave,
 }: NodeActionMenuProps) {
+  // The bubble sits on the far side from the object: above a menu that hangs
+  // over it, below one that sits under it.
+  const confirmBelow = tail === 'up'
   return (
     <div
-      className="pointer-events-auto relative flex items-center gap-0.5 rounded-full bg-white/95 px-1.5 py-0.5 shadow-[0_4px_16px_rgba(0,0,0,0.18)] backdrop-blur-md dark:bg-neutral-900/95"
+      className={cn(
+        'pointer-events-none flex flex-col items-center gap-1.5',
+        confirmBelow && 'flex-col-reverse',
+      )}
       onPointerDown={onPointerDown}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
       onPointerUp={onPointerUp}
     >
+      {onConfirm && <ConfirmBubble onClick={onConfirm} />}
+      <MenuPill
+        onAddHole={onAddHole}
+        onCurve={onCurve}
+        onDelete={onDelete}
+        onDuplicate={onDuplicate}
+        onFind={onFind}
+        onFlipHinge={onFlipHinge}
+        onFlipSwing={onFlipSwing}
+        onFocus={onFocus}
+        onInspect={onInspect}
+        onMove={onMove}
+        onPaint={onPaint}
+        onRotateLeft={onRotateLeft}
+        onRotateRight={onRotateRight}
+        onSplit={onSplit}
+        tail={tail}
+      />
+    </div>
+  )
+}
+
+function MenuPill({
+  onFind,
+  onAddHole,
+  onDelete,
+  onDuplicate,
+  onMove,
+  onCurve,
+  onRotateLeft,
+  onRotateRight,
+  onPaint,
+  onInspect,
+  onFocus,
+  onSplit,
+  onFlipHinge,
+  onFlipSwing,
+  tail,
+}: Omit<
+  NodeActionMenuProps,
+  'onConfirm' | 'onPointerDown' | 'onPointerUp' | 'onPointerEnter' | 'onPointerLeave'
+>) {
+  return (
+    <div className="pointer-events-auto relative flex items-center gap-0.5 rounded-full bg-white/95 px-1.5 py-0.5 shadow-[0_4px_16px_rgba(0,0,0,0.18)] backdrop-blur-md dark:bg-neutral-900/95">
       {tail === 'down' && (
         <span
           aria-hidden
@@ -125,17 +200,6 @@ export function NodeActionMenu({
           aria-hidden
           className="-translate-x-1/2 absolute bottom-full left-1/2 size-0 border-x-[7px] border-x-transparent border-b-[8px] border-b-white/95 dark:border-b-neutral-900/95"
         />
-      )}
-      {onConfirm && (
-        <button
-          className="relative mr-1 inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[#2B8CE8] px-3 font-semibold text-white text-xs shadow-[0_2px_8px_rgba(0,0,0,0.25)] ring-2 ring-white after:absolute after:top-full after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:-translate-y-[3px] after:rotate-45 after:border-white after:border-r-2 after:border-b-2 after:bg-[#2B8CE8] hover:bg-[#1f7fd9]"
-          onClick={onConfirm}
-          title="확인 (Enter)"
-          type="button"
-        >
-          <Check className="size-3.5" strokeWidth={2.5} />
-          확인
-        </button>
       )}
       {onMove && (
         <MenuButton label="이동" onClick={onMove}>
@@ -194,7 +258,7 @@ export function NodeActionMenu({
       )}
       {onAddHole && (
         <MenuButton label="구멍 내기" onClick={onAddHole}>
-          <Icon height={20} icon="carbon:cut-out" width={20} />
+          <SquareDashed className={ICON_CLASS} strokeWidth={ICON_STROKE} />
         </MenuButton>
       )}
       {onFocus && (

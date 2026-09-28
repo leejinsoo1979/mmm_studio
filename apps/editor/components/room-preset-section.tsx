@@ -1,17 +1,38 @@
 'use client'
 
-import { type RoomPresetKind, type RoomPresetSpec, triggerSFX, useEditor } from '@pascal-app/editor'
-import { Check } from 'lucide-react'
+import {
+  CatalogCard,
+  CatalogSection,
+  type RoomPresetKind,
+  type RoomPresetSpec,
+  useEditor,
+} from '@pascal-app/editor'
 import { useEffect } from 'react'
 import { ROOM_PRESET_SHAPES, type RoomPresetShape, roomPresetArea } from '@/lib/room-presets'
-import { cn } from '@/lib/utils'
 import { useWallDrawingDefaults, wallDrawingToolDefaults } from '@/lib/wall-drawing-defaults'
-import { CatalogHover } from './catalog-hover-card'
-
-/** Section headers this component renders, for the panel's jump chips. */
-export const ROOM_PRESET_SECTION_TITLES = ['방', '플랫폼'] as const
 
 const RECTANGLE_ROOM_LABEL = '사각형 방'
+
+/** The 방 / 플랫폼 cards matching the panel's search text (titles match by prefix). */
+function presetMatches(needle: string) {
+  const query = needle.trim()
+  const matches = (title: string, label: string) =>
+    !query || title.startsWith(query) || label.includes(query)
+  return {
+    rooms: ROOM_PRESET_SHAPES.filter((shape) => matches('방', shape.label)),
+    platforms: ROOM_PRESET_SHAPES.filter((shape) => matches('플랫폼', shape.label)),
+    showRectangle: matches('방', RECTANGLE_ROOM_LABEL),
+  }
+}
+
+/** Section headers this component renders for `needle`, for the panel's icon row. */
+export function visibleRoomPresetSections(needle: string): string[] {
+  const { rooms, platforms, showRectangle } = presetMatches(needle)
+  return [
+    ...(showRectangle || rooms.length > 0 ? ['방'] : []),
+    ...(platforms.length > 0 ? ['플랫폼'] : []),
+  ]
+}
 
 function activateRoomPreset(kind: RoomPresetKind, shape: RoomPresetShape): void {
   const ed = useEditor.getState()
@@ -123,7 +144,7 @@ function PresetThumb({
   const stroke = '#b8b8b8'
   if (kind === 'platform') {
     return (
-      <svg aria-hidden className="h-[78%] w-[78%]" viewBox="0 0 100 100">
+      <svg aria-hidden className="h-full w-full" viewBox="0 0 100 100">
         {faces
           .filter((face) => face.outer)
           .map((face) => (
@@ -147,7 +168,7 @@ function PresetThumb({
     )
   }
   return (
-    <svg aria-hidden className="h-[78%] w-[78%]" viewBox="0 0 100 100">
+    <svg aria-hidden className="h-full w-full" viewBox="0 0 100 100">
       <polygon fill="#e2e2e2" points={ring(0)} stroke={stroke} strokeWidth={0.6} />
       {faces.map((face) => (
         <polygon
@@ -179,64 +200,6 @@ function PresetThumb({
   )
 }
 
-function PresetCard({
-  active,
-  area,
-  description,
-  label,
-  onClick,
-  thumb,
-}: {
-  active: boolean
-  area?: string
-  description: string
-  label: string
-  onClick: () => void
-  thumb: React.ReactNode
-}) {
-  return (
-    <CatalogHover info={{ title: label, description, meta: area }}>
-      <button
-        aria-label={label}
-        aria-pressed={active}
-        className={cn(
-          'group relative flex aspect-square min-w-0 flex-col items-center justify-center overflow-hidden rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.12)] ring-1 transition-all duration-150 dark:bg-neutral-900',
-          active ? 'ring-2 ring-sky-400' : 'ring-black/5 hover:ring-neutral-400 dark:ring-white/10',
-        )}
-        onClick={() => {
-          triggerSFX('sfx:menu-click')
-          onClick()
-        }}
-        onMouseEnter={() => triggerSFX('sfx:menu-hover')}
-        type="button"
-      >
-        <span className="mb-2 flex h-full w-full items-center justify-center transition-transform duration-150 group-hover:scale-105">
-          {thumb}
-        </span>
-        <span className="absolute inset-x-1.5 bottom-1 flex items-baseline justify-between gap-1 text-[10px] leading-none">
-          <span className="truncate font-medium text-neutral-700 dark:text-neutral-200">
-            {label}
-          </span>
-          {area && <span className="shrink-0 text-neutral-400 tabular-nums">{area}</span>}
-        </span>
-        {active && (
-          <span className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full bg-sky-400 text-white">
-            <Check className="size-3" strokeWidth={3} />
-          </span>
-        )}
-      </button>
-    </CatalogHover>
-  )
-}
-
-function Header({ title }: { title: string }) {
-  return (
-    <h2 className="mb-2 rounded-md bg-neutral-200/80 px-3 py-1.5 font-semibold text-[12px] text-neutral-600 leading-none dark:bg-white/10 dark:text-neutral-300">
-      {title}
-    </h2>
-  )
-}
-
 const formatArea = (area: number) => `${Number.isInteger(area) ? area : area.toFixed(1)}㎡`
 
 /**
@@ -265,63 +228,65 @@ export function RoomPresetSection({ needle = '' }: { needle?: string }) {
     [],
   )
 
-  const query = needle.trim()
-  const matches = (title: string, label: string) =>
-    !query || title.includes(query) || label.includes(query)
   const isActive = (kind: RoomPresetKind, shape: RoomPresetShape) =>
     mode === 'build' && activePreset?.kind === kind && activePreset.label === shape.label
 
-  const rooms = ROOM_PRESET_SHAPES.filter((shape) => matches('방', shape.label))
-  const platforms = ROOM_PRESET_SHAPES.filter((shape) => matches('플랫폼', shape.label))
-  const showRectangle = matches('방', RECTANGLE_ROOM_LABEL)
+  const { rooms, platforms, showRectangle } = presetMatches(needle)
   const square = ROOM_PRESET_SHAPES[0]!
+
+  const card = (kind: RoomPresetKind, shape: RoomPresetShape, description: string) => {
+    const area = formatArea(roomPresetArea(shape))
+    return (
+      <CatalogCard
+        active={isActive(kind, shape)}
+        hover={{ description, meta: area }}
+        key={shape.id}
+        // Names the kind too, so 정사각 방 and 정사각 플랫폼 read apart.
+        label={`${shape.label} ${kind === 'room' ? '방' : '플랫폼'}`}
+        meta={`${shape.label} ${area}`}
+        onClick={() => activateRoomPreset(kind, shape)}
+        thumb={<PresetThumb kind={kind} shape={shape} />}
+      />
+    )
+  }
 
   return (
     <>
       {(showRectangle || rooms.length > 0) && (
-        <section className="scroll-mt-1 px-2 pt-3" data-build-section="방">
-          <Header title="방" />
-          <div className="grid grid-cols-4 gap-1.5">
-            {showRectangle && (
-              <PresetCard
-                active={mode === 'build' && tool === 'rectangle-room'}
-                description="두 번 클릭해 원하는 크기의 사각형 방을 그립니다. 벽과 바닥이 함께 생깁니다."
-                label={RECTANGLE_ROOM_LABEL}
-                onClick={activateRectangleRoom}
-                thumb={<PresetThumb dashed kind="room" shape={square} />}
-              />
-            )}
-            {rooms.map((shape) => (
-              <PresetCard
-                active={isActive('room', shape)}
-                area={formatArea(roomPresetArea(shape))}
-                description={`${shape.size[0]} × ${shape.size[1]} m ${shape.label} 방. 클릭해 놓은 뒤 옆면 손잡이로 크기를, 화살표로 방향을 바꾸고 확인(Enter)을 누르세요.`}
-                key={shape.id}
-                label={shape.label}
-                onClick={() => activateRoomPreset('room', shape)}
-                thumb={<PresetThumb kind="room" shape={shape} />}
-              />
-            ))}
-          </div>
-        </section>
+        <CatalogSection data-build-section="방" title="방">
+          {showRectangle && (
+            <CatalogCard
+              active={mode === 'build' && tool === 'rectangle-room'}
+              hover={{
+                description:
+                  '두 번 클릭해 원하는 크기의 사각형 방을 그립니다. 벽과 바닥이 함께 생깁니다.',
+                meta: '직접 그리기',
+              }}
+              label={RECTANGLE_ROOM_LABEL}
+              meta={RECTANGLE_ROOM_LABEL}
+              onClick={activateRectangleRoom}
+              thumb={<PresetThumb dashed kind="room" shape={square} />}
+            />
+          )}
+          {rooms.map((shape) =>
+            card(
+              'room',
+              shape,
+              `${shape.size[0]} × ${shape.size[1]} m ${shape.label} 방. 클릭해 놓은 뒤 옆면 손잡이로 크기를, 화살표로 방향을 바꾸고 확인(Enter)을 누르세요.`,
+            ),
+          )}
+        </CatalogSection>
       )}
       {platforms.length > 0 && (
-        <section className="scroll-mt-1 px-2 pt-3" data-build-section="플랫폼">
-          <Header title="플랫폼" />
-          <div className="grid grid-cols-4 gap-1.5">
-            {platforms.map((shape) => (
-              <PresetCard
-                active={isActive('platform', shape)}
-                area={formatArea(roomPresetArea(shape))}
-                description={`${shape.size[0]} × ${shape.size[1]} m ${shape.label} 플랫폼 (높이 30 cm, 벽 없음). 클릭해 놓은 뒤 크기·방향을 맞추고 확인(Enter)을 누르세요.`}
-                key={shape.id}
-                label={shape.label}
-                onClick={() => activateRoomPreset('platform', shape)}
-                thumb={<PresetThumb kind="platform" shape={shape} />}
-              />
-            ))}
-          </div>
-        </section>
+        <CatalogSection data-build-section="플랫폼" title="플랫폼">
+          {platforms.map((shape) =>
+            card(
+              'platform',
+              shape,
+              `${shape.size[0]} × ${shape.size[1]} m ${shape.label} 플랫폼 (높이 30 cm, 벽 없음). 클릭해 놓은 뒤 크기·방향을 맞추고 확인(Enter)을 누르세요.`,
+            ),
+          )}
+        </CatalogSection>
       )}
     </>
   )

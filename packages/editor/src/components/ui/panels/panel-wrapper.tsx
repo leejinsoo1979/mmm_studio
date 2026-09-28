@@ -118,11 +118,22 @@ export function PanelWrapper({
   const customizing = useUiHidden((s) => s.customizing)
   const hiddenWhileCollapsed = !isMobile && collapsed && (opensFromMenu || customizing)
 
-  // Esc folds an open card away before it reaches the selection.
+  // Esc folds an open card away before it reaches the selection. An Esc typed
+  // into one of the card's fields belongs to that field (it cancels the edit),
+  // so only the next Esc folds the card.
   useEffect(() => {
     if (isMobile || collapsed || !opensFromMenu) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
+      const target = event.target
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return
+      }
       event.stopImmediatePropagation()
       setCollapsed(true)
     }

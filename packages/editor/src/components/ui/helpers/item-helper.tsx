@@ -22,29 +22,46 @@ export function formatItemSize(dimensions: readonly number[]): string {
   return `${dimensions.map((m) => Math.round(m * 1000)).join('×')} mm`
 }
 
+/** Wall-mounted items face out of their wall: the placement never turns them. */
+export function isWallMountedAsset(asset: { attachTo?: string } | null | undefined): boolean {
+  return asset?.attachTo === 'wall' || asset?.attachTo === 'wall-side'
+}
+
+/**
+ * A held item turns on Z / C, so the placement coordinator moves its once /
+ * repeat toggle to Q; the continuation row follows.
+ */
+export function withItemContinuationKey(hints: ContextualShortcutHint[]): ContextualShortcutHint[] {
+  return hints.map((hint) =>
+    hint.keys.length === 1 && hint.keys[0] === 'C' ? { ...hint, keys: ['Q'] } : hint,
+  )
+}
+
 /**
  * inZOI's held-object keys, shared by a fresh catalog placement (the item
- * definition's `toolHints`) and a move so both read the same.
+ * definition's `toolHints`) and a move so both read the same. Shift (snapping
+ * mode) is named on the tool bar's magnet, so it is not repeated here.
  */
 function heldItemHints({
-  rightClickRotates = true,
+  rotation,
   showForce = true,
 }: {
-  rightClickRotates?: boolean
+  rotation: 'item' | 'keys' | 'none'
   showForce?: boolean
-} = {}): ContextualShortcutHint[] {
+}): ContextualShortcutHint[] {
   return [
     // Items (the placement coordinator) also turn on a quick right click and
     // Z / C, and 5° with Alt; other kinds rotate on R / T only.
-    ...(rightClickRotates
+    ...(rotation === 'item'
       ? [
           { keys: ['Right click'], label: '오른쪽 45° 회전' },
           { keys: [['Z', 'C']], label: '왼쪽·오른쪽 회전' },
           { keys: ['Alt', ['R', 'T']], label: '5° 미세 회전' },
         ]
-      : [{ keys: [['R', 'T']], label: '회전' }]),
+      : rotation === 'keys'
+        ? [{ keys: [['R', 'T']], label: '회전' }]
+        : []),
     ...(showForce ? [{ keys: ['Alt'], label: '자유 배치' }] : []),
-    { keys: ['Shift'], label: '스냅 모드 전환' },
     { keys: ['Esc'], label: '선택 취소' },
     { keys: ['Delete'], label: '삭제' },
   ]
@@ -60,16 +77,21 @@ export function ItemHelper({
   const blocked = usePlacementFeedback((s) => s.blocked)
   const movingNode = useMovingNode()
   const continuationHints = useContinuationHints(continuationContext)
-  const title =
-    movingNode?.type === 'item'
-      ? {
-          name: movingNode.name ?? (movingNode as ItemNode).asset.name,
-          size: formatItemSize(getScaledDimensions(movingNode as ItemNode)),
-        }
-      : undefined
+  const item = movingNode?.type === 'item' ? (movingNode as ItemNode) : null
+  const title = item
+    ? { name: item.name ?? item.asset.name, size: formatItemSize(getScaledDimensions(item)) }
+    : undefined
+  const rotation = !rightClickRotates
+    ? 'keys'
+    : isWallMountedAsset(item?.asset)
+      ? 'none'
+      : 'item'
   return (
     <ToolCursorHints
-      hints={[...heldItemHints({ rightClickRotates, showForce }), ...continuationHints]}
+      hints={[
+        ...heldItemHints({ rotation, showForce }),
+        ...(rightClickRotates ? withItemContinuationKey(continuationHints) : continuationHints),
+      ]}
       title={title}
       warning={blocked ? '사물은 서로 겹쳐서 배치할 수 없습니다' : undefined}
     />

@@ -3,11 +3,11 @@ import { useViewer } from '@pascal-app/viewer'
 import Image from 'next/image'
 import { memo, useCallback, useEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { formatAreaLabel } from './../../../../../lib/measurements'
 import useEditor from './../../../../../store/use-editor'
 import { InlineRenameInput } from './inline-rename-input'
 import { focusTreeNode, handleTreeSelection, TreeNode, TreeNodeWrapper } from './tree-node'
 import { TreeNodeActions } from './tree-node-actions'
+import { formatFloorArea } from './area-label'
 
 interface CeilingTreeNodeProps {
   nodeId: AnyNodeId
@@ -77,7 +77,7 @@ export const CeilingTreeNode = memo(function CeilingTreeNode({
   const handleStartEditing = useCallback(() => setIsEditing(true), [])
   const handleStopEditing = useCallback(() => setIsEditing(false), [])
 
-  const defaultName = `천장 (${formatAreaLabel(calculatePolygonArea(polygon), unit)})`
+  const defaultName = `천장 (${formatFloorArea(calculatePolygonArea(polygon), unit)})`
 
   return (
     <TreeNodeWrapper

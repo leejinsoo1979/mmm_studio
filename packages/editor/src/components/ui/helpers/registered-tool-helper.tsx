@@ -3,8 +3,11 @@ import type { ContinuationContext } from '../../../lib/continuation'
 import useEditor from '../../../store/use-editor'
 import { usePlacementFeedback } from '../../../store/use-placement-feedback'
 import { useContinuationHints } from './continuation-hints'
-import { formatItemSize } from './item-helper'
+import { formatItemSize, isWallMountedAsset, withItemContinuationKey } from './item-helper'
 import { ToolCursorHints } from './tool-cursor-hints'
+
+/** The held item's turn keys, hidden for a wall-mounted item (it never turns). */
+const ITEM_ROTATION_KEYS = new Set(['Right click', 'Z / C', 'Alt + R / T'])
 
 /** 'Alt + R / T' → ['Alt', ['R', 'T']]: sequential keys, each with its alternatives. */
 function splitHintKey(key: string): Array<string | string[]> {
@@ -38,7 +41,10 @@ export function RegisteredToolHelper({
   const blocked = usePlacementFeedback((s) => s.blocked)
   const tool = useEditor((s) => s.tool)
   const selectedItem = useEditor((s) => s.selectedItem)
-  const continuationHints = useContinuationHints(continuationContext)
+  const itemContinuationHints = useContinuationHints(continuationContext)
+  const continuationHints =
+    tool === 'item' ? withItemContinuationKey(itemContinuationHints) : itemContinuationHints
+  const wallMountedItem = tool === 'item' && isWallMountedAsset(selectedItem)
   const title =
     tool === 'item' && selectedItem
       ? {
@@ -47,11 +53,12 @@ export function RegisteredToolHelper({
         }
       : undefined
   // The tool bar's magnet shows the snapping mode (Shift = cycle), so drop the
-  // redundant 'Cycle snapping mode' tool hint; also hide draft-gated hints
-  // until the draft is far enough along.
+  // redundant snapping-mode tool hint; also hide draft-gated hints until the
+  // draft is far enough along.
   const visible = hints.filter(
     (hint) =>
-      !(hint.key === 'Shift' && hint.label === 'Cycle snapping mode') &&
+      !(hint.key === 'Shift' && hint.label === '스냅 모드 전환') &&
+      !(wallMountedItem && ITEM_ROTATION_KEYS.has(hint.key)) &&
       (hint.minDraftVertices == null || draftVertexCount >= hint.minDraftVertices),
   )
   if (visible.length === 0 && continuationHints.length === 0) return null

@@ -22,14 +22,17 @@ import {
   type AnyNode,
   type AnyNodeId,
   type BuildingNode,
+  getDefaultLevelName,
+  getLevelDisplayName,
   LevelNode,
   useScene,
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
-import { ClipboardPaste, Copy, GripVertical, MoreVertical, Plus, Trash2 } from 'lucide-react'
+import { ClipboardPaste, Copy, GripVertical, Plus, Trash2 } from 'lucide-react'
 import {
   type ButtonHTMLAttributes,
   type CSSProperties,
+  type ReactNode,
   useCallback,
   useEffect,
   useRef,
@@ -41,14 +44,13 @@ import {
   buildLevelDuplicateCreateOps,
   type LevelDuplicatePreset,
 } from '../../lib/level-duplication'
-import { getDefaultLevelName, getLevelDisplayName } from '@pascal-app/core'
 import { addLevelAbove, deleteLevelWithFallbackSelection } from '../../lib/level-selection'
 import {
   getEditorClipboardSnapshot,
   pasteEditorClipboardToLevel,
   subscribeEditorClipboard,
 } from '../../lib/scene-clipboard'
-import { sfxEmitter } from '../../lib/sfx-bus'
+import { sfxEmitter, triggerSFX } from '../../lib/sfx-bus'
 import { cn } from '../../lib/utils'
 import { LevelDuplicateDialog } from './level-duplicate-dialog'
 import {
@@ -63,29 +65,15 @@ import { Popover, PopoverContent, PopoverTrigger } from './primitives/popover'
 
 // ── Inline rename input for a level row ─────────────────────────────────────
 
-function LevelInlineRename({
-  level,
-  isEditing,
-  onStopEditing,
-}: {
-  level: LevelNode
-  isEditing: boolean
-  onStopEditing: () => void
-}) {
+function LevelInlineRename({ level, onStopEditing }: { level: LevelNode; onStopEditing: () => void }) {
   const updateNode = useScene((s) => s.updateNode)
-  const defaultName = getDefaultLevelName(level.level)
   const [value, setValue] = useState(level.name || '')
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (isEditing) {
-      setValue(level.name || '')
-      setTimeout(() => {
-        inputRef.current?.focus()
-        inputRef.current?.select()
-      }, 0)
-    }
-  }, [isEditing, level.name])
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [])
 
   const handleSave = useCallback(() => {
     const trimmed = value.trim()
@@ -95,15 +83,15 @@ function LevelInlineRename({
     onStopEditing()
   }, [value, level.id, level.name, updateNode, onStopEditing])
 
-  if (!isEditing) return null
-
   return (
     <input
-      className="m-0 h-full w-full min-w-0 rounded-lg bg-transparent px-2.5 py-1.5 font-medium text-foreground text-xs outline-none ring-1 ring-primary/50"
+      aria-label="층 이름"
+      className="m-0 h-8 w-full min-w-0 rounded-lg bg-white px-2.5 font-medium text-[12px] text-neutral-800 outline-none ring-1 ring-[#8ec3f2] dark:bg-neutral-800 dark:text-neutral-100"
       onBlur={handleSave}
       onChange={(e) => setValue(e.target.value)}
-      onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
+        // Keys typed into the name must not reach the editor's shortcuts.
+        e.stopPropagation()
         if (e.key === 'Enter') {
           e.preventDefault()
           handleSave()
@@ -112,7 +100,7 @@ function LevelInlineRename({
           onStopEditing()
         }
       }}
-      placeholder={defaultName}
+      placeholder={getDefaultLevelName(level.level)}
       ref={inputRef}
       type="text"
       value={value}
@@ -120,7 +108,10 @@ function LevelInlineRename({
   )
 }
 
-// ── Level row with three-dot menu ───────────────────────────────────────────
+// ── Level row ───────────────────────────────────────────────────────────────
+
+const ROW_ICON_BUTTON =
+  'flex size-6 shrink-0 items-center justify-center rounded-full text-neutral-400 opacity-0 transition-all hover:bg-black/[0.06] hover:text-neutral-700 focus-visible:opacity-100 group-hover/level:opacity-100 dark:hover:bg-white/10 dark:hover:text-neutral-100'
 
 function LevelRow({
   level,
@@ -139,152 +130,83 @@ function LevelRow({
   dragHandleProps?: ButtonHTMLAttributes<HTMLButtonElement>
   dragHandleRef?: (element: HTMLButtonElement | null) => void
   onSelect: () => void
-  onDuplicate: (preset?: LevelDuplicatePreset) => void
+  onDuplicate: () => void
   onPaste?: () => void
   onRequestDelete: () => void
 }) {
-  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
+  const name = getLevelDisplayName(level)
+
+  if (isEditing) {
+    return <LevelInlineRename level={level} onStopEditing={() => setIsEditing(false)} />
+  }
 
   return (
-    <div className="group/level">
-      {isEditing ? (
-        <LevelInlineRename
-          isEditing={isEditing}
-          level={level}
-          onStopEditing={() => setIsEditing(false)}
-        />
-      ) : (
-        <div
-          className={cn(
-            'flex items-center rounded-lg transition-colors',
-            isDragging && 'bg-foreground/10 text-foreground shadow-lg',
-            isSelected
-              ? 'bg-foreground/10 text-foreground'
-              : 'text-muted-foreground/70 hover:bg-foreground/5 hover:text-muted-foreground',
-          )}
-        >
-          <button
-            {...dragHandleProps}
-            aria-label={`Reorder ${getLevelDisplayName(level)}`}
-            className={cn(
-              'ml-0.5 flex h-6 w-4 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground/35 opacity-0 transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 group-hover/level:opacity-100',
-              isDragging && 'cursor-grabbing opacity-100',
-            )}
-            onClick={(e) => {
-              e.stopPropagation()
-              dragHandleProps?.onClick?.(e)
-            }}
-            ref={dragHandleRef}
-            title="Drag to reorder"
-            type="button"
-          >
-            <GripVertical className="h-3.5 w-3.5" />
-          </button>
-
-          <button
-            className="flex min-w-0 flex-1 items-center justify-start py-1.5 pr-2 pl-1 font-medium text-xs"
-            onClick={onSelect}
-            onDoubleClick={(e) => {
-              e.stopPropagation()
-              setIsEditing(true)
-            }}
-            title={getLevelDisplayName(level)}
-            type="button"
-          >
-            <span className="truncate">{getLevelDisplayName(level)}</span>
-          </button>
-
-          {/* Vertical three-dot menu — inside the pill */}
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                className="flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground/40 opacity-0 transition-all hover:text-foreground group-hover/level:opacity-100"
-                onClick={(e) => e.stopPropagation()}
-                type="button"
-              >
-                <MoreVertical className="h-3 w-3" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-44 p-1" side="right" sideOffset={8}>
-              <button
-                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-muted-foreground text-xs transition-colors hover:bg-foreground/10 hover:text-foreground"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onDuplicate()
-                }}
-                type="button"
-              >
-                <Copy className="h-3 w-3" />
-                Duplicate level
-              </button>
-              <button
-                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-muted-foreground text-xs transition-colors hover:bg-foreground/10 hover:text-foreground"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setDuplicateDialogOpen(true)
-                }}
-                type="button"
-              >
-                <Copy className="h-3 w-3" />
-                Duplicate with options...
-              </button>
-              {onPaste && (
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-muted-foreground text-xs transition-colors hover:bg-foreground/10 hover:text-foreground"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onPaste()
-                  }}
-                  type="button"
-                >
-                  <ClipboardPaste className="h-3 w-3" />
-                  Paste copied selection
-                </button>
-              )}
-              <button
-                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-muted-foreground text-xs transition-colors hover:bg-foreground/10 hover:text-red-400"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onRequestDelete()
-                }}
-                type="button"
-              >
-                <Trash2 className="h-3 w-3" />
-                Delete level
-              </button>
-            </PopoverContent>
-          </Popover>
-        </div>
+    <div
+      className={cn(
+        'group/level flex h-8 items-center rounded-lg pr-1 transition-colors',
+        isDragging && 'bg-white shadow-lg dark:bg-neutral-800',
+        isSelected
+          ? 'bg-[#bfe0fa] text-[#2f7fd0]'
+          : 'text-neutral-600 hover:bg-black/[0.05] dark:text-neutral-300 dark:hover:bg-white/10',
       )}
-      <LevelDuplicateDialog
-        level={level}
-        onConfirm={(preset) => {
-          onDuplicate(preset)
-          setDuplicateDialogOpen(false)
-        }}
-        onOpenChange={setDuplicateDialogOpen}
-        open={duplicateDialogOpen}
-      />
+    >
+      <button
+        {...dragHandleProps}
+        aria-label={`${name} 순서 바꾸기`}
+        className={cn(
+          'ml-0.5 flex h-6 w-4 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-neutral-400 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/level:opacity-100',
+          isDragging && 'cursor-grabbing opacity-100',
+        )}
+        ref={dragHandleRef}
+        title="끌어서 층 순서 바꾸기"
+        type="button"
+      >
+        <GripVertical className="size-3.5" />
+      </button>
+      <button
+        className="flex h-full min-w-0 flex-1 items-center pr-2 pl-1 font-semibold text-[12px]"
+        onClick={onSelect}
+        onDoubleClick={() => setIsEditing(true)}
+        title={`${name} · 더블클릭으로 이름 바꾸기`}
+        type="button"
+      >
+        <span className="truncate">{name}</span>
+      </button>
+      {onPaste && (
+        <button
+          aria-label={`${name}에 붙여넣기`}
+          className={ROW_ICON_BUTTON}
+          onClick={onPaste}
+          title="복사한 항목을 이 층에 붙여넣기"
+          type="button"
+        >
+          <ClipboardPaste className="size-3.5" />
+        </button>
+      )}
+      <button
+        aria-label={`${name} 복제`}
+        className={ROW_ICON_BUTTON}
+        onClick={onDuplicate}
+        title="층 복제"
+        type="button"
+      >
+        <Copy className="size-3.5" />
+      </button>
+      <button
+        aria-label={`${name} 삭제`}
+        className={cn(ROW_ICON_BUTTON, 'hover:text-red-500 dark:hover:text-red-400')}
+        onClick={onRequestDelete}
+        title="층 삭제"
+        type="button"
+      >
+        <Trash2 className="size-3.5" />
+      </button>
     </div>
   )
 }
 
-function SortableLevelRow({
-  level,
-  isSelected,
-  onSelect,
-  onDuplicate,
-  onPaste,
-  onRequestDelete,
-}: {
-  level: LevelNode
-  isSelected: boolean
-  onSelect: () => void
-  onDuplicate: (preset?: LevelDuplicatePreset) => void
-  onPaste?: () => void
-  onRequestDelete: () => void
-}) {
+function SortableLevelRow(props: Omit<Parameters<typeof LevelRow>[0], 'dragHandleProps'>) {
   const {
     attributes,
     isDragging,
@@ -293,7 +215,7 @@ function SortableLevelRow({
     setNodeRef,
     transform,
     transition,
-  } = useSortable({ id: level.id })
+  } = useSortable({ id: props.level.id })
 
   const style: CSSProperties = {
     opacity: isDragging ? 0.86 : undefined,
@@ -306,23 +228,37 @@ function SortableLevelRow({
   return (
     <div ref={setNodeRef} style={style}>
       <LevelRow
+        {...props}
         dragHandleProps={{ ...attributes, ...listeners }}
         dragHandleRef={setActivatorNodeRef}
         isDragging={isDragging}
-        isSelected={isSelected}
-        level={level}
-        onDuplicate={onDuplicate}
-        onPaste={onPaste}
-        onRequestDelete={onRequestDelete}
-        onSelect={onSelect}
       />
     </div>
   )
 }
 
+function InsertLevelButton({ title, onClick }: { title: string; onClick: () => void }) {
+  return (
+    <button
+      aria-label={title}
+      className="absolute left-1/2 z-10 flex size-4 -translate-x-1/2 items-center justify-center rounded-full border border-black/10 bg-white text-neutral-500 opacity-60 shadow-sm transition-opacity hover:text-neutral-800 hover:opacity-100 dark:border-white/15 dark:bg-neutral-800 dark:text-neutral-300"
+      onClick={onClick}
+      title={title}
+      type="button"
+    >
+      <Plus className="size-2.5" />
+    </button>
+  )
+}
+
 // ── Main component ──────────────────────────────────────────────────────────
 
-export function FloatingLevelSelector() {
+/**
+ * The floor list behind the tool bar's floor name: switch floors, add one
+ * above / below or between two, drag to reorder, rename (double-click),
+ * duplicate, paste the copied selection onto a floor, and delete.
+ */
+export function FloatingLevelSelector({ children }: { children: ReactNode }) {
   const selectedBuildingId = useViewer((s) => s.selection.buildingId)
   const levelId = useViewer((s) => s.selection.levelId)
   const setSelection = useViewer((s) => s.setSelection)
@@ -330,7 +266,10 @@ export function FloatingLevelSelector() {
   const createNodes = useScene((s) => s.createNodes)
   const updateNodes = useScene((s) => s.updateNodes)
 
+  const [open, setOpen] = useState(false)
+  // The dialogs live outside the popover: focusing them would dismiss it.
   const [deletingLevel, setDeletingLevel] = useState<LevelNode | null>(null)
+  const [duplicatingLevel, setDuplicatingLevel] = useState<LevelNode | null>(null)
   const [draggingLevelId, setDraggingLevelId] = useState<string | null>(null)
   const clipboardSnapshot = useSyncExternalStore(
     subscribeEditorClipboard,
@@ -382,12 +321,9 @@ export function FloatingLevelSelector() {
     setSelection({ buildingId: resolvedBuildingId, levelId: newLevel.id })
   }, [resolvedBuildingId, levels, createNode, setSelection])
 
-  const handleInsertBetween = useCallback(
-    (lowerIndex: number) => {
+  const handleInsertAbove = useCallback(
+    (lower: LevelNode) => {
       if (!resolvedBuildingId) return
-      const lower = levels[lowerIndex]
-      if (!lower) return
-
       const newLevelNumber = lower.level + 1
       const toShift = levels.filter((l) => l.level >= newLevelNumber)
       if (toShift.length > 0) {
@@ -417,7 +353,7 @@ export function FloatingLevelSelector() {
   }, [deletingLevel])
 
   const handleDuplicateLevel = useCallback(
-    (level: LevelNode, preset: LevelDuplicatePreset = 'everything') => {
+    (level: LevelNode, preset: LevelDuplicatePreset) => {
       const { createOps, newLevelId, shiftedLevels } = buildLevelDuplicateCreateOps({
         nodes: useScene.getState().nodes,
         level,
@@ -488,111 +424,101 @@ export function FloatingLevelSelector() {
     [levels, updateNodes],
   )
 
-  const handleDragCancel = useCallback(() => {
-    setDraggingLevelId(null)
-  }, [])
-
-  if (levels.length === 0) return null
-
   const reversedLevels = [...levels].reverse()
-  const sortableLevelIds = reversedLevels.map((level) => level.id)
-
-  const addButtonClass =
-    'absolute left-1/2 z-10 flex h-4 w-4 -translate-x-1/2 items-center justify-center rounded-full border border-border/80 bg-neutral-800 text-muted-foreground/60 shadow-md transition-colors hover:bg-neutral-700 hover:text-foreground'
 
   return (
     <>
-      <div
-        className="pointer-events-auto absolute top-4 z-20"
-        style={{ left: 'calc(var(--viewer-left-inset, 0px) + 12px)' }}
-      >
-        <div className="relative">
-          {/* Floating + at top edge */}
-          {!draggingLevelId && (
-            <button
-              className={cn(addButtonClass, 'top-0 -translate-y-1/2')}
-              onClick={handleAddAbove}
-              title="Add level above"
-              type="button"
+      <Popover onOpenChange={setOpen} open={open}>
+        <PopoverTrigger asChild>{children}</PopoverTrigger>
+        <PopoverContent
+          align="center"
+          className="w-52 rounded-xl border-0 bg-[#f5f5f5]/95 p-2 shadow-[0_2px_8px_rgba(0,0,0,0.15)] backdrop-blur-md dark:bg-neutral-900/95"
+          // Esc closes the list only; the editor would also disarm the tool.
+          onEscapeKeyDown={(event) => event.stopPropagation()}
+          side="bottom"
+          sideOffset={10}
+        >
+          <p className="px-1.5 pb-2 text-[11px] text-neutral-500">층 관리</p>
+          <div className="relative pt-2 pb-2">
+            {!draggingLevelId && (
+              <div className="absolute inset-x-0 top-0">
+                <InsertLevelButton onClick={handleAddAbove} title="맨 위에 층 추가" />
+              </div>
+            )}
+            <DndContext
+              collisionDetection={closestCenter}
+              onDragCancel={() => setDraggingLevelId(null)}
+              onDragEnd={handleDragEnd}
+              onDragStart={handleDragStart}
+              sensors={sensors}
             >
-              <Plus className="h-2.5 w-2.5" />
-            </button>
-          )}
-
-          {/* Floating + at bottom edge */}
-          {!draggingLevelId && (
-            <button
-              className={cn(addButtonClass, 'bottom-0 translate-y-1/2')}
-              onClick={handleAddBelow}
-              title="Add level below"
-              type="button"
-            >
-              <Plus className="h-2.5 w-2.5" />
-            </button>
-          )}
-
-          {/* Level list */}
-          <DndContext
-            collisionDetection={closestCenter}
-            onDragCancel={handleDragCancel}
-            onDragEnd={handleDragEnd}
-            onDragStart={handleDragStart}
-            sensors={sensors}
-          >
-            <SortableContext items={sortableLevelIds} strategy={verticalListSortingStrategy}>
-              <div className="flex flex-col gap-0.5 rounded-2xl border border-white/70 dark:border-white/10 bg-white/90 dark:bg-neutral-900/90 p-1 shadow-[0_6px_24px_rgba(0,0,0,0.16)] backdrop-blur-md">
-                {reversedLevels.map((level, i) => {
-                  const isSelected = level.id === levelId
-                  const sortedIndex = levels.indexOf(level)
-                  const showGapBelow = i < reversedLevels.length - 1
-
-                  return (
+              <SortableContext
+                items={reversedLevels.map((level) => level.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="flex flex-col gap-1">
+                  {reversedLevels.map((level, i) => (
                     <div className="relative" key={level.id}>
                       <SortableLevelRow
-                        isSelected={isSelected}
+                        isSelected={level.id === levelId}
                         level={level}
-                        onDuplicate={(preset) => handleDuplicateLevel(level, preset)}
-                        onPaste={
-                          clipboardSnapshot ? () => handlePasteToLevel(level) : undefined
-                        }
-                        onRequestDelete={() => setDeletingLevel(level)}
-                        onSelect={() =>
+                        onDuplicate={() => {
+                          setOpen(false)
+                          setDuplicatingLevel(level)
+                        }}
+                        onPaste={clipboardSnapshot ? () => handlePasteToLevel(level) : undefined}
+                        onRequestDelete={() => {
+                          setOpen(false)
+                          setDeletingLevel(level)
+                        }}
+                        onSelect={() => {
+                          triggerSFX('sfx:menu-click')
                           setSelection(
                             resolvedBuildingId
                               ? { buildingId: resolvedBuildingId, levelId: level.id }
                               : { levelId: level.id },
                           )
-                        }
+                        }}
                       />
-
-                      {showGapBelow && !draggingLevelId && (
-                        <button
-                          className={cn(addButtonClass, 'bottom-0 translate-y-1/2')}
-                          onClick={() => handleInsertBetween(sortedIndex - 1)}
-                          title="Insert level here"
-                          type="button"
-                        >
-                          <Plus className="h-2.5 w-2.5" />
-                        </button>
+                      {i < reversedLevels.length - 1 && !draggingLevelId && (
+                        <div className="absolute inset-x-0 bottom-1.5">
+                          <InsertLevelButton
+                            onClick={() => handleInsertAbove(reversedLevels[i + 1]!)}
+                            title="이 사이에 층 추가"
+                          />
+                        </div>
                       )}
                     </div>
-                  )
-                })}
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+            {!draggingLevelId && (
+              <div className="absolute inset-x-0 bottom-4">
+                <InsertLevelButton onClick={handleAddBelow} title="맨 아래에 층 추가" />
               </div>
-            </SortableContext>
-          </DndContext>
-        </div>
-      </div>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
 
-      {/* Delete confirmation dialog */}
-      <Dialog onOpenChange={(open) => !open && setDeletingLevel(null)} open={!!deletingLevel}>
+      <LevelDuplicateDialog
+        level={duplicatingLevel}
+        onConfirm={(preset) => {
+          if (duplicatingLevel) handleDuplicateLevel(duplicatingLevel, preset)
+          setDuplicatingLevel(null)
+        }}
+        onOpenChange={(next) => !next && setDuplicatingLevel(null)}
+        open={!!duplicatingLevel}
+      />
+
+      <Dialog onOpenChange={(next) => !next && setDeletingLevel(null)} open={!!deletingLevel}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>Delete level</DialogTitle>
+            <DialogTitle>층 삭제</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete{' '}
-              <strong>{deletingLevel ? getLevelDisplayName(deletingLevel) : ''}</strong>? All
-              walls, floors, and objects on this level will be permanently removed.
+              <strong>{deletingLevel ? getLevelDisplayName(deletingLevel) : ''}</strong>을(를)
+              삭제할까요? 이 층의 벽, 바닥과 모든 사물이 함께 지워집니다.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -601,14 +527,14 @@ export function FloatingLevelSelector() {
               onClick={() => setDeletingLevel(null)}
               type="button"
             >
-              Cancel
+              취소
             </button>
             <button
               className="rounded-full bg-red-600 px-4 py-2 text-sm text-white transition-colors hover:bg-red-700"
               onClick={handleConfirmDelete}
               type="button"
             >
-              Delete
+              삭제
             </button>
           </DialogFooter>
         </DialogContent>

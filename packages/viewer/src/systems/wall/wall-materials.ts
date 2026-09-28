@@ -37,7 +37,8 @@ import {
 type SceneMaterials = Record<SceneMaterialId, SceneMaterial> | undefined
 
 const DEFAULT_WALL_COLOR = '#f2f0ed'
-const WALL_CAP_COLOR = '#050505'
+// inZOI's wall tops read as a light cream band, not a black one.
+const WALL_CAP_COLOR = '#e6e1d8'
 
 const WALL_HIGHLIGHT_PROFILES = {
   delete: {
@@ -65,7 +66,7 @@ export interface WallMaterials {
 const wallMaterialCache = new Map<string, WallMaterials>()
 
 // Cutaway walls drop to a low stub (inZOI / Sims "벽 자르기") instead of vanishing.
-const CUTAWAY_STUB_HEIGHT = 0.3
+export const CUTAWAY_STUB_HEIGHT = 0.3
 
 function getSurfaceVisibleMaterial(
   spec: WallSurfaceMaterialSpec,
@@ -282,7 +283,7 @@ function createInvisibleWallMaterial(color: string, shading: RenderShading): Mat
       : new MeshStandardNodeMaterial(params)
 
   material.opacityNode = step(positionLocal.y, float(CUTAWAY_STUB_HEIGHT))
-  // Seen from above, the cut's inner faces read as the dark wall section.
+  // Seen from above, the cut's inner faces read as the wall's cap section.
   // Explicit node types: inferring them here trips tsgo's TS2590 union limit.
   const surface = materialColor as unknown as Node<'color'>
   material.colorNode = select<'color'>(frontFacing, surface, tslColor(WALL_CAP_COLOR))

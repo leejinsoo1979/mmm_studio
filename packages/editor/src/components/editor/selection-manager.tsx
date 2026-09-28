@@ -75,7 +75,6 @@ import useInteractionScope, {
   useMovingNode,
 } from '../../store/use-interaction-scope'
 import { passesSelectionFilter } from '../../store/use-selection-filter'
-import { useUiHidden } from '../../store/use-ui-hidden'
 import { boxSelectHandled, suppressBoxSelectForPointer } from '../tools/select/box-select-state'
 import { swallowNextClick } from './node-arrow-handles'
 
@@ -437,14 +436,6 @@ const HIGHLIGHT_PROFILES = {
     blend: 0.76,
     emissiveBlend: 0.92,
     emissiveIntensity: 0.46,
-  },
-  selection: {
-    // Keep the real material/texture readable: no albedo tint, just a gentle
-    // cyan emissive glow matching the cyan selection outline.
-    color: new Color('#7fd6ff'),
-    blend: 0,
-    emissiveBlend: 0.4,
-    emissiveIntensity: 0.12,
   },
 } as const
 
@@ -1964,13 +1955,8 @@ const SelectionStateSync = () => {
 }
 
 const SelectionMaterialSync = () => {
-  const selectedIds = useViewer((s) => s.selection.selectedIds)
-  const previewSelectedIds = useViewer((s) => s.previewSelectedIds)
   const hoveredId = useViewer((s) => s.hoveredId)
   const hoverHighlightMode = useViewer((s) => s.hoverHighlightMode)
-  const selectedMaterialTarget = useEditor((s) => s.selectedMaterialTarget)
-  // The paint card judges the real finish: no tint while customizing.
-  const customizing = useUiHidden((s) => s.customizing)
   const activeHighlightKindsRef = useRef(new Map<string, HighlightKind>())
   const highlightedMaterialsRef = useRef(
     new Map<
@@ -2047,15 +2033,9 @@ const SelectionMaterialSync = () => {
   }, [])
 
   useEffect(() => {
+    // A selection keeps the object's own look (inZOI): the outline alone marks
+    // it. Only the delete hover tints the object.
     const nextHighlightKinds = new Map<string, HighlightKind>()
-
-    for (const id of new Set([...selectedIds, ...previewSelectedIds])) {
-      // Keep the logical node selection while its material inspector is open,
-      // but restore the original surface material so tint/roughness edits can
-      // be judged without the purple selection overlay.
-      if (customizing || id === selectedMaterialTarget?.nodeId) continue
-      nextHighlightKinds.set(id, 'selection')
-    }
 
     if (hoverHighlightMode === 'delete' && hoveredId) {
       nextHighlightKinds.set(hoveredId, 'delete')
@@ -2063,15 +2043,7 @@ const SelectionMaterialSync = () => {
 
     activeHighlightKindsRef.current = nextHighlightKinds
     syncSelectionMaterials()
-  }, [
-    customizing,
-    hoverHighlightMode,
-    hoveredId,
-    previewSelectedIds,
-    selectedIds,
-    selectedMaterialTarget,
-    syncSelectionMaterials,
-  ])
+  }, [hoverHighlightMode, hoveredId, syncSelectionMaterials])
 
   useEffect(() => {
     return useScene.subscribe((state, prevState) => {

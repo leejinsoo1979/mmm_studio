@@ -1,7 +1,15 @@
 'use client'
 
 import { useScene } from '@pascal-app/core'
-import { SegmentedControl, SliderControl, ToggleControl, useEditor } from '@pascal-app/editor'
+import {
+  CatalogCard,
+  CatalogSection,
+  SegmentedControl,
+  SliderControl,
+  ToggleControl,
+  useEditor,
+} from '@pascal-app/editor'
+import type { ReactNode } from 'react'
 import { FLOWER_PRESET_LIST } from './flower-presets'
 import type { FlowerPreset } from './flower-schema'
 import { GRASS_PRESET_LIST } from './grass-presets'
@@ -16,6 +24,7 @@ const KIND: Record<Mode, string> = {
   grass: 'trees:grass',
 }
 const NOUN: Record<Mode, string> = { trees: '나무를', flowers: '꽃을', grass: '풀을' }
+const TITLE: Record<Mode, string> = { trees: '나무', flowers: '꽃', grass: '풀' }
 
 /**
  * The plugin's left-rail panel. A Trees / Flowers / Grass segmented control
@@ -37,15 +46,11 @@ export default function TreesPanel() {
 
   const arming = activeTool === KIND[mode]
 
+  // The host's catalogue already titles the category (the 자연 hero chip), so
+  // the panel opens straight on its brush switch.
   return (
-    <div className="flex flex-col gap-4 p-4 text-sidebar-foreground">
-      <header className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-base">자연</h2>
-          <span className="rounded-full bg-sidebar-accent px-2 py-0.5 text-sidebar-foreground/70 text-xs">
-            {count}개 심음
-          </span>
-        </div>
+    <div className="flex flex-col pb-3 text-[var(--panel-card-fg,#333)]">
+      <header className="flex flex-col gap-2 px-2.5 pt-2.5">
         <SegmentedControl
           onChange={setMode}
           options={[
@@ -55,38 +60,52 @@ export default function TreesPanel() {
           ]}
           value={mode}
         />
-        <p className="text-sidebar-foreground/50 text-xs">
-          {arming
-            ? '땅을 클릭해 심습니다. Esc로 종료합니다.'
-            : `${NOUN[mode]} 고른 뒤 땅을 클릭하세요.`}
-        </p>
+        <div className="flex items-center justify-between gap-2 px-0.5 text-[11px]">
+          <p className="opacity-80">
+            {arming
+              ? '땅을 클릭해 심습니다. Esc로 종료합니다.'
+              : `${NOUN[mode]} 고른 뒤 땅을 클릭하세요.`}
+          </p>
+          <span className="shrink-0 rounded-full bg-[var(--panel-card,#f3f3f3)] px-2 py-0.5 tabular-nums">
+            {count}개 심음
+          </span>
+        </div>
       </header>
 
       {mode === 'trees' && <TreesSection arming={arming} />}
       {mode === 'flowers' && <FlowersSection arming={arming} />}
       {mode === 'grass' && <GrassSection arming={arming} />}
 
-      <footer className="-mx-4 -mb-4 sticky bottom-0 mt-1 border-sidebar-border/50 border-t bg-sidebar px-4 py-3 text-[11px] text-sidebar-foreground/50 leading-relaxed">
-        Trees generated with{' '}
+      <footer className="mt-3 px-3 text-[10.5px] leading-relaxed opacity-70">
+        나무 모델은{' '}
         <a
-          className="underline decoration-dotted underline-offset-2 hover:text-sidebar-foreground/70"
-          href="https://github.com/dgreenheck/ez-tree"
-          rel="noreferrer"
-          target="_blank"
-        >
-          ez-tree
-        </a>{' '}
-        by{' '}
-        <a
-          className="underline decoration-dotted underline-offset-2 hover:text-sidebar-foreground/70"
+          className="underline decoration-dotted underline-offset-2 hover:opacity-100"
           href="https://x.com/dangreenheck"
           rel="noreferrer"
           target="_blank"
         >
           Daniel Greenheck
-        </a>{' '}
-        (MIT).
+        </a>
+        의{' '}
+        <a
+          className="underline decoration-dotted underline-offset-2 hover:opacity-100"
+          href="https://github.com/dgreenheck/ez-tree"
+          rel="noreferrer"
+          target="_blank"
+        >
+          ez-tree
+        </a>
+        (MIT 라이선스)로 만듭니다.
       </footer>
+    </div>
+  )
+}
+
+/** Sliders and toggles under a preset grid, on a catalogue card. */
+function Controls({ children }: { children: ReactNode }) {
+  return (
+    <div className="mx-2.5 mt-2 flex flex-col gap-2 rounded-[10px] bg-[var(--panel-card,#f3f3f3)] p-3">
+      {children}
     </div>
   )
 }
@@ -107,23 +126,26 @@ function TreesSection({ arming }: { arming: boolean }) {
 
   return (
     <>
-      <PresetGrid items={TREE_PRESET_LIST} onPick={activate} selected={arming ? selected : null} />
-      {selected !== 'trellis' && (
-        <div className="flex flex-col gap-2">
+      <PresetGrid
+        items={TREE_PRESET_LIST}
+        onPick={activate}
+        selected={arming ? selected : null}
+        title={TITLE.trees}
+      />
+      <Controls>
+        {selected !== 'trellis' && (
           <SegmentedControl
             onChange={useTreesStore.getState().setSize}
             options={[
-              { label: 'S', value: 'small' },
-              { label: 'M', value: 'medium' },
-              { label: 'L', value: 'large' },
+              { label: '작게', value: 'small' },
+              { label: '보통', value: 'medium' },
+              { label: '크게', value: 'large' },
             ]}
             value={size}
           />
-        </div>
-      )}
-      <div className="flex flex-col gap-0.5">
+        )}
         <SliderControl
-          label="Height"
+          label="높이"
           max={15}
           min={1}
           onChange={useTreesStore.getState().setHeight}
@@ -135,7 +157,7 @@ function TreesSection({ arming }: { arming: boolean }) {
         />
         {!leafless && (
           <SliderControl
-            label="Foliage"
+            label="잎 밀도"
             max={1.5}
             min={0}
             onChange={useTreesStore.getState().setFoliageDensity}
@@ -146,7 +168,7 @@ function TreesSection({ arming }: { arming: boolean }) {
           />
         )}
         <SliderControl
-          label="Trunk"
+          label="줄기 굵기"
           max={2.5}
           min={0.3}
           onChange={useTreesStore.getState().setTrunkThickness}
@@ -157,10 +179,10 @@ function TreesSection({ arming }: { arming: boolean }) {
         />
         <ToggleControl
           checked={leafless}
-          label="Bare (leafless)"
+          label="잎 없는 나무"
           onChange={useTreesStore.getState().setLeafless}
         />
-      </div>
+      </Controls>
     </>
   )
 }
@@ -181,18 +203,21 @@ function FlowersSection({ arming }: { arming: boolean }) {
         items={FLOWER_PRESET_LIST}
         onPick={activate}
         selected={arming ? selected : null}
+        title={TITLE.flowers}
       />
-      <SliderControl
-        label="Height"
-        max={2}
-        min={0.2}
-        onChange={useTreesStore.getState().setFlowerHeight}
-        precision={2}
-        restoreOnCommit={false}
-        step={0.05}
-        unit="m"
-        value={height}
-      />
+      <Controls>
+        <SliderControl
+          label="높이"
+          max={2}
+          min={0.2}
+          onChange={useTreesStore.getState().setFlowerHeight}
+          precision={2}
+          restoreOnCommit={false}
+          step={0.05}
+          unit="m"
+          value={height}
+        />
+      </Controls>
     </>
   )
 }
@@ -209,59 +234,55 @@ function GrassSection({ arming }: { arming: boolean }) {
 
   return (
     <>
-      <PresetGrid items={GRASS_PRESET_LIST} onPick={activate} selected={arming ? selected : null} />
-      <SliderControl
-        label="Height"
-        max={2}
-        min={0.1}
-        onChange={useTreesStore.getState().setGrassHeight}
-        precision={2}
-        restoreOnCommit={false}
-        step={0.05}
-        unit="m"
-        value={height}
+      <PresetGrid
+        items={GRASS_PRESET_LIST}
+        onPick={activate}
+        selected={arming ? selected : null}
+        title={TITLE.grass}
       />
+      <Controls>
+        <SliderControl
+          label="높이"
+          max={2}
+          min={0.1}
+          onChange={useTreesStore.getState().setGrassHeight}
+          precision={2}
+          restoreOnCommit={false}
+          step={0.05}
+          unit="m"
+          value={height}
+        />
+      </Controls>
     </>
   )
 }
 
+/** The presets as catalogue cards (the host's 4-up grid under a header bar). */
 function PresetGrid<T extends string>({
   items,
   selected,
   onPick,
+  title,
 }: {
   items: ReadonlyArray<{ id: T; label: string; thumbnail: string }>
   selected: T | null
   onPick: (id: T) => void
+  title: string
 }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {items.map((item) => {
-        const isSelected = selected === item.id
-        return (
-          <button
-            className={`group relative flex flex-col gap-2 rounded-xl border p-2 transition-all ${
-              isSelected
-                ? 'border-sidebar-ring bg-sidebar-accent shadow-sm'
-                : 'border-sidebar-border hover:border-sidebar-ring/50 hover:bg-sidebar-accent/40'
-            }`}
-            key={item.id}
-            onClick={() => onPick(item.id)}
-            type="button"
-          >
-            <img
-              alt=""
-              aria-hidden
-              className="aspect-square w-full rounded-lg bg-[#f3f4f6] object-cover ring-1 ring-black/10 transition-transform group-hover:scale-[1.02]"
-              src={item.thumbnail}
-            />
-            <span className="pl-0.5 font-medium text-xs">{item.label}</span>
-            {isSelected && (
-              <span className="absolute top-3 right-3 h-2 w-2 rounded-full bg-sidebar-ring ring-2 ring-sidebar-accent" />
-            )}
-          </button>
-        )
-      })}
-    </div>
+    <CatalogSection title={title}>
+      {items.map((item) => (
+        <CatalogCard
+          active={selected === item.id}
+          hover={{ description: '고른 뒤 땅을 클릭해 심습니다.' }}
+          image={item.thumbnail}
+          imageFit="cover"
+          key={item.id}
+          label={item.label}
+          meta={item.label}
+          onClick={() => onPick(item.id)}
+        />
+      ))}
+    </CatalogSection>
   )
 }

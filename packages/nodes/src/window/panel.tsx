@@ -73,15 +73,15 @@ function isSameRadiusTuple(
 }
 
 const windowTypeOptions: Array<{ label: string; value: WindowNode['windowType'] }> = [
-  { label: 'Fixed', value: 'fixed' },
-  { label: 'Sliding', value: 'sliding' },
-  { label: 'Casement', value: 'casement' },
-  { label: 'Awning', value: 'awning' },
-  { label: 'Single Hung', value: 'single-hung' },
-  { label: 'Double Hung', value: 'double-hung' },
-  { label: 'Bay', value: 'bay' },
-  { label: 'Bow', value: 'bow' },
-  { label: 'Louvered', value: 'louvered' },
+  { label: '고정창', value: 'fixed' },
+  { label: '미닫이', value: 'sliding' },
+  { label: '여닫이창', value: 'casement' },
+  { label: '들창', value: 'awning' },
+  { label: '외오르내리창', value: 'single-hung' },
+  { label: '오르내리창', value: 'double-hung' },
+  { label: '돌출창', value: 'bay' },
+  { label: '활형 돌출창', value: 'bow' },
+  { label: '루버창', value: 'louvered' },
 ]
 
 const shapedWindowTypes = new Set<WindowNode['windowType']>([
@@ -397,7 +397,7 @@ export default function WindowPanel() {
       title={node.name || 'Window'}
       width={320}
     >
-      <PanelSection title="Type">
+      <PanelSection title="종류">
         <SegmentedControl
           onChange={(value) =>
             handleUpdate({
@@ -415,8 +415,8 @@ export default function WindowPanel() {
             })
           }
           options={[
-            { value: 'window', label: 'Window' },
-            { value: 'opening', label: 'Opening' },
+            { value: 'window', label: '창문' },
+            { value: 'opening', label: '개구부' },
           ]}
           value={node.openingKind ?? 'window'}
         />
@@ -489,7 +489,7 @@ export default function WindowPanel() {
       )}
 
       {showWindowTypeSection && (
-        <PanelSection title="Window Type">
+        <PanelSection title="창 종류">
           <div className="grid grid-cols-2 gap-2 px-1 pt-1">
             {windowTypeOptions.map((option) => {
               const isSelected = displayedWindowType === option.value
@@ -529,8 +529,8 @@ export default function WindowPanel() {
                   })
                 }
                 options={[
-                  { value: 'up', label: 'Up' },
-                  { value: 'down', label: 'Down' },
+                  { value: 'up', label: '위' },
+                  { value: 'down', label: '아래' },
                 ]}
                 value={awningDirection}
               />
@@ -543,8 +543,8 @@ export default function WindowPanel() {
                   handleUpdate({ casementStyle: value as WindowNode['casementStyle'] })
                 }
                 options={[
-                  { value: 'single', label: 'Single' },
-                  { value: 'french', label: 'French' },
+                  { value: 'single', label: '단창' },
+                  { value: 'french', label: '프렌치' },
                 ]}
                 value={node.casementStyle ?? 'single'}
               />
@@ -554,8 +554,8 @@ export default function WindowPanel() {
                     handleUpdate({ hingesSide: value as WindowNode['hingesSide'] })
                   }
                   options={[
-                    { value: 'left', label: 'Left' },
-                    { value: 'right', label: 'Right' },
+                    { value: 'left', label: '왼쪽' },
+                    { value: 'right', label: '오른쪽' },
                   ]}
                   value={node.hingesSide ?? 'left'}
                 />
@@ -579,11 +579,11 @@ export default function WindowPanel() {
         </PanelSection>
       )}
 
-      <PanelSection title="Position">
+      <PanelSection title="위치">
         <SliderControl
           label={
             <>
-              X<sub className="ml-[1px] text-[11px] opacity-70">pos</sub>
+              X<sub className="ml-[1px] text-[11px] opacity-70">위치</sub>
             </>
           }
           onChange={(v) => handleUpdate({ position: [v, node.position[1], node.position[2]] })}
@@ -595,7 +595,7 @@ export default function WindowPanel() {
         <SliderControl
           label={
             <>
-              Y<sub className="ml-[1px] text-[11px] opacity-70">pos</sub>
+              Y<sub className="ml-[1px] text-[11px] opacity-70">위치</sub>
             </>
           }
           onChange={(v) => handleUpdate({ position: [node.position[0], v, node.position[2]] })}
@@ -609,16 +609,16 @@ export default function WindowPanel() {
             <ActionButton
               className="w-full"
               icon={<FlipHorizontal2 className="h-4 w-4" />}
-              label="Flip Side"
+              label="방향 뒤집기"
               onClick={handleFlip}
             />
           </div>
         )}
       </PanelSection>
 
-      <PanelSection title="Dimensions">
+      <PanelSection title="치수">
         <SliderControl
-          label="Width"
+          label="폭"
           min={0}
           onChange={(v) => handleUpdate(getDimensionUpdates({ width: v }))}
           precision={2}
@@ -628,7 +628,7 @@ export default function WindowPanel() {
           value={Math.round(node.width * 100) / 100}
         />
         <SliderControl
-          label="Height"
+          label="높이"
           min={0}
           onChange={(v) => handleUpdate(getDimensionUpdates({ height: v }))}
           precision={2}
@@ -640,7 +640,7 @@ export default function WindowPanel() {
       </PanelSection>
 
       {showWindowShapeSection && (
-        <PanelSection title="Top Shape">
+        <PanelSection title="상부 모양">
           <SegmentedControl
             onChange={(value) =>
               handleUpdate({
@@ -658,9 +658,9 @@ export default function WindowPanel() {
               })
             }
             options={[
-              { value: 'rectangle', label: 'Rect' },
-              { value: 'rounded', label: 'Rounded' },
-              { value: 'arch', label: 'Arch' },
+              { value: 'rectangle', label: '사각' },
+              { value: 'rounded', label: '둥근 모서리' },
+              { value: 'arch', label: '아치' },
             ]}
             value={windowShape}
           />
@@ -671,14 +671,14 @@ export default function WindowPanel() {
                   handleUpdate({ openingRadiusMode: value as WindowNode['openingRadiusMode'] })
                 }
                 options={[
-                  { value: 'all', label: 'All' },
-                  { value: 'individual', label: 'Individual' },
+                  { value: 'all', label: '전체' },
+                  { value: 'individual', label: '개별' },
                 ]}
                 value={openingRadiusMode}
               />
               {openingRadiusMode === 'all' ? (
                 <SliderControl
-                  label="Corner Radius"
+                  label="모서리 반경"
                   max={maxRoundedRadius}
                   min={0}
                   onChange={(value) => previewWindowUpdate('cornerRadius', value)}
@@ -691,8 +691,8 @@ export default function WindowPanel() {
               ) : (
                 <>
                   {[
-                    ['Top Left', 0],
-                    ['Top Right', 1],
+                    ['왼쪽 위', 0],
+                    ['오른쪽 위', 1],
                     ['Bottom Right', 2],
                     ['Bottom Left', 3],
                   ].map(([label, index]) => (
@@ -712,7 +712,7 @@ export default function WindowPanel() {
                 </>
               )}
               <SliderControl
-                label="Reveal Radius"
+                label="안쪽 반경"
                 max={0.08}
                 min={0}
                 onChange={(value) => previewWindowUpdate('openingRevealRadius', value)}
@@ -727,7 +727,7 @@ export default function WindowPanel() {
           {windowShape === 'arch' && (
             <div className="mt-2 flex flex-col gap-1">
               <SliderControl
-                label="Arch Height"
+                label="아치 높이"
                 max={Math.max(0.05, node.height)}
                 min={0.05}
                 onChange={(value) => handleUpdate({ archHeight: value })}
@@ -743,15 +743,15 @@ export default function WindowPanel() {
       )}
 
       {showOpeningShapeSection && (
-        <PanelSection title="Opening Shape">
+        <PanelSection title="개구부 모양">
           <SegmentedControl
             onChange={(value) =>
               handleUpdate({ openingShape: value as WindowNode['openingShape'] })
             }
             options={[
-              { value: 'rectangle', label: 'Rect' },
-              { value: 'rounded', label: 'Rounded' },
-              { value: 'arch', label: 'Arch' },
+              { value: 'rectangle', label: '사각' },
+              { value: 'rounded', label: '둥근 모서리' },
+              { value: 'arch', label: '아치' },
             ]}
             value={openingShape}
           />
@@ -762,14 +762,14 @@ export default function WindowPanel() {
                   handleUpdate({ openingRadiusMode: value as WindowNode['openingRadiusMode'] })
                 }
                 options={[
-                  { value: 'all', label: 'All' },
-                  { value: 'individual', label: 'Individual' },
+                  { value: 'all', label: '전체' },
+                  { value: 'individual', label: '개별' },
                 ]}
                 value={openingRadiusMode}
               />
               {openingRadiusMode === 'all' ? (
                 <SliderControl
-                  label="Corner Radius"
+                  label="모서리 반경"
                   max={maxRoundedRadius}
                   min={0}
                   onChange={(value) => previewWindowUpdate('cornerRadius', value)}
@@ -782,8 +782,8 @@ export default function WindowPanel() {
               ) : (
                 <>
                   {[
-                    ['Top Left', 0],
-                    ['Top Right', 1],
+                    ['왼쪽 위', 0],
+                    ['오른쪽 위', 1],
                     ['Bottom Right', 2],
                     ['Bottom Left', 3],
                   ].map(([label, index]) => (
@@ -803,7 +803,7 @@ export default function WindowPanel() {
                 </>
               )}
               <SliderControl
-                label="Reveal Radius"
+                label="안쪽 반경"
                 max={0.08}
                 min={0}
                 onChange={(value) => previewWindowUpdate('openingRevealRadius', value)}
@@ -818,7 +818,7 @@ export default function WindowPanel() {
           {openingShape === 'arch' && (
             <div className="mt-2 flex flex-col gap-1">
               <SliderControl
-                label="Arch Height"
+                label="아치 높이"
                 max={Math.max(0.05, node.height)}
                 min={0.05}
                 onChange={(value) => handleUpdate({ archHeight: value })}
@@ -836,9 +836,9 @@ export default function WindowPanel() {
       {!isOpening && (
         <>
           {showFrameSection && (
-            <PanelSection title="Frame">
+            <PanelSection title="문틀">
               <SliderControl
-                label="Thickness"
+                label="두께"
                 min={0}
                 onChange={(v) => handleUpdate({ frameThickness: v })}
                 precision={3}
@@ -847,7 +847,7 @@ export default function WindowPanel() {
                 value={Math.round(node.frameThickness * 1000) / 1000}
               />
               <SliderControl
-                label="Depth"
+                label="깊이"
                 min={0}
                 onChange={(v) => handleUpdate({ frameDepth: v })}
                 precision={3}
@@ -859,9 +859,9 @@ export default function WindowPanel() {
           )}
 
           {showGridSection && (
-            <PanelSection title="Grid">
+            <PanelSection title="창살">
               <SliderControl
-                label="Columns"
+                label="열 수"
                 max={8}
                 min={1}
                 onChange={(v) => {
@@ -873,7 +873,7 @@ export default function WindowPanel() {
                 value={numCols}
               />
               <SliderControl
-                label="Rows"
+                label="행 수"
                 max={8}
                 min={1}
                 onChange={(v) => {
@@ -905,7 +905,7 @@ export default function WindowPanel() {
                   ))}
                   <div className="mt-1 border-border/50 border-t pt-1">
                     <SliderControl
-                      label="Divider"
+                      label="칸막이"
                       max={0.1}
                       min={0.005}
                       onChange={(v) => handleUpdate({ columnDividerThickness: v })}
@@ -938,7 +938,7 @@ export default function WindowPanel() {
                   ))}
                   <div className="mt-1 border-border/50 border-t pt-1">
                     <SliderControl
-                      label="Divider"
+                      label="칸막이"
                       max={0.1}
                       min={0.005}
                       onChange={(v) => handleUpdate({ rowDividerThickness: v })}
@@ -954,16 +954,16 @@ export default function WindowPanel() {
           )}
 
           {showSillSection && (
-            <PanelSection title="Sill">
+            <PanelSection title="창대">
               <ToggleControl
                 checked={node.sill}
-                label="Enable Sill"
+                label="창대 사용"
                 onChange={(checked) => handleUpdate({ sill: checked })}
               />
               {node.sill && (
                 <div className="mt-1 flex flex-col gap-1">
                   <SliderControl
-                    label="Depth"
+                    label="깊이"
                     min={0}
                     onChange={(v) => handleUpdate({ sillDepth: v })}
                     precision={3}
@@ -972,7 +972,7 @@ export default function WindowPanel() {
                     value={Math.round(node.sillDepth * 1000) / 1000}
                   />
                   <SliderControl
-                    label="Thickness"
+                    label="두께"
                     min={0}
                     onChange={(v) => handleUpdate({ sillThickness: v })}
                     precision={3}
@@ -987,18 +987,18 @@ export default function WindowPanel() {
         </>
       )}
 
-      <PanelSection title="Actions">
+      <PanelSection title="동작">
         <ActionGroup>
-          <ActionButton icon={<Move className="h-3.5 w-3.5" />} label="Move" onClick={handleMove} />
+          <ActionButton icon={<Move className="h-3.5 w-3.5" />} label="이동" onClick={handleMove} />
           <ActionButton
             icon={<Copy className="h-3.5 w-3.5" />}
-            label="Duplicate"
+            label="복제"
             onClick={handleDuplicate}
           />
           <ActionButton
             className="hover:bg-red-500/20"
             icon={<Trash2 className="h-3.5 w-3.5 text-red-400" />}
-            label="Delete"
+            label="삭제"
             onClick={handleDelete}
           />
         </ActionGroup>

@@ -380,8 +380,12 @@ function planWallSplit(
       .map((update) => update.id) as WallNode['children']
   const firstWall = { ...first, children: childrenOf(first.id) }
   const secondWall = { ...second, children: childrenOf(second.id) }
-  const parentId = wallToSplit.parentId as AnyNodeId | undefined
   const pendingIndex = changes.create.findIndex(({ node }) => node.id === wallToSplit.id)
+  // A still-pending half from an earlier split carries its parent on the create entry.
+  const parentId =
+    pendingIndex >= 0
+      ? changes.create[pendingIndex]!.parentId
+      : (wallToSplit.parentId as AnyNodeId | undefined)
   if (pendingIndex >= 0) {
     changes.create.splice(pendingIndex, 1)
   } else {
@@ -763,10 +767,71 @@ export function commitWallDraftSegment(
   return wall
 }
 
+// A given segment end within this distance of an existing wall joins it, and a
+// segment this close to collinear with a wall shares the stretch they overlap.
+const WALL_SHARED_EDGE_TOLERANCE = 1e-3
+
+function isStraightWall(wall: WallNode): boolean {
+  return (wall.curveOffset ?? 0) === 0
+}
+
 /**
- * Creates the given segments on the current level exactly as given (no
- * snapping or splitting), plus the auto floor / ceiling they close, as one
- * undo step. Segments duplicating an existing wall are skipped.
+ * The stretches of `start → end` that no straight wall already runs along, in
+ * order. A stretch ends on the covering wall's own endpoint so the new wall
+ * joins it exactly.
+ */
+function uncoveredStretches(
+  start: WallPlanPoint,
+  end: WallPlanPoint,
+  walls: WallNode[],
+): [WallPlanPoint, WallPlanPoint][] {
+  const length = Math.hypot(end[0] - start[0], end[1] - start[1])
+  const ux = (end[0] - start[0]) / length
+  const uz = (end[1] - start[1]) / length
+  const along = (point: WallPlanPoint) => (point[0] - start[0]) * ux + (point[1] - start[1]) * uz
+  const offLine = (point: WallPlanPoint) =>
+    Math.abs((point[0] - start[0]) * uz - (point[1] - start[1]) * ux)
+  type Stop = { t: number; point: WallPlanPoint }
+  const clampStop = (point: WallPlanPoint): Stop => {
+    const t = along(point)
+    if (t <= 0) return { t: 0, point: start }
+    if (t >= length) return { t: length, point: end }
+    return { t, point }
+  }
+
+  const covered: { from: Stop; to: Stop }[] = []
+  for (const wall of walls) {
+    if (!isStraightWall(wall)) continue
+    if (
+      offLine(wall.start) > WALL_SHARED_EDGE_TOLERANCE ||
+      offLine(wall.end) > WALL_SHARED_EDGE_TOLERANCE
+    ) {
+      continue
+    }
+    const [from, to] = [clampStop(wall.start), clampStop(wall.end)].sort((a, b) => a.t - b.t) as [
+      Stop,
+      Stop,
+    ]
+    if (to.t - from.t > WALL_MIN_LENGTH) covered.push({ from, to })
+  }
+  covered.sort((a, b) => a.from.t - b.from.t)
+
+  const stretches: [WallPlanPoint, WallPlanPoint][] = []
+  let cursor: Stop = { t: 0, point: start }
+  for (const { from, to } of covered) {
+    if (from.t - cursor.t > WALL_MIN_LENGTH) stretches.push([cursor.point, from.point])
+    if (to.t > cursor.t) cursor = to
+  }
+  if (length - cursor.t > WALL_MIN_LENGTH) stretches.push([cursor.point, end])
+  return stretches
+}
+
+/**
+ * Creates the given segments on the current level (no snapping), plus the
+ * auto floor / ceiling they close, as one undo step. Like a drawn wall, a
+ * segment end landing on an existing wall splits it there; a stretch an
+ * existing wall already runs along is shared rather than doubled, so a room
+ * dropped against a wall reuses that wall and still closes.
  */
 export function createWallSegmentsOnCurrentLevel(
   segments: [WallPlanPoint, WallPlanPoint][],
@@ -774,28 +839,57 @@ export function createWallSegmentsOnCurrentLevel(
   const levelId = useViewer.getState().selection.levelId
   if (!levelId) return []
   const { applyNodeChanges, nodes } = useScene.getState()
-  const existing: Pick<WallNode, 'start' | 'end'>[] = Object.values(nodes).filter(
-    (node): node is WallNode => node?.type === 'wall' && node.parentId === levelId,
-  )
+  const changes: WallCommitChanges = {
+    nodes,
+    walls: Object.values(nodes).filter(
+      (node): node is WallNode => node?.type === 'wall' && node.parentId === levelId,
+    ),
+    create: [],
+    update: [],
+    delete: [],
+  }
   const defaults = useEditor.getState().toolDefaults.wall ?? {}
   let wallCount = Object.values(nodes).filter((node) => node.type === 'wall').length
   const walls: WallNode[] = []
-  for (const [start, end] of segments) {
+  const joined = new Map<string, WallPlanPoint>()
+  // Joins split the level's walls (or their split halves), never this batch's.
+  const joinable = (wall: WallNode) => isStraightWall(wall) && !walls.includes(wall)
+  const join = (point: WallPlanPoint) => {
+    const key = `${point[0]},${point[1]}`
+    let resolved = joined.get(key)
+    if (!resolved) {
+      const intersection = findWallIntersection(
+        point,
+        changes.walls.filter(joinable),
+        WALL_SHARED_EDGE_TOLERANCE,
+      )
+      resolved = planWallSplit(intersection, changes) ?? point
+      joined.set(key, resolved)
+    }
+    return resolved
+  }
+
+  for (const segment of segments) {
+    if (!isSegmentLongEnough(segment[0], segment[1])) continue
+    const start = join(segment[0])
+    const end = join(segment[1])
     if (!isSegmentLongEnough(start, end)) continue
-    const duplicate = existing.some(
-      (wall) =>
-        (pointsEqual(wall.start, start) && pointsEqual(wall.end, end)) ||
-        (pointsEqual(wall.start, end) && pointsEqual(wall.end, start)),
-    )
-    if (duplicate) continue
-    wallCount += 1
-    const wall = WallSchema.parse({ ...defaults, name: `Wall ${wallCount}`, start, end })
-    walls.push(wall)
-    existing.push(wall)
+    for (const [from, to] of uncoveredStretches(start, end, changes.walls)) {
+      wallCount += 1
+      const wall = WallSchema.parse({
+        ...defaults,
+        name: `Wall ${wallCount}`,
+        start: from,
+        end: to,
+      })
+      walls.push(wall)
+      changes.create.push({ node: wall, parentId: levelId as AnyNodeId })
+      changes.walls = [...changes.walls, wall]
+    }
   }
   if (walls.length === 0) return []
 
-  applyNodeChanges({ create: walls.map((node) => ({ node, parentId: levelId as AnyNodeId })) })
+  applyNodeChanges({ create: changes.create, update: changes.update, delete: changes.delete })
   sfxEmitter.emit('sfx:structure-build')
   flushAutoSurfacesForCurrentLevel()
   return walls

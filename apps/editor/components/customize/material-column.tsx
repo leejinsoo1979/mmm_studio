@@ -70,7 +70,9 @@ export function MaterialColumn({
           ))}
         </div>
       ) : (
-        <span className="text-[10.5px] text-neutral-500">{emptyText}</span>
+        <span className="grid flex-1 place-items-center text-center text-[12px] text-[#777] dark:text-neutral-400">
+          {emptyText}
+        </span>
       )}
     </div>
   )

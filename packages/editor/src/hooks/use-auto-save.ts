@@ -2,6 +2,7 @@
 
 import { useScene } from '@pascal-app/core'
 import { type MutableRefObject, useCallback, useEffect, useRef } from 'react'
+import { isApplyingHistoryJump } from '../lib/history'
 import { type SceneGraph, saveSceneToLocalStorage } from '../lib/scene'
 
 const AUTOSAVE_DEBOUNCE_MS = 1000
@@ -16,15 +17,71 @@ interface UseAutoSaveOptions {
   /**
    * localStorage key for a client-side copy written with every save attempt, so
    * a scene the server lost (restart, in-memory store) can still be restored.
+   * Keys sharing the part up to the last ':' (e.g. `app-backup:<sceneId>`) are
+   * one family, of which only the most recently saved few are kept.
    */
   backupKey?: string
 }
 
+/** Scene copies kept per backup family; older ones are dropped. */
+const BACKUP_LIMIT = 5
+const RECENT_SUFFIX = '__recent'
+
+function backupFamily(key: string): string | null {
+  const split = key.lastIndexOf(':')
+  return split === -1 ? null : key.slice(0, split + 1)
+}
+
+/** The family's backup keys, oldest first. */
+function readRecentBackups(family: string): string[] {
+  const indexKey = `${family}${RECENT_SUFFIX}`
+  const raw = localStorage.getItem(indexKey)
+  if (raw) {
+    try {
+      const keys = JSON.parse(raw)
+      if (Array.isArray(keys)) return keys.filter((key): key is string => typeof key === 'string')
+    } catch {}
+  }
+  // No index yet: order the copies already stored by their save time.
+  const found: { key: string; savedAt: string }[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (!key?.startsWith(family) || key === indexKey) continue
+    let savedAt = ''
+    try {
+      savedAt = String(JSON.parse(localStorage.getItem(key) ?? '{}').savedAt ?? '')
+    } catch {}
+    found.push({ key, savedAt })
+  }
+  return found.sort((a, b) => a.savedAt.localeCompare(b.savedAt)).map(({ key }) => key)
+}
+
 function writeBackup(key: string, graph: SceneGraph) {
+  const payload = JSON.stringify({ graph, savedAt: new Date().toISOString() })
+  const family = backupFamily(key)
   try {
-    localStorage.setItem(key, JSON.stringify({ graph, savedAt: new Date().toISOString() }))
+    let recent = family ? [...readRecentBackups(family).filter((k) => k !== key), key] : [key]
+    const dropOldest = (keep: number) => {
+      while (recent.length > keep) {
+        const old = recent.shift()
+        if (old) localStorage.removeItem(old)
+      }
+    }
+    dropOldest(BACKUP_LIMIT)
+    try {
+      localStorage.setItem(key, payload)
+    } catch {
+      // Out of quota: make room with the other scenes' copies and retry once.
+      dropOldest(1)
+      try {
+        localStorage.setItem(key, payload)
+      } catch {
+        recent = recent.filter((k) => localStorage.getItem(k) !== null)
+      }
+    }
+    if (family) localStorage.setItem(`${family}${RECENT_SUFFIX}`, JSON.stringify(recent))
   } catch {
-    // Swallow storage quota errors
+    // Storage unavailable (private mode, blocked site data): the copy is best effort.
   }
 }
 
@@ -86,6 +143,9 @@ export function useAutoSave({
     let lastCollectionsRef = useScene.getState().collections
     let lastMaterialsRef = useScene.getState().materials
     let lastExperienceRef = useScene.getState().experience
+    // An undo / redo since the last save: a deliberate step, which may take
+    // the lot back to its bare skeleton (undoing the first room on it).
+    let historyJumpSinceSave = false
 
     async function executeSave() {
       if (isLoadingSceneRef.current || isVersionPreviewModeRef.current) {
@@ -101,7 +161,15 @@ export function useAutoSave({
       // This catches accidental full deletions before they're persisted.
       const currentNodeCount = Object.keys(nodes).length
       const STRUCTURAL_NODE_COUNT = 4 // site + building + levels (empty scene skeleton)
-      if (lastNodeCount > STRUCTURAL_NODE_COUNT && currentNodeCount <= STRUCTURAL_NODE_COUNT) {
+      // An undo may empty the lot, but never past its skeleton (that would be
+      // history reaching back before the scene loaded).
+      const undoneToSkeleton =
+        historyJumpSinceSave && Object.values(nodes).some((node) => node.type === 'level')
+      if (
+        !undoneToSkeleton &&
+        lastNodeCount > STRUCTURAL_NODE_COUNT &&
+        currentNodeCount <= STRUCTURAL_NODE_COUNT
+      ) {
         console.warn(
           `[autosave] Blocked: scene dropped from ${lastNodeCount} to ${currentNodeCount} nodes. Likely accidental deletion.`,
         )
@@ -109,6 +177,7 @@ export function useAutoSave({
         return
       }
       lastNodeCount = currentNodeCount
+      historyJumpSinceSave = false
 
       isSavingRef.current = true
       pendingSaveRef.current = false
@@ -173,6 +242,7 @@ export function useAutoSave({
       lastCollectionsRef = state.collections
       lastMaterialsRef = state.materials
       lastExperienceRef = state.experience
+      if (isApplyingHistoryJump()) historyJumpSinceSave = true
       hasDirtyChangesRef.current = true
       onDirtyRef.current?.()
       setSaveStatus('pending')

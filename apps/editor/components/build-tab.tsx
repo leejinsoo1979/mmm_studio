@@ -5,6 +5,7 @@ import {
   CATALOG_SCROLL,
   CatalogBandPill,
   CatalogCard,
+  CatalogEmpty,
   CatalogHero,
   CatalogIconRow,
   CatalogSearchBand,
@@ -19,6 +20,7 @@ import {
 } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
 import {
+  AirVent,
   AppWindow,
   BrickWall,
   DoorOpen,
@@ -30,6 +32,7 @@ import {
   PenLine,
   Spline,
   Square,
+  Warehouse,
 } from 'lucide-react'
 import Image from 'next/image'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -42,8 +45,14 @@ import {
 } from '@/lib/wall-drawing-defaults'
 import { StructureHero } from './catalog/build-hero-art'
 import { useBuildPanelPrefs } from './catalog/build-panel-prefs'
-import { type RailingStyle, RailingThumb, WallHeightThumb } from './catalog/build-thumbnails'
-import { ROOM_PRESET_SECTION_TITLES, RoomPresetSection } from './room-preset-section'
+import {
+  type RailingStyle,
+  RailingThumb,
+  RoofFeatureThumb,
+  WallHeightThumb,
+} from './catalog/build-thumbnails'
+import { useTabVisit } from './catalog/panel-visit'
+import { RoomPresetSection, visibleRoomPresetSections } from './room-preset-section'
 
 type BuildToolKind =
   | 'wall'
@@ -79,6 +88,7 @@ type BuildType = {
   iconSrc: string
   asset?: AssetInput
   kind?: BuildToolKind
+  /** Seeded as `toolDefaults[kind]`; door / window tools mint their node from it. */
   defaults?: Record<string, unknown>
 }
 
@@ -249,20 +259,31 @@ const BUILD_SECTIONS: BuildSection[] = [
       {
         id: 'door',
         label: '여닫이문',
+        description: '한 짝이 경첩으로 열리는 문입니다. 벽을 클릭해 설치합니다.',
         iconSrc: '/images/room-library/doors/hinged.jpg',
         kind: 'door',
       },
       {
         id: 'double-door',
         label: '양개문',
+        description: '두 짝이 양쪽으로 열리는 폭 1.5 m 문입니다. 벽을 클릭해 설치합니다.',
         iconSrc: '/images/room-library/doors/hinged.jpg',
         kind: 'door',
+        defaults: { doorType: 'double', leafCount: 2, width: 1.5, handleSide: 'right' },
       },
       {
         id: 'sliding-door',
         label: '미닫이문',
+        description: '두 짝이 레일을 따라 옆으로 밀리는 폭 1.5 m 문입니다. 벽을 클릭해 설치합니다.',
         iconSrc: '/images/room-library/doors/sliding.jpg',
         kind: 'door',
+        defaults: {
+          doorType: 'sliding',
+          leafCount: 2,
+          width: 1.5,
+          trackStyle: 'visible',
+          threshold: false,
+        },
       },
       {
         id: 'hidden-door',
@@ -308,44 +329,58 @@ const BUILD_SECTIONS: BuildSection[] = [
       {
         id: 'window',
         label: '단창',
+        description: '한 장짜리 고정창입니다. 벽을 클릭해 설치합니다.',
         iconSrc: '/images/room-library/windows/fixed.jpg',
         kind: 'window',
       },
       {
         id: 'dual-window',
         label: '쌍창',
+        description: '두 짝이 옆으로 밀리는 미서기 창입니다.',
         iconSrc: '/images/room-library/windows/sliding.jpg',
         kind: 'window',
+        defaults: { windowType: 'sliding', width: 1.8, height: 1.2 },
       },
       {
         id: 'unequal-double-window',
         label: '비대칭 쌍창',
+        description: '큰 창과 작은 창을 나란히 둔 2분할 창입니다.',
         iconSrc: '/images/room-library/windows/sliding.jpg',
         kind: 'window',
+        defaults: { windowType: 'fixed', columnRatios: [0.65, 0.35], width: 1.8, height: 1.2 },
       },
       {
         id: 'corner-bay-window',
         label: '코너 돌출창',
+        description: '둥글게 밖으로 돌출된 활 모양 창입니다.',
         iconSrc: '/images/room-library/windows/fixed.jpg',
         kind: 'window',
+        defaults: { windowType: 'bow', width: 2, height: 1.4, sill: false },
       },
       {
         id: 'corner-window',
         label: '코너창',
+        description:
+          '세 칸으로 나뉜 넓은 창입니다. 모서리 양쪽 벽 끝에 하나씩 붙여 놓으면 코너창이 됩니다.',
         iconSrc: '/images/room-library/windows/fixed.jpg',
         kind: 'window',
+        defaults: { windowType: 'fixed', columnRatios: [1, 1, 1], width: 2.4, height: 1.2 },
       },
       {
         id: 'bay-window',
         label: '돌출창',
+        description: '세 면이 밖으로 튀어나온 돌출창입니다.',
         iconSrc: '/images/room-library/windows/fixed.jpg',
         kind: 'window',
+        defaults: { windowType: 'bay', width: 2, height: 1.4, sill: false },
       },
       {
         id: 'arc-window',
         label: '아치창',
+        description: '윗부분이 둥근 아치형 고정창입니다.',
         iconSrc: '/images/room-library/windows/fixed.jpg',
         kind: 'window',
+        defaults: { openingShape: 'arch', archHeight: 0.35, width: 1.2, height: 1.6 },
       },
     ],
   },
@@ -392,7 +427,36 @@ const WALL_HEIGHT_TOOLS = new Set<string>(['wall', 'wall-arc', 'rectangle-room',
 
 const ROOF_FEATURE_FALLBACK_ICON = '/icons/roof.webp'
 
-type RoofFeature = { kind: string; label: string; iconSrc: string }
+const ROOF_PLACE_HELP = '지붕을 클릭해 놓습니다.'
+
+/** Korean names for the registry's roof parts (their definitions carry English labels). */
+const ROOF_FEATURE_TEXT: Record<string, { label: string; description: string }> = {
+  'box-vent': { label: '박스 환기구', description: '지붕 경사면에 얹는 작은 루버형 배기구입니다.' },
+  'ridge-vent': {
+    label: '용마루 환기구',
+    description: '용마루를 따라 길게 이어지는 환기구입니다.',
+  },
+  'turbine-vent': {
+    label: '터빈 환기구',
+    description: '바람에 돌며 지붕 속 더운 공기를 빼는 환기구입니다.',
+  },
+  cupola: {
+    label: '큐폴라',
+    description: '용마루 위에 올리는 작은 탑 모양 환기·채광 구조물입니다.',
+  },
+  'eyebrow-vent': { label: '눈썹 환기구', description: '지붕면에서 둥글게 솟은 환기구입니다.' },
+  chimney: { label: '굴뚝', description: '지붕면에서 솟은 조적 굴뚝입니다.' },
+  'solar-panel': { label: '태양광 패널', description: '지붕 경사면에 붙이는 태양광 모듈입니다.' },
+  skylight: { label: '천창', description: '지붕면에 내는 채광창입니다.' },
+  dormer: { label: '도머', description: '경사 지붕 밖으로 내민 창과 작은 지붕입니다.' },
+  gutter: { label: '물받이', description: '처마 끝을 따라 빗물을 받는 홈통입니다.' },
+  downspout: { label: '선홈통', description: '물받이의 빗물을 땅으로 내리는 세로 홈통입니다.' },
+}
+
+type RoofFeature = { kind: string; label: string; description: string; iconSrc: string }
+
+const ROOF_SECTION_TITLE = '지붕 요소'
+const MEP_SECTION_TITLE = '설비 (MEP)'
 
 /** Sub-category row: one glyph per catalogue section, in list order. */
 const SECTION_ICONS: Record<string, ReactNode> = {
@@ -410,6 +474,8 @@ const SECTION_ICONS: Record<string, ReactNode> = {
   창문: <AppWindow />,
   구조: <House />,
   '도면 가져오기': <FileUp />,
+  [ROOF_SECTION_TITLE]: <Warehouse />,
+  [MEP_SECTION_TITLE]: <AirVent />,
 }
 
 function activateBuildTool(
@@ -468,11 +534,14 @@ function BuildCard({
   disabled,
   item,
   onClick,
+  thumb,
 }: {
   active?: boolean
   disabled?: boolean
   item: BuildType | MepItem | RoofFeature
   onClick?: () => void
+  /** Drawn thumbnail in place of the item's icon. */
+  thumb?: ReactNode
 }) {
   const photo = isPhoto(item.iconSrc)
   const DrawIcon = 'id' in item ? DRAW_MODE_ICONS[item.id] : undefined
@@ -487,16 +556,17 @@ function BuildCard({
           (disabled ? '준비 중인 기능입니다.' : undefined),
         meta: meta === item.label ? undefined : meta,
       }}
-      image={DrawIcon ? undefined : item.iconSrc}
+      image={DrawIcon || thumb ? undefined : item.iconSrc}
       imageClassName={photo ? undefined : 'p-[8%]'}
       imageFit={photo ? 'cover' : 'contain'}
       label={item.label}
       meta={meta}
       onClick={onClick}
       thumb={
-        DrawIcon ? (
+        thumb ??
+        (DrawIcon ? (
           <DrawIcon className="size-7 text-[#555] dark:text-neutral-300" strokeWidth={1.5} />
-        ) : undefined
+        ) : undefined)
       }
     />
   )
@@ -605,9 +675,8 @@ export function BuildTab() {
   )
   const mode = useEditor((s) => s.mode)
   const selectedItem = useEditor((s) => s.selectedItem)
-  const doorDefaults = useEditor(
-    (s) => s.toolDefaults.door as { stepProduct?: string; hidden?: boolean } | null | undefined,
-  )
+  const doorVariant = useEditor((s) => s.toolDefaults.door?.variant)
+  const windowVariant = useEditor((s) => s.toolDefaults.window?.variant)
   const fencePresetId = useEditor(
     (s) => (s.toolDefaults.fence as { presetId?: string } | null | undefined)?.presetId,
   )
@@ -620,7 +689,9 @@ export function BuildTab() {
   const [activeSection, setActiveSection] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const needle = query.trim()
+  /** Card names match anywhere; section titles only from their start ('문' is not 창문). */
   const matches = (text: string) => !needle || text.includes(needle)
+  const matchesTitle = (title: string) => !needle || title.startsWith(needle)
 
   const ductContext =
     mode === 'build' && (activeTool === 'duct-segment' || activeTool === 'duct-fitting')
@@ -635,9 +706,11 @@ export function BuildTab() {
       if (def.capabilities.roofAccessory === undefined) continue
       if (def.capabilities.wallOpeningPlacement) continue
       const icon = def.presentation?.icon
+      const text = ROOF_FEATURE_TEXT[kind]
       features.push({
         kind,
-        label: def.presentation?.label ?? kind,
+        label: text?.label ?? def.presentation?.label ?? kind,
+        description: `${text?.description ?? ''} ${ROOF_PLACE_HELP}`.trim(),
         iconSrc: icon?.kind === 'url' ? icon.src : ROOF_FEATURE_FALLBACK_ICON,
       })
     }
@@ -647,6 +720,8 @@ export function BuildTab() {
   const isRoofFeatureActive =
     mode === 'build' && !!activeTool && roofFeatures.some((f) => f.kind === activeTool)
   const isMepActive = mode === 'build' && !!activeTool && MEP_TOOL_KINDS.has(activeTool)
+  const showRoofFeatures =
+    mode === 'build' && (activeTool === 'roof' || isRoofFeatureActive) && roofFeatures.length > 0
 
   const isTypeActive = (type: BuildType) => {
     if (type.asset)
@@ -657,16 +732,11 @@ export function BuildTab() {
     if (type.id === 'wall-arc') return mode === 'build' && activeTool === 'wall-arc'
     if (type.id === 'wall')
       return mode === 'build' && activeTool === 'wall' && wallPlacementMode !== 'rectangle-room'
-    if (
-      type.kind === 'door' &&
-      (type.id === 'door' || type.defaults?.stepProduct || type.defaults?.hidden)
-    )
-      return (
-        mode === 'build' &&
-        activeTool === 'door' &&
-        doorDefaults?.stepProduct === type.defaults?.stepProduct &&
-        !!doorDefaults?.hidden === !!type.defaults?.hidden
-      )
+    // Door / window tiles seed `toolDefaults.<kind>.variant`; an unseeded tool is the plain tile.
+    if (type.kind === 'door' || type.kind === 'window') {
+      const variant = (type.kind === 'door' ? doorVariant : windowVariant) ?? type.kind
+      return mode === 'build' && activeTool === type.kind && variant === type.id
+    }
     return mode === 'build' && activeTool === type.kind && type.id === type.kind
   }
 
@@ -692,17 +762,17 @@ export function BuildTab() {
       activateArcWallTool()
       return
     }
-    if (type.kind) activateBuildTool(type.kind, type.defaults)
+    if (type.kind === 'door' || type.kind === 'window')
+      activateBuildTool(type.kind, { ...type.defaults, variant: type.id })
+    else if (type.kind) activateBuildTool(type.kind, type.defaults)
   }, [])
 
-  const didInitRef = useRef(false)
-  useEffect(() => {
-    if (didInitRef.current) return
-    didInitRef.current = true
+  // Opening the tab arms straight walls unless a build tool is already armed.
+  useTabVisit('draw', () => {
     const ed = useEditor.getState()
     if (ed.mode === 'build' && ed.tool) return
     activateBuildTool('wall')
-  }, [])
+  })
 
   // The height check stays on while walls are drawn (straight, curved, room
   // shapes) or nothing is armed; any other build tool carries its own check.
@@ -732,41 +802,48 @@ export function BuildTab() {
           useWallDrawingDefaults.getState().setHeight(h)
           if (!wallToolArmed) activateBuildTool('wall')
         }}
-        thumb={
-          <span className="-translate-y-[12%] block h-full w-full">
-            <WallHeightThumb height={h} max={heights[heights.length - 1]!} partial={partial} />
-          </span>
-        }
+        thumb={<WallHeightThumb height={h} max={heights[heights.length - 1]!} partial={partial} />}
       />
     )
   }
 
-  const showFullWalls = matches('온 벽') || matches('벽')
-  const showPartialWalls = matches('부분 벽') || matches('벽')
+  const showFullWalls = matchesTitle('온 벽') || matchesTitle('벽')
+  const showPartialWalls = matchesTitle('부분 벽') || matchesTitle('벽')
   const visibleRailings = RAILING_PRESETS.filter(
-    (preset) => matches('난간') || matches('울타리') || matches(preset.label),
+    (preset) => matchesTitle('난간') || matchesTitle('울타리') || matches(preset.label),
   )
   const visibleSections = BUILD_SECTIONS.map((section) => ({
     ...section,
-    items: matches(section.title)
+    items: matchesTitle(section.title)
       ? section.items
       : section.items.filter((t) => matches(t.label) || matches(t.meta ?? '')),
   })).filter((section) => section.items.length > 0)
   const visibleImports = IMPORT_ITEMS.filter(
-    (item) => matches('도면 가져오기') || matches(item.label),
+    (item) => matchesTitle('도면 가져오기') || matches(item.label),
   )
   const jumpTitles = [
     ...(showFullWalls ? ['온 벽'] : []),
     ...(showPartialWalls ? ['부분 벽'] : []),
     ...(visibleRailings.length > 0 ? ['난간'] : []),
-    ...ROOM_PRESET_SECTION_TITLES.filter((title) => matches(title) || !needle),
+    ...visibleRoomPresetSections(needle),
     ...visibleSections.map((section) => section.title),
     ...(visibleImports.length > 0 ? ['도면 가져오기'] : []),
+    ...(showRoofFeatures ? [ROOF_SECTION_TITLE] : []),
+    ...(isMepActive ? [MEP_SECTION_TITLE] : []),
   ]
   const jumpKey = jumpTitles.join('|')
+  const nothingFound = !!needle && jumpTitles.length === 0
 
-  // Scroll spy: the section whose header last passed the list's top edge.
+  // Scroll spy: the section whose header last passed the list's top edge. A
+  // jump from the icon row keeps its section lit until the user scrolls
+  // (a section near the end cannot reach the top, where "at the bottom →
+  // last section" would otherwise take over).
+  const jumpTargetRef = useRef<string | null>(null)
   const syncActiveSection = useCallback(() => {
+    if (jumpTargetRef.current) {
+      setActiveSection(jumpTargetRef.current)
+      return
+    }
     const root = scrollRef.current
     if (!root) return
     const sections = [
@@ -783,9 +860,16 @@ export function BuildTab() {
     setActiveSection(current.dataset.catalogSection ?? current.dataset.buildSection ?? null)
   }, [])
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-sync when the visible sections change
-  useEffect(() => syncActiveSection(), [jumpKey, syncActiveSection])
+  useEffect(() => {
+    jumpTargetRef.current = null
+    syncActiveSection()
+  }, [jumpKey, syncActiveSection])
+  const releaseJump = () => {
+    jumpTargetRef.current = null
+  }
 
   const jumpTo = (title: string) => {
+    jumpTargetRef.current = title
     setActiveSection(title)
     scrollRef.current
       ?.querySelector(`[data-catalog-section="${title}"],[data-build-section="${title}"]`)
@@ -816,9 +900,15 @@ export function BuildTab() {
 
       <div
         className={cn(CATALOG_SCROLL, 'pb-3')}
+        onKeyDown={releaseJump}
+        onPointerDown={releaseJump}
         onScroll={() => requestAnimationFrame(syncActiveSection)}
+        onTouchStart={releaseJump}
+        onWheel={releaseJump}
         ref={scrollRef}
       >
+        {nothingFound && <CatalogEmpty>&lsquo;{needle}&rsquo; 검색 결과가 없습니다</CatalogEmpty>}
+
         {showFullWalls && (
           <CatalogSection title="온 벽">{FULL_WALL_HEIGHTS.map(heightCard(false))}</CatalogSection>
         )}
@@ -878,16 +968,15 @@ export function BuildTab() {
           </CatalogSection>
         )}
 
-        {mode === 'build' &&
-        (activeTool === 'roof' || isRoofFeatureActive) &&
-        roofFeatures.length > 0 ? (
-          <CatalogSection title="지붕 요소">
+        {showRoofFeatures ? (
+          <CatalogSection title={ROOF_SECTION_TITLE}>
             {roofFeatures.map((feature) => (
               <BuildCard
                 active={mode === 'build' && activeTool === feature.kind}
                 item={feature}
                 key={feature.kind}
                 onClick={() => activateRoofFeatureTool(feature.kind)}
+                thumb={<RoofFeatureThumb kind={feature.kind} />}
               />
             ))}
           </CatalogSection>
@@ -895,7 +984,7 @@ export function BuildTab() {
 
         {isMepActive ? (
           <>
-            <CatalogSection title="설비 (MEP)">
+            <CatalogSection title={MEP_SECTION_TITLE}>
               {MEP_ITEMS.map((item) => (
                 <BuildCard
                   active={isMepItemActive(item)}

@@ -50,7 +50,9 @@ import {
   publishPlacementSurface,
 } from '../../../lib/active-placement-surface'
 import { EDITOR_LAYER } from '../../../lib/constants'
+import { isFloorplanInputEvent } from '../../../lib/floorplan-input'
 import { formatLinearMeasurement } from '../../../lib/measurements'
+import { isFreshPlacementMetadata } from '../../../lib/placement-metadata'
 import { subscribeQuickRightClick } from '../../../lib/quick-right-click'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 
@@ -59,9 +61,14 @@ import {
   resolveAlignmentForActiveBuilding,
 } from '../../../lib/world-grid-snap'
 import useAlignmentGuides from '../../../store/use-alignment-guides'
-import useEditor, { isAlignmentGuideActive, isMagneticSnapActive } from '../../../store/use-editor'
+import useEditor, {
+  getActiveContinuationContext,
+  isAlignmentGuideActive,
+  isMagneticSnapActive,
+} from '../../../store/use-editor'
 
 import useFacingPose from '../../../store/use-facing-pose'
+import { getMovingNode } from '../../../store/use-interaction-scope'
 import { usePlacementFeedback } from '../../../store/use-placement-feedback'
 import { getFloorStackPreviewPosition } from '../shared/floor-stack-preview'
 import {
@@ -105,6 +112,9 @@ const DEFAULT_DIMENSIONS: [number, number, number] = [1, 1, 1]
 /** Figma-style alignment-snap threshold (meters), matching the 2D
  *  floor-plan overlay and the 3D registry move tool. */
 const ALIGNMENT_THRESHOLD_M = 0.08
+/** Slack around the ghost's screen box within which a first pointer sample
+ *  still counts as grabbing the item (see `applyFloorGrabOffset`). */
+const GRAB_BOX_MARGIN_PX = 24
 
 /** Right-click cancels an active placement — but the right button also orbits
  *  the camera (CameraControls ROTATE). Only a quick, near-stationary right
@@ -385,6 +395,14 @@ export interface PlacementCoordinatorConfig {
 
 export function usePlacementCoordinator(config: PlacementCoordinatorConfig): React.ReactNode {
   const cursorGroupRef = useRef<Group>(null!)
+  // The ghost's projected screen box, refreshed each frame (see the key-list
+  // anchor) — a move whose first pointer sample is off it wasn't a grab.
+  const ghostScreenBoxRef = useRef<{
+    left: number
+    right: number
+    top: number
+    bottom: number
+  } | null>(null)
   const edgesRef = useRef<LineSegments>(null!)
   const measurementWidthRef = useRef<LineSegments>(null!)
   const measurementDepthRef = useRef<LineSegments>(null!)
@@ -919,6 +937,22 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
     // corrected world point and both frames carry the offset to stay consistent.
     const applyFloorGrabOffset = (event: GridEvent): GridEvent => {
       if (relativeFloorStart === null) return event
+      // A move started away from the item (the action menu's 이동) holds it
+      // under the cursor like inZOI; only a grab on the item keeps the offset.
+      const box = ghostScreenBoxRef.current
+      const { clientX, clientY } = event.nativeEvent
+      if (
+        floorDragAnchor === null &&
+        box &&
+        !isFloorplanInputEvent(event.nativeEvent) &&
+        (clientX < box.left - GRAB_BOX_MARGIN_PX ||
+          clientX > box.right + GRAB_BOX_MARGIN_PX ||
+          clientY < box.top - GRAB_BOX_MARGIN_PX ||
+          clientY > box.bottom + GRAB_BOX_MARGIN_PX)
+      ) {
+        relativeFloorStart = null
+        return event
+      }
       const rawX = event.localPosition[0]
       const rawZ = event.localPosition[2]
       const anchor = floorDragAnchor ?? [rawX, rawZ]
@@ -2196,6 +2230,22 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
       }
 
       if (event.metaKey || event.ctrlKey) return
+      // Z / C turn the held item, so its once / repeat toggle is Q (the
+      // helpers list it as such) — only for a fresh placement, never a move.
+      if (event.code === 'KeyQ' && !event.altKey && !event.shiftKey) {
+        const moving = getMovingNode()
+        if (
+          !event.repeat &&
+          getActiveContinuationContext() === 'point' &&
+          !(moving && !isFreshPlacementMetadata(moving.metadata))
+        ) {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+          useEditor.getState().cycleContinuation('point')
+          sfxEmitter.emit('sfx:grid-snap')
+        }
+        return
+      }
       // Alt+R on macOS types '®', so match the physical key too.
       const key = event.key.toLowerCase()
       // inZOI's Z / C turn the held object left / right. While an item is held
@@ -2220,9 +2270,15 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
     const rotateDraft = (rotationDir: 1 | -1, fine: boolean) => {
       const draft = draftNode.current
       if (!draft) return
-      // Roof-wall drafts live flat in the host face frame (yaw 0) —
+      // Wall and roof-wall items face out of their host (yaw 0 in its frame) —
       // manual rotation would skew them off the wall plane.
-      if (placementState.current.surface === 'roof-wall') return
+      if (
+        asset.attachTo === 'wall' ||
+        asset.attachTo === 'wall-side' ||
+        placementState.current.surface === 'roof-wall'
+      ) {
+        return
+      }
       sfxEmitter.emit('sfx:item-rotate')
       const currentRotation = draft.rotation
       const newRotationY = turnRotation(currentRotation[1] ?? 0, rotationDir, fine)
@@ -2771,6 +2827,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
     const bounds = ghostBoundsRef.current
     const feedback = usePlacementFeedback.getState()
     if (!(asset && ghost && bounds) || rect.width < 10 || rect.height < 10) {
+      ghostScreenBoxRef.current = null
       feedback.setAnchor(null)
       return
     }
@@ -2781,6 +2838,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
     let left = Number.POSITIVE_INFINITY
     let right = Number.NEGATIVE_INFINITY
     let top = Number.POSITIVE_INFINITY
+    let bottom = Number.NEGATIVE_INFINITY
     let visible = false
     const v = anchorCorner.current
     for (let i = 0; i < 8; i++) {
@@ -2793,7 +2851,9 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
       left = Math.min(left, x)
       right = Math.max(right, x)
       top = Math.min(top, y)
+      bottom = Math.max(bottom, y)
     }
+    ghostScreenBoxRef.current = visible ? { left, right, top, bottom } : null
     feedback.setAnchor(visible ? { left, right, top } : null)
   })
 

@@ -21,28 +21,28 @@ const DUPLICATE_PRESETS: Array<{
 }> = [
   {
     id: 'everything',
-    label: 'Everything',
-    description: 'Structure, materials, furniture, and references.',
+    label: '전부',
+    description: '구조, 재질, 가구와 참조 이미지까지 모두 복사합니다.',
   },
   {
     id: 'structure',
-    label: 'Structure only',
-    description: 'Walls, slabs, roofs, stairs, windows, and doors without finishes.',
+    label: '구조만',
+    description: '마감 없이 벽, 바닥, 지붕, 계단, 창문과 문만 복사합니다.',
   },
   {
     id: 'structure-materials',
-    label: 'Structure + materials',
-    description: 'Structure with the current material and finish assignments.',
+    label: '구조 + 재질',
+    description: '구조와 지금 적용된 재질·마감을 복사합니다.',
   },
   {
     id: 'structure-furniture',
-    label: 'Structure + furniture',
-    description: 'Structure, finishes, and placed items, without guide references.',
+    label: '구조 + 가구',
+    description: '구조, 마감과 배치한 사물을 복사합니다 (참조 이미지 제외).',
   },
 ]
 
 function getLevelLabel(level: LevelNode | null) {
-  if (!level) return 'this level'
+  if (!level) return '이 층'
   return getLevelDisplayName(level)
 }
 
@@ -69,8 +69,8 @@ export function LevelDuplicateDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="sm:max-w-md" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>Duplicate Level</DialogTitle>
-          <DialogDescription>Choose what to copy from {getLevelLabel(level)}.</DialogDescription>
+          <DialogTitle>층 복제</DialogTitle>
+          <DialogDescription>{getLevelLabel(level)}에서 복사할 내용을 고르세요.</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-2">
@@ -98,14 +98,14 @@ export function LevelDuplicateDialog({
             onClick={() => onOpenChange(false)}
             type="button"
           >
-            Cancel
+            취소
           </button>
           <button
             className="cursor-pointer rounded-md bg-primary px-4 py-2 text-primary-foreground text-sm transition-opacity hover:opacity-90"
             onClick={() => onConfirm(preset)}
             type="button"
           >
-            Duplicate
+            복제
           </button>
         </DialogFooter>
       </DialogContent>

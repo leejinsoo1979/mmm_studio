@@ -56,9 +56,14 @@ export function CatalogCard({
   useEffect(() => setFailedSrc(null), [image])
   const showImage = !thumb && image && failedSrc !== image
   const cover = imageFit === 'cover'
+  const drawn =
+    thumb ?? (showImage ? null : <Box className="size-7 text-[#b5b5b5]" strokeWidth={1.25} />)
 
+  // `aria-disabled` rather than `disabled`: a disabled button gets no mouse
+  // events, so its hover card (the reason it is greyed out) would never open.
   const button = (
     <button
+      aria-disabled={disabled || undefined}
       aria-label={label}
       aria-pressed={active}
       className={cn(
@@ -67,12 +72,12 @@ export function CatalogCard({
           ? 'cursor-not-allowed bg-[rgba(200,200,200,0.6)] dark:bg-white/10'
           : 'bg-[var(--panel-card,#f3f3f3)] hover:bg-[var(--panel-card-hover,#fff)]',
       )}
-      disabled={disabled}
       onClick={() => {
+        if (disabled) return
         triggerSFX('sfx:menu-click')
         onClick?.()
       }}
-      onDoubleClick={onDoubleClick}
+      onDoubleClick={disabled ? undefined : onDoubleClick}
       onMouseEnter={() => triggerSFX('sfx:menu-hover')}
       type="button"
     >
@@ -83,23 +88,20 @@ export function CatalogCard({
           disabled && 'opacity-50',
         )}
       >
-        {thumb ??
-          (showImage ? (
-            <img
-              alt=""
-              className={cn(
-                'h-full w-full',
-                cover ? 'object-cover' : 'object-contain',
-                imageClassName,
-              )}
-              draggable={false}
-              loading="lazy"
-              onError={() => setFailedSrc(image ?? null)}
-              src={image ?? undefined}
-            />
-          ) : (
-            <Box className="size-7 text-[#b5b5b5]" strokeWidth={1.25} />
-          ))}
+        {drawn ?? (
+          <img
+            alt=""
+            className={cn(
+              'h-full w-full',
+              cover ? 'object-cover' : 'object-contain',
+              imageClassName,
+            )}
+            draggable={false}
+            loading="lazy"
+            onError={() => setFailedSrc(image ?? null)}
+            src={image ?? undefined}
+          />
+        )}
       </span>
       {caption}
       {meta && (
@@ -130,7 +132,9 @@ export function CatalogCard({
         title: label,
         description: hover?.description,
         image: hover?.image ?? (showImage && image ? image : undefined),
-        meta: hover?.meta ?? meta,
+        thumb: hover?.image ? undefined : (drawn ?? undefined),
+        // The card's fact line is often just the name; the title already says it.
+        meta: hover?.meta ?? (meta === label ? undefined : meta),
       }}
     >
       {button}

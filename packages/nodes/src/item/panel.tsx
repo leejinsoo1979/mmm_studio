@@ -105,11 +105,11 @@ export default function ItemPanel() {
       title={node.name || node.asset.name}
       width={300}
     >
-      <PanelSection title="Position">
+      <PanelSection title="위치">
         <SliderControl
           label={
             <>
-              X<sub className="ml-[1px] text-[11px] opacity-70">pos</sub>
+              X<sub className="ml-[1px] text-[11px] opacity-70">위치</sub>
             </>
           }
           max={node.position[0] + 2}
@@ -125,7 +125,7 @@ export default function ItemPanel() {
         <SliderControl
           label={
             <>
-              Y<sub className="ml-[1px] text-[11px] opacity-70">pos</sub>
+              Y<sub className="ml-[1px] text-[11px] opacity-70">위치</sub>
             </>
           }
           max={node.position[1] + 2}
@@ -141,7 +141,7 @@ export default function ItemPanel() {
         <SliderControl
           label={
             <>
-              Z<sub className="ml-[1px] text-[11px] opacity-70">pos</sub>
+              Z<sub className="ml-[1px] text-[11px] opacity-70">위치</sub>
             </>
           }
           max={node.position[2] + 2}
@@ -156,11 +156,11 @@ export default function ItemPanel() {
         />
       </PanelSection>
 
-      <PanelSection title="Rotation">
+      <PanelSection title="회전">
         <SliderControl
           label={
             <>
-              Y<sub className="ml-[1px] text-[11px] opacity-70">rot</sub>
+              Y<sub className="ml-[1px] text-[11px] opacity-70">회전</sub>
             </>
           }
           max={Math.round((node.rotation[1] * 180) / Math.PI) + 45}
@@ -196,10 +196,10 @@ export default function ItemPanel() {
         </div>
       </PanelSection>
 
-      <PanelSection title="Scale">
+      <PanelSection defaultExpanded={false} title="크기 배율">
         <div className="flex items-center justify-between px-2 pb-2">
           <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
-            Uniform Scale
+            비율 고정
           </span>
           <button
             className={
@@ -218,7 +218,7 @@ export default function ItemPanel() {
           <SliderControl
             label={
               <>
-                XYZ<sub className="ml-[1px] text-[11px] opacity-70">scale</sub>
+                XYZ<sub className="ml-[1px] text-[11px] opacity-70">배율</sub>
               </>
             }
             max={10}
@@ -236,7 +236,7 @@ export default function ItemPanel() {
             <SliderControl
               label={
                 <>
-                  X<sub className="ml-[1px] text-[11px] opacity-70">scale</sub>
+                  X<sub className="ml-[1px] text-[11px] opacity-70">배율</sub>
                 </>
               }
               max={10}
@@ -251,7 +251,7 @@ export default function ItemPanel() {
             <SliderControl
               label={
                 <>
-                  Y<sub className="ml-[1px] text-[11px] opacity-70">scale</sub>
+                  Y<sub className="ml-[1px] text-[11px] opacity-70">배율</sub>
                 </>
               }
               max={10}
@@ -266,7 +266,7 @@ export default function ItemPanel() {
             <SliderControl
               label={
                 <>
-                  Z<sub className="ml-[1px] text-[11px] opacity-70">scale</sub>
+                  Z<sub className="ml-[1px] text-[11px] opacity-70">배율</sub>
                 </>
               }
               max={10}
@@ -282,13 +282,13 @@ export default function ItemPanel() {
         )}
       </PanelSection>
 
-      <PanelSection title="Info">
+      <PanelSection title="정보">
         <div className="flex items-center justify-between px-2 py-1 text-muted-foreground text-sm">
-          <span>Dimensions</span>
+          <span>크기 (폭×높이×깊이)</span>
           {(() => {
             const [w, h, d] = getScaledDimensions(node)
             return (
-              <span className="font-mono text-white">
+              <span className="font-mono text-foreground">
                 {Math.round(w * 100) / 100}×{Math.round(h * 100) / 100}×{Math.round(d * 100) / 100}
               </span>
             )
@@ -296,29 +296,29 @@ export default function ItemPanel() {
         </div>
       </PanelSection>
 
-      <PanelSection title="Collections">
+      <PanelSection defaultExpanded={false} title="컬렉션">
         <ActionGroup>
           <CollectionsPopover
             collectionIds={node.collectionIds}
             nodeId={selectedId as AnyNode['id']}
           >
-            <ActionButton label="Manage collections…" />
+            <ActionButton label="컬렉션 관리…" />
           </CollectionsPopover>
         </ActionGroup>
       </PanelSection>
 
-      <PanelSection title="Actions">
+      <PanelSection title="동작">
         <ActionGroup>
-          <ActionButton icon={<Move className="h-3.5 w-3.5" />} label="Move" onClick={handleMove} />
+          <ActionButton icon={<Move className="h-3.5 w-3.5" />} label="이동" onClick={handleMove} />
           <ActionButton
             icon={<Copy className="h-3.5 w-3.5" />}
-            label="Duplicate"
+            label="복제"
             onClick={handleDuplicate}
           />
           <ActionButton
             className="hover:bg-red-500/20"
             icon={<Trash2 className="h-3.5 w-3.5 text-red-400" />}
-            label="Delete"
+            label="삭제"
             onClick={handleDelete}
           />
         </ActionGroup>

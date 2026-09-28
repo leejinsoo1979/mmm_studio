@@ -148,10 +148,10 @@ function OptionItem({
 // Sub-page label map
 // ---------------------------------------------------------------------------
 const PAGE_LABEL: Record<string, string> = {
-  'wall-mode': 'Wall Mode',
-  'level-mode': 'Level Mode',
-  'rename-level': 'Rename Level',
-  'goto-level': 'Go to Level',
+  'wall-mode': '벽 보기',
+  'level-mode': '층 보기',
+  'rename-level': '층 이름 바꾸기',
+  'goto-level': '층 이동',
 }
 
 // ---------------------------------------------------------------------------
@@ -245,16 +245,16 @@ export function CommandPalette({ emptyAction }: { emptyAction?: CommandPaletteEm
   }
 
   const wallModeLabel: Record<'cutaway' | 'up' | 'down' | 'translucent', string> = {
-    cutaway: 'Cutaway',
-    up: 'Up',
-    down: 'Down',
-    translucent: 'Translucent',
+    cutaway: '벽 자르기',
+    up: '벽 올리기',
+    down: '벽 내리기',
+    translucent: '반투명 벽',
   }
   const levelModeLabel: Record<'manual' | 'stacked' | 'exploded' | 'solo', string> = {
-    manual: 'Manual',
-    stacked: 'Stacked',
-    exploded: 'Exploded',
-    solo: 'Solo',
+    manual: '직접',
+    stacked: '층 쌓기',
+    exploded: '층 펼치기',
+    solo: '한 층만',
   }
 
   const confirmRename = () => {
@@ -293,7 +293,7 @@ export function CommandPalette({ emptyAction }: { emptyAction?: CommandPaletteEm
   return (
     <Dialog onOpenChange={setOpen} open={open}>
       <DialogContent className="max-w-lg gap-0 overflow-hidden p-0" showCloseButton={false}>
-        <DialogTitle className="sr-only">Command Palette</DialogTitle>
+        <DialogTitle className="sr-only">명령 팔레트</DialogTitle>
 
         {modeView && <modeView.Component onBack={onBack} onClose={onClose} />}
 
@@ -326,10 +326,10 @@ export function CommandPalette({ emptyAction }: { emptyAction?: CommandPaletteEm
                 onValueChange={setInputValue}
                 placeholder={
                   page === 'rename-level'
-                    ? 'Type a new name…'
+                    ? '새 이름 입력…'
                     : page
-                      ? 'Filter options…'
-                      : 'Search actions…'
+                      ? '항목 찾기…'
+                      : '명령 검색…'
                 }
                 value={inputValue}
               />
@@ -373,7 +373,7 @@ export function CommandPalette({ emptyAction }: { emptyAction?: CommandPaletteEm
 
               {/* ── Wall Mode sub-page ────────────────────────────────────── */}
               {page === 'wall-mode' && (
-                <Command.Group heading="Wall Mode">
+                <Command.Group heading="벽 보기">
                   {(['cutaway', 'up', 'down', 'translucent'] as const).map((mode) => (
                     <OptionItem
                       isActive={wallMode === mode}
@@ -387,7 +387,7 @@ export function CommandPalette({ emptyAction }: { emptyAction?: CommandPaletteEm
 
               {/* ── Level Mode sub-page ───────────────────────────────────── */}
               {page === 'level-mode' && (
-                <Command.Group heading="Level Mode">
+                <Command.Group heading="층 보기">
                   {(['stacked', 'exploded', 'solo'] as const).map((mode) => (
                     <OptionItem
                       isActive={levelMode === mode}
@@ -401,7 +401,7 @@ export function CommandPalette({ emptyAction }: { emptyAction?: CommandPaletteEm
 
               {/* ── Go to Level sub-page ──────────────────────────────────── */}
               {page === 'goto-level' && (
-                <Command.Group heading="Go to Level">
+                <Command.Group heading="층 이동">
                   {allLevels.map((level) => (
                     <OptionItem
                       isActive={level.id === activeLevelId}
@@ -417,7 +417,7 @@ export function CommandPalette({ emptyAction }: { emptyAction?: CommandPaletteEm
 
               {/* ── Rename Level sub-page ─────────────────────────────────── */}
               {page === 'rename-level' && (
-                <Command.Group heading="Rename Level">
+                <Command.Group heading="층 이름 바꾸기">
                   <Command.Item
                     className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-foreground text-sm transition-colors data-[disabled=true]:cursor-not-allowed data-[selected=true]:bg-accent data-[disabled=true]:opacity-40"
                     disabled={!inputValue.trim()}
@@ -443,10 +443,10 @@ export function CommandPalette({ emptyAction }: { emptyAction?: CommandPaletteEm
                     <span className="flex-1 truncate">
                       {inputValue.trim() ? (
                         <>
-                          Rename to <span className="font-medium">"{inputValue.trim()}"</span>
+                          <span className="font-medium">"{inputValue.trim()}"</span>(으)로 이름 바꾸기
                         </>
                       ) : (
-                        <span className="text-muted-foreground">Type a new name above…</span>
+                        <span className="text-muted-foreground">위에 새 이름을 입력하세요…</span>
                       )}
                     </span>
                   </Command.Item>
@@ -457,18 +457,18 @@ export function CommandPalette({ emptyAction }: { emptyAction?: CommandPaletteEm
             {/* Footer hint */}
             <div className="flex items-center justify-between border-border/50 border-t px-3 py-2">
               <span className="text-[11px] text-muted-foreground">
-                <Shortcut keys={['↑', '↓']} /> navigate
+                <Shortcut keys={['↑', '↓']} /> 이동
               </span>
               <span className="text-[11px] text-muted-foreground">
-                <Shortcut keys={['↵']} /> select
+                <Shortcut keys={['↵']} /> 선택
               </span>
               {page ? (
                 <span className="text-[11px] text-muted-foreground">
-                  <Shortcut keys={['⌫']} /> back
+                  <Shortcut keys={['⌫']} /> 뒤로
                 </span>
               ) : (
                 <span className="text-[11px] text-muted-foreground">
-                  <Shortcut keys={['Esc']} /> close
+                  <Shortcut keys={['Esc']} /> 닫기
                 </span>
               )}
             </div>

@@ -26,9 +26,11 @@ const FLOORPLAN_WALL_THICKNESS_SCALE = 1.18
 const FLOORPLAN_MIN_VISIBLE_WALL_THICKNESS = 0.13
 const FLOORPLAN_MAX_EXTRA_THICKNESS = 0.035
 
-// The 2D reference's selected wall: a solid violet bar with a soft glow.
-const WALL_SELECTED_FILL = '#7563ff'
-const WALL_SELECTED_GLOW_COLOR = '#8b7dff'
+// The selected wall: a solid bar in the selection blue (the 3D gizmos' colour)
+// with a soft glow. Hover only rings the wall, so the two never look alike.
+const WALL_SELECTED_FILL = '#3d9fe0'
+const WALL_SELECTED_GLOW_COLOR = '#7fc3ef'
+const WALL_HOVER_STROKE = '#5cc2f2'
 /** [stroke width px, opacity], widest first. */
 const WALL_SELECTED_GLOW: ReadonlyArray<readonly [number, number]> = [
   [14, 0.12],
@@ -125,14 +127,10 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
 
   const points = polygon.map((p) => [p.x, p.y] as FloorplanPoint)
 
-  const fill = isSelected
-    ? WALL_SELECTED_FILL
-    : isHovered
-      ? '#6557e8'
-      : (palette?.wallFill ?? '#111111')
+  const fill = isSelected ? WALL_SELECTED_FILL : (palette?.wallFill ?? '#111111')
 
   const children: FloorplanGeometry[] = []
-  // The selected wall's soft violet halo, drawn under the body.
+  // The selected wall's soft halo, drawn under the body.
   if (isSelected) {
     for (const [width, opacity] of WALL_SELECTED_GLOW) {
       children.push({
@@ -152,8 +150,8 @@ export function buildWallFloorplan(node: WallNode, ctx: GeometryContext): Floorp
     kind: 'polygon',
     points,
     fill,
-    stroke: isHovered && !isSelected ? '#8b82ff' : 'transparent',
-    strokeWidth: isHovered && !isSelected ? 0.035 : 0,
+    stroke: isHovered && !isSelected ? WALL_HOVER_STROKE : 'transparent',
+    strokeWidth: isHovered && !isSelected ? 0.05 : 0,
     opacity: 1,
     // Once the wall is selected, the body keeps catching the pointer
     // so the cursor stays neutral (no drag/pointer affordance from

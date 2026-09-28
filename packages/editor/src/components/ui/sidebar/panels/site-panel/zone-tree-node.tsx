@@ -2,10 +2,10 @@ import { useScene, type ZoneNode } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { memo, useCallback, useState } from 'react'
 import { ColorDot } from './../../../../../components/ui/primitives/color-dot'
-import { formatAreaLabel } from './../../../../../lib/measurements'
 import { InlineRenameInput } from './inline-rename-input'
 import { focusTreeNode, TreeNodeWrapper } from './tree-node'
 import { TreeNodeActions } from './tree-node-actions'
+import { formatFloorArea } from './area-label'
 
 interface ZoneTreeNodeProps {
   nodeId: ZoneNode['id']
@@ -36,7 +36,7 @@ export const ZoneTreeNode = memo(function ZoneTreeNode({
   const handleStartEditing = useCallback(() => setIsEditing(true), [])
   const handleStopEditing = useCallback(() => setIsEditing(false), [])
 
-  const defaultName = `방 (${formatAreaLabel(calculatePolygonArea(polygon), unit)})`
+  const defaultName = `방 (${formatFloorArea(calculatePolygonArea(polygon), unit)})`
 
   return (
     <TreeNodeWrapper

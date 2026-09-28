@@ -2,12 +2,14 @@
 
 import { useViewer } from '@pascal-app/viewer'
 import { motion } from 'motion/react'
-import { type CSSProperties, useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { TooltipProvider } from './../../../components/ui/primitives/tooltip'
 import { useIsMobile } from './../../../hooks/use-mobile'
 import { useReducedMotion } from './../../../hooks/use-reduced-motion'
 import { cn } from './../../../lib/utils'
 import useEditor from './../../../store/use-editor'
+import { useUiHidden } from './../../../store/use-ui-hidden'
+import { useSidebarStore } from '../primitives/sidebar'
 import { ControlModes } from './control-modes'
 import { InzoiToolbar } from './inzoi-toolbar'
 import { SecondaryToggles } from './view-toggles'
@@ -17,10 +19,30 @@ import { SecondaryToggles } from './view-toggles'
 // just above that strip instead of inside it.
 const MOBILE_BOTTOM_OFFSET = 24
 
-// inZOI centres the bar on the screen; on narrow screens it slides right just
-// far enough to clear the floating build panel.
-const DESKTOP_CENTER =
-  'max(50%, calc(var(--viewer-left-inset, 0px) + 16px + var(--action-menu-half, 400px)))'
+/** Gap kept between the bar and the build panel / the top-right cluster. */
+const DESKTOP_GAP = 16
+/** Narrow screens shrink the bar to fit between the two, down to this scale. */
+const MIN_DESKTOP_SCALE = 0.6
+
+type DesktopPlacement = { center: number; scale: number }
+
+/**
+ * inZOI centres the bar on the screen. It slides right just far enough to clear
+ * the floating build panel, and shrinks rather than run under the day / night
+ * slider when the room between the two runs out.
+ */
+function placeDesktopBar(bar: HTMLElement, width: number): DesktopPlacement {
+  const viewport = window.innerWidth
+  const inset =
+    Number.parseFloat(getComputedStyle(bar).getPropertyValue('--viewer-left-inset')) || 0
+  const right = document.querySelector('[data-toolbar-right]')?.getBoundingClientRect().left
+  const lo = inset + DESKTOP_GAP
+  const hi = (right ?? viewport) - DESKTOP_GAP
+  const scale = Math.max(MIN_DESKTOP_SCALE, Math.min(1, (hi - lo) / width))
+  const half = (width * scale) / 2
+  const center = Math.max(lo + half, Math.min(viewport / 2, hi - half))
+  return { center, scale }
+}
 
 export function ActionMenu({ className }: { className?: string }) {
   const isMobile = useIsMobile()
@@ -33,6 +55,11 @@ export function ActionMenu({ className }: { className?: string }) {
   const reducedMotion = useReducedMotion()
   const barRef = useRef<HTMLDivElement>(null)
   const [barWidth, setBarWidth] = useState<number | null>(null)
+  const [placement, setPlacement] = useState<DesktopPlacement | null>(null)
+  // The panel's width and visibility move the bar's left bound.
+  const sidebarWidth = useSidebarStore((s) => s.width)
+  const sidebarCollapsed = useSidebarStore((s) => s.isCollapsed)
+  const panelAside = useUiHidden((s) => s.hidden || s.customizing)
 
   useEffect(() => {
     const el = barRef.current
@@ -43,6 +70,32 @@ export function ActionMenu({ className }: { className?: string }) {
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the panel state moves the left bound read from the layout's CSS
+  useLayoutEffect(() => {
+    const el = barRef.current
+    if (isMobile || !el || !barWidth) return
+    const place = () => setPlacement(placeDesktopBar(el, barWidth))
+    place()
+    const right = document.querySelector('[data-toolbar-right]')
+    const observer = new ResizeObserver(place)
+    if (right) observer.observe(right)
+    window.addEventListener('resize', place)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', place)
+    }
+  }, [isMobile, barWidth, sidebarWidth, sidebarCollapsed, panelAside])
+
+  // The hint line under the scene lines up with the bar.
+  useEffect(() => {
+    if (!placement) return
+    const root = document.documentElement
+    root.style.setProperty('--hud-center-x', `${placement.center}px`)
+    return () => {
+      root.style.removeProperty('--hud-center-x')
+    }
+  }, [placement])
 
   // On mobile, defer the bottom rail to the selection bar when something
   // is selected — the contextual actions take priority over mode controls.
@@ -61,7 +114,7 @@ export function ActionMenu({ className }: { className?: string }) {
         className={cn(
           'z-50 -translate-x-1/2',
           // inZOI keeps the build tools in a bar at the top centre.
-          isMobile ? 'absolute left-1/2 origin-bottom scale-90' : 'fixed top-3',
+          isMobile ? 'absolute left-1/2 origin-bottom scale-90' : 'fixed top-3 origin-top',
           isMobile && 'rounded-2xl border border-border bg-background/90 shadow-2xl backdrop-blur-md',
           'transition-colors duration-200 ease-out',
           className,
@@ -72,10 +125,11 @@ export function ActionMenu({ className }: { className?: string }) {
         style={
           isMobile
             ? { bottom: MOBILE_BOTTOM_OFFSET }
-            : ({
-                left: DESKTOP_CENTER,
-                ...(barWidth ? { '--action-menu-half': `${barWidth / 2}px` } : {}),
-              } as CSSProperties)
+            : {
+                left: placement ? placement.center : '50%',
+                scale: placement && placement.scale < 1 ? placement.scale : undefined,
+                visibility: placement ? undefined : 'hidden',
+              }
         }
         transition={transition}
       >

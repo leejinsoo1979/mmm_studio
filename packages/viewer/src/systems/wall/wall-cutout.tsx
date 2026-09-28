@@ -1,14 +1,79 @@
 import { type AnyNodeId, emitter, sceneRegistry, useScene, type WallNode } from '@pascal-app/core'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
-import type { Material } from 'three'
-import { type Mesh, Vector3 } from 'three/webgpu'
+import type { Intersection, Material, Object3D } from 'three'
+import { Matrix4, Mesh, MeshBasicNodeMaterial, Ray, Raycaster, Vector3 } from 'three/webgpu'
 import useViewer from '../../store/use-viewer'
-import { getMaterialsForWall, getSelectionHighlightMaterials } from './wall-materials'
+import {
+  CUTAWAY_STUB_HEIGHT,
+  getMaterialsForWall,
+  getSelectionHighlightMaterials,
+} from './wall-materials'
 
 const tmpVec = new Vector3()
 const u = new Vector3()
 const v = new Vector3()
+
+const CUTAWAY_KEY = 'cutaway'
+const PROBE_LIFT = 100
+const _hits: Intersection[] = []
+const _inverse = new Matrix4()
+const _localRay = new Ray()
+const _probe = new Raycaster()
+const _point = new Vector3()
+
+/** True while the wall is drawn as its low cutaway stub. */
+export function isWallCutaway(object: Object3D | null | undefined): boolean {
+  return object?.userData[CUTAWAY_KEY] === true
+}
+
+/** Whether a vertical probe through local (x, z) meets the wall volume. */
+function footprintContains(mesh: Mesh, x: number, z: number): boolean {
+  for (const lift of [PROBE_LIFT, -PROBE_LIFT]) {
+    _probe.ray.origin.set(x, CUTAWAY_STUB_HEIGHT + lift, z).applyMatrix4(mesh.matrixWorld)
+    _probe.ray.direction.set(0, -Math.sign(lift), 0).transformDirection(mesh.matrixWorld)
+    _hits.length = 0
+    Mesh.prototype.raycast.call(mesh, _probe, _hits)
+    if (_hits.length > 0) return true
+  }
+  return false
+}
+
+/**
+ * The collision mesh keeps the wall's full volume, but a cut wall only shows
+ * its stub: the pointer passes through the cut-away part to whatever is behind
+ * it, and the stub's cut face still picks the wall.
+ */
+function stubOnlyRaycast(this: Mesh, raycaster: Raycaster, intersects: Intersection[]) {
+  if (!isWallCutaway(this.parent)) {
+    Mesh.prototype.raycast.call(this, raycaster, intersects)
+    return
+  }
+  const hits: Intersection[] = []
+  Mesh.prototype.raycast.call(this, raycaster, hits)
+  _inverse.copy(this.matrixWorld).invert()
+  let kept = false
+  for (const hit of hits) {
+    _point.copy(hit.point).applyMatrix4(_inverse)
+    if (_point.y <= CUTAWAY_STUB_HEIGHT + 1e-3) {
+      intersects.push(hit)
+      kept = true
+    }
+  }
+  if (kept) return
+
+  _localRay.copy(raycaster.ray).applyMatrix4(_inverse)
+  const dy = _localRay.direction.y
+  if (dy > -1e-6) return
+  const t = (CUTAWAY_STUB_HEIGHT - _localRay.origin.y) / dy
+  if (t <= 0) return
+  _localRay.at(t, _point)
+  if (!footprintContains(this, _point.x, _point.z)) return
+  const point = _point.clone().applyMatrix4(this.matrixWorld)
+  const distance = raycaster.ray.origin.distanceTo(point)
+  if (distance < raycaster.near || distance > raycaster.far) return
+  intersects.push({ distance, point, object: this, face: null })
+}
 
 function getWallHideState(
   wallNode: WallNode,
@@ -36,6 +101,67 @@ function getWallHideState(
   return hideWall
 }
 
+const OUTLINE_PROXY_NAME = 'cutaway-outline-proxy'
+// Draws nothing itself: only the outline passes (which swap in their own
+// materials) see it.
+const outlineProxyMaterial = new MeshBasicNodeMaterial({ colorWrite: false, depthWrite: false })
+
+/**
+ * The selection / hover outline of a cut wall traces its stub, not the full
+ * wall the outline passes would otherwise draw (they ignore the cut). The
+ * proxy is the wall's solid volume squashed to the stub height.
+ */
+function getCutawayOutlineProxy(wallMesh: Object3D): Mesh | null {
+  const collision = wallMesh.getObjectByName('collision-mesh') as Mesh | undefined
+  if (!collision) return null
+  let proxy = wallMesh.getObjectByName(OUTLINE_PROXY_NAME) as Mesh | undefined
+  if (!proxy) {
+    proxy = new Mesh(collision.geometry, outlineProxyMaterial)
+    proxy.name = OUTLINE_PROXY_NAME
+    proxy.raycast = () => {}
+    wallMesh.add(proxy)
+  }
+  if (proxy.geometry !== collision.geometry) proxy.geometry = collision.geometry
+  const geometry = proxy.geometry
+  if (!geometry.boundingBox) geometry.computeBoundingBox()
+  const top = geometry.boundingBox?.max.y ?? 0
+  proxy.scale.y = top > CUTAWAY_STUB_HEIGHT ? CUTAWAY_STUB_HEIGHT / top : 1
+  return proxy
+}
+
+/** Swaps cut walls in an outline list for their stub proxies (and back). */
+function syncOutlineTargets(objects: Object3D[], inUse: Set<Object3D>) {
+  for (let i = 0; i < objects.length; i++) {
+    const object = objects[i]!
+    if (object.name === OUTLINE_PROXY_NAME) {
+      if (object.parent && !isWallCutaway(object.parent)) objects[i] = object.parent
+      else inUse.add(object)
+    } else if (isWallCutaway(object)) {
+      const proxy = getCutawayOutlineProxy(object)
+      if (proxy) {
+        objects[i] = proxy
+        inUse.add(proxy)
+      }
+    }
+  }
+}
+
+const liveProxies = new Set<Object3D>()
+
+/** Keeps proxies only while an outline shows them (their geometry is borrowed). */
+function syncOutlineProxies(selected: Object3D[], hovered: Object3D[]) {
+  const inUse = new Set<Object3D>()
+  syncOutlineTargets(selected, inUse)
+  syncOutlineTargets(hovered, inUse)
+  for (const proxy of liveProxies) {
+    if (!inUse.has(proxy)) {
+      proxy.removeFromParent()
+      liveProxies.delete(proxy)
+    }
+  }
+  for (const proxy of inUse) liveProxies.add(proxy)
+}
+
 function sameMaterialArray(a: Material | Material[], b: Material[]): boolean {
   return Array.isArray(a) && a.length === b.length && a.every((material, i) => material === b[i])
 }
@@ -53,6 +179,8 @@ export const WallCutout = () => {
   const lastSceneTheme = useRef(useViewer.getState().sceneTheme)
 
   useFrame(({ camera, clock }) => {
+    const { outliner } = useViewer.getState()
+    syncOutlineProxies(outliner.selectedObjects, outliner.hoveredObjects)
     const wallMode = useViewer.getState().wallMode
     const shading = useViewer.getState().shading
     const textures = useViewer.getState().textures
@@ -109,6 +237,11 @@ export const WallCutout = () => {
         if (wallNode?.type !== 'wall') return
 
         const hideWall = getWallHideState(wallNode, wallMesh as Mesh, wallMode, u)
+        wallMesh.userData[CUTAWAY_KEY] = hideWall && wallMode !== 'translucent'
+        const collisionMesh = wallMesh.getObjectByName('collision-mesh')
+        if (collisionMesh && collisionMesh.raycast !== stubOnlyRaycast) {
+          collisionMesh.raycast = stubOnlyRaycast as Object3D['raycast']
+        }
         const isDeleteHighlighted = deleteHoveredWallId === wallId
         const isSelectionHighlighted = !isDeleteHighlighted && highlightedWallIds.has(wallId)
         const materials = getMaterialsForWall(

@@ -67,6 +67,7 @@ import { LightingTab } from './lighting-tab'
 import { MaterialPalette } from './material-palette'
 import { MaterialSurfaceInspector } from './material-surface-inspector'
 import { MaterialTab } from './material-tab'
+import { SceneStatusBanner } from './scene-status-banner'
 import { CommunityViewerToolbarRight } from './viewer-toolbar'
 
 export interface SceneMeta {
@@ -102,6 +103,8 @@ const SIDEBAR_TABS: (SidebarTab & { component: React.ComponentType })[] = [
   {
     id: 'asset',
     label: '사물',
+    // The F shortcut opens the generic 'items' panel.
+    aliases: ['items'],
     component: AssetTab,
     mobileDefaultSnap: 0.5,
     mobileIcon: <Sofa className="h-5 w-5" />,
@@ -648,12 +651,13 @@ async function createLocalGlbItem(file: File): Promise<AssetInput> {
 
 const ROOM_TAGGED_CATALOG = withRoomTags(CATALOG_ITEMS)
 
-function AssetHero({ name }: { name: string }) {
+function AssetHero({ name, slug }: { name: string; slug: string }) {
   const collapsed = useBuildPanelPrefs((s) => s.heroCollapsed)
   const toggle = useBuildPanelPrefs((s) => s.toggleHero)
+  // '자연 (나무·꽃·풀)' → '자연'; '내 모델' stays whole.
   return (
-    <CatalogHero collapsed={collapsed} label={name.split(' ')[0]!} onToggle={toggle}>
-      <RoomHero />
+    <CatalogHero collapsed={collapsed} label={name.replace(/\s*\(.*\)$/, '')} onToggle={toggle}>
+      <RoomHero room={slug} />
     </CatalogHero>
   )
 }
@@ -730,7 +734,7 @@ function AssetTab() {
             />
           </>
         }
-        renderHero={(room) => <AssetHero name={room.name} />}
+        renderHero={(room) => <AssetHero name={room.name} slug={room.slug} />}
         showSourceFilter={false}
         showTagFilters={false}
       />
@@ -894,8 +898,13 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
   const lastRemoteGraphJsonRef = useRef<string | null>(null)
   const suppressRemoteSaveUntilRef = useRef(0)
   const thumbnailTimerRef = useRef<number | null>(null)
+  const lastSavedGraphJsonRef = useRef<string | null>(null)
+  // Saves, renames and thumbnail uploads each bump the scene version, so they
+  // run one at a time: an overlapping request would carry a stale If-Match.
+  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve())
   const [conflict, setConflict] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [liveLost, setLiveLost] = useState(false)
   const [sceneName, setSceneName] = useState(meta.name)
 
   useEffect(() => {
@@ -920,6 +929,12 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
   }, [initialScene])
 
   const handleLoad = useCallback(async () => initialScene, [initialScene])
+
+  const enqueueWrite = useCallback(<T,>(write: () => Promise<T>): Promise<T> => {
+    const run = writeChainRef.current.then(write, write)
+    writeChainRef.current = run.catch(() => undefined)
+    return run
+  }, [])
 
   const requestThumbnail = useCallback(
     (delayMs = 1200) => {
@@ -956,20 +971,23 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
       if (isRecentRemoteApply) return
 
       try {
-        const response = await fetch(`/api/scenes/${meta.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'If-Match': String(versionRef.current),
-            ...(await getStudioAuthHeaders()),
-          },
-          body: JSON.stringify({ name: sceneName, graph }),
-          // `keepalive` lets the request outlive a page unload (the autosave
-          // flush on refresh/close). Browsers cap keepalive bodies at 64KB, so
-          // only the unload flush opts in — normal debounced saves omit it and
-          // can carry arbitrarily large scenes.
-          keepalive: options?.keepalive,
-        })
+        const put = async () =>
+          fetch(`/api/scenes/${meta.id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'If-Match': String(versionRef.current),
+              ...(await getStudioAuthHeaders()),
+            },
+            body: JSON.stringify({ name: sceneName, graph }),
+            // `keepalive` lets the request outlive a page unload (the autosave
+            // flush on refresh/close). Browsers cap keepalive bodies at 64KB, so
+            // only the unload flush opts in — normal debounced saves omit it and
+            // can carry arbitrarily large scenes.
+            keepalive: options?.keepalive,
+          })
+        // The unload flush can't wait behind a queued write.
+        const response = options?.keepalive ? await put() : await enqueueWrite(put)
 
         if (response.status === 409) {
           setConflict(true)
@@ -977,38 +995,45 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
         }
 
         if (!response.ok) {
-          setSaveError(`Save failed (${response.status})`)
+          setSaveError(`저장하지 못했습니다 (${response.status}). 다음 변경 때 다시 저장합니다.`)
           return
         }
 
         const next = (await response.json()) as SceneMeta
         versionRef.current = next.version
+        lastSavedGraphJsonRef.current = graphJson
         setSaveError(null)
         requestThumbnail()
       } catch (error) {
-        setSaveError(error instanceof Error ? error.message : 'Save failed')
+        setSaveError(
+          error instanceof Error && error.message
+            ? `저장하지 못했습니다: ${error.message}`
+            : '저장하지 못했습니다. 연결을 확인하세요.',
+        )
       }
     },
-    [meta.id, requestThumbnail, sceneName],
+    [enqueueWrite, meta.id, requestThumbnail, sceneName],
   )
 
   const handleRename = useCallback(
     async (name: string) => {
-      const response = await fetch(`/api/scenes/${meta.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'If-Match': String(versionRef.current),
-          ...(await getStudioAuthHeaders()),
-        },
-        body: JSON.stringify({ name }),
-      })
+      const response = await enqueueWrite(async () =>
+        fetch(`/api/scenes/${meta.id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'If-Match': String(versionRef.current),
+            ...(await getStudioAuthHeaders()),
+          },
+          body: JSON.stringify({ name }),
+        }),
+      )
       if (response.status === 409) {
         setConflict(true)
         throw new Error('Version conflict')
       }
       if (!response.ok) {
-        const message = `Rename failed (${response.status})`
+        const message = `이름을 바꾸지 못했습니다 (${response.status})`
         setSaveError(message)
         throw new Error(message)
       }
@@ -1017,13 +1042,15 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
       setSceneName(next.name)
       setSaveError(null)
     },
-    [meta.id],
+    [enqueueWrite, meta.id],
   )
 
   useEffect(() => {
-    const source = new EventSource(`/api/scenes/${meta.id}/events`)
+    let source: EventSource | null = null
+    let retryTimer: number | undefined
+    let failures = 0
 
-    source.addEventListener('scene', (event) => {
+    const onScene = (event: Event) => {
       let payload: LiveSceneEvent
       try {
         payload = JSON.parse((event as MessageEvent<string>).data) as LiveSceneEvent
@@ -1034,67 +1061,62 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
       if (payload.version <= versionRef.current) return
 
       versionRef.current = payload.version
-      lastRemoteGraphJsonRef.current = sceneGraphSignature(payload.graph)
+      // Our own graph echoed back (a rename or thumbnail upload): re-applying
+      // it would drop edits made since that save.
+      const remoteGraphJson = sceneGraphSignature(payload.graph)
+      if (remoteGraphJson === lastSavedGraphJsonRef.current) return
+      lastSavedGraphJsonRef.current = remoteGraphJson
+      lastRemoteGraphJsonRef.current = remoteGraphJson
       suppressRemoteSaveUntilRef.current = Date.now() + 2500
       applySceneGraphToEditor(payload.graph)
       setConflict(false)
       setSaveError(null)
-    })
+    }
 
-    source.addEventListener('error', () => {
-      if (source.readyState === EventSource.CLOSED) {
-        setSaveError('Live scene connection closed')
-      }
-    })
+    // The browser retries a dropped stream itself but gives up on a failed
+    // response (a server restart or a route still compiling), so reconnect
+    // with a backoff and only report a connection that keeps failing.
+    const connect = () => {
+      const current = new EventSource(`/api/scenes/${meta.id}/events`)
+      source = current
+      current.addEventListener('open', () => {
+        failures = 0
+        setLiveLost(false)
+      })
+      current.addEventListener('scene', onScene)
+      current.addEventListener('error', () => {
+        if (current.readyState !== EventSource.CLOSED) return
+        failures += 1
+        if (failures >= 3) setLiveLost(true)
+        retryTimer = window.setTimeout(connect, Math.min(30_000, 1000 * 2 ** failures))
+      })
+    }
+    connect()
 
-    return () => source.close()
+    return () => {
+      window.clearTimeout(retryTimer)
+      source?.close()
+    }
   }, [meta.id])
 
   const handleThumb = useCallback(
     async (blob: Blob) => {
-      const response = await fetch(`/api/scenes/${meta.id}/thumbnail`, {
-        method: 'POST',
-        headers: { 'Content-Type': blob.type || 'image/png', ...(await getStudioAuthHeaders()) },
-        body: blob,
+      await enqueueWrite(async () => {
+        const response = await fetch(`/api/scenes/${meta.id}/thumbnail`, {
+          method: 'POST',
+          headers: { 'Content-Type': blob.type || 'image/png', ...(await getStudioAuthHeaders()) },
+          body: blob,
+        })
+        if (!response.ok) return
+        const next = (await response.json()) as SceneMeta
+        versionRef.current = Math.max(versionRef.current, next.version)
       })
-      if (!response.ok) return
-      const next = (await response.json()) as SceneMeta
-      versionRef.current = next.version
     },
-    [meta.id],
+    [enqueueWrite, meta.id],
   )
 
   return (
     <div className="relative h-screen w-screen">
-      {conflict && (
-        <div className="pointer-events-auto absolute top-4 left-1/2 z-50 w-full max-w-md -translate-x-1/2 rounded-lg border border-border bg-background p-4 shadow-xl">
-          <h2 className="font-semibold text-sm">Another session saved first — refresh?</h2>
-          <p className="mt-1 text-muted-foreground text-xs">
-            Your changes haven&apos;t been saved. Reload to pick up the latest version.
-          </p>
-          <div className="mt-3 flex items-center gap-2">
-            <button
-              className="rounded-md border border-border bg-accent px-3 py-1.5 font-medium text-xs hover:bg-accent/80"
-              onClick={() => router.refresh()}
-              type="button"
-            >
-              Reload
-            </button>
-            <button
-              className="rounded-md border border-border bg-background px-3 py-1.5 font-medium text-xs hover:bg-accent/40"
-              onClick={() => setConflict(false)}
-              type="button"
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-      {saveError && !conflict && (
-        <div className="pointer-events-auto absolute top-4 left-1/2 z-50 w-full max-w-md -translate-x-1/2 rounded-lg border border-destructive/50 bg-background p-3 shadow-xl">
-          <p className="font-medium text-destructive text-xs">{saveError}</p>
-        </div>
-      )}
       <MaterialSurfaceInspector />
       <LocalGlbFloorPlanSync />
       <Editor
@@ -1108,6 +1130,19 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
         sidebarTabs={SIDEBAR_TABS}
         viewerBanner={
           <>
+            <SceneStatusBanner
+              conflict={conflict}
+              error={
+                saveError ??
+                (liveLost ? '실시간 동기화 연결이 끊겼습니다. 다시 연결하는 중입니다.' : null)
+              }
+              onDismiss={() => {
+                setConflict(false)
+                setSaveError(null)
+                setLiveLost(false)
+              }}
+              onReload={() => router.refresh()}
+            />
             <ArchipleFloorplanBridge />
             <CabinetDoorControls />
             <MaterialPalette />

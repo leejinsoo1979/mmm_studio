@@ -1,7 +1,7 @@
 'use client'
 
 import { Search, X } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { cn } from '../../../lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '../primitives/popover'
 
@@ -73,9 +73,14 @@ export function CatalogSearchBand({
 export const CATALOG_BAND_ACTION =
   'grid size-6 place-items-center rounded-full text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.3)] transition-colors hover:bg-white/20 [&_svg]:size-5 [&_svg]:stroke-[1.5]'
 
+/** Gap between the floating panel's right edge and a popover opened from inside it. */
+const BESIDE_PANEL_GAP = 12
+
 /**
  * Small outlined pill at the left of the band's filter row that opens a
- * settings popover beside the panel (inZOI's secondary action).
+ * settings popover beside the panel (inZOI's secondary action). The pill sits
+ * at the panel's left edge, so the popover is pushed past the panel's right
+ * edge instead of covering the catalogue.
  */
 export function CatalogBandPill({
   label,
@@ -86,10 +91,16 @@ export function CatalogBandPill({
   children: ReactNode
   contentClassName?: string
 }) {
+  const [sideOffset, setSideOffset] = useState(BESIDE_PANEL_GAP)
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
+          onClick={(e) => {
+            const trigger = e.currentTarget.getBoundingClientRect()
+            const panel = e.currentTarget.closest('[data-floating-panel]')?.getBoundingClientRect()
+            setSideOffset((panel ? Math.max(0, panel.right - trigger.right) : 0) + BESIDE_PANEL_GAP)
+          }}
           className="h-6 max-w-[220px] truncate rounded-full border border-white/80 px-2.5 font-medium text-[11px] text-white transition-colors [text-shadow:0_1px_2px_rgba(0,0,0,0.3)] hover:bg-white/20 data-[state=open]:bg-white/25"
           type="button"
         >
@@ -104,7 +115,7 @@ export function CatalogBandPill({
         )}
         onKeyDown={(e) => e.stopPropagation()}
         side="right"
-        sideOffset={14}
+        sideOffset={sideOffset}
       >
         {children}
       </PopoverContent>

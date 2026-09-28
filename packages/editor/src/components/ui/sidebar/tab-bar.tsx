@@ -13,6 +13,11 @@ export type SidebarTab = {
   mobileIcon?: ReactNode
   /** Desktop icon shown in the vertical rail (v2 layout). */
   icon?: ReactNode
+  /**
+   * Generic panel ids this tab stands in for, so a request for one (the F
+   * shortcut opens `'items'`) lands on this tab.
+   */
+  aliases?: string[]
 }
 
 interface TabBarProps {

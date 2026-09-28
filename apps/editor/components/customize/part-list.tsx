@@ -34,7 +34,7 @@ export function PartList({
             aria-pressed={part.key === activeKey}
             className={`h-[31px] shrink-0 truncate rounded-[10px] px-4 text-left text-[12px] transition-colors ${
               part.key === activeKey
-                ? 'bg-white font-medium text-[#333] shadow-sm'
+                ? 'bg-white font-medium text-[#333] shadow-[0_0_0_1px_rgba(0,0,0,0.14),0_2px_6px_rgba(0,0,0,0.18)]'
                 : 'border border-white/70 bg-neutral-700/45 text-white backdrop-blur-sm hover:bg-neutral-700/60'
             }`}
             key={part.key}

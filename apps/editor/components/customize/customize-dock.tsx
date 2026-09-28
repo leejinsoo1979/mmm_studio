@@ -107,7 +107,7 @@ export function CustomizeDock({
       onPointerDown={(e) => e.stopPropagation()}
       style={{ left: `max(${minLeft}, ${centre})` }}
     >
-      <div className="-translate-x-1/2 absolute bottom-[calc(100%+48px)] left-1/2 grid h-7 w-[300px] grid-cols-2 rounded-full border border-white/80 bg-neutral-800/45 p-0.5 backdrop-blur-sm">
+      <div className="-translate-x-1/2 absolute bottom-[calc(100%+42px)] left-1/2 grid h-7 w-[300px] grid-cols-2 rounded-full border border-white/80 bg-neutral-800/45 p-0.5 backdrop-blur-sm">
         <button
           className="rounded-full text-[12px] text-white transition-colors [text-shadow:0_1px_2px_rgba(0,0,0,0.4)] hover:bg-white/15"
           onClick={onShape}
@@ -119,8 +119,9 @@ export function CustomizeDock({
           색상과 재질
         </span>
       </div>
-      {/* One drop shadow follows the card and its tab, so the join has no seam. */}
-      <div className="relative [filter:drop-shadow(0_6px_20px_rgba(0,0,0,0.14))]">
+      {/* One drop shadow follows the card and its tab, so the join has no seam;
+          the hairline one keeps the edge visible over the pale 2D plan. */}
+      <div className="relative [filter:drop-shadow(0_0_0.75px_rgba(0,0,0,0.3))_drop-shadow(0_6px_20px_rgba(0,0,0,0.16))]">
         <div
           className={`-translate-x-1/2 absolute bottom-full left-1/2 flex h-10 items-center gap-0.5 rounded-t-[16px] px-2 ${CARD_FILL}`}
         >
@@ -163,7 +164,10 @@ export function CustomizeDock({
             확인
           </button>
         </div>
-        <div className={`relative flex h-[146px] rounded-[14px] ${CARD_FILL}`} ref={cardRef}>
+        <div
+          className={`relative flex h-[146px] min-w-[320px] rounded-[14px] ${CARD_FILL}`}
+          ref={cardRef}
+        >
           {children}
         </div>
       </div>

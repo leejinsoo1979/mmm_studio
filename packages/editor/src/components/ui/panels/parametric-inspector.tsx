@@ -174,10 +174,10 @@ export function ParametricInspector({
         </Suspense>
       )}
       {(canMove || canDelete || (parametrics.actions && parametrics.actions.length > 0)) && (
-        <PanelSection title="Actions">
+        <PanelSection title="동작">
           <ActionGroup className={isZone ? 'flex-col' : undefined}>
             {canMove && (
-              <ActionButton icon={<Move className="h-4 w-4" />} label="Move" onClick={handleMove} />
+              <ActionButton icon={<Move className="h-4 w-4" />} label="이동" onClick={handleMove} />
             )}
             {parametrics.actions?.map((action, i) => (
               <ParamActionButton action={action} key={`paramaction-${i}`} nodeId={selectedId} />
@@ -188,13 +188,13 @@ export function ParametricInspector({
                   <ActionButton
                     className="w-full flex-none"
                     icon={<Trash2 className="h-4 w-4 text-red-400" />}
-                    label="Delete"
+                    label="삭제"
                     onClick={() => handleDelete(false)}
                   />
                   <ActionButton
                     className="w-full flex-none"
                     icon={<Trash2 className="h-4 w-4 text-red-400" />}
-                    label="Delete with contents"
+                    label="내용까지 삭제"
                     onClick={() => handleDelete(true)}
                   />
                 </>
@@ -202,7 +202,7 @@ export function ParametricInspector({
                 <ActionButton
                   className="border-red-500/40 text-red-200 hover:bg-red-500/15"
                   icon={<Trash2 className="h-4 w-4" />}
-                  label="Delete"
+                  label="삭제"
                   onClick={() => handleDelete()}
                 />
               ))}

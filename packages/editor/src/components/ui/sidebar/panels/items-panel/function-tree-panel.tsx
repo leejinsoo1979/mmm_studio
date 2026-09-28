@@ -10,7 +10,7 @@ import {
   CATALOG_BAND_ACTION,
   CatalogSearchBand,
 } from '../../../item-catalog/catalog-search-band'
-import { CATALOG_SCROLL, CatalogSection } from '../../../item-catalog/catalog-section'
+import { CATALOG_SCROLL, CatalogEmpty, CatalogSection } from '../../../item-catalog/catalog-section'
 import { ItemCatalog } from '../../../item-catalog/item-catalog'
 import { Popover, PopoverContent, PopoverTrigger } from '../../../primitives/popover'
 import { resolveAssetSnapTarget } from '../../../snap-target-badge'
@@ -151,7 +151,9 @@ export function FunctionTreePanel({
   // close the list as 기타.
   const sections = useMemo(() => {
     if (!activeRoot || activeRoot.children.length === 0) {
-      return activeRoot ? [{ slug: activeRoot.slug, name: activeRoot.name, items: treeItems }] : []
+      return activeRoot && treeItems.length > 0
+        ? [{ slug: activeRoot.slug, name: activeRoot.name, items: treeItems }]
+        : []
     }
     const placed = new Set<AssetInput>()
     const out = activeRoot.children.map((child) => {
@@ -309,6 +311,10 @@ export function FunctionTreePanel({
     />
   )
 
+  const placementLabel = PLACEMENTS.find((option) => option.id === placement)?.label
+  const emptyLine = (text: string) => (emptyState ? null : <CatalogEmpty>{text}</CatalogEmpty>)
+  const searchList = isServerSearch ? (searchItems ?? undefined) : (localSearchItems ?? [])
+
   return (
     <div className="flex h-full flex-col">
       <CatalogSearchBand
@@ -345,17 +351,30 @@ export function FunctionTreePanel({
               </div>
             ))
           ) : search ? (
-            <div className="px-2.5 pt-2">
-              {renderGrid(isServerSearch ? (searchItems ?? undefined) : (localSearchItems ?? []), true)}
-            </div>
+            <>
+              <div className="px-2.5 pt-2">{renderGrid(searchList, true)}</div>
+              {searchList?.length === 0 && emptyLine(`‘${search.trim()}’ 검색 결과가 없습니다`)}
+            </>
           ) : sections.length === 0 ? (
-            <div className="px-2.5 pt-2">{renderGrid([], true)}</div>
+            <>
+              <div className="px-2.5 pt-2">{renderGrid([], true)}</div>
+              {emptyLine(
+                placementLabel
+                  ? `${activeRoot?.name ?? '여기'}에는 ${placementLabel}에 놓는 사물이 없습니다`
+                  : '아직 사물이 없습니다',
+              )}
+            </>
           ) : (
-            sections.map((section, index) => (
-              <CatalogSection grid={false} key={section.slug} title={section.name}>
-                {renderGrid(section.items, index === 0)}
-              </CatalogSection>
-            ))
+            <>
+              {sections.map((section) => (
+                <CatalogSection grid={false} key={section.slug} title={section.name}>
+                  {renderGrid(section.items, false)}
+                </CatalogSection>
+              ))}
+              {/* The host's tile (GLB import) closes the room instead of sitting
+                  among its first kind's items. */}
+              {leadingTile && <CatalogSection title="가져오기">{leadingTile}</CatalogSection>}
+            </>
           )}
         </div>
       )}

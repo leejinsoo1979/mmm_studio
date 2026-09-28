@@ -91,6 +91,24 @@ describe('SqliteSceneStore', () => {
     await rmrf(rootDir)
   })
 
+  test('keeps the scene materials painted slots refer to', async () => {
+    const graph = {
+      ...makeGraph(),
+      materials: {
+        mat_a: {
+          id: 'mat_a',
+          name: 'Material 1',
+          material: { preset: 'custom', properties: { color: '#1e8449' } },
+        },
+      },
+    } as SceneGraph
+    await store.save({ id: 'painted', name: 'Painted', graph })
+    store.close()
+    store = createStore(rootDir)
+    const loaded = await store.load('painted')
+    expect(loaded!.graph).toEqual(graph)
+  })
+
   test('backend is "sqlite"', () => {
     expect(store.backend).toBe('sqlite')
   })

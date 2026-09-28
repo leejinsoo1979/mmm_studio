@@ -12,12 +12,13 @@ import { EDITOR_LAYER } from '../../lib/constants'
 // a frame *around* the opening rather than coinciding with its edges.
 const PAD = 0.05
 
-const ACCENT = 0x83_81_ed
+// The selection blue of the handles, so the wall's glass keeps one hue.
+const ACCENT = 0x3d_9f_e0
 
 const NO_RAYCAST = () => null
 const scratchScale = new Vector3()
 
-// Indigo accent matching the resize-arrow handles — deliberately distinct
+// Blue accent matching the resize-arrow handles — deliberately distinct
 // from the white selection outline so the highlight reads as "editable child
 // here", not "this is selected". `depthTest: false` keeps both layers drawn
 // on top of the wall so frameless openings (which have no visible geometry)
@@ -36,7 +37,7 @@ const outlineMaterial = new LineBasicNodeMaterial({
 const fillMaterial = new MeshBasicNodeMaterial({
   color: ACCENT,
   transparent: true,
-  opacity: 0.5,
+  opacity: 0.18,
   depthTest: false,
   depthWrite: false,
 })
@@ -49,7 +50,7 @@ function makeOutlineGeometry(width: number, height: number, depth: number): Buff
 }
 
 /**
- * When a wall is selected, draws a translucent indigo highlight (filled block
+ * When a wall is selected, draws a translucent blue highlight (filled block
  * + outline) over each door / window it hosts. Openings whose `openingKind`
  * is `'opening'` have no visible geometry, so without this affordance the
  * user can't tell an editable cutout lives there — the fill marks it (and

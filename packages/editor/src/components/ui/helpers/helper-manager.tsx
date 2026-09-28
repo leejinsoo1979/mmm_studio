@@ -20,6 +20,7 @@ import useInteractionScope, {
   useActiveHandleDrag,
   useMovingNode,
 } from '../../../store/use-interaction-scope'
+import useRoomPresetStatus from '../../../store/use-room-preset-status'
 import { useUiHidden } from '../../../store/use-ui-hidden'
 import { BuildingHelper } from './building-helper'
 import { ItemHelper } from './item-helper'
@@ -33,8 +34,15 @@ const RECTANGLE_ROOM_HINTS: ToolHint[] = [
   { key: 'Esc', label: '그리기 취소' },
 ]
 
-// The 방 / 플랫폼 presets ride on the wall tool the same way.
-const ROOM_PRESET_HINTS: ToolHint[] = [
+// The 방 / 플랫폼 presets ride on the wall tool the same way. A 3D click drops
+// the preset into its gizmo (Enter commits it there); a plan click commits.
+const ROOM_PRESET_PLACING_HINTS: ToolHint[] = [
+  { key: 'Left click', label: '놓기' },
+  { key: 'R', label: '90° 회전' },
+  { key: 'Esc', label: '취소' },
+]
+const ROOM_PRESET_EDITING_HINTS: ToolHint[] = [
+  { key: 'Left click', label: '핸들을 끌어 크기·위치 조절' },
   { key: 'R', label: '90° 회전' },
   { key: 'Enter', label: '확인' },
   { key: 'Esc', label: '놓기 취소' },
@@ -128,6 +136,7 @@ export function HelperManager() {
   const customizing = useUiHidden((s) => s.customizing)
   const isMobile = useIsMobile()
   const shiftPressed = useShiftPressed()
+  const presetEditing = useRoomPresetStatus((s) => s.editing)
   // biome-ignore lint/correctness/useExhaustiveDependencies: the store getter reads the scope / mode / tool it is keyed on
   const continuationContext = useMemo(() => getActiveContinuationContext(), [scope, mode, tool])
 
@@ -218,7 +227,9 @@ export function HelperManager() {
       (tool === 'rectangle-room'
         ? RECTANGLE_ROOM_HINTS
         : tool === 'room-preset'
-          ? ROOM_PRESET_HINTS
+          ? presetEditing
+            ? ROOM_PRESET_EDITING_HINTS
+            : ROOM_PRESET_PLACING_HINTS
           : [])
     return (
       <RegisteredToolHelper

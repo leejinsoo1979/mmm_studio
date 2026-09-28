@@ -1,7 +1,7 @@
 'use client'
 
 import { type AnyNodeId, isCurvedWall, sceneRegistry, useScene } from '@pascal-app/core'
-import { GRID_LAYER, useViewer } from '@pascal-app/viewer'
+import { CUTAWAY_STUB_HEIGHT, GRID_LAYER, isWallCutaway, useViewer } from '@pascal-app/viewer'
 import { createPortal, useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -37,11 +37,11 @@ import { useUiHidden } from '../../store/use-ui-hidden'
 import { NO_RAYCAST } from './handles/handle-arrow'
 import { PaintFaceOutlines } from './paint-face-outline'
 
-// inZOI's selected wall: the wall's own finish seen through a pale cyan glass
-// volume with a 1 m white lattice and bright white edges.
-const WALL_GLASS_COLOR = '#8fdcf7'
-const GLASS_OPACITY = 0.2
-const GRID_OPACITY = 0.7
+// inZOI's selected wall: the wall's own finish seen through a bright, pale
+// glass volume with a 1 m white lattice and bright white edges.
+const WALL_GLASS_COLOR = '#dff4ff'
+const GLASS_OPACITY = 0.34
+const GRID_OPACITY = 0.8
 // Keeps the glass just proud of the wall faces so it never z-fights them.
 const GLASS_PAD = 0.006
 
@@ -131,21 +131,35 @@ function WallGlassPortal({ id }: { id: AnyNodeId }) {
 function WallGlass({ wall }: { wall: Mesh }) {
   const groupRef = useRef<Group>(null)
   const glass = useMemo(createGlassMaterial, [])
-  const measured = useRef<BufferGeometry | null>(null)
+  const measured = useRef<{ geometry: BufferGeometry; cutaway: boolean } | null>(null)
   useEffect(() => () => glass.material.dispose(), [glass])
 
   // The wall system swaps the mesh geometry on every rebuild (including live
-  // drags), so re-measure only when the geometry object changes.
+  // drags), so re-measure only when the geometry object changes — or when the
+  // camera turns the wall into its cutaway stub (or back): the glass wraps
+  // the part of the wall that is actually drawn.
   useFrame(() => {
     const group = groupRef.current
     const geometry = wall.geometry
-    if (!(group && geometry) || measured.current === geometry) return
+    const cutaway = isWallCutaway(wall)
+    if (
+      !(group && geometry) ||
+      (measured.current?.geometry === geometry && measured.current.cutaway === cutaway)
+    ) {
+      return
+    }
     if (!geometry.boundingBox) geometry.computeBoundingBox()
     const bounds = geometry.boundingBox
     if (!bounds || bounds.isEmpty()) return
-    measured.current = geometry
+    measured.current = { geometry, cutaway }
     bounds.getCenter(group.position)
-    bounds.getSize(group.scale).addScalar(GLASS_PAD * 2)
+    bounds.getSize(group.scale)
+    if (cutaway) {
+      const top = Math.min(bounds.max.y, CUTAWAY_STUB_HEIGHT)
+      group.position.y = (bounds.min.y + top) / 2
+      group.scale.y = top - bounds.min.y
+    }
+    group.scale.addScalar(GLASS_PAD * 2)
     glass.size.value.copy(group.scale)
     glass.center.value.copy(group.position)
     group.visible = true

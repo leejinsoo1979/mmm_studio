@@ -1,17 +1,17 @@
 import type { HoverStyles, SelectionOutlineStyle } from '@pascal-app/viewer'
 
 /**
- * inZOI's selection edge: a crisp cyan core with a soft cyan halo, painted
- * over the scene so it reads on white furniture and the light canvas alike.
- * Occluded parts show as a faint cyan, never yellow.
+ * inZOI's selection edge: a thin, crisp cyan line with only a faint halo,
+ * painted over the scene so it reads on white furniture and the light canvas
+ * alike. Occluded parts show as a faint cyan, never yellow.
  */
 export const EDITOR_SELECTION_STYLE: SelectionOutlineStyle = {
   visibleColor: 0x2e_c4_ff,
   hiddenColor: 0x7f_d6_ff,
-  strength: 4,
+  strength: 3,
   pulse: false,
-  thickness: 1.5,
-  glow: 0.8,
+  thickness: 1.25,
+  glow: 0.35,
   blend: 'over',
   hiddenOpacity: 0.35,
 }

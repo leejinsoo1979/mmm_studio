@@ -96,6 +96,14 @@ function hiddenTileError(door: DoorNode, wall: WallNode): string | null {
 }
 
 /**
+ * The door node fields a catalogue tile seeds in `toolDefaults.door` (양개문's
+ * doorType / leafCount / width …). Parsing strips the tile's own control keys.
+ */
+function tileDoorFields(): Record<string, unknown> {
+  return useEditor.getState().toolDefaults.door ?? {}
+}
+
+/**
  * Door tool — places DoorNodes on walls and on roof-segment wall faces
  * (the generated base walls under a roof, including coplanar gable ends).
  * Doors always sit at floor level (clampedY = height/2 — segment base for
@@ -123,15 +131,17 @@ const DoorTool: React.FC = () => {
     side: DoorNode['side']
   } | null>(null)
 
+  const tileDefaults = useEditor((s) => s.toolDefaults.door)
   // Ghost preview node — zeroed transform + the live facing side (rebuilds on R).
   const ghostStub = useMemo(
     () =>
       DoorNode.parse({
+        ...tileDefaults,
         position: [0, 0, 0],
         rotation: [0, 0, 0],
         side: fallbackPose?.side ?? 'front',
       }),
-    [fallbackPose?.side],
+    [fallbackPose?.side, tileDefaults],
   )
   // The frame depth is a fixed parse default (the `side` flip doesn't change
   // it); a ref lets the facing-pose publish inside the setup effect read it
@@ -205,6 +215,10 @@ const DoorTool: React.FC = () => {
       group.visible = true
       group.position.set(...worldPosition)
       group.rotation.y = cursorRotationY
+      // The outline is built at the fallback size; fit it to the tile's draft.
+      const draft = draftRef.current
+      if (draft && edgesRef.current)
+        edgesRef.current.scale.set(draft.width / FALLBACK_WIDTH, draft.height / FALLBACK_HEIGHT, 1)
       edgeMaterial.color.setHex(valid ? 0x22_c5_5e : 0xef_44_44)
       // Forward-facing triangle (editor-side overlay). The cursor group is
       // already yawed so +Z faces out of the wall, so the door's front is +Z.
@@ -287,6 +301,7 @@ const DoorTool: React.FC = () => {
 
       if (!draftRef.current) {
         const node = DoorNode.parse({
+          ...tileDoorFields(),
           position: [0, height / 2, 0],
           rotation: [0, itemRotation, 0],
           side,
@@ -395,6 +410,7 @@ const DoorTool: React.FC = () => {
       }).length
 
       const node = DoorNode.parse({
+        ...tileDoorFields(),
         name: `Door ${doorCount + 1}`,
         position: [clampedX, clampedY, 0],
         rotation: [0, itemRotation, 0],
@@ -582,6 +598,7 @@ const DoorTool: React.FC = () => {
         })
       } else {
         const node = DoorNode.parse({
+          ...tileDoorFields(),
           position,
           rotation: [0, 0, 0],
           side: 'front',
@@ -620,6 +637,7 @@ const DoorTool: React.FC = () => {
       ).length
 
       const node = DoorNode.parse({
+        ...tileDoorFields(),
         name: `Door ${doorCount + 1}`,
         position,
         rotation: [0, 0, 0],
@@ -702,6 +720,11 @@ const DoorTool: React.FC = () => {
       // else: no preview yet — `sideFlip` is set, so the first hover/follow uses it.
     }
 
+    // Another door tile picked mid-placement: the next hover rebuilds the draft from it.
+    const unsubscribeTile = useEditor.subscribe((state, prev) => {
+      if (state.toolDefaults.door !== prev.toolDefaults.door) destroyDraft()
+    })
+
     emitter.on('wall:enter', onWallHover)
     emitter.on('wall:move', onWallHover)
     emitter.on('wall:click', onWallClick)
@@ -715,6 +738,7 @@ const DoorTool: React.FC = () => {
     window.addEventListener('keydown', onKeyDown)
 
     return () => {
+      unsubscribeTile()
       destroyDraft()
       hideCursor()
       useAlignmentGuides.getState().clear()

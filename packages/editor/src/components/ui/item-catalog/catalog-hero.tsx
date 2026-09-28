@@ -24,12 +24,14 @@ export function CatalogHero({
     <div
       className={cn(
         'relative shrink-0 overflow-hidden bg-[var(--panel-hero,#edebea)] transition-[height] duration-200 ease-out',
+        // Drawing colours (see the hero art): dark mode swaps them rather than inverting.
+        '[--hero-fill:#fff] [--hero-line:#333] [--hero-shade:#dcdad8] dark:[--hero-fill:#3a3a3d] dark:[--hero-line:#e2e2e2] dark:[--hero-shade:#4d4d51]',
         collapsed ? 'h-[14px]' : 'h-[128px]',
       )}
     >
       {!collapsed && (
         <>
-          <div className="absolute inset-0 flex items-end justify-center pb-3.5 dark:[&>svg]:invert [&>svg]:h-full [&>svg]:w-full">
+          <div className="absolute inset-0 flex items-end justify-center pb-3.5 [&>svg]:h-full [&>svg]:w-full">
             {children}
           </div>
           <span className="absolute top-2 left-2 rounded-[3px] bg-[#a5d5ef] px-1.5 py-0.5 font-bold text-[10px] text-white leading-none">

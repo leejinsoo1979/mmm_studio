@@ -227,6 +227,7 @@ export {
 export {
   CATALOG_GRID,
   CATALOG_SCROLL,
+  CatalogEmpty,
   CatalogSection,
 } from './components/ui/item-catalog/catalog-section'
 // Item collections UI — used by the kind-owned ItemPanel in nodes/.
@@ -457,7 +458,9 @@ export {
   type PaletteViewProps,
   usePaletteViewRegistry,
 } from './store/use-palette-view-registry'
+export { type PlacementAnchor, usePlacementFeedback } from './store/use-placement-feedback'
 export { default as usePlacementPreview } from './store/use-placement-preview'
+export { default as useRoomPresetStatus } from './store/use-room-preset-status'
 export { default as useSegmentDraftChain } from './store/use-segment-draft-chain'
 export { passesSelectionFilter, useSelectionFilter } from './store/use-selection-filter'
 export { useUiHidden } from './store/use-ui-hidden'

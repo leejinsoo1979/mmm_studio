@@ -165,6 +165,20 @@ const UNIT_OPTIONS = [
   { id: 'imperial', icon: 'ft', label: '피트' },
 ] as const
 
+const THEME_NAMES: Record<string, string> = {
+  studio: '스튜디오',
+  paper: '종이',
+  sunset: '노을',
+  overcast: '흐린 날',
+  blueprint: '청사진',
+  mediterranean: '지중해',
+  twilight: '해 질 녘',
+  night: '밤',
+  verdant: '초록',
+}
+
+const themeName = (theme: { id: string; name: string }) => THEME_NAMES[theme.id] ?? theme.name
+
 const SUBMENU_CONTENT_CLASS = 'min-w-56 rounded-xl border-border/45 bg-popover/95 backdrop-blur-xl'
 
 function SunSlider({
@@ -496,7 +510,7 @@ function DisplayMenu() {
             <SwatchBook className="h-4 w-4" />
             <span>테마</span>
             <span className="ml-auto truncate text-muted-foreground text-xs">
-              {activeTheme.name}
+              {themeName(activeTheme)}
             </span>
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="min-w-48 rounded-xl border-border/45 bg-popover/95 backdrop-blur-xl">
@@ -514,7 +528,7 @@ function DisplayMenu() {
                       <span key={`${theme.id}-${index}`} style={{ backgroundColor: color }} />
                     ))}
                   </span>
-                  <span className="text-foreground">{theme.name}</span>
+                  <span className="text-foreground">{themeName(theme)}</span>
                   {sceneTheme === theme.id ? (
                     <Check className="ml-auto h-4 w-4 text-foreground" />
                   ) : null}
@@ -535,7 +549,31 @@ function themeForTime(time: number): 'night' | 'twilight' | null {
   return null
 }
 
+/**
+ * The light source for a slider time. At night the moon lights the scene from
+ * the sun's opposite hour: the night theme already darkens the sky and tints
+ * the light, and a sun below the horizon on top of it would leave the scene
+ * pitch black.
+ */
+function lightTimeFor(time: number): number {
+  return themeForTime(time) === 'night' ? (time + 12) % 24 : time
+}
+
 let dayTheme = 'studio'
+/** The time last picked on the slider, which the sun position can't tell apart at night. */
+let sliderClock: number | null = null
+
+/** The clock the user set: the slider's own time while the moon stands in for the sun. */
+function useClock(): number {
+  const sunTime = useViewer((s) => s.sunTime)
+  return sliderClock !== null && lightTimeFor(sliderClock) === sunTime ? sliderClock : sunTime
+}
+
+const formatClock = (time: number) => {
+  const hh = Math.floor(time)
+  const mm = Math.round((time - hh) * 60)
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+}
 
 /**
  * inZOI's sun ↔ moon slider: drags the time of day (the sun position) and
@@ -543,7 +581,7 @@ let dayTheme = 'studio'
  * theme at dawn.
  */
 function TimeOfDaySlider() {
-  const sunTime = useViewer((s) => s.sunTime)
+  const clock = useClock()
   const setTime = (time: number) => {
     const viewer = useViewer.getState()
     if (
@@ -552,16 +590,15 @@ function TimeOfDaySlider() {
       viewer.sceneTheme !== 'twilight'
     )
       dayTheme = viewer.sceneTheme
-    viewer.setSunTime(time)
+    sliderClock = time
+    viewer.setSunTime(lightTimeFor(time))
     viewer.setSceneTheme(themeForTime(time) ?? dayTheme)
   }
-  const hh = Math.floor(sunTime)
-  const mm = Math.round((sunTime - hh) * 60)
   return (
     <div
       className="flex h-11 items-center gap-2"
       onKeyDown={(event) => event.stopPropagation()}
-      title={`시간대 ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`}
+      title={`시간대 ${formatClock(clock)}`}
     >
       <SunMedium className="size-5 shrink-0 fill-[#f5b41e] text-[#f5b41e] drop-shadow-[0_0_6px_rgba(245,180,30,0.75)]" />
       <Slider
@@ -571,7 +608,7 @@ function TimeOfDaySlider() {
         min={0}
         onValueChange={([next]) => next !== undefined && setTime(next)}
         step={0.25}
-        value={[sunTime]}
+        value={[clock]}
       />
       <Moon className="size-5 shrink-0 fill-[#5f8fe0] text-[#5f8fe0] drop-shadow-[0_0_6px_rgba(95,143,224,0.75)]" />
     </div>

@@ -1,23 +1,25 @@
 'use client'
 
 import { CATALOG_SCROLL, MaterialPaintPanel, useEditor } from '@pascal-app/editor'
-import { useEffect } from 'react'
 import { cn } from '@/lib/utils'
+import { useTabVisit } from './catalog/panel-visit'
 
 export function MaterialTab() {
-  useEffect(() => {
-    const editor = useEditor.getState()
-    editor.setPhase('structure')
-    editor.setStructureLayer('elements')
-    editor.setTool(null)
-    editor.setMode('material-paint')
-
-    return () => {
+  useTabVisit(
+    'material',
+    () => {
+      const editor = useEditor.getState()
+      editor.setPhase('structure')
+      editor.setStructureLayer('elements')
+      editor.setTool(null)
+      editor.setMode('material-paint')
+    },
+    () => {
       if (useEditor.getState().mode === 'material-paint') {
         useEditor.getState().setMode('select')
       }
-    }
-  }, [])
+    },
+  )
 
   return (
     <div className="flex h-full flex-col text-foreground">

@@ -73,24 +73,33 @@ export function ToolCursorHints({
       el.style.display = shown ? 'flex' : 'none'
       if (!shown) return
       const rect = bounds.getBoundingClientRect()
+      const avoid = hudAvoidRects(el.ownerDocument)
       // A held item: ride beside the ghost's screen box, top-aligned with it,
-      // flipping to its left edge near the right of the viewport.
+      // flipping to its left edge near the right of the viewport, and sliding
+      // down below any HUD chrome (tool bar, filter row) it would run under.
       if (anchor && overCanvas) {
+        const w = el.offsetWidth
+        const h = el.offsetHeight
         const right = anchor.right - rect.left + ANCHOR_GAP
-        const left =
-          right + el.offsetWidth > rect.width
-            ? anchor.left - rect.left - ANCHOR_GAP - el.offsetWidth
-            : right
-        const top = Math.min(
-          Math.max(0, anchor.top - rect.top),
-          Math.max(0, rect.height - el.offsetHeight),
-        )
+        const left = right + w > rect.width ? anchor.left - rect.left - ANCHOR_GAP - w : right
+        const maxTop = Math.max(0, rect.height - h)
+        let top = Math.min(Math.max(0, anchor.top - rect.top), maxTop)
+        for (let pass = 0; pass < avoid.length; pass++) {
+          const box = {
+            left: left + rect.left,
+            top: top + rect.top,
+            right: left + rect.left + w,
+            bottom: top + rect.top + h,
+          }
+          const hit = avoid.find((r) => overlaps(r, box))
+          if (!hit) break
+          top = Math.min(hit.bottom - rect.top + ANCHOR_GAP / 2, maxTop)
+        }
         el.style.transform = `translate(${left}px, ${top}px)`
         return
       }
       // Right / below the cursor first, then flip left and / or up: the first
       // placement that stays on screen and clear of the HUD chrome wins.
-      const avoid = hudAvoidRects(el.ownerDocument)
       const px = x + rect.left
       const py = y + rect.top
       if (avoid.some((r) => overlaps(r, { left: px, top: py, right: px, bottom: py }))) {
