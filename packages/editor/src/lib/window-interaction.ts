@@ -88,3 +88,12 @@ export function closeWindowOpenState(windowId: AnyNodeId, options?: WindowOpenAn
   const currentOpenAmount = getDisplayedWindowValue(windowId, node.operationState)
   startWindowOpenAnimation(windowId, 'operationState', currentOpenAmount, 0, options)
 }
+
+/** Moves a window to `to` open for this walk only (another player's toggle arriving). */
+export function moveWindowTo(windowId: AnyNodeId, to: number) {
+  const node = useScene.getState().nodes[windowId]
+  if (node?.type !== 'window' || node.openingKind === 'opening') return
+  const from = getDisplayedWindowValue(windowId, node.operationState)
+  if (from !== to)
+    startWindowOpenAnimation(windowId, 'operationState', from, to, { persist: false })
+}

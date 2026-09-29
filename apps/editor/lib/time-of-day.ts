@@ -21,11 +21,15 @@ let dayTheme = 'studio'
 /** The time last picked on the slider, which the sun position can't tell apart at night. */
 let sliderClock: number | null = null
 
+const clockFor = (sunTime: number) =>
+  sliderClock !== null && lightTimeFor(sliderClock) === sunTime ? sliderClock : sunTime
+
 /** The clock the user set: the slider's own time while the moon stands in for the sun. */
 export function useClock(): number {
-  const sunTime = useViewer((s) => s.sunTime)
-  return sliderClock !== null && lightTimeFor(sliderClock) === sunTime ? sliderClock : sunTime
+  return clockFor(useViewer((s) => s.sunTime))
 }
+
+export const getClock = () => clockFor(useViewer.getState().sunTime)
 
 export const formatClock = (time: number) => {
   const hh = Math.floor(time)

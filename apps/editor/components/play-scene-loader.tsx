@@ -8,6 +8,7 @@ import { PlayGameLobby } from './play-game-lobby'
 import { PlayTvRemote } from './play-tv-remote'
 import { RuntimeCollaboration } from './runtime-collaboration'
 import { RuntimeConfigurator } from './runtime-configurator'
+import { RuntimeWorldSync } from './runtime-world-sync'
 
 export function PlaySceneLoader({
   scene,
@@ -70,6 +71,7 @@ export function PlaySceneLoader({
         sceneId={sceneId}
         visibility={scene.experience?.multiplayer.visibility ?? 'public'}
       />
+      <RuntimeWorldSync enabled={scene.experience?.multiplayer.enabled ?? true} sceneId={sceneId} />
     </div>
   )
 }

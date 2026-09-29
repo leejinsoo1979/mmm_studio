@@ -86,3 +86,11 @@ export function closeDoorOpenState(doorId: AnyNodeId, options?: DoorOpenAnimatio
   const currentSwingAngle = getDisplayedDoorValue(doorId, 'swingAngle', node.swingAngle)
   startDoorOpenAnimation(doorId, 'swingAngle', currentSwingAngle, 0, options)
 }
+
+/** Moves a door to `to` for this walk only (another player's toggle arriving). */
+export function moveDoorTo(doorId: AnyNodeId, field: keyof DoorInteractiveState, to: number) {
+  const node = useScene.getState().nodes[doorId]
+  if (node?.type !== 'door' || node.openingKind === 'opening') return
+  const from = getDisplayedDoorValue(doorId, field, node[field])
+  if (from !== to) startDoorOpenAnimation(doorId, field, from, to, { persist: false })
+}

@@ -309,6 +309,7 @@ export {
   continuationContextOf,
   nextContinuation,
 } from './lib/continuation'
+export { moveDoorTo } from './lib/door-interaction'
 export {
   resolveCurrentBuildingId,
   resolveElevatorNodeSupportY,
@@ -418,6 +419,7 @@ export {
   type WalkthroughInteraction,
   type WalkthroughTarget,
 } from './lib/walkthrough-interactions'
+export { moveWindowTo } from './lib/window-interaction'
 export {
   getActiveBuildingPose,
   projectAlignmentGuidesWorldToActiveBuildingLocal,
