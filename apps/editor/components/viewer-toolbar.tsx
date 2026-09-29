@@ -285,7 +285,7 @@ function DisplayMenu() {
       >
         <DropdownMenuItem onSelect={startWalkthrough}>
           <Footprints className="h-4 w-4" />
-          <span>{isFirstPersonMode ? '1인칭 투어 끝내기' : '1인칭 투어'}</span>
+          <span>{isFirstPersonMode ? '투어 끝내기' : '걸어서 둘러보기 (3인칭·1인칭)'}</span>
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => useEditor.getState().setPreviewMode(true)}>
           <Eye className="h-4 w-4" />
