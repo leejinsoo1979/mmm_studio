@@ -2,7 +2,14 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
 export type WalkthroughView = 'third' | 'first'
-export type WalkthroughCharacterId = 'male' | 'female'
+/** A Rocketbox avatar id, e.g. `Female_Adult_05` (see first-person/avatar-catalog.ts). */
+export type WalkthroughCharacterId = string
+
+/** Saves from before the avatar library stored just a gender. */
+const LEGACY_CHARACTERS: Record<string, WalkthroughCharacterId> = {
+  male: 'Male_Adult_01',
+  female: 'Female_Adult_01',
+}
 
 /** Third-person camera distance (m) from the character's head. */
 export const THIRD_PERSON_DISTANCE = { min: 1.2, max: 6, default: 3.4 } as const
@@ -28,7 +35,7 @@ const useWalkthroughView = create<WalkthroughViewState>()(
   persist(
     (set) => ({
       view: 'third',
-      character: 'male',
+      character: 'Male_Adult_01',
       distance: THIRD_PERSON_DISTANCE.default,
       setView: (view) => set({ view }),
       toggleView: () => set((state) => ({ view: state.view === 'third' ? 'first' : 'third' })),
@@ -42,6 +49,12 @@ const useWalkthroughView = create<WalkthroughViewState>()(
       name: 'mmm-walkthrough-view',
       storage: createJSONStorage(() => localStorage),
       partialize: ({ view, character, distance }) => ({ view, character, distance }),
+      version: 1,
+      migrate: (persisted) => {
+        const state = persisted as Partial<WalkthroughViewState>
+        const character = state.character && LEGACY_CHARACTERS[state.character]
+        return (character ? { ...state, character } : state) as WalkthroughViewState
+      },
     },
   ),
 )

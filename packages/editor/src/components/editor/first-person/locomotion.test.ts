@@ -5,13 +5,14 @@ import {
   GAITS,
   gaitSpeed,
   locomotionWeights,
+  MOTION_SETS,
   RUN_SPEED,
   runningJumpWeight,
+  scaledGaits,
   WALK_SPEED,
-  WALKTHROUGH_CHARACTERS,
 } from './locomotion'
 
-const male = WALKTHROUGH_CHARACTERS.male
+const male = MOTION_SETS.male
 const sum = (w: ReturnType<typeof locomotionWeights>) =>
   w.idle + GAITS.reduce((total, gait) => total + w[gait], 0)
 
@@ -87,12 +88,19 @@ describe('airborneJumpTime', () => {
 
 describe('speeds', () => {
   test('walking is a brisk walk and running a run, for both characters', () => {
-    for (const character of Object.values(WALKTHROUGH_CHARACTERS)) {
+    for (const character of Object.values(MOTION_SETS)) {
       const walk = locomotionWeights(WALK_SPEED, character)
       expect(walk.walkFast).toBeGreaterThan(0.9)
       const run = locomotionWeights(RUN_SPEED, character)
       expect(run.run + run.runFast).toBeCloseTo(1, 6)
     }
+  })
+
+  test('a smaller body strides proportionally shorter, so its gaits come in at lower speeds', () => {
+    const child = scaledGaits(male.gaits, 0.6)
+    expect(child.walk.distance).toBeCloseTo(male.gaits.walk.distance * 0.6, 6)
+    expect(child.walk.duration).toBe(male.gaits.walk.duration)
+    expect(gaitSpeed(child.run)).toBeLessThan(gaitSpeed(male.gaits.run))
   })
 
   test('a standing jump on the spot, a running jump at a run', () => {

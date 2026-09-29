@@ -6,6 +6,7 @@ import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import {
   type AnimationAction,
+  AnimationClip,
   AnimationMixer,
   type Group,
   type Material,
@@ -15,6 +16,7 @@ import {
 } from 'three'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import useWalkthroughView from '../../../store/use-walkthrough-view'
+import { avatarGender, avatarUrl, findAvatar } from './avatar-catalog'
 import {
   advanceGaitPhase,
   airborneJumpTime,
@@ -22,9 +24,10 @@ import {
   type Gait,
   type JumpKind,
   locomotionWeights,
+  MOTION_SETS,
   runningJumpWeight,
   type Span,
-  WALKTHROUGH_CHARACTERS,
+  scaledGaits,
 } from './locomotion'
 
 /** A frame-to-frame jump faster than this (m/s) is a respawn or ride, not a step. */
@@ -90,6 +93,29 @@ const approach = (value: number, target: number, rate: number, delta: number) =>
 
 const spanTime = (span: Span, progress: number) => span.from + (span.to - span.from) * progress
 
+/** The hips carry the clips' only translation: their dips and bounce. */
+const HIP_TRACK = 'Bip01_Pelvis.position'
+
+/**
+ * The shared clips fitted to one body. Every Rocketbox skeleton names and
+ * orients its bones alike, so bone rotations carry over as they are; bone
+ * offsets are the body's own (the clips' would impose the reference body's
+ * proportions), except the hips' motion, scaled to this body's size.
+ */
+function fitClips(clips: AnimationClip[], scale: number): AnimationClip[] {
+  return clips.map((clip) => {
+    const tracks = clip.tracks
+      .filter((track) => track.name.endsWith('.quaternion') || track.name === HIP_TRACK)
+      .map((track) => {
+        if (track.name !== HIP_TRACK || scale === 1) return track
+        const fitted = track.clone()
+        for (let i = 0; i < fitted.values.length; i++) fitted.values[i]! *= scale
+        return fitted
+      })
+    return new AnimationClip(clip.name, clip.duration, tracks)
+  })
+}
+
 function prepareModel(source: Object3D): Object3D {
   const model = cloneSkinned(source)
   model.traverse((object) => {
@@ -113,7 +139,7 @@ function prepareModel(source: Object3D): Object3D {
 }
 
 /**
- * The walkthrough's third-person body: a Rocketbox avatar whose idle, walk,
+ * The walkthrough's third-person body: any Rocketbox avatar, whose idle, walk,
  * brisk walk, run and sprint motion-capture loops blend by the speed the
  * controller actually moves at — all sharing one gait phase driven by the
  * ground covered, so the feet stay planted at every speed. Motion-capture
@@ -127,9 +153,13 @@ export function WalkthroughCharacter({
   feetOffset: number
   visible: boolean
 }) {
-  const characterId = useWalkthroughView((state) => state.character)
-  const character = WALKTHROUGH_CHARACTERS[characterId]
-  const gltf = useGLTF(character.url)
+  const avatar = findAvatar(useWalkthroughView((state) => state.character))
+  const motion = MOTION_SETS[avatarGender(avatar.id)]
+  const body = useGLTF(avatarUrl(avatar.id))
+  const moves = useGLTF(motion.url)
+  const scale = avatar.hip / motion.hip
+  const gaitSet = useMemo(() => ({ gaits: scaledGaits(motion.gaits, scale) }), [motion, scale])
+  const clips = useMemo(() => fitClips(moves.animations, scale), [moves.animations, scale])
   const rootRef = useRef<Group>(null)
   const lastPositionRef = useRef<Vector3 | null>(null)
   const leanRef = useRef({ yaw: Number.NaN, speed: 0, acceleration: 0, roll: 0, pitch: 0 })
@@ -153,18 +183,18 @@ export function WalkthroughCharacter({
     clips: { crouchIn: 1, crouchIdle: 0, crouchOut: 0 },
   })
 
-  const model = useMemo(() => prepareModel(gltf.scene), [gltf.scene])
+  const model = useMemo(() => prepareModel(body.scene), [body.scene])
 
   const actions = useMemo<Actions | null>(() => {
     const mixer = new AnimationMixer(model)
     const found: Partial<Actions> = { mixer }
     for (const name of ['idle', ...GAITS, ...JUMP_KINDS, ...CROUCH_CLIPS] as const) {
-      const clip = gltf.animations.find((animation) => animation.name === name)
+      const clip = clips.find((animation) => animation.name === name)
       if (!clip) return null
       found[name] = mixer.clipAction(clip)
     }
     return found as Actions
-  }, [gltf.animations, model])
+  }, [clips, model])
 
   // Started here rather than in the memo so a remount (StrictMode) restarts
   // the actions its cleanup stopped.
@@ -231,7 +261,7 @@ export function WalkthroughCharacter({
     root.rotation.set(lean.pitch, 0, lean.roll)
 
     // Locomotion.
-    const gait = locomotionWeights(speed, character)
+    const gait = locomotionWeights(speed, gaitSet)
     phaseRef.current = advanceGaitPhase(phaseRef.current, stepped / delta, delta, gait.loopDistance)
     for (const name of GAITS) {
       actions[name].time = phaseRef.current * actions[name].getClip().duration
@@ -240,7 +270,7 @@ export function WalkthroughCharacter({
     // Jump: follow the controller's flight — on the spot or out of a run,
     // by the speed it took off at.
     const jump = jumpRef.current
-    const { jumps } = character
+    const { jumps } = motion
     const verticalSpeed = characterStatus.linvel.y
     const grounded = characterStatus.isOnGround
     jump.unsupported = grounded ? 0 : jump.unsupported + delta
@@ -296,7 +326,7 @@ export function WalkthroughCharacter({
 
     // Crouch: down, hold, up — any step or flight stands straight back up.
     const crouch = crouchRef.current
-    const { crouch: spans } = character
+    const { crouch: spans } = motion
     const wantsCrouch = useWalkthroughView.getState().crouching
     if (jump.phase !== 'ground' || speed > CROUCH_BREAK_SPEED) {
       crouch.phase = 'standing'

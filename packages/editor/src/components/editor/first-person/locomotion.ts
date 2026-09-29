@@ -1,4 +1,4 @@
-import type { WalkthroughCharacterId } from '../../../store/use-walkthrough-view'
+import type { AvatarGender } from './avatar-catalog'
 
 /** A looping motion-capture cycle and the ground it covers per loop (m). */
 export type GaitClip = { duration: number; distance: number }
@@ -18,31 +18,33 @@ export type CrouchSpans = { down: Span; up: Span }
 /** A jump on the spot, and one out of a run. */
 export type JumpKind = 'jump' | 'jumpRun'
 
-export type WalkthroughCharacter = {
+/** One gender's shared clips (any Rocketbox body plays them) and their timing. */
+export type MotionSet = {
   url: string
-  label: string
+  /** Hip height (m) of the reference body the clips were baked on. */
+  hip: number
   gaits: Record<Gait, GaitClip>
   jumps: Record<JumpKind, JumpMarks>
   /** Crouch-in and crouch-out clips, trimmed to the motion (they open and close on long holds). */
   crouch: CrouchSpans
 }
 
-/** CMU 16_01 and 75_01, retargeted onto both avatars, so both share their timing. */
+/** CMU 16_01 and 75_01, retargeted onto both skeletons, so both share their timing. */
 const JUMPS: Record<JumpKind, JumpMarks> = {
   jump: { takeoff: 0.1667, apex: 0.3667, land: 0.6, end: 1 },
   jumpRun: { takeoff: 0.1333, apex: 0.2667, land: 0.3833, end: 0.5667 },
 }
 
 /**
- * Microsoft Rocketbox avatars (MIT) with their own motion-capture clips plus a
- * CMU motion-capture jump, converted by
+ * Microsoft Rocketbox motion capture (MIT) plus CMU motion-capture jumps,
+ * baked onto Male_Adult_01 and Female_Adult_01 by
  * `scripts/characters/build-rocketbox-character.py`. Cycle lengths and
  * distances are measured from the clips' extracted root motion.
  */
-export const WALKTHROUGH_CHARACTERS: Record<WalkthroughCharacterId, WalkthroughCharacter> = {
+export const MOTION_SETS: Record<AvatarGender, MotionSet> = {
   male: {
-    url: '/characters/rocketbox-male.glb',
-    label: '남성',
+    url: '/characters/rocketbox/motion-male.glb',
+    hip: 0.8961,
     gaits: {
       walk: { duration: 1.2, distance: 1.214 },
       walkFast: { duration: 1.0667, distance: 1.5951 },
@@ -53,8 +55,8 @@ export const WALKTHROUGH_CHARACTERS: Record<WalkthroughCharacterId, WalkthroughC
     crouch: { down: { from: 1.4, to: 2.9 }, up: { from: 0.9, to: 2.3 } },
   },
   female: {
-    url: '/characters/rocketbox-female.glb',
-    label: '여성',
+    url: '/characters/rocketbox/motion-female.glb',
+    hip: 0.9279,
     gaits: {
       walk: { duration: 1.2, distance: 1.4565 },
       walkFast: { duration: 1.0333, distance: 1.5815 },
@@ -103,7 +105,7 @@ export const gaitSpeed = (clip: GaitClip) => (GAIT_PACE * clip.distance) / clip.
  */
 export function locomotionWeights(
   speed: number,
-  character: Pick<WalkthroughCharacter, 'gaits'>,
+  character: Pick<MotionSet, 'gaits'>,
 ): LocomotionWeights {
   const weights: LocomotionWeights = {
     idle: 0,
@@ -177,4 +179,15 @@ export function airborneJumpTime(
 /** How much of a jump is the running jump, for the speed (m/s) it took off at. */
 export function runningJumpWeight(speed: number): number {
   return smoothstep(clamp01((speed - RUNNING_JUMP_FROM) / (RUNNING_JUMP_TO - RUNNING_JUMP_FROM)))
+}
+
+/**
+ * The gaits as a body `scale` times the reference's size strides them: the
+ * same clip covers proportionally less ground on a child's shorter legs.
+ */
+export function scaledGaits(gaits: Record<Gait, GaitClip>, scale: number): Record<Gait, GaitClip> {
+  const scaled = {} as Record<Gait, GaitClip>
+  for (const gait of GAITS)
+    scaled[gait] = { ...gaits[gait], distance: gaits[gait].distance * scale }
+  return scaled
 }

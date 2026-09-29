@@ -59,10 +59,7 @@ import {
   toggleWindowOpenState,
 } from '../../lib/window-interaction'
 import useEditor from '../../store/use-editor'
-import useWalkthroughView, {
-  THIRD_PERSON_DISTANCE,
-  type WalkthroughCharacterId,
-} from '../../store/use-walkthrough-view'
+import useWalkthroughView, { THIRD_PERSON_DISTANCE } from '../../store/use-walkthrough-view'
 import {
   buildFirstPersonColliderWorldFromRegistry,
   deriveFirstPersonSpawn,
@@ -70,7 +67,8 @@ import {
   type FirstPersonColliderWorld,
   type FirstPersonSpawn,
 } from './first-person/build-collider-world'
-import { RUN_SPEED, WALK_SPEED, WALKTHROUGH_CHARACTERS } from './first-person/locomotion'
+import { CharacterPicker } from './first-person/character-picker'
+import { RUN_SPEED, WALK_SPEED } from './first-person/locomotion'
 import { WalkthroughCharacter } from './first-person/walkthrough-character'
 
 const CAMERA_EYE_OFFSET = 0.45
@@ -1565,7 +1563,6 @@ export const FirstPersonControls = () => {
 export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
   const [isLocked, setIsLocked] = useState(false)
   const view = useWalkthroughView((state) => state.view)
-  const characterId = useWalkthroughView((state) => state.character)
   const hoveredId = useViewer((state) => state.hoveredId)
   const hoveredNode = useScene((state) =>
     hoveredId ? state.nodes[hoveredId as AnyNodeId] : undefined,
@@ -1652,26 +1649,7 @@ export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
             </button>
           ))}
         </div>
-        {view === 'third' && (
-          <div className="pointer-events-auto flex items-center gap-0.5 rounded-xl border border-border/40 bg-background/90 p-1 shadow-lg backdrop-blur-xl">
-            {(Object.keys(WALKTHROUGH_CHARACTERS) as WalkthroughCharacterId[]).map((id) => (
-              <button
-                aria-pressed={characterId === id}
-                className={cn(
-                  'rounded-lg px-3 py-1.5 font-medium text-sm transition-colors',
-                  characterId === id
-                    ? 'bg-foreground text-background'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-                key={id}
-                onClick={() => useWalkthroughView.getState().setCharacter(id)}
-                type="button"
-              >
-                {WALKTHROUGH_CHARACTERS[id].label}
-              </button>
-            ))}
-          </div>
-        )}
+        {view === 'third' && <CharacterPicker />}
         <button
           className="pointer-events-auto flex items-center gap-2 rounded-xl border border-border/40 bg-background/90 px-4 py-2 font-medium text-foreground text-sm shadow-lg backdrop-blur-xl transition-colors hover:bg-background"
           onClick={handleExit}
