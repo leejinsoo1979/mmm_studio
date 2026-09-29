@@ -55,10 +55,26 @@ const VARIANT_LABEL = {
   appliance: '가전',
 } as const
 
+/** How big the elevation draws: the panel's width, and no taller than this. */
+const ELEVATION_MAX_PX = { width: 288, height: 220 }
+
+const BOARD_ROLES = new Set([
+  'side',
+  'bottom',
+  'top',
+  'top-band',
+  'divider',
+  'fixed-shelf',
+  'toe-kick',
+  'top-moulding',
+  'end-panel',
+  'front-rail',
+])
+
 /**
  * Front elevation of the cabinet (drawn from the part list) with clickable
- * compartments. The selected compartment is highlighted; the front that
- * covers it is outlined.
+ * compartments: a small line drawing, whatever the cabinet's size. The
+ * selected compartment is tinted; the front that covers it is outlined.
  */
 function Elevation({
   node,
@@ -76,138 +92,160 @@ function Elevation({
   const top = node.family === 'upper' ? Math.min(0, ...build.parts.map((p) => p.box.y)) : 0
   // Parts above the carcass (상단몰딩) extend the drawing upwards.
   const above = Math.max(0, ...build.parts.map((p) => p.box.y + p.box.h - H))
-  const pad = 40
-  const vb = `${-pad} ${-pad - above} ${W + pad * 2} ${H - top + above + pad * 2}`
+  const pad = Math.max(W, H) * 0.03
+  const vbW = W + pad * 2
+  const vbH = H - top + above + pad * 2
+  const vb = `${-pad} ${-pad - above} ${vbW} ${vbH}`
+  // The drawing is in millimetres: strokes and text are sized in screen pixels.
+  const mmPerPx = 1 / Math.min(ELEVATION_MAX_PX.width / vbW, ELEVATION_MAX_PX.height / vbH)
+  const px = (n: number) => n * mmPerPx
   const fy = (y: number, h: number) => H - (y + h)
   const owner = selectedId ? frontOwnerOf(node.interior, selectedId) : null
   const ownerRect = owner ? build.frontRects.find((f) => f.id === owner.id)?.rect : undefined
   const selectedRect = selectedId ? build.cellRects.get(selectedId) : undefined
+  const fontMm = px(10)
   return (
-    <svg className="w-full rounded-lg border border-border/50 bg-card" role="img" viewBox={vb}>
-      <title>정면도</title>
-      {build.parts
-        .filter((p) =>
-          [
-            'side',
-            'bottom',
-            'top',
-            'top-band',
-            'divider',
-            'fixed-shelf',
-            'toe-kick',
-            'top-moulding',
-            'end-panel',
-            'front-rail',
-          ].includes(p.role),
-        )
-        .map((p) => (
-          <rect
-            fill={
-              p.role === 'toe-kick' || p.role === 'end-panel' || p.role === 'top-moulding'
-                ? '#6b6258'
-                : '#8b8175'
-            }
-            height={p.box.h}
-            key={p.id}
-            width={p.box.w}
-            x={p.box.x}
-            y={fy(p.box.y, p.box.h)}
-          />
-        ))}
-      {build.parts
-        .filter((p) => p.role === 'shelf')
-        .map((p) => (
-          <rect
-            fill="#a89e91"
-            height={p.box.h}
-            key={p.id}
-            width={p.box.w}
-            x={p.box.x}
-            y={fy(p.box.y, p.box.h)}
-          />
-        ))}
-      {build.parts
-        .filter((p) => p.role === 'rod')
-        .map((p) => (
-          <line
-            key={p.id}
-            stroke="#c9c9c9"
-            strokeWidth={20}
-            x1={p.box.x}
-            x2={p.box.x + p.box.w}
-            y1={fy(p.box.y, p.box.h) + p.box.h / 2}
-            y2={fy(p.box.y, p.box.h) + p.box.h / 2}
-          />
-        ))}
-      {build.parts
-        .filter(
-          (p) => p.role === 'pants-hanger' || p.role === 'drawer-front' || p.role === 'appliance',
-        )
-        .map((p) => (
-          <rect
-            fill="none"
-            height={p.box.h}
-            key={p.id}
-            stroke={p.role === 'drawer-front' ? '#d8cbb8' : '#9aa3ad'}
-            strokeWidth={8}
-            width={p.box.w}
-            x={p.box.x}
-            y={fy(p.box.y, p.box.h)}
-          />
-        ))}
-      {build.frontRects.map((f) => (
-        <rect
-          fill="none"
-          height={f.rect.y1 - f.rect.y0}
-          key={`front-${f.id}`}
-          stroke={ownerRect === f.rect ? '#7779ff' : '#5b5b66'}
-          strokeDasharray="30 18"
-          strokeWidth={ownerRect === f.rect ? 10 : 6}
-          width={f.rect.x1 - f.rect.x0}
-          x={f.rect.x0}
-          y={fy(f.rect.y0, f.rect.y1 - f.rect.y0)}
-        />
-      ))}
-      {build.leaves.map((leaf) => {
-        const r = leaf.rect
-        const selected = selectedId === leaf.id
-        return (
-          <g key={leaf.id} onClick={() => onSelect(leaf.id)} style={{ cursor: 'pointer' }}>
+    <div className="flex justify-center rounded-xl bg-muted/60 py-3">
+      <svg
+        role="img"
+        style={{ maxHeight: ELEVATION_MAX_PX.height, maxWidth: '100%' }}
+        viewBox={vb}
+        width={vbW / mmPerPx}
+      >
+        <title>정면도</title>
+        <rect className="fill-background" height={H} width={W} x={0} y={0} />
+        {build.parts
+          .filter((p) => BOARD_ROLES.has(p.role))
+          .map((p) => (
             <rect
-              fill={selected ? 'rgba(119,121,255,0.28)' : 'rgba(255,255,255,0.02)'}
-              height={r.y1 - r.y0}
-              stroke={selected ? '#7779ff' : 'transparent'}
-              strokeWidth={10}
-              width={r.x1 - r.x0}
-              x={r.x0}
-              y={fy(r.y0, r.y1 - r.y0)}
+              className={
+                p.role === 'toe-kick' || p.role === 'end-panel' || p.role === 'top-moulding'
+                  ? 'fill-stone-400 dark:fill-neutral-500'
+                  : 'fill-stone-300 dark:fill-neutral-600'
+              }
+              height={p.box.h}
+              key={p.id}
+              width={p.box.w}
+              x={p.box.x}
+              y={fy(p.box.y, p.box.h)}
             />
-            <text
-              fill="#e5e5e5"
-              fontSize={Math.max(40, Math.min(70, (r.x1 - r.x0) / 6))}
-              pointerEvents="none"
-              textAnchor="middle"
-              x={(r.x0 + r.x1) / 2}
-              y={fy(r.y0, r.y1 - r.y0) + (r.y1 - r.y0) / 2}
+          ))}
+        {build.parts
+          .filter((p) => p.role === 'shelf')
+          .map((p) => (
+            <rect
+              className="fill-stone-200 dark:fill-neutral-700"
+              height={p.box.h}
+              key={p.id}
+              width={p.box.w}
+              x={p.box.x}
+              y={fy(p.box.y, p.box.h)}
+            />
+          ))}
+        {build.parts
+          .filter((p) => p.role === 'rod')
+          .map((p) => (
+            <line
+              className="stroke-stone-400 dark:stroke-neutral-400"
+              key={p.id}
+              strokeLinecap="round"
+              strokeWidth={px(2)}
+              x1={p.box.x}
+              x2={p.box.x + p.box.w}
+              y1={fy(p.box.y, p.box.h) + p.box.h / 2}
+              y2={fy(p.box.y, p.box.h) + p.box.h / 2}
+            />
+          ))}
+        {build.parts
+          .filter(
+            (p) => p.role === 'pants-hanger' || p.role === 'drawer-front' || p.role === 'appliance',
+          )
+          .map((p) => (
+            <rect
+              className="fill-none stroke-stone-300 dark:stroke-neutral-500"
+              height={p.box.h}
+              key={p.id}
+              rx={px(1.5)}
+              strokeWidth={px(1)}
+              width={p.box.w}
+              x={p.box.x}
+              y={fy(p.box.y, p.box.h)}
+            />
+          ))}
+        {build.frontRects.map((f) => {
+          const owned = ownerRect === f.rect
+          return (
+            <rect
+              className={
+                owned
+                  ? 'fill-none stroke-sky-500'
+                  : 'fill-none stroke-stone-300 dark:stroke-neutral-600'
+              }
+              height={f.rect.y1 - f.rect.y0}
+              key={`front-${f.id}`}
+              strokeDasharray={`${px(4)} ${px(3)}`}
+              strokeWidth={px(owned ? 1.5 : 1)}
+              width={f.rect.x1 - f.rect.x0}
+              x={f.rect.x0}
+              y={fy(f.rect.y0, f.rect.y1 - f.rect.y0)}
+            />
+          )
+        })}
+        {build.leaves.map((leaf) => {
+          const r = leaf.rect
+          const w = r.x1 - r.x0
+          const h = r.y1 - r.y0
+          const selected = selectedId === leaf.id
+          const label = `${Math.round(w)}×${Math.round(h)}`
+          const fits = w > fontMm * label.length * 0.6 && h > fontMm * 1.6
+          return (
+            <g
+              className="group"
+              key={leaf.id}
+              onClick={() => onSelect(leaf.id)}
+              style={{ cursor: 'pointer' }}
             >
-              {Math.round(r.x1 - r.x0)}×{Math.round(r.y1 - r.y0)}
-            </text>
-          </g>
-        )
-      })}
-      {selectedRect && !build.leaves.some((l) => l.id === selectedId) && (
-        <rect
-          fill="rgba(119,121,255,0.12)"
-          height={selectedRect.y1 - selectedRect.y0}
-          pointerEvents="none"
-          stroke="#7779ff"
-          strokeWidth={12}
-          width={selectedRect.x1 - selectedRect.x0}
-          x={selectedRect.x0}
-          y={fy(selectedRect.y0, selectedRect.y1 - selectedRect.y0)}
-        />
-      )}
-    </svg>
+              <rect
+                className={
+                  selected
+                    ? 'fill-sky-500/10 stroke-sky-500'
+                    : 'fill-transparent stroke-transparent group-hover:fill-sky-500/5'
+                }
+                height={h}
+                strokeWidth={px(1.5)}
+                width={w}
+                x={r.x0}
+                y={fy(r.y0, h)}
+              />
+              {fits && (
+                <text
+                  className={selected ? 'fill-sky-700 dark:fill-sky-300' : 'fill-muted-foreground'}
+                  dominantBaseline="central"
+                  fontSize={fontMm}
+                  pointerEvents="none"
+                  textAnchor="middle"
+                  x={(r.x0 + r.x1) / 2}
+                  y={fy(r.y0, h) + h / 2}
+                >
+                  {label}
+                </text>
+              )}
+            </g>
+          )
+        })}
+        {selectedRect && !build.leaves.some((l) => l.id === selectedId) && (
+          <rect
+            className="fill-sky-500/5 stroke-sky-500"
+            height={selectedRect.y1 - selectedRect.y0}
+            pointerEvents="none"
+            strokeWidth={px(1.5)}
+            width={selectedRect.x1 - selectedRect.x0}
+            x={selectedRect.x0}
+            y={fy(selectedRect.y0, selectedRect.y1 - selectedRect.y0)}
+          />
+        )}
+      </svg>
+    </div>
   )
 }
 
@@ -254,7 +292,7 @@ function CellEditor({
         </span>
         {parent && (
           <button
-            className="text-[#9a9cff] hover:underline"
+            className="text-sky-600 hover:underline dark:text-sky-400"
             onClick={() => onSelect(parent.id)}
             type="button"
           >
