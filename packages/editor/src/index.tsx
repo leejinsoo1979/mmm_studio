@@ -413,6 +413,7 @@ export {
 // dependency.
 export { cn } from './lib/utils'
 export {
+  nearestHit,
   registerWalkthroughInteraction,
   type WalkthroughInteraction,
   type WalkthroughTarget,

@@ -7,7 +7,7 @@ import {
   useInteractive,
   useScene,
 } from '@pascal-app/core'
-import { registerWalkthroughInteraction } from '@pascal-app/editor'
+import { nearestHit, registerWalkthroughInteraction } from '@pascal-app/editor'
 import { useEffect } from 'react'
 
 /** The item's on/off control (a lamp, a fan), if it has one. */
@@ -25,17 +25,17 @@ export function ItemWalkthroughToggle() {
       registerWalkthroughInteraction('item-toggle', {
         resolve: (raycaster) => {
           const nodes = useScene.getState().nodes
-          let hit: { node: ItemNode; distance: number; index: number } | null = null
-          for (const id of sceneRegistry.byType.item ?? []) {
+          const toggleable = [...(sceneRegistry.byType.item ?? [])].flatMap((id) => {
             const node = nodes[id as AnyNodeId]
-            if (node?.type !== 'item') continue
-            const index = toggleIndex(node)
-            if (index < 0) continue
-            const object = sceneRegistry.nodes.get(id)
-            const first = object ? raycaster.intersectObject(object, true)[0] : undefined
-            if (first && (!hit || first.distance < hit.distance)) {
-              hit = { node, distance: first.distance, index }
-            }
+            return node?.type === 'item' && toggleIndex(node) >= 0
+              ? [[node, sceneRegistry.nodes.get(id)] as const]
+              : []
+          })
+          const found = nearestHit(raycaster, toggleable)
+          const hit = found && {
+            node: found.key,
+            distance: found.distance,
+            index: toggleIndex(found.key),
           }
           if (!hit) return null
           const on = useInteractive.getState().items[hit.node.id]?.controlValues[hit.index] === true

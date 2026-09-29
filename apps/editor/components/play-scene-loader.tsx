@@ -5,6 +5,7 @@ import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useState } from 'react'
 import { PlayGameHud } from './play-game-hud'
 import { PlayGameLobby } from './play-game-lobby'
+import { PlayTvRemote } from './play-tv-remote'
 import { RuntimeCollaboration } from './runtime-collaboration'
 import { RuntimeConfigurator } from './runtime-configurator'
 
@@ -62,6 +63,7 @@ export function PlaySceneLoader({
       {!inGame && <RuntimeConfigurator />}
       <PlayGameLobby title={title} />
       <PlayGameHud />
+      <PlayTvRemote />
       <RuntimeCollaboration
         chatEnabled={scene.experience?.multiplayer.chat ?? true}
         enabled={scene.experience?.multiplayer.enabled ?? true}

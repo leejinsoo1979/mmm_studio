@@ -1,7 +1,7 @@
 'use client'
 
 import { type AnyNodeId, sceneRegistry, useScene } from '@pascal-app/core'
-import { registerWalkthroughInteraction } from '@pascal-app/editor'
+import { nearestHit, registerWalkthroughInteraction } from '@pascal-app/editor'
 import { useEffect } from 'react'
 import type { Object3D } from 'three'
 
@@ -26,14 +26,13 @@ export default function LightSwitchSystem() {
       registerWalkthroughInteraction('light-switch', {
         resolve: (raycaster) => {
           const nodes = useScene.getState().nodes
-          let hit: { id: string; distance: number; gang: number } | null = null
-          for (const id of sceneRegistry.byType['light-switch'] ?? []) {
-            const object = sceneRegistry.nodes.get(id)
-            const first = object ? raycaster.intersectObject(object, true)[0] : undefined
-            if (first && (!hit || first.distance < hit.distance)) {
-              hit = { id, distance: first.distance, gang: gangOf(first.object) }
-            }
-          }
+          const found = nearestHit(
+            raycaster,
+            [...(sceneRegistry.byType['light-switch'] ?? [])].map(
+              (id) => [id, sceneRegistry.nodes.get(id)] as const,
+            ),
+          )
+          const hit = found && { id: found.key, distance: found.distance, gang: gangOf(found.part) }
           if (!hit) return null
           const node = nodes[hit.id as AnyNodeId]
           if (node?.type !== 'light-switch') return null

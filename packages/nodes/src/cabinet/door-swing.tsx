@@ -1,7 +1,7 @@
 'use client'
 
 import { sceneRegistry, useScene } from '@pascal-app/core'
-import { registerWalkthroughInteraction } from '@pascal-app/editor'
+import { nearestHit, registerWalkthroughInteraction } from '@pascal-app/editor'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import type { Object3D } from 'three'
@@ -49,16 +49,13 @@ export function CabinetDoorSwing() {
       registerWalkthroughInteraction('cabinet', {
         resolve: (raycaster) => {
           const nodes = useScene.getState().nodes
-          let hit: { id: string; distance: number; object: Object3D } | null = null
-          for (const id of sceneRegistry.byType.cabinet ?? []) {
-            const node = nodes[id as keyof typeof nodes] as unknown as CabinetNode | undefined
-            const object = sceneRegistry.nodes.get(id)
-            if (!(node && object)) continue
-            const first = raycaster.intersectObject(object, true)[0]
-            if (first && (!hit || first.distance < hit.distance)) {
-              hit = { id, distance: first.distance, object }
-            }
-          }
+          const found = nearestHit(
+            raycaster,
+            [...(sceneRegistry.byType.cabinet ?? [])].map(
+              (id) => [id, sceneRegistry.nodes.get(id)] as const,
+            ),
+          )
+          const hit = found && { id: found.key, distance: found.distance, object: found.object }
           if (!hit) return null
           const node = nodes[hit.id as keyof typeof nodes] as unknown as CabinetNode
           const doors = resolveCabinetNode(node).hasDoor
