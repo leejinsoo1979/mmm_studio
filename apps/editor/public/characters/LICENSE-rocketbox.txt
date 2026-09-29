@@ -19,3 +19,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+The jump animation is retargeted from the CMU Graphics Lab Motion Capture
+Database (subject 13, trial 39): "The data used in this project was obtained
+from mocap.cs.cmu.edu. The database was created with funding from NSF
+EIA-0196217." The CMU data is free for all uses.
