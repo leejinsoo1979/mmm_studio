@@ -1,13 +1,15 @@
-"""Build a walkthrough character GLB (mesh + idle/walk/run clips) from a Rocketbox avatar.
+"""Build a walkthrough character GLB (mesh + locomotion, crouch and jump clips) from a Rocketbox avatar.
 
 Sources (MIT, https://github.com/microsoft/Microsoft-Rocketbox):
   Assets/Avatars/Adults/<Name>/Export/<Name>.fbx and its Textures/*.tga
-  Assets/Animations/all_animations_max_motextr_static/<m|f>_idle_neutral_01.max.fbx
-  Assets/Animations/all_animations_max_motextr_xy/<m|f>_{walk,run}_neutral_01.max.fbx
-(save the clips as <m|f>_idle_neutral_01.fbx etc. in one folder)
+  Assets/Animations/all_animations_max_motextr_*/<m|f>_{idle_neutral_01,walk_neutral_01,
+    walk_fast_01,run_neutral_01,run_fast_01,crouch_in,crouch_idle,crouch_out}.max.fbx
+(save them as <m|f>_idle_neutral_01.fbx etc. in one folder)
+The jump is CMU motion capture 13_39 (http://mocap.cs.cmu.edu, free for any use)
+in Bruce Hahne's BVH conversion, retargeted onto the Rocketbox skeleton.
 
 Needs Blender's Python module and Pillow (`pip install bpy==5.0.1 pillow`, Python 3.11):
-  python build-rocketbox-character.py -- <avatar.fbx> <textures_dir> <m|f> <anims_dir> <out.glb> <meta.json>
+  python build-rocketbox-character.py -- <avatar.fbx> <textures_dir> <m|f> <anims_dir> <13_39.bvh> <out.glb> <meta.json>
 
 The clips' root motion is removed (the walkthrough controller moves the body)
 and its length is written to meta.json, which feeds WALKTHROUGH_CHARACTERS in
@@ -15,20 +17,27 @@ packages/editor/src/components/editor/first-person/locomotion.ts.
 """
 
 import json
+import math
 import os
 import sys
 
 import bpy
+from mathutils import Matrix, Vector
 from PIL import Image
 
-avatar_fbx, tex_dir, gender, anims_dir, out_glb, meta_json = sys.argv[sys.argv.index('--') + 1:]
+avatar_fbx, tex_dir, gender, anims_dir, jump_bvh, out_glb, meta_json = sys.argv[sys.argv.index('--') + 1:]
 work = os.path.join(os.path.dirname(out_glb), '_tex_' + gender)
 os.makedirs(work, exist_ok=True)
 
 CLIPS = {
     'idle': f'{gender}_idle_neutral_01',
     'walk': f'{gender}_walk_neutral_01',
+    'walkFast': f'{gender}_walk_fast_01',
     'run': f'{gender}_run_neutral_01',
+    'runFast': f'{gender}_run_fast_01',
+    'crouchIn': f'{gender}_crouch_in',
+    'crouchIdle': f'{gender}_crouch_idle',
+    'crouchOut': f'{gender}_crouch_out',
 }
 TEX_SIZE = 1024
 
@@ -125,6 +134,157 @@ for clip, stem in CLIPS.items():
         bpy.data.objects.remove(o, do_unlink=True)
     for a in set(bpy.data.actions) - before_acts - {baked}:
         bpy.data.actions.remove(a)
+
+
+# CMU (BVH) joints -> Rocketbox bones, matched by direction: every limb bone
+# turns from its rest pose so it points where the source limb points (the
+# two skeletons rest in different poses, so their rotations can't be copied),
+# and the pelvis, spine and neck match the source's up and left-right axes.
+LIMBS = []
+for side, cmu in (('L', 'Left'), ('R', 'Right')):
+    LIMBS += [
+        # (rocketbox bone, rocketbox limb end, cmu joint, cmu limb end)
+        (f'Bip01 {side} Clavicle', f'Bip01 {side} UpperArm', f'{cmu}Shoulder', f'{cmu}Arm'),
+        (f'Bip01 {side} UpperArm', f'Bip01 {side} Forearm', f'{cmu}Arm', f'{cmu}ForeArm'),
+        (f'Bip01 {side} Forearm', f'Bip01 {side} Hand', f'{cmu}ForeArm', f'{cmu}Hand'),
+        (f'Bip01 {side} Thigh', f'Bip01 {side} Calf', f'{cmu}UpLeg', f'{cmu}Leg'),
+        (f'Bip01 {side} Calf', f'Bip01 {side} Foot', f'{cmu}Leg', f'{cmu}Foot'),
+        (f'Bip01 {side} Foot', f'Bip01 {side} Toe0', f'{cmu}Foot', f'{cmu}ToeBase'),
+    ]
+# (rocketbox bone, its up end, cmu joint, cmu up end, left-right pair: rocketbox, cmu)
+TRUNK = [
+    ('Bip01 Pelvis', 'Bip01 Neck', 'Hips', 'Neck', ('Bip01 L Thigh', 'Bip01 R Thigh'), ('LeftUpLeg', 'RightUpLeg')),
+    ('Bip01 Spine', 'Bip01 Neck', 'LowerBack', 'Neck', ('Bip01 L UpperArm', 'Bip01 R UpperArm'), ('LeftArm', 'RightArm')),
+    ('Bip01 Spine1', 'Bip01 Neck', 'Spine', 'Neck', ('Bip01 L UpperArm', 'Bip01 R UpperArm'), ('LeftArm', 'RightArm')),
+    ('Bip01 Spine2', 'Bip01 Neck', 'Spine1', 'Neck', ('Bip01 L UpperArm', 'Bip01 R UpperArm'), ('LeftArm', 'RightArm')),
+    ('Bip01 Neck', 'Bip01 Head', 'Neck1', 'Head', ('Bip01 L UpperArm', 'Bip01 R UpperArm'), ('LeftArm', 'RightArm')),
+]
+# End bones keep their pose relative to the bone above them.
+FOLLOWERS = {
+    'Bip01 Head': 'Bip01 Neck',
+    'Bip01 L Hand': 'Bip01 L Forearm',
+    'Bip01 R Hand': 'Bip01 R Forearm',
+    'Bip01 L Toe0': 'Bip01 L Foot',
+    'Bip01 R Toe0': 'Bip01 R Foot',
+}
+
+# 13_39 at 120 fps: standing, crouch, take-off, flight, landing, recovery.
+JUMP_FRAMES = {'start': 150, 'takeoff': 163, 'apex': 193, 'land': 229, 'end': 297}
+JUMP_STEP = 4  # 120 fps -> 30 fps
+
+
+def rest_head_world(obj, bone_name):
+    return obj.matrix_world @ obj.data.bones[bone_name].head_local
+
+
+def pose_head_world(obj, bone_name):
+    return obj.matrix_world @ obj.pose.bones[bone_name].head
+
+
+def basis(up, side):
+    """Rotation whose Z is `up` and X is `side` (made orthogonal)."""
+    z = up.normalized()
+    x = (side - z * side.dot(z)).normalized()
+    y = z.cross(x)
+    return Matrix((x, y, z)).transposed().to_quaternion()
+
+
+def retarget_jump(arm, bvh_path):
+    before = set(bpy.data.objects)
+    bpy.ops.import_anim.bvh(filepath=bvh_path, global_scale=0.056444, frame_start=1, update_scene_fps=False)
+    src = next(o for o in set(bpy.data.objects) - before if o.type == 'ARMATURE')
+    bpy.context.scene.render.fps = 30
+
+    # Face the source the same way as the avatar (hip line from right to left).
+    def facing(obj, left, right):
+        v = rest_head_world(obj, left) - rest_head_world(obj, right)
+        return math.atan2(v.y, v.x)
+
+    src.rotation_euler.z += facing(arm, 'Bip01 L Thigh', 'Bip01 R Thigh') - facing(src, 'LeftUpLeg', 'RightUpLeg')
+    bpy.context.view_layer.update()
+
+    arm_q = arm.matrix_world.to_quaternion()
+    bones = arm.data.bones
+    rest_world_q = {b.name: arm_q @ b.matrix_local.to_quaternion() for b in bones}
+    limb_rest = {
+        dst: rest_head_world(arm, dst_end) - rest_head_world(arm, dst) for dst, dst_end, _, _ in LIMBS
+    }
+
+    def trunk_now(cmu, cmu_up, cmu_pair):
+        return basis(
+            pose_head_world(src, cmu_up) - pose_head_world(src, cmu),
+            pose_head_world(src, cmu_pair[0]) - pose_head_world(src, cmu_pair[1]),
+        )
+
+    # The actor's standing posture is the avatar's upright rest, so the trunk
+    # turns relative to it (the actor's neck leans further forward).
+    bpy.context.scene.frame_set(1)
+    trunk_stand = {dst: trunk_now(cmu, cmu_up, cmu_pair) for dst, _, cmu, cmu_up, _, cmu_pair in TRUNK}
+
+    # Hip height: source standing height -> avatar pelvis height.
+    src_stand = pose_head_world(src, 'Hips').z
+    hip_scale = rest_head_world(arm, 'Bip01 Pelvis').z / src_stand
+
+    action = bpy.data.actions.new('jump')
+    arm.animation_data.action = action
+    for pb in arm.pose.bones:
+        pb.rotation_mode = 'QUATERNION'
+    driven = {m[0] for m in LIMBS} | {t[0] for t in TRUNK} | set(FOLLOWERS)
+    order = [b.name for b in bones if b.name in driven]  # parents before children
+    out_frame = 1
+    for f in range(JUMP_FRAMES['start'], JUMP_FRAMES['end'] + 1, JUMP_STEP):
+        bpy.context.scene.frame_set(f)
+        turn = {}
+        for dst, _, cmu, cmu_up, _, cmu_pair in TRUNK:
+            turn[dst] = trunk_now(cmu, cmu_up, cmu_pair) @ trunk_stand[dst].inverted()
+        for dst, _, cmu, cmu_end in LIMBS:
+            turn[dst] = limb_rest[dst].rotation_difference(pose_head_world(src, cmu_end) - pose_head_world(src, cmu))
+        for follower, leader in FOLLOWERS.items():
+            turn[follower] = turn[leader]
+
+        airborne = JUMP_FRAMES['takeoff'] <= f <= JUMP_FRAMES['land']
+        desired = {}
+        for name in order:
+            arm_space_q = arm_q.inverted() @ (turn[name] @ rest_world_q[name])
+            bone = bones[name]
+            if bone.parent is None:
+                head = bone.head_local.copy()
+                # In flight the controller lifts the body; only the dips stay.
+                lift = 0.0 if airborne else (pose_head_world(src, 'Hips').z - src_stand) * hip_scale
+                head += arm.matrix_world.inverted().to_3x3() @ Vector((0.0, 0.0, lift))
+            else:
+                rest_rel = bone.parent.matrix_local.inverted() @ bone.matrix_local
+                head = (desired[bone.parent.name] @ rest_rel).translation
+            desired[name] = Matrix.Translation(head) @ arm_space_q.to_matrix().to_4x4()
+        for name in order:
+            pb = arm.pose.bones[name]
+            bone = bones[name]
+            if bone.parent is None:
+                base = bone.matrix_local
+            else:
+                base = desired[bone.parent.name] @ (bone.parent.matrix_local.inverted() @ bone.matrix_local)
+            pb.matrix_basis = base.inverted() @ desired[name]
+            pb.keyframe_insert('rotation_quaternion', frame=out_frame)
+            if bone.parent is None:
+                pb.keyframe_insert('location', frame=out_frame)
+        out_frame += 1
+    slot = arm.animation_data.action_slot
+    arm.animation_data.action = None
+    for pb in arm.pose.bones:
+        pb.matrix_basis = Matrix()
+    bpy.data.objects.remove(src, do_unlink=True)
+    fps = 120
+    marks = {k: round((v - JUMP_FRAMES['start']) / fps, 4) for k, v in JUMP_FRAMES.items() if k != 'start'}
+    return action, slot, out_frame - 1, marks
+
+
+jump_action, jump_slot, jump_frames, jump_marks = retarget_jump(arm, jump_bvh)
+track = arm.animation_data.nla_tracks.new()
+track.name = 'jump'
+strip = track.strips.new('jump', 1, jump_action)
+if jump_slot is not None:
+    strip.action_slot = jump_slot
+meta['jump'] = jump_marks
 
 
 def load_image(name, keep_alpha=False):

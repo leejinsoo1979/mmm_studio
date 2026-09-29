@@ -94,6 +94,11 @@ const THIRD_PERSON_START_PITCH = -0.28
 /** Keeps the orbiting camera this far (m) in front of a wall it would pass through. */
 const THIRD_PERSON_WALL_PADDING = 0.2
 const WHEEL_ZOOM_PER_PIXEL = 0.004
+/** How far (m) the eyes sink while crouching, and how fast (1/s) they get there. */
+const CROUCH_EYE_DROP = 0.55
+const CROUCH_EYE_RESPONSE = 7
+/** A brisk hop: about half a metre up. */
+const JUMP_SPEED = 3.2
 const CONTROLLER_CENTER_FROM_EYE = 0.85
 const DOOR_INTERACTION_DISTANCE = 2.5
 const DOOR_LEAF_INTERACTION_DEPTH = 0.08
@@ -612,6 +617,7 @@ export const FirstPersonControls = () => {
   const movementInputRef = useRef<MovementInput>({ ...inactiveMovementInput })
   const yawRef = useRef(0)
   const pitchRef = useRef(0)
+  const crouchEyeDropRef = useRef(0)
   const view = useWalkthroughView((state) => state.view)
   const interactableTargetRef = useRef<FirstPersonInteractableTarget | null>(null)
   const [isElevatorRideLocked, setIsElevatorRideLocked] = useState(false)
@@ -1106,6 +1112,7 @@ export const FirstPersonControls = () => {
       if (!movement) return false
 
       event.preventDefault()
+      if (active && !movement.run) useWalkthroughView.getState().setCrouching(false)
       Object.assign(movementInputRef.current, movement)
       controllerRef.current?.setMovement(movement)
       return true
@@ -1140,6 +1147,10 @@ export const FirstPersonControls = () => {
         const walkthrough = useWalkthroughView.getState()
         walkthrough.toggleView()
         if (useWalkthroughView.getState().view === 'first') canvas.requestPointerLock?.()
+      } else if (event.code === 'KeyC' && !event.repeat) {
+        event.preventDefault()
+        event.stopPropagation()
+        useWalkthroughView.getState().toggleCrouch()
       }
     }
 
@@ -1150,6 +1161,7 @@ export const FirstPersonControls = () => {
     document.addEventListener('keydown', handleKeyDown, true)
     document.addEventListener('keyup', handleKeyUp, true)
     return () => {
+      useWalkthroughView.getState().setCrouching(false)
       document.removeEventListener('keydown', handleKeyDown, true)
       document.removeEventListener('keyup', handleKeyUp, true)
     }
@@ -1420,7 +1432,7 @@ export const FirstPersonControls = () => {
     [camera],
   )
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     if (!controllerRef.current?.group) return
 
     const group = controllerRef.current.group
@@ -1459,7 +1471,11 @@ export const FirstPersonControls = () => {
     cameraEuler.set(pitchRef.current, yawRef.current, 0, 'YXZ')
     camera.quaternion.setFromEuler(cameraEuler)
     syncElevatorRide(group)
+    crouchEyeDropRef.current +=
+      ((walkthrough.crouching ? CROUCH_EYE_DROP : 0) - crouchEyeDropRef.current) *
+      (1 - Math.exp(-delta * CROUCH_EYE_RESPONSE))
     walkerEye.copy(group.position).add(cameraOffset)
+    walkerEye.y -= crouchEyeDropRef.current
     walkerEyeKnown = true
     if (thirdPerson) {
       placeThirdPersonCamera(walkthrough.distance)
@@ -1520,7 +1536,7 @@ export const FirstPersonControls = () => {
             floatSensorRadius={0.15}
             floatSpringK={1200}
             gravity={9.81}
-            jumpVel={5}
+            jumpVel={JUMP_SPEED}
             key="first-person-controller"
             maxRunSpeed={view === 'third' ? THIRD_PERSON_RUN_SPEED : 5}
             maxSlope={1.2}
@@ -1689,6 +1705,7 @@ export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
             <div className="h-px w-full bg-border/30" />
             <InlineControlHint keyLabel="Shift" label="달리기" />
             <InlineControlHint keyLabel="Space" label="점프" />
+            <InlineControlHint keyLabel="C" label="앉기 / 일어서기" />
             <InlineControlHint keyLabel="E / R" label="열기 · 누르기" />
             <InlineControlHint keyLabel="T" label="닫기" />
             <InlineControlHint keyLabel="V" label="1인칭 / 3인칭" />

@@ -1,46 +1,83 @@
 import { describe, expect, test } from 'bun:test'
 import {
   advanceGaitPhase,
+  airborneJumpTime,
+  GAITS,
+  gaitSpeed,
   locomotionWeights,
-  THIRD_PERSON_RUN_SPEED,
-  THIRD_PERSON_WALK_SPEED,
   WALKTHROUGH_CHARACTERS,
 } from './locomotion'
 
+const male = WALKTHROUGH_CHARACTERS.male
+const sum = (w: ReturnType<typeof locomotionWeights>) =>
+  w.idle + GAITS.reduce((total, gait) => total + w[gait], 0)
+
 describe('locomotionWeights', () => {
   test('standing still is pure idle', () => {
-    expect(locomotionWeights(0)).toEqual({ idle: 1, walk: 0, run: 0, runBlend: 0 })
+    expect(locomotionWeights(0, male)).toMatchObject({ idle: 1, walk: 0, runFast: 0 })
   })
 
-  test('walking speed is pure walk, running speed pure run', () => {
-    expect(locomotionWeights(THIRD_PERSON_WALK_SPEED)).toMatchObject({ idle: 0, walk: 1, run: 0 })
-    expect(locomotionWeights(THIRD_PERSON_RUN_SPEED)).toMatchObject({ idle: 0, walk: 0, run: 1 })
+  test('each gait plays alone at the speed it was recorded at', () => {
+    for (const gait of GAITS) {
+      const weights = locomotionWeights(gaitSpeed(male.gaits[gait]), male)
+      expect(weights[gait]).toBeCloseTo(1, 6)
+      expect(weights.loopDistance).toBeCloseTo(male.gaits[gait].distance, 6)
+    }
   })
 
-  test('weights always sum to one', () => {
-    for (let speed = 0; speed <= 4; speed += 0.1) {
-      const { idle, walk, run } = locomotionWeights(speed)
-      expect(idle + walk + run).toBeCloseTo(1, 6)
+  test('between two gaits only those two blend', () => {
+    const between = (gaitSpeed(male.gaits.walkFast) + gaitSpeed(male.gaits.run)) / 2
+    const weights = locomotionWeights(between, male)
+    expect(weights.walkFast).toBeGreaterThan(0)
+    expect(weights.run).toBeGreaterThan(0)
+    expect(weights.idle + weights.walk + weights.runFast).toBe(0)
+  })
+
+  test('weights always sum to one, past the fastest gait too', () => {
+    for (let speed = 0; speed <= 8; speed += 0.1) {
+      expect(sum(locomotionWeights(speed, male))).toBeCloseTo(1, 6)
     }
   })
 })
 
 describe('advanceGaitPhase', () => {
-  const male = WALKTHROUGH_CHARACTERS.male
-
-  test('walking one stride length completes exactly one loop', () => {
+  test('covering one stride length completes exactly one loop', () => {
     let phase = 0.25
-    for (let i = 0; i < 100; i++) phase = advanceGaitPhase(phase, male.walk.distance, 0.01, male, 0)
+    for (let i = 0; i < 100; i++)
+      phase = advanceGaitPhase(phase, male.gaits.walk.distance, 0.01, male.gaits.walk.distance)
     expect(phase).toBeCloseTo(0.25, 6)
   })
 
   test('the phase holds while standing', () => {
-    expect(advanceGaitPhase(0.4, 0, 0.1, male, 0)).toBe(0.4)
+    expect(advanceGaitPhase(0.4, 0, 0.1, 1)).toBe(0.4)
+  })
+})
+
+describe('airborneJumpTime', () => {
+  const marks = male.jump
+
+  test('leaving the ground plays take-off, the top of the arc plays the apex', () => {
+    expect(airborneJumpTime(marks, { launchSpeed: 3, verticalSpeed: 3, height: 0, peak: 0 })).toBe(
+      marks.takeoff,
+    )
+    expect(
+      airborneJumpTime(marks, { launchSpeed: 3, verticalSpeed: 0, height: 0.5, peak: 0.5 }),
+    ).toBe(marks.apex)
   })
 
-  test('running strides are longer, so the same distance advances less', () => {
-    const walked = advanceGaitPhase(0, 1, 0.5, male, 0)
-    const ran = advanceGaitPhase(0, 1, 0.5, male, 1)
-    expect(ran).toBeLessThan(walked)
+  test('falling back to take-off height reaches touch-down', () => {
+    expect(
+      airborneJumpTime(marks, { launchSpeed: 3, verticalSpeed: -3, height: 0, peak: 0.5 }),
+    ).toBe(marks.land)
+  })
+
+  test('stepping off a ledge (no launch) falls from the apex pose', () => {
+    const time = airborneJumpTime(marks, {
+      launchSpeed: 0,
+      verticalSpeed: -1,
+      height: -0.2,
+      peak: 0,
+    })
+    expect(time).toBe(marks.land)
   })
 })

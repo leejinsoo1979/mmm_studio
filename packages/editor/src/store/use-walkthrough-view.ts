@@ -11,10 +11,14 @@ type WalkthroughViewState = {
   view: WalkthroughView
   character: WalkthroughCharacterId
   distance: number
+  /** Crouching in place; any step or jump stands the walker back up. */
+  crouching: boolean
   setView: (view: WalkthroughView) => void
   toggleView: () => void
   setCharacter: (character: WalkthroughCharacterId) => void
   setDistance: (distance: number) => void
+  setCrouching: (crouching: boolean) => void
+  toggleCrouch: () => void
 }
 
 const clampDistance = (distance: number) =>
@@ -30,10 +34,14 @@ const useWalkthroughView = create<WalkthroughViewState>()(
       toggleView: () => set((state) => ({ view: state.view === 'third' ? 'first' : 'third' })),
       setCharacter: (character) => set({ character }),
       setDistance: (distance) => set({ distance: clampDistance(distance) }),
+      crouching: false,
+      setCrouching: (crouching) => set({ crouching }),
+      toggleCrouch: () => set((state) => ({ crouching: !state.crouching })),
     }),
     {
       name: 'mmm-walkthrough-view',
       storage: createJSONStorage(() => localStorage),
+      partialize: ({ view, character, distance }) => ({ view, character, distance }),
     },
   ),
 )

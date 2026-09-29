@@ -1,5 +1,6 @@
 'use client'
 
+import { characterStatus } from '@pascal-app/viewer'
 import { useGLTF } from '@react-three/drei/core/Gltf'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
@@ -14,21 +15,64 @@ import {
 } from 'three'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import useWalkthroughView from '../../../store/use-walkthrough-view'
-import { advanceGaitPhase, locomotionWeights, WALKTHROUGH_CHARACTERS } from './locomotion'
+import {
+  advanceGaitPhase,
+  airborneJumpTime,
+  GAITS,
+  type Gait,
+  locomotionWeights,
+  type Span,
+  WALKTHROUGH_CHARACTERS,
+} from './locomotion'
 
 /** A frame-to-frame jump faster than this (m/s) is a respawn or ride, not a step. */
 const TELEPORT_SPEED = 12
+/** Moving less than this (m) in a frame is standing still. */
+const STILL_DISTANCE = 0.0005
 /** How quickly (1/s) the gait follows the body's measured speed. */
 const SPEED_RESPONSE = 10
+/**
+ * The floating controller loses the ground for a moment on stair noses and
+ * slope changes; only a launch or a longer drop counts as being in the air.
+ */
+const AIRBORNE_DELAY = 0.12
+const LAUNCH_SPEED = 0.8
+/** Crouching and standing up play this much faster than the capture. */
+const CROUCH_SPEEDUP = 1.3
+/** Moving faster than this (m/s) while crouched stands the body straight up. */
+const CROUCH_BREAK_SPEED = 0.5
 
 const worldPosition = new Vector3()
 
-type Gait = {
-  mixer: AnimationMixer
-  idle: AnimationAction
-  walk: AnimationAction
-  run: AnimationAction
+type CrouchClip = 'crouchIn' | 'crouchIdle' | 'crouchOut'
+const CROUCH_CLIPS: CrouchClip[] = ['crouchIn', 'crouchIdle', 'crouchOut']
+
+type Actions = { mixer: AnimationMixer } & Record<
+  'idle' | Gait | 'jump' | CrouchClip,
+  AnimationAction
+>
+
+type JumpState = {
+  phase: 'ground' | 'air' | 'landing'
+  unsupported: number
+  launchSpeed: number
+  takeoffY: number
+  peak: number
+  time: number
+  weight: number
 }
+
+type CrouchState = {
+  phase: 'standing' | 'down' | 'held' | 'up'
+  progress: number
+  weight: number
+  clips: Record<CrouchClip, number>
+}
+
+const approach = (value: number, target: number, rate: number, delta: number) =>
+  value + (target - value) * (1 - Math.exp(-rate * delta))
+
+const spanTime = (span: Span, progress: number) => span.from + (span.to - span.from) * progress
 
 function prepareModel(source: Object3D): Object3D {
   const model = cloneSkinned(source)
@@ -53,10 +97,12 @@ function prepareModel(source: Object3D): Object3D {
 }
 
 /**
- * The walkthrough's third-person body: a Rocketbox avatar whose idle, walk and
- * run motion-capture loops blend by the speed the controller actually moves
- * at, with the walk and run sharing one gait phase driven by the ground
- * covered — so the feet stay planted at every speed.
+ * The walkthrough's third-person body: a Rocketbox avatar whose idle, walk,
+ * brisk walk, run and sprint motion-capture loops blend by the speed the
+ * controller actually moves at — all sharing one gait phase driven by the
+ * ground covered, so the feet stay planted at every speed. A motion-capture
+ * jump follows the controller's flight (rising, top, falling, landing) and a
+ * crouch plays in place.
  */
 export function WalkthroughCharacter({
   feetOffset,
@@ -72,67 +118,182 @@ export function WalkthroughCharacter({
   const lastPositionRef = useRef<Vector3 | null>(null)
   const speedRef = useRef(0)
   const phaseRef = useRef(0)
+  const jumpRef = useRef<JumpState>({
+    phase: 'ground',
+    unsupported: 0,
+    launchSpeed: 0,
+    takeoffY: 0,
+    peak: 0,
+    time: 0,
+    weight: 0,
+  })
+  const crouchRef = useRef<CrouchState>({
+    phase: 'standing',
+    progress: 0,
+    weight: 0,
+    clips: { crouchIn: 1, crouchIdle: 0, crouchOut: 0 },
+  })
 
   const model = useMemo(() => prepareModel(gltf.scene), [gltf.scene])
 
-  const gait = useMemo<Gait | null>(() => {
-    const clip = (name: string) => gltf.animations.find((animation) => animation.name === name)
-    const idleClip = clip('idle')
-    const walkClip = clip('walk')
-    const runClip = clip('run')
-    if (!(idleClip && walkClip && runClip)) return null
+  const actions = useMemo<Actions | null>(() => {
     const mixer = new AnimationMixer(model)
-    return {
-      mixer,
-      idle: mixer.clipAction(idleClip),
-      walk: mixer.clipAction(walkClip),
-      run: mixer.clipAction(runClip),
+    const found: Partial<Actions> = { mixer }
+    for (const name of ['idle', ...GAITS, 'jump', ...CROUCH_CLIPS] as const) {
+      const clip = gltf.animations.find((animation) => animation.name === name)
+      if (!clip) return null
+      found[name] = mixer.clipAction(clip)
     }
+    return found as Actions
   }, [gltf.animations, model])
 
   // Started here rather than in the memo so a remount (StrictMode) restarts
   // the actions its cleanup stopped.
   useEffect(() => {
-    if (!gait) return
-    for (const action of [gait.idle, gait.walk, gait.run]) {
+    if (!actions) return
+    const { mixer, ...clips } = actions
+    for (const action of Object.values(clips)) {
       action.play()
       action.setEffectiveWeight(0)
+      // Posed by hand from the gait phase, the flight or the crouch progress.
+      action.timeScale = 0
     }
-    gait.idle.setEffectiveWeight(1)
-    // Walk and run are posed from the shared gait phase, not by the clock.
-    gait.walk.timeScale = 0
-    gait.run.timeScale = 0
+    actions.idle.timeScale = 1
+    actions.crouchIdle.timeScale = 1
+    actions.idle.setEffectiveWeight(1)
     return () => {
-      gait.mixer.stopAllAction()
+      mixer.stopAllAction()
     }
-  }, [gait])
+  }, [actions])
 
   useFrame((_, delta) => {
     const root = rootRef.current
-    if (!(root && gait) || delta <= 0) return
+    if (!(root && actions) || delta <= 0) return
 
     root.getWorldPosition(worldPosition)
+    // The controller's own velocity drives the gait (its physics step is
+    // capped, so on a slow frame the body covers less than delta implies); a
+    // body that didn't actually move — against a wall, paused on a ride — or
+    // that jumped (respawn) doesn't step.
     let measured = 0
     const last = lastPositionRef.current
     if (last) {
-      measured = Math.hypot(worldPosition.x - last.x, worldPosition.z - last.z) / delta
-      if (measured > TELEPORT_SPEED) measured = 0
+      const moved = Math.hypot(worldPosition.x - last.x, worldPosition.z - last.z)
+      if (moved > STILL_DISTANCE && moved / delta <= TELEPORT_SPEED) {
+        measured = Math.hypot(characterStatus.linvel.x, characterStatus.linvel.z)
+      }
       last.copy(worldPosition)
     } else {
       lastPositionRef.current = worldPosition.clone()
     }
     speedRef.current += (measured - speedRef.current) * (1 - Math.exp(-delta * SPEED_RESPONSE))
-
     const speed = speedRef.current
-    const weights = locomotionWeights(speed)
-    phaseRef.current = advanceGaitPhase(phaseRef.current, speed, delta, character, weights.runBlend)
 
-    gait.idle.setEffectiveWeight(weights.idle)
-    gait.walk.setEffectiveWeight(weights.walk)
-    gait.run.setEffectiveWeight(weights.run)
-    gait.walk.time = phaseRef.current * gait.walk.getClip().duration
-    gait.run.time = phaseRef.current * gait.run.getClip().duration
-    gait.mixer.update(delta)
+    // Locomotion.
+    const gait = locomotionWeights(speed, character)
+    phaseRef.current = advanceGaitPhase(phaseRef.current, speed, delta, gait.loopDistance)
+    for (const name of GAITS) {
+      actions[name].time = phaseRef.current * actions[name].getClip().duration
+    }
+
+    // Jump: follow the controller's flight.
+    const jump = jumpRef.current
+    const verticalSpeed = characterStatus.linvel.y
+    const grounded = characterStatus.isOnGround
+    jump.unsupported = grounded ? 0 : jump.unsupported + delta
+    if (jump.phase !== 'air') {
+      const launched = !grounded && verticalSpeed > LAUNCH_SPEED
+      if (launched || jump.unsupported > AIRBORNE_DELAY) {
+        jump.phase = 'air'
+        jump.launchSpeed = launched ? verticalSpeed : 0
+        jump.takeoffY = worldPosition.y
+        jump.peak = 0
+      }
+    }
+    if (jump.phase === 'air') {
+      if (grounded) {
+        jump.phase = 'landing'
+        jump.time = character.jump.land
+      } else {
+        const height = worldPosition.y - jump.takeoffY
+        jump.peak = Math.max(jump.peak, height)
+        jump.time = airborneJumpTime(character.jump, {
+          launchSpeed: jump.launchSpeed,
+          verticalSpeed,
+          height,
+          peak: jump.peak,
+        })
+      }
+    } else if (jump.phase === 'landing') {
+      // Moving on out of a landing cuts the recovery short.
+      jump.time += delta * (speed > CROUCH_BREAK_SPEED ? 1.8 : 1)
+      if (jump.time >= character.jump.end) jump.phase = 'ground'
+    }
+    const jumpTarget =
+      jump.phase === 'air' ||
+      (jump.phase === 'landing' &&
+        (speed <= CROUCH_BREAK_SPEED || jump.time < character.jump.land + 0.15))
+        ? 1
+        : 0
+    jump.weight = approach(jump.weight, jumpTarget, jumpTarget ? 18 : 8, delta)
+    actions.jump.time = Math.min(jump.time, actions.jump.getClip().duration)
+
+    // Crouch: down, hold, up — any step or flight stands straight back up.
+    const crouch = crouchRef.current
+    const { crouch: spans } = character
+    const wantsCrouch = useWalkthroughView.getState().crouching
+    if (jump.phase !== 'ground' || speed > CROUCH_BREAK_SPEED) {
+      crouch.phase = 'standing'
+    } else if (wantsCrouch && (crouch.phase === 'standing' || crouch.phase === 'up')) {
+      crouch.progress = crouch.phase === 'up' ? 1 - crouch.progress : 0
+      crouch.phase = 'down'
+    } else if (!wantsCrouch && (crouch.phase === 'down' || crouch.phase === 'held')) {
+      crouch.progress = crouch.phase === 'down' ? 1 - crouch.progress : 0
+      crouch.phase = 'up'
+    }
+    if (crouch.phase === 'down' || crouch.phase === 'up') {
+      const span = crouch.phase === 'down' ? spans.down : spans.up
+      crouch.progress += (delta * CROUCH_SPEEDUP) / (span.to - span.from)
+      if (crouch.progress >= 1) {
+        crouch.progress = 1
+        crouch.phase = crouch.phase === 'down' ? 'held' : 'standing'
+      }
+    }
+    actions.crouchIn.time = spanTime(spans.down, crouch.phase === 'down' ? crouch.progress : 1)
+    actions.crouchOut.time = spanTime(spans.up, crouch.phase === 'up' ? crouch.progress : 1)
+    const activeClip: CrouchClip | null =
+      crouch.phase === 'down'
+        ? 'crouchIn'
+        : crouch.phase === 'held'
+          ? 'crouchIdle'
+          : crouch.phase === 'up'
+            ? 'crouchOut'
+            : null
+    let clipTotal = 0
+    for (const clip of CROUCH_CLIPS) {
+      if (activeClip) {
+        crouch.clips[clip] = approach(crouch.clips[clip], clip === activeClip ? 1 : 0, 12, delta)
+      }
+      clipTotal += crouch.clips[clip]
+    }
+    // Standing up from the clip's last frame (already a standing pose) is
+    // gentle; a step out of a crouch snaps up quicker.
+    const crouchTarget = crouch.phase === 'standing' ? 0 : 1
+    crouch.weight = approach(crouch.weight, crouchTarget, crouchTarget ? 16 : 9, delta)
+
+    // Layers: a jump overrides everything, a crouch overrides the gait.
+    const jumpWeight = jump.weight
+    const crouchWeight = (1 - jumpWeight) * crouch.weight
+    const gaitWeight = (1 - jumpWeight) * (1 - crouch.weight)
+    actions.jump.setEffectiveWeight(jumpWeight)
+    for (const clip of CROUCH_CLIPS) {
+      actions[clip].setEffectiveWeight(
+        clipTotal > 0 ? (crouchWeight * crouch.clips[clip]) / clipTotal : 0,
+      )
+    }
+    actions.idle.setEffectiveWeight(gaitWeight * gait.idle)
+    for (const name of GAITS) actions[name].setEffectiveWeight(gaitWeight * gait[name])
+    actions.mixer.update(delta)
   })
 
   return (
