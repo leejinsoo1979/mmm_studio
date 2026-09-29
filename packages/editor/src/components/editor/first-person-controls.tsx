@@ -1486,6 +1486,10 @@ export const FirstPersonControls = () => {
     [camera],
   )
 
+  // After the controller steps the body (priority 0) and before the frame is
+  // drawn (1): a camera placed after the draw shows the body a frame ahead of
+  // it, which reads as a shake whenever frame times vary — most of all when
+  // strafing, where that frame's step runs straight across the screen.
   useFrame((_, delta) => {
     if (!controllerRef.current?.group) return
 
@@ -1550,7 +1554,7 @@ export const FirstPersonControls = () => {
         label: nextInteractableTarget?.type === 'registered' ? nextInteractableTarget.label : null,
       })
     }
-  }, 2.5)
+  }, 0.5)
 
   useEffect(() => {
     return () => {

@@ -368,6 +368,8 @@ export function GlbWalkthroughController({ url }: { url: string }) {
   }, [])
 
   // Drive the camera from the capsule each frame + respawn if it falls into void.
+  // After the controller steps (priority 0), before the frame is drawn (1), so
+  // the camera never trails the body by a frame.
   useFrame(() => {
     const group = controllerRef.current?.group
     if (!group) return
@@ -382,7 +384,7 @@ export function GlbWalkthroughController({ url }: { url: string }) {
     cameraEuler.set(pitchRef.current, yawRef.current, 0, 'YXZ')
     camera.quaternion.setFromEuler(cameraEuler)
     camera.updateMatrixWorld(true)
-  }, 2.5)
+  }, 0.5)
 
   if (!(world && start)) return null
 

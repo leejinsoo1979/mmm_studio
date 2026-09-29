@@ -23,6 +23,7 @@ import { applyIsolation, clearIsolation } from '../../lib/isolation'
 import { ensureKtx2Support } from '../../lib/ktx2-loader'
 import type { ColorPreset, RenderShading } from '../../lib/materials'
 import { getSceneTheme } from '../../lib/scene-themes'
+import { toneMappingFor } from '../../lib/tone-mapping'
 import useViewer, { type RenderContext } from '../../store/use-viewer'
 import { FloorElevationSystem } from '../../systems/floor-elevation/floor-elevation-system'
 import { GeometrySystem } from '../../systems/geometry/geometry-system'
@@ -244,13 +245,15 @@ function GPUDeviceWatcher() {
 
 function ToneMappingExposure() {
   const sceneTheme = useViewer((state) => state.sceneTheme)
+  const shading = useViewer((state) => state.shading)
   const gl = useThree((state) => state.gl)
   const invalidate = useThree((state) => state.invalidate)
 
   useEffect(() => {
+    gl.toneMapping = toneMappingFor(shading)
     gl.toneMappingExposure = getSceneTheme(sceneTheme).toneMappingExposure
     invalidate()
-  }, [gl, invalidate, sceneTheme])
+  }, [gl, invalidate, sceneTheme, shading])
 
   return null
 }
@@ -523,7 +526,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           const promise = (async () => {
             try {
               const renderer = new THREE.WebGPURenderer({ ...(props as any), alpha: true })
-              renderer.toneMapping = THREE.ACESFilmicToneMapping
+              renderer.toneMapping = toneMappingFor(useViewer.getState().shading)
               renderer.toneMappingExposure = getSceneTheme(
                 useViewer.getState().sceneTheme,
               ).toneMappingExposure

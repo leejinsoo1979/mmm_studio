@@ -114,6 +114,12 @@ const surfaceRoleMaterialCache = new Map<string, THREE.Material>()
 const textureCache = new Map<string, THREE.Texture>()
 const textureLoadPromises = new Map<string, Promise<THREE.Texture | null>>()
 const textureLoader = new THREE.TextureLoader()
+/**
+ * Floors and walls are mostly seen at a grazing angle (walking through, or a
+ * low camera): without anisotropic filtering their finishes blur to mush a
+ * few metres off. The renderer clamps this to what the GPU supports.
+ */
+const TEXTURE_ANISOTROPY = 8
 
 // `.ktx2` finish maps transcode through the shared KTX2 loader (support is
 // detected once at viewer init); everything else loads as a normal image.
@@ -205,6 +211,7 @@ function getTexture(material?: MaterialSchema): THREE.Texture | undefined {
   const texture = pickTextureLoader(textureConfig.url).load(textureConfig.url)
   texture.wrapS = THREE.RepeatWrapping
   texture.wrapT = THREE.RepeatWrapping
+  texture.anisotropy = TEXTURE_ANISOTROPY
 
   const repeatX = textureConfig.repeat?.[0] ?? textureConfig.scale ?? 1
   const repeatY = textureConfig.repeat?.[1] ?? textureConfig.scale ?? 1
@@ -231,6 +238,7 @@ function getAuxTexture(
   const texture = pickTextureLoader(url).load(url)
   texture.wrapS = THREE.RepeatWrapping
   texture.wrapT = THREE.RepeatWrapping
+  texture.anisotropy = TEXTURE_ANISOTROPY
   const repeatX = material.texture.repeat?.[0] ?? material.texture.scale ?? 1
   const repeatY = material.texture.repeat?.[1] ?? material.texture.scale ?? 1
   texture.repeat.set(repeatX, repeatY)
@@ -262,6 +270,7 @@ function applyTextureProperties(
 ): THREE.Texture {
   texture.wrapS = wrapMap[props.wrapS]
   texture.wrapT = wrapMap[props.wrapT]
+  texture.anisotropy = TEXTURE_ANISOTROPY
   texture.repeat.set(props.repeatX, props.repeatY)
   texture.rotation = props.rotation
   texture.flipY = props.flipY

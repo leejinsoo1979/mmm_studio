@@ -277,9 +277,11 @@ export function Lights() {
             lightRefs.current[index] = ref
           }}
           shadow-bias={-0.002}
-          shadow-mapSize={shading === 'hyper' ? [2048, 2048] : [1024, 1024]}
+          shadow-mapSize={shading === 'hyper' ? [4096, 4096] : [1024, 1024]}
           shadow-normalBias={0.3}
-          shadow-radius={1.5}
+          // The filter radius is in shadow-map texels: hyper's finer map keeps the
+          // same soft edge, drawn from twice the detail.
+          shadow-radius={shading === 'hyper' ? 3 : 1.5}
         >
           {light.castShadow && !SHADOWS_DISABLED && shadows && shading !== 'performance' ? (
             <orthographicCamera

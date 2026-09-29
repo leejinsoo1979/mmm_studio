@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Color, Layers, type Object3D, UnsignedByteType } from 'three'
 import { ssgi } from 'three/addons/tsl/display/SSGINode.js'
 import { denoise } from 'three/examples/jsm/tsl/display/DenoiseNode.js'
+import { fxaa } from 'three/examples/jsm/tsl/display/FXAANode.js'
 import {
   add,
   colorToDirection,
@@ -30,6 +31,7 @@ import { GRID_LAYER, OVERLAY_LAYER, SCENE_LAYER, ZONE_LAYER } from '../../lib/la
 import { mergedOutline } from '../../lib/merged-outline-node'
 import { getSceneTheme } from '../../lib/scene-themes'
 import { getSolarPosition } from '../../lib/solar-position'
+import { toneMappingFor } from '../../lib/tone-mapping'
 import { OVERCAST_SKY, WEATHER_LOOKS } from '../../lib/weather'
 import useViewer from '../../store/use-viewer'
 
@@ -596,6 +598,15 @@ const PostProcessingPasses = ({
       const renderPipeline = new RenderPipeline(renderer as unknown as WebGPURenderer)
       renderPipeline.outputColorTransform = !transparentBackground
       renderPipeline.outputNode = finalOutput
+      if (hyper && !transparentBackground) {
+        // Nothing else smooths the scene's edges (the passes render without
+        // MSAA): hyper runs FXAA over the display image, which it needs tone
+        // mapped first. The pipeline is rebuilt when the shading changes.
+        renderPipeline.outputColorTransform = false
+        renderPipeline.outputNode = fxaa(
+          renderOutput(finalOutput, toneMappingFor(shading), renderer.outputColorSpace),
+        )
+      }
       renderPipelineRef.current = renderPipeline
       retryCountRef.current = 0
     } catch (error) {

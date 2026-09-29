@@ -943,7 +943,7 @@ function DoorLeaf({
           ? (runtime?.doorOpen ?? 0)
           : 0
     ref.current.position.x = getLeafX(nextDoorOpen)
-  }, 2.6)
+  }, 0.6)
 
   return (
     <group ref={ref} position={[getLeafX(doorOpen), y + height / 2, z]}>
@@ -1256,12 +1256,13 @@ export const ElevatorRenderer = ({ node }: { node: ElevatorNode }) => {
     }),
   )
 
+  // With the walkthrough carrying its rider (0.5), before the frame is drawn (1).
   useFrame(() => {
     if (!cabRef.current) return
     const runtime = useInteractive.getState().elevators[elevatorId]
     if (!runtime) return
     cabRef.current.position.y = runtime.carY
-  }, 2.6)
+  }, 0.6)
 
   const cabWidth = getElevatorCabWidth(renderNode)
   const cabDepth = getElevatorCabDepth(renderNode)
