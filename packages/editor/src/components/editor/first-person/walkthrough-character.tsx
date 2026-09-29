@@ -190,22 +190,20 @@ export function WalkthroughCharacter({
     if (!(root && actions) || delta <= 0) return
 
     root.getWorldPosition(worldPosition)
-    // The controller's own velocity drives the gait (its physics step is
-    // capped, so on a slow frame the body covers less than delta implies); a
-    // body that didn't actually move — against a wall, paused on a ride — or
-    // that jumped (respawn) doesn't step.
-    let measured = 0
+    // The ground the body actually covered drives the steps, so the feet can't
+    // slide whatever the frame rate; a body that didn't move (against a wall)
+    // or that jumped (respawn) doesn't step.
+    let stepped = 0
     const last = lastPositionRef.current
     if (last) {
       const moved = Math.hypot(worldPosition.x - last.x, worldPosition.z - last.z)
-      if (moved > STILL_DISTANCE && moved / delta <= TELEPORT_SPEED) {
-        measured = Math.hypot(characterStatus.linvel.x, characterStatus.linvel.z)
-      }
+      if (moved > STILL_DISTANCE && moved / delta <= TELEPORT_SPEED) stepped = moved
       last.copy(worldPosition)
     } else {
       lastPositionRef.current = worldPosition.clone()
     }
-    speedRef.current += (measured - speedRef.current) * (1 - Math.exp(-delta * SPEED_RESPONSE))
+    speedRef.current +=
+      (stepped / delta - speedRef.current) * (1 - Math.exp(-delta * SPEED_RESPONSE))
     const speed = speedRef.current
 
     // Lean like a runner: into a turn by the angle that balances the turn
@@ -234,7 +232,7 @@ export function WalkthroughCharacter({
 
     // Locomotion.
     const gait = locomotionWeights(speed, character)
-    phaseRef.current = advanceGaitPhase(phaseRef.current, speed, delta, gait.loopDistance)
+    phaseRef.current = advanceGaitPhase(phaseRef.current, stepped / delta, delta, gait.loopDistance)
     for (const name of GAITS) {
       actions[name].time = phaseRef.current * actions[name].getClip().duration
     }

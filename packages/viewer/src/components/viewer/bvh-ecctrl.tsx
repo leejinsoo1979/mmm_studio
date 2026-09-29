@@ -86,6 +86,10 @@ type CharacterStatus = {
   animationStatus: CharacterAnimationStatus
 }
 
+/** Longest physics step (s), and the most frame time stepped at once (a longer hitch is dropped). */
+const MAX_STEP = 1 / 45
+const MAX_FRAME_TIME = 1 / 8
+
 export const characterStatus: CharacterStatus = {
   position: new THREE.Vector3(),
   linvel: new THREE.Vector3(),
@@ -763,7 +767,12 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
       elapsedRef.current += delta
       if (paused || elapsedRef.current < delay) return
 
-      const deltaTime = Math.min(1 / 45, delta) * slowMotionFactor
+      // Step the physics in slices no longer than MAX_STEP so a slow frame
+      // still covers its full time (a single capped step would leave the
+      // body behind the clock, walking in slow motion).
+      const frameTime = Math.min(delta, MAX_FRAME_TIME) * slowMotionFactor
+      const steps = Math.max(1, Math.ceil(frameTime / MAX_STEP))
+      const deltaTime = frameTime / steps
       const keys = getKeys() ?? presetKeys
       const forward = forwardState.current || (keys.forward ?? false)
       const backward = backwardState.current || (keys.backward ?? false)
@@ -779,13 +788,14 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
         rightward,
         joystick: joystickState.current,
       })
-      handleCharacterMovement(run, deltaTime)
-      if (jump && isOnGround.current) currentLinVel.current.y = jumpVel
-      movingDir.current.copy(currentLinVel.current).normalize()
-      currentLinVelOnPlane.current.copy(currentLinVel.current).projectOnPlane(upAxis.current)
+      for (let step = 0; step < steps; step++) {
+        handleCharacterMovement(run, deltaTime)
+        if (jump && isOnGround.current) currentLinVel.current.y = jumpVel
+        movingDir.current.copy(currentLinVel.current).normalize()
+        currentLinVelOnPlane.current.copy(currentLinVel.current).projectOnPlane(upAxis.current)
 
-      checkCharacterSleep(jump, deltaTime)
-      if (!isSleeping.current) {
+        checkCharacterSleep(jump, deltaTime)
+        if (isSleeping.current) break
         if (!isOnGround.current) applyGravity(deltaTime)
 
         updateSegmentBBox()
