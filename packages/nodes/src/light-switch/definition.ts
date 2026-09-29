@@ -28,6 +28,7 @@ export const lightSwitchDefinition: NodeDefinition<typeof LightSwitchNode> = {
     presettable: false,
   },
   geometry: buildLightSwitchGeometry,
+  system: { module: () => import('./system') },
   floorplan: buildLightSwitchFloorplan,
   parametrics: { groups: [], customPanel: () => import('./panel') },
   tool: () => import('./tool'),

@@ -413,6 +413,11 @@ export {
 // dependency.
 export { cn } from './lib/utils'
 export {
+  registerWalkthroughInteraction,
+  type WalkthroughInteraction,
+  type WalkthroughTarget,
+} from './lib/walkthrough-interactions'
+export {
   getActiveBuildingPose,
   projectAlignmentGuidesWorldToActiveBuildingLocal,
   resolveAlignmentForActiveBuilding,

@@ -1,18 +1,19 @@
 'use client'
 
 import { sceneRegistry, useScene } from '@pascal-app/core'
-import { useEditor } from '@pascal-app/editor'
-import { useFrame, useThree } from '@react-three/fiber'
+import { registerWalkthroughInteraction } from '@pascal-app/editor'
+import { useFrame } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
-import { type Object3D, Raycaster, Vector2 } from 'three'
+import type { Object3D } from 'three'
 import { isCabinetOpen, useCabinetDoors } from './doors'
 import { type CabinetNode, resolveCabinetNode } from './schema'
 
 /** Seconds for a full swing. */
 const SWING_S = 0.6
 const QUARTER = Math.PI / 2
-/** Reach for opening a cabinet in first person (the room doors' reach). */
-const REACH_M = 2.5
+/** Drawers pull out this share of the cabinet's depth. */
+const DRAWER_PULL = 0.6
+const MM = 0.001
 
 function swing(pivot: Object3D, t: number) {
   const hinge = pivot.userData.cabinetDoorHinge
@@ -21,44 +22,55 @@ function swing(pivot: Object3D, t: number) {
   else if (hinge === 'top') pivot.rotation.x = -QUARTER * t
 }
 
-const raycaster = new Raycaster()
-const screenCentre = new Vector2(0, 0)
+/** Drawer fronts and boxes (not the fixed filler strips) slide out along +Z. */
+const isDrawerPart = (object: Object3D) =>
+  object.name.startsWith('cabinet-drawer-') && !object.name.startsWith('cabinet-drawer-filler')
+
+function hasDrawers(object: Object3D) {
+  let found = false
+  object.traverse((child) => {
+    if (!found && isDrawerPart(child)) found = true
+  })
+  return found
+}
 
 /**
  * Swings each cabinet's doors to its open / closed state (mmmcraft's 90°
- * hinge rotation). Rebuilt geometry comes back closed, so the pivots are
- * re-posed every frame while a cabinet is (or is going) open. In first
- * person, E on the cabinet in the crosshair opens or closes just that one,
- * as E does for room doors.
+ * hinge rotation) and slides its drawers out. Rebuilt geometry comes back
+ * closed, so the parts are re-posed every frame while a cabinet is (or is
+ * going) open. In the walkthrough, E on the cabinet in the aim opens or closes
+ * just that one, as E does for room doors.
  */
 export function CabinetDoorSwing() {
   const amounts = useRef(new Map<string, number>())
-  const camera = useThree((s) => s.camera)
 
-  useEffect(() => {
-    // Capture on window runs ahead of the first-person controls' document
-    // listener, so a cabinet in reach takes the E press.
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code !== 'KeyE' || e.repeat || !useEditor.getState().isFirstPersonMode) return
-      raycaster.setFromCamera(screenCentre, camera)
-      raycaster.far = REACH_M
-      const nodes = useScene.getState().nodes
-      let hit: { id: string; distance: number } | null = null
-      for (const id of sceneRegistry.byType.cabinet ?? []) {
-        const node = nodes[id as keyof typeof nodes] as unknown as CabinetNode | undefined
-        if (!(node && resolveCabinetNode(node).hasDoor)) continue
-        const object = sceneRegistry.nodes.get(id)
-        const first = object ? raycaster.intersectObject(object, true)[0] : undefined
-        if (first && (!hit || first.distance < hit.distance)) hit = { id, distance: first.distance }
-      }
-      if (!hit) return
-      e.preventDefault()
-      e.stopImmediatePropagation()
-      useCabinetDoors.getState().toggleCabinet(hit.id)
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [camera])
+  useEffect(
+    () =>
+      registerWalkthroughInteraction('cabinet', {
+        resolve: (raycaster) => {
+          const nodes = useScene.getState().nodes
+          let hit: { id: string; distance: number; object: Object3D } | null = null
+          for (const id of sceneRegistry.byType.cabinet ?? []) {
+            const node = nodes[id as keyof typeof nodes] as unknown as CabinetNode | undefined
+            const object = sceneRegistry.nodes.get(id)
+            if (!(node && object)) continue
+            const first = raycaster.intersectObject(object, true)[0]
+            if (first && (!hit || first.distance < hit.distance)) {
+              hit = { id, distance: first.distance, object }
+            }
+          }
+          if (!hit) return null
+          const node = nodes[hit.id as keyof typeof nodes] as unknown as CabinetNode
+          const doors = resolveCabinetNode(node).hasDoor
+          if (!(doors || hasDrawers(hit.object))) return null
+          const open = isCabinetOpen(hit.id)
+          const what = doors ? '수납장' : '서랍'
+          return { id: hit.id, distance: hit.distance, label: `${what} ${open ? '닫기' : '열기'}` }
+        },
+        activate: (id) => useCabinetDoors.getState().toggleCabinet(id),
+      }),
+    [],
+  )
 
   useFrame((_, delta) => {
     const step = Math.min(delta, 0.1) / SWING_S
@@ -70,8 +82,18 @@ export function CabinetDoorSwing() {
         target > current ? Math.min(target, current + step) : Math.max(target, current - step)
       amounts.current.set(id, a)
       const eased = a * a * (3 - 2 * a)
+      const node = useScene.getState().nodes[
+        id as keyof ReturnType<typeof useScene.getState>['nodes']
+      ] as unknown | undefined
+      const pull = node ? resolveCabinetNode(node as CabinetNode).depthMm * MM * DRAWER_PULL : 0
       sceneRegistry.nodes.get(id)?.traverse((object) => {
         if (object.userData.cabinetDoorHinge) swing(object, eased)
+        else if (isDrawerPart(object)) {
+          if (object.userData.drawerClosedZ === undefined) {
+            object.userData.drawerClosedZ = object.position.z
+          }
+          object.position.z = object.userData.drawerClosedZ + pull * eased
+        }
       })
     }
   })

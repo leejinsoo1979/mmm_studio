@@ -59,6 +59,12 @@ import {
 } from '../../lib/door-interaction'
 import { cn } from '../../lib/utils'
 import {
+  activateWalkthroughTarget,
+  type ResolvedWalkthroughTarget,
+  resolveWalkthroughTarget,
+  useWalkthroughPrompt,
+} from '../../lib/walkthrough-interactions'
+import {
   closeWindowOpenState,
   isOperableWindowType,
   toggleWindowOpenState,
@@ -177,6 +183,7 @@ function aimFromWalkerEye(raycaster: Raycaster) {
 }
 const centerScreenPoint = new Vector2(0, 0)
 const doorInteractionRaycaster = new Raycaster()
+const registeredInteractionRaycaster = new Raycaster()
 const doorLeafBox = new Box3()
 const doorLeafInverseMatrix = new Matrix4()
 const doorLeafLocalHit = new Vector3()
@@ -240,6 +247,7 @@ type FirstPersonInteractableTarget =
       id: AnyNodeId
       type: 'door' | 'window'
     }
+  | (ResolvedWalkthroughTarget & { type: 'registered' })
   | {
       action: 'open-door' | 'request-level'
       buttonKind: 'cab' | 'landing'
@@ -307,9 +315,9 @@ function resolveElevatorButtonTarget(object: Object3D): ElevatorButtonTarget | n
 
 function getInteractableTargetKey(target: FirstPersonInteractableTarget | null) {
   if (!target) return null
-  return target.type === 'elevator'
-    ? `${target.type}:${target.id}:${target.levelId}`
-    : `${target.type}:${target.id}`
+  if (target.type === 'elevator') return `${target.type}:${target.id}:${target.levelId}`
+  if (target.type === 'registered') return `${target.key}:${target.id}:${target.label}`
+  return `${target.type}:${target.id}`
 }
 
 function isDynamicElevatorCollider(kind: ElevatorColliderKind) {
@@ -860,6 +868,13 @@ export const FirstPersonControls = () => {
     const elevatorTarget = resolveInteractableElevatorTarget()
     if (elevatorTarget) return elevatorTarget
 
+    // Cabinets, lamps, switches, TVs — whatever node kinds registered.
+    registeredInteractionRaycaster.setFromCamera(centerScreenPoint, camera)
+    aimFromWalkerEye(registeredInteractionRaycaster)
+    registeredInteractionRaycaster.far = DOOR_INTERACTION_DISTANCE
+    const registered = resolveWalkthroughTarget(registeredInteractionRaycaster)
+    if (registered) return { ...registered, type: 'registered' }
+
     const doorId = resolveInteractableDoorId()
     if (doorId) return { id: doorId, type: 'door' }
 
@@ -867,11 +882,21 @@ export const FirstPersonControls = () => {
     if (windowId) return { id: windowId, type: 'window' }
 
     return null
-  }, [resolveInteractableDoorId, resolveInteractableElevatorTarget, resolveInteractableWindowId])
+  }, [
+    camera,
+    resolveInteractableDoorId,
+    resolveInteractableElevatorTarget,
+    resolveInteractableWindowId,
+  ])
 
   const toggleInteractableTarget = useCallback(() => {
     const target = interactableTargetRef.current ?? resolveInteractableTarget()
     if (!target) return
+
+    if (target.type === 'registered') {
+      activateWalkthroughTarget(target)
+      return
+    }
 
     if (target.type === 'elevator') {
       if (target.buttonKind === 'cab') {
@@ -930,7 +955,7 @@ export const FirstPersonControls = () => {
     const target = interactableTargetRef.current ?? resolveInteractableTarget()
     if (!target) return
 
-    if (target.type === 'elevator') return
+    if (target.type === 'elevator' || target.type === 'registered') return
 
     if (target.type === 'window') {
       const node = useScene.getState().nodes[target.id]
@@ -1516,13 +1541,17 @@ export const FirstPersonControls = () => {
       getInteractableTargetKey(nextInteractableTarget)
     ) {
       interactableTargetRef.current = nextInteractableTarget
-      useViewer.getState().setHoveredId(nextInteractableTarget?.id ?? null)
+      useViewer.getState().setHoveredId((nextInteractableTarget?.id ?? null) as AnyNodeId | null)
+      useWalkthroughPrompt.setState({
+        label: nextInteractableTarget?.type === 'registered' ? nextInteractableTarget.label : null,
+      })
     }
   }, 2.5)
 
   useEffect(() => {
     return () => {
       walkerEyeKnown = false
+      useWalkthroughPrompt.setState({ label: null })
       if (useViewer.getState().hoveredId === interactableTargetRef.current?.id) {
         useViewer.getState().setHoveredId(null)
       }
@@ -1600,7 +1629,9 @@ export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
   )
   // A shared play link's visitors can't place one: the hint is the author's.
   const isPreviewMode = useEditor((state) => state.isPreviewMode)
+  const registeredLabel = useWalkthroughPrompt((state) => state.label)
   const doorInteractionLabel = useMemo(() => {
+    if (registeredLabel) return registeredLabel
     if (hoveredNode?.type !== 'door' || hoveredNode.openingKind === 'opening') return null
 
     const openAmount = isOperationDoorType(hoveredNode.doorType)
@@ -1608,7 +1639,7 @@ export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
       : (interactiveDoor?.swingAngle ?? hoveredNode.swingAngle ?? 0) / DOOR_SWING_OPEN_ANGLE
 
     return openAmount >= 0.5 ? '문 닫기' : '문 열기'
-  }, [hoveredNode, interactiveDoor])
+  }, [hoveredNode, interactiveDoor, registeredLabel])
 
   useEffect(() => {
     const handlePointerLockChange = () => {
