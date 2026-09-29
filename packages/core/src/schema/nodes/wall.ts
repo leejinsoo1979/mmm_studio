@@ -94,11 +94,10 @@ export type WallSurfaceSide = 'interior' | 'exterior'
 // visual parity with the retired DEFAULT_WALL_MATERIAL. Lives in core so the
 // slot declaration (nodes) and the material resolver (viewer) share one value.
 // May be a `#rrggbb` colour or a `library:<id>` ref. Textures-off still
-// collapses to the themed wall role (the escape hatch). New walls are an
-// off-white matte paint, as inZOI builds them; concrete stays in the palette.
+// collapses to the themed wall role (the escape hatch).
 export const WALL_SLOT_DEFAULT: Record<WallSurfaceSide, string> = {
-  interior: 'library:preset-softwhite',
-  exterior: 'library:preset-softwhite',
+  interior: 'library:concrete-drywall',
+  exterior: 'library:concrete-drywall',
 }
 
 export type WallSurfaceMaterialSpec = {

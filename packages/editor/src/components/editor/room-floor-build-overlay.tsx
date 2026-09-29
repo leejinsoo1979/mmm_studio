@@ -12,7 +12,7 @@ import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import { type Group, Path, Shape, ShapeGeometry, Vector2 } from 'three'
 import { color, float, fract, fwidth, mix, positionWorld, uniform } from 'three/tsl'
-import { MeshBasicNodeMaterial } from 'three/webgpu'
+import { MeshBasicNodeMaterial, type Node } from 'three/webgpu'
 import { useShallow } from 'zustand/react/shallow'
 import useEditor from '../../store/use-editor'
 
@@ -20,21 +20,29 @@ import useEditor from '../../store/use-editor'
 const WALL_DRAFT_TOOLS = new Set<string>(['wall', 'wall-arc', 'rectangle-room'])
 
 const FILL_COLOR = '#5b7395'
-const FILL_ALPHA = 0.92
+const FILL_ALPHA = 0.6
 const LINE_ALPHA = 0.5
 const LIFT = 0.003
 
 const cellSize = uniform(0.5)
 
 // Slate blue with the building lattice over it, in world XZ so its lines
-// continue the ground grid outside the room.
-const fillMaterial = (() => {
-  const r = positionWorld.xz.div(cellSize)
+// continue the ground grid outside the room. Once a cell shrinks to a few
+// pixels the fine lines give way to every fifth one instead of aliasing.
+function latticeLines(size: Node<'float'>) {
+  const r = positionWorld.xz.div(size)
   const fw = fwidth(r)
   const g = fract(r.sub(0.5)).sub(0.5).abs()
   const lineX = float(1).sub(g.x.div(fw.x).sub(0.25).min(1))
   const lineZ = float(1).sub(g.y.div(fw.y).sub(0.25).min(1))
-  const line = lineX.max(lineZ).clamp(0, 1)
+  return { line: lineX.max(lineZ).clamp(0, 1), density: fw.x.max(fw.y) }
+}
+
+const fillMaterial = (() => {
+  const fine = latticeLines(cellSize)
+  const coarse = latticeLines(cellSize.mul(5))
+  const fineVisible = float(1).sub(fine.density.smoothstep(1 / 14, 1 / 6))
+  const line = fine.line.mul(fineVisible).max(coarse.line)
   return new MeshBasicNodeMaterial({
     colorNode: mix(color(FILL_COLOR), color('#ffffff'), line.mul(LINE_ALPHA)),
     opacityNode: float(FILL_ALPHA),

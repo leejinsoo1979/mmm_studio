@@ -43,7 +43,7 @@ const DRAFT_REVEAL_RADIUS = 60
 // reads on a pale ground the way inZOI's reads on grass.
 const DRAFT_LINE_COLOR = '#ffffff'
 const DRAFT_LOT_COLOR = '#5d6d7e'
-const DRAFT_LOT_ALPHA = 0.85
+const DRAFT_LOT_ALPHA = 0.5
 const FLOOR_DRAFT_TOOLS = new Set<string>([
   'wall',
   'wall-arc',
@@ -79,6 +79,19 @@ function gridLines(size: number | Node<'float'>, thickness: number) {
       .min(1),
   )
   return lineX.max(lineY)
+}
+
+/**
+ * The building lattice: fine cells up close, fading to every fifth line once a
+ * cell shrinks to a few pixels, where the fine lines would alias into noise.
+ */
+function draftLatticeLines(size: Node<'float'>) {
+  const cellsPerPixel = fwidth(positionLocal.xy.div(size))
+  const density = cellsPerPixel.x.max(cellsPerPixel.y)
+  const fineVisible = float(1).sub(density.smoothstep(1 / 14, 1 / 6))
+  const fine = gridLines(size, 1.25).min(1).mul(fineVisible)
+  const coarse = gridLines(size.mul(5), 1.5).min(1)
+  return fine.max(coarse)
 }
 
 /** The lot (site polygon) the building lattice is laid over while drawing. */
@@ -184,7 +197,7 @@ export const Grid = ({
 
     // Drafting: every line the same bright white over a tinted lot that fades
     // out with the reveal, instead of grey lines on the pale ground.
-    const lineMask = gridLines(cellSizeUniform, 1.25).min(1)
+    const lineMask = draftLatticeLines(cellSizeUniform)
     const reveal = fade.mul(cursorFade)
     const draftColor = mix(color(DRAFT_LOT_COLOR), color(DRAFT_LINE_COLOR), lineMask)
     const draftAlpha = lineMask.mul(0.9).max(float(DRAFT_LOT_ALPHA)).mul(reveal)
@@ -221,7 +234,7 @@ export const Grid = ({
   // inZOI's building lattice covers the lot, not the whole ground: a mesh in
   // the site polygon's shape carries it while a floor draw tool is armed.
   const lotMaterial = useMemo(() => {
-    const lineMask = gridLines(cellSizeUniform, 1.25).min(1)
+    const lineMask = draftLatticeLines(cellSizeUniform)
     return new MeshBasicNodeMaterial({
       transparent: true,
       colorNode: mix(color(DRAFT_LOT_COLOR), color(DRAFT_LINE_COLOR), lineMask),
