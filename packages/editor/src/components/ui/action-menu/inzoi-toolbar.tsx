@@ -639,26 +639,27 @@ export function InzoiToolbar() {
           <ToolButton disabled={!canUndo} icon={Undo2} label="되돌리기 (⌘Z)" onClick={runUndo} />
           <ToolButton disabled={!canRedo} icon={Redo2} label="다시하기 (⇧⌘Z)" onClick={runRedo} />
         </Group>
-        <Divider />
-        <Group>
-          <ToolButton
-            icon={RotateCcw}
-            label="왼쪽으로 돌리기"
-            onClick={() => emitter.emit('camera-controls:orbit-ccw')}
-          />
-          <ToolButton
-            icon={RotateCw}
-            label="오른쪽으로 돌리기"
-            onClick={() => emitter.emit('camera-controls:orbit-cw')}
-          />
-          {!is2dOnly && (
+        {/* Turning the view is the 3D camera's: the plan stays north-up. */}
+        {!is2dOnly && <Divider />}
+        {!is2dOnly && (
+          <Group>
+            <ToolButton
+              icon={RotateCcw}
+              label="왼쪽으로 돌리기"
+              onClick={() => emitter.emit('camera-controls:orbit-ccw')}
+            />
+            <ToolButton
+              icon={RotateCw}
+              label="오른쪽으로 돌리기"
+              onClick={() => emitter.emit('camera-controls:orbit-cw')}
+            />
             <ToolButton
               icon={Scan}
               label="위에서 보기"
               onClick={() => emitter.emit('camera-controls:top-view')}
             />
-          )}
-        </Group>
+          </Group>
+        )}
       </div>
       <div
         className="absolute top-full left-1/2 mt-2 flex -translate-x-1/2 flex-col items-center gap-1"

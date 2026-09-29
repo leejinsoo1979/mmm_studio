@@ -312,7 +312,6 @@ const FLOORPLAN_GUIDE_HANDLE_HINT_OFFSET = 72
 const FLOORPLAN_GUIDE_HANDLE_HINT_PADDING_X = 92
 const FLOORPLAN_GUIDE_HANDLE_HINT_PADDING_Y = 48
 const FLOORPLAN_GUIDE_ROTATION_SNAP_DEGREES = 15
-const FLOORPLAN_ROTATION_DEGREES_PER_PIXEL = 0.35
 const FLOORPLAN_VIEW_ANIMATION_TIME_CONSTANT_MS = 90
 const FLOORPLAN_VIEW_ANIMATION_EPSILON = 0.0005
 const FLOORPLAN_ROTATION_ANIMATION_EPSILON_DEG = 0.01
@@ -361,13 +360,6 @@ type PanState = {
   clientX: number
   clientY: number
   centerSvg: SvgPoint
-}
-
-type FloorplanRotationState = {
-  pointerId: number
-  startClientX: number
-  initialUserRotationDeg: number
-  viewportCenterLocal: SvgPoint
 }
 
 type FloorplanScreenSelectionState = {
@@ -1893,6 +1885,11 @@ function floorplanRotationFromCameraAzimuth(azimuth: number, reference: number) 
 
 function cameraAzimuthFromFloorplanRotation(rotationDeg: number) {
   return degreesToRadians(rotationDeg + FLOORPLAN_VIEW_ROTATION_DEG)
+}
+
+/** The camera azimuth facing north, the turn nearest a camera now at `headingDeg`. */
+function northCameraAzimuth(headingDeg: number) {
+  return cameraAzimuthFromFloorplanRotation(nearestEquivalentDegrees(0, headingDeg))
 }
 
 function projectSvgPointToSurface(
@@ -5652,7 +5649,6 @@ export function FloorplanPanel({
   const floorplanSceneRef = useRef<SVGGElement>(null)
   const floorplanContentRef = useRef<SVGGElement>(null)
   const panStateRef = useRef<PanState | null>(null)
-  const floorplanRotationStateRef = useRef<FloorplanRotationState | null>(null)
   const floorplanSpacePanPressedRef = useRef(false)
   const floorplanNavigationClickSuppressedRef = useRef(false)
   const guideInteractionRef = useRef<GuideInteractionState | null>(null)
@@ -5680,6 +5676,9 @@ export function FloorplanPanel({
     useEditor.getState().navigationSyncPose,
   )
   const compassNeedleRef = useRef<SVGSVGElement | null>(null)
+  // The 3D camera's heading, for the compass while the plan is hidden. The
+  // plan itself stays north-up whatever way the 3D camera faces.
+  const cameraHeadingDegRef = useRef(0)
   const levelId = useViewer((state) => state.selection.levelId)
   const buildingId = useViewer((state) => state.selection.buildingId)
   const selectedZoneId = useViewer((state) => state.selection.zoneId)
@@ -5962,7 +5961,6 @@ export function FloorplanPanel({
   )
   const [isSpacePanPressed, setIsSpacePanPressed] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
-  const [isRotatingFloorplan, setIsRotatingFloorplan] = useState(false)
   const [isDraggingPanel, setIsDraggingPanel] = useState(false)
   const [isMacPlatform, setIsMacPlatform] = useState(true)
   const [activeResizeDirection, setActiveResizeDirection] = useState<ResizeDirection | null>(null)
@@ -7142,14 +7140,7 @@ export function FloorplanPanel({
       if (!isFloorplanOpenRef.current) {
         return
       }
-      if (floorplanRotationStateRef.current) {
-        return
-      }
 
-      const nextUserRotationDeg = floorplanRotationFromCameraAzimuth(
-        pose.azimuth,
-        latestFloorplanUserRotationDegRef.current,
-      )
       const localCenter = worldToFloorplanLocalPoint(
         pose.target[0],
         pose.target[2],
@@ -7157,9 +7148,12 @@ export function FloorplanPanel({
         buildingRotationY,
       )
 
-      applyFloorplanNavigationView(localCenter, nextUserRotationDeg, pose.viewWidth, {
-        clampViewWidth: false,
-      })
+      applyFloorplanNavigationView(
+        localCenter,
+        latestFloorplanUserRotationDegRef.current,
+        pose.viewWidth,
+        { clampViewWidth: false },
+      )
     },
     [applyFloorplanNavigationView, buildingPosition, buildingRotationY],
   )
@@ -7188,17 +7182,16 @@ export function FloorplanPanel({
       latestNavigationSyncPoseRef.current = pose
 
       if (pose.source === '3d') {
+        cameraHeadingDegRef.current = floorplanRotationFromCameraAzimuth(
+          pose.azimuth,
+          cameraHeadingDegRef.current,
+        )
         if (!isFloorplanOpenRef.current) {
           // Panel hidden — drive the compass needle imperatively without
           // triggering React state (setViewport) that would re-render the
           // full floorplan SVG every camera frame.
-          const nextDeg = floorplanRotationFromCameraAzimuth(
-            pose.azimuth,
-            latestFloorplanUserRotationDegRef.current,
-          )
-          latestFloorplanUserRotationDegRef.current = nextDeg
           if (compassNeedleRef.current) {
-            compassNeedleRef.current.style.transform = `rotate(${nextDeg}deg)`
+            compassNeedleRef.current.style.transform = `rotate(${cameraHeadingDegRef.current}deg)`
           }
           return
         }
@@ -7211,10 +7204,12 @@ export function FloorplanPanel({
   // React re-renders can overwrite the needle's inline transform with stale
   // state; this layout effect restores the authoritative ref value before
   // the browser paints so the needle never visibly snaps to a stale angle.
+  // With the plan open the needle shows the plan's own north (it is
+  // north-up), whatever the hidden path last wrote.
   useLayoutEffect(() => {
-    if (!isFloorplanOpen && compassNeedleRef.current) {
-      compassNeedleRef.current.style.transform = `rotate(${latestFloorplanUserRotationDegRef.current}deg)`
-    }
+    if (!compassNeedleRef.current) return
+    const needleDeg = isFloorplanOpen ? floorplanUserRotationDeg : cameraHeadingDegRef.current
+    compassNeedleRef.current.style.transform = `rotate(${needleDeg}deg)`
   })
 
   useEffect(() => {
@@ -7275,10 +7270,8 @@ export function FloorplanPanel({
       stopFloorplanViewAnimation()
       floorplanSpacePanPressedRef.current = false
       panStateRef.current = null
-      floorplanRotationStateRef.current = null
       setIsSpacePanPressed(false)
       setIsPanning(false)
-      setIsRotatingFloorplan(false)
       return
     }
     setMeasuredSceneBBox(null)
@@ -7970,7 +7963,7 @@ export function FloorplanPanel({
   }, [levelId, movingNode])
   const floorplanGridWorldY = buildingPosition[1] + floorplanGridLocalY
   const publishFloorplanNavigationPose = useCallback(
-    (localCenter: SvgPoint, userRotationDeg: number, viewWidth?: number) => {
+    (localCenter: SvgPoint, viewWidth?: number, azimuth?: number) => {
       const currentViewport = latestViewportRef.current ?? latestFittedViewportRef.current
       const resolvedViewWidth = viewWidth ?? currentViewport?.width
       if (!(resolvedViewWidth && resolvedViewWidth > 0)) {
@@ -7987,7 +7980,11 @@ export function FloorplanPanel({
       useEditor.getState().publishNavigationSyncPose({
         source: '2d',
         target: [worldCenter.x, targetY, worldCenter.z],
-        azimuth: cameraAzimuthFromFloorplanRotation(userRotationDeg),
+        // Panning or zooming the plan moves the 3D camera without turning it.
+        azimuth:
+          azimuth ??
+          latestNavigationSyncPoseRef.current?.azimuth ??
+          cameraAzimuthFromFloorplanRotation(0),
         viewWidth: resolvedViewWidth,
       })
     },
@@ -8001,14 +7998,10 @@ export function FloorplanPanel({
       // the 3D camera transitions.
       const pose = latestNavigationSyncPoseRef.current
       if (!pose) return
-      const currentRotation = latestFloorplanUserRotationDegRef.current
-      const northAzimuth = cameraAzimuthFromFloorplanRotation(
-        nearestEquivalentDegrees(0, currentRotation),
-      )
       useEditor.getState().publishNavigationSyncPose({
         source: '2d',
         target: [...pose.target],
-        azimuth: northAzimuth,
+        azimuth: northCameraAzimuth(cameraHeadingDegRef.current),
         viewWidth: pose.viewWidth,
       })
       return
@@ -8029,10 +8022,13 @@ export function FloorplanPanel({
       },
       -currentSceneRotationDeg,
     )
-    const nextUserRotationDeg = nearestEquivalentDegrees(0, currentUserRotationDeg)
-
-    smoothFloorplanNavigationView(localCenter, nextUserRotationDeg, currentViewport.width)
-    publishFloorplanNavigationPose(localCenter, nextUserRotationDeg, currentViewport.width)
+    // The plan is already north-up: turn the 3D camera to face north too.
+    smoothFloorplanNavigationView(localCenter, currentUserRotationDeg, currentViewport.width)
+    publishFloorplanNavigationPose(
+      localCenter,
+      currentViewport.width,
+      northCameraAzimuth(cameraHeadingDegRef.current),
+    )
   }, [buildingRotationDeg, publishFloorplanNavigationPose, smoothFloorplanNavigationView])
 
   const clearGuideInteraction = useCallback(() => {
@@ -8219,11 +8215,7 @@ export function FloorplanPanel({
         latestFloorplanUserRotationDegRef.current,
         nextWidth,
       )
-      publishFloorplanNavigationPose(
-        localCenter,
-        latestFloorplanUserRotationDegRef.current,
-        nextWidth,
-      )
+      publishFloorplanNavigationPose(localCenter, nextWidth)
     },
     [
       fittedViewport,
@@ -9224,7 +9216,12 @@ export function FloorplanPanel({
 
   const handleNavigationPointerDown = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
-      if (event.button === 1 || (event.button === 0 && floorplanSpacePanPressedRef.current)) {
+      // The plan never turns: the right button pans, as the middle one does.
+      if (
+        event.button === 1 ||
+        event.button === 2 ||
+        (event.button === 0 && floorplanSpacePanPressedRef.current)
+      ) {
         event.preventDefault()
         event.stopPropagation()
 
@@ -9244,42 +9241,9 @@ export function FloorplanPanel({
         setFloorplanCursorPosition(null)
 
         event.currentTarget.setPointerCapture(event.pointerId)
-        return
       }
-
-      if (event.button !== 2) {
-        return
-      }
-
-      event.preventDefault()
-      event.stopPropagation()
-
-      const currentViewport = viewport ?? fittedViewport
-      const viewportCenterLocal = rotateSvgPoint(
-        { x: currentViewport.centerX, y: currentViewport.centerY },
-        -floorplanSceneRotationDeg,
-      )
-
-      floorplanRotationStateRef.current = {
-        pointerId: event.pointerId,
-        startClientX: event.clientX,
-        initialUserRotationDeg: floorplanUserRotationDeg,
-        viewportCenterLocal,
-      }
-      setIsRotatingFloorplan(true)
-      setCursorPoint(null)
-      setFloorplanCursorPosition(null)
-
-      event.currentTarget.setPointerCapture(event.pointerId)
     },
-    [
-      fittedViewport,
-      floorplanSceneRotationDeg,
-      floorplanUserRotationDeg,
-      viewport,
-      setFloorplanCursorPosition,
-      setCursorPoint,
-    ],
+    [fittedViewport, viewport, setFloorplanCursorPosition, setCursorPoint],
   )
 
   const handlePointerDown = useCallback(
@@ -9319,18 +9283,12 @@ export function FloorplanPanel({
   )
 
   const endFloorplanNavigation = useCallback((event?: ReactPointerEvent<SVGSVGElement>) => {
-    if (
-      event &&
-      (panStateRef.current || floorplanRotationStateRef.current) &&
-      event.currentTarget.hasPointerCapture(event.pointerId)
-    ) {
+    if (event && panStateRef.current && event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
 
     panStateRef.current = null
-    floorplanRotationStateRef.current = null
     setIsPanning(false)
-    setIsRotatingFloorplan(false)
 
     window.setTimeout(() => {
       floorplanNavigationClickSuppressedRef.current = false
@@ -9658,21 +9616,6 @@ export function FloorplanPanel({
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
-      const rotationState = floorplanRotationStateRef.current
-      if (rotationState?.pointerId === event.pointerId) {
-        event.preventDefault()
-        event.stopPropagation()
-
-        const angleDeltaDeg =
-          (rotationState.startClientX - event.clientX) * FLOORPLAN_ROTATION_DEGREES_PER_PIXEL
-        const nextUserRotationDeg = rotationState.initialUserRotationDeg + angleDeltaDeg
-
-        smoothFloorplanNavigationView(rotationState.viewportCenterLocal, nextUserRotationDeg)
-        publishFloorplanNavigationPose(rotationState.viewportCenterLocal, nextUserRotationDeg)
-        setCursorPoint(null)
-        return
-      }
-
       if (panStateRef.current?.pointerId === event.pointerId) {
         event.preventDefault()
         event.stopPropagation()
@@ -9692,7 +9635,7 @@ export function FloorplanPanel({
         const localCenter = rotateSvgPoint(nextCenterSvg, -currentSceneRotationDeg)
 
         smoothFloorplanNavigationView(localCenter, currentUserRotationDeg)
-        publishFloorplanNavigationPose(localCenter, currentUserRotationDeg)
+        publishFloorplanNavigationPose(localCenter)
 
         panStateRef.current = {
           pointerId: event.pointerId,
@@ -11106,14 +11049,7 @@ export function FloorplanPanel({
   )
 
   const handlePointerLeave = useCallback(() => {
-    if (
-      !(
-        panStateRef.current ||
-        floorplanRotationStateRef.current ||
-        wallEndpointDragRef.current ||
-        siteVertexDragState
-      )
-    ) {
+    if (!(panStateRef.current || wallEndpointDragRef.current || siteVertexDragState)) {
       setCursorPoint(null)
     }
     setHoveredSiteHandleId(null)
@@ -11149,7 +11085,6 @@ export function FloorplanPanel({
         hasFloorplanCursorIndicator &&
         !isSpacePanPressed &&
         !panStateRef.current &&
-        !floorplanRotationStateRef.current &&
         !guideInteractionRef.current &&
         !elevatorResizeDragState &&
         !wallEndpointDragRef.current &&
@@ -11543,9 +11478,8 @@ export function FloorplanPanel({
         : activeDraftAnchorPoint
           ? palette.draftStroke
           : palette.cursor
-  const floorplanNavigationCursor =
-    isPanning || isRotatingFloorplan ? 'grabbing' : isSpacePanPressed ? 'grab' : null
-  const isFloorplanNavigationOverlayVisible = isSpacePanPressed || isPanning || isRotatingFloorplan
+  const floorplanNavigationCursor = isPanning ? 'grabbing' : isSpacePanPressed ? 'grab' : null
+  const isFloorplanNavigationOverlayVisible = isSpacePanPressed || isPanning
   const pendingReferenceDisplayLength = Number(referenceScaleValue)
   const pendingReferenceRealLengthMeters =
     pendingReferenceScale && pendingReferenceDisplayLength > 0
@@ -11583,7 +11517,7 @@ export function FloorplanPanel({
           indicatorBadgeOffsetX={FLOORPLAN_CURSOR_BADGE_OFFSET_X}
           indicatorBadgeOffsetY={FLOORPLAN_CURSOR_BADGE_OFFSET_Y}
           indicatorLineHeight={FLOORPLAN_CURSOR_INDICATOR_LINE_HEIGHT}
-          isPanning={isPanning || isRotatingFloorplan}
+          isPanning={isPanning}
           movingOpeningType={movingOpeningType}
         />
         {showGuides && canInteractWithGuides && selectedGuide && (
