@@ -15,14 +15,95 @@ import {
 } from './avatar-catalog'
 
 /**
- * The walkthrough's character button: the current body's thumbnail, opening a
- * gallery of every Rocketbox avatar sorted into tabs.
+ * Every Rocketbox avatar, sorted into tabs, as a thumbnail grid: picking one
+ * makes it the walkthrough body.
  */
+export function CharacterGallery({
+  className,
+  columns = 5,
+  onClose,
+}: {
+  className?: string
+  columns?: number
+  onClose?: () => void
+}) {
+  const current = findAvatar(useWalkthroughView((state) => state.character))
+  const [tab, setTab] = useState<AvatarTab>(() => avatarTab(current))
+  const avatars = useMemo(() => ALL_AVATARS.filter((avatar) => avatarTab(avatar) === tab), [tab])
+
+  return (
+    <div className={className}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex gap-0.5 rounded-lg bg-accent/40 p-0.5">
+          {AVATAR_TABS.map(({ id, label }) => (
+            <button
+              aria-pressed={tab === id}
+              className={cn(
+                'rounded-md px-2.5 py-1 font-medium text-xs transition-colors',
+                tab === id
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+              key={id}
+              onClick={() => setTab(id)}
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {onClose && (
+          <button
+            aria-label="닫기"
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+      <div
+        className="grid max-h-[min(420px,60vh)] gap-1.5 overflow-y-auto pr-0.5"
+        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+      >
+        {avatars.map((avatar) => (
+          <button
+            aria-pressed={avatar.id === current.id}
+            className={cn(
+              'flex flex-col items-center gap-0.5 rounded-lg border p-1 transition-colors',
+              avatar.id === current.id
+                ? 'border-sky-500 bg-sky-500/10'
+                : 'border-transparent hover:border-border hover:bg-accent/50',
+            )}
+            key={avatar.id}
+            onClick={() => useWalkthroughView.getState().setCharacter(avatar.id)}
+            title={avatarLabel(avatar.id)}
+            type="button"
+          >
+            <img
+              alt=""
+              className="aspect-[128/208] w-full object-contain"
+              loading="lazy"
+              src={avatarThumbnailUrl(avatar.id)}
+            />
+            <span className="w-full truncate text-center text-[11px] text-muted-foreground">
+              {avatarLabel(avatar.id)}
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-center text-[11px] text-muted-foreground/70">
+        Microsoft Rocketbox 아바타 {ALL_AVATARS.length}명 · 고르면 바로 바뀝니다
+      </p>
+    </div>
+  )
+}
+
+/** The walkthrough's character button: the current body's thumbnail, opening the gallery. */
 export function CharacterPicker() {
   const current = findAvatar(useWalkthroughView((state) => state.character))
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<AvatarTab>(() => avatarTab(current))
-  const avatars = useMemo(() => ALL_AVATARS.filter((avatar) => avatarTab(avatar) === tab), [tab])
 
   return (
     <div className="pointer-events-auto relative">
@@ -43,66 +124,10 @@ export function CharacterPicker() {
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 mt-2 w-[min(440px,calc(100vw-2rem))] rounded-2xl border border-border/40 bg-background/95 p-3 shadow-xl backdrop-blur-xl">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="flex gap-0.5 rounded-lg bg-accent/40 p-0.5">
-              {AVATAR_TABS.map(({ id, label }) => (
-                <button
-                  aria-pressed={tab === id}
-                  className={cn(
-                    'rounded-md px-2.5 py-1 font-medium text-xs transition-colors',
-                    tab === id
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                  key={id}
-                  onClick={() => setTab(id)}
-                  type="button"
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button
-              aria-label="닫기"
-              className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-              onClick={() => setOpen(false)}
-              type="button"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="grid max-h-[min(420px,60vh)] grid-cols-5 gap-1.5 overflow-y-auto pr-0.5">
-            {avatars.map((avatar) => (
-              <button
-                aria-pressed={avatar.id === current.id}
-                className={cn(
-                  'flex flex-col items-center gap-0.5 rounded-lg border p-1 transition-colors',
-                  avatar.id === current.id
-                    ? 'border-sky-500 bg-sky-500/10'
-                    : 'border-transparent hover:border-border hover:bg-accent/50',
-                )}
-                key={avatar.id}
-                onClick={() => useWalkthroughView.getState().setCharacter(avatar.id)}
-                title={avatarLabel(avatar.id)}
-                type="button"
-              >
-                <img
-                  alt=""
-                  className="aspect-[128/208] w-full object-contain"
-                  loading="lazy"
-                  src={avatarThumbnailUrl(avatar.id)}
-                />
-                <span className="w-full truncate text-center text-[11px] text-muted-foreground">
-                  {avatarLabel(avatar.id)}
-                </span>
-              </button>
-            ))}
-          </div>
-          <p className="mt-2 text-center text-[11px] text-muted-foreground/70">
-            Microsoft Rocketbox 아바타 {ALL_AVATARS.length}명 · 고르면 바로 바뀝니다
-          </p>
-        </div>
+        <CharacterGallery
+          className="absolute top-full right-0 mt-2 w-[min(440px,calc(100vw-2rem))] rounded-2xl border border-border/40 bg-background/95 p-3 shadow-xl backdrop-blur-xl"
+          onClose={() => setOpen(false)}
+        />
       )}
     </div>
   )

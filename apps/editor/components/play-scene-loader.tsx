@@ -3,11 +3,21 @@
 import { Editor, type SceneGraph, useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useState } from 'react'
+import { PlayGameLobby } from './play-game-lobby'
 import { RuntimeCollaboration } from './runtime-collaboration'
 import { RuntimeConfigurator } from './runtime-configurator'
 
-export function PlaySceneLoader({ scene, sceneId }: { scene: SceneGraph; sceneId: string }) {
+export function PlaySceneLoader({
+  scene,
+  sceneId,
+  title,
+}: {
+  scene: SceneGraph
+  sceneId: string
+  title: string
+}) {
   const [ready, setReady] = useState(false)
+  const inGame = useEditor((state) => state.isFirstPersonMode)
 
   useEffect(() => {
     const editor = useEditor.getState()
@@ -31,6 +41,7 @@ export function PlaySceneLoader({ scene, sceneId }: { scene: SceneGraph; sceneId
     viewer.setShowZones(false)
     setReady(true)
     return () => {
+      editor.setFirstPersonMode(false)
       editor.setPreviewMode(false)
       viewer.setShading(previous.shading)
       viewer.setTextures(previous.textures)
@@ -47,7 +58,8 @@ export function PlaySceneLoader({ scene, sceneId }: { scene: SceneGraph; sceneId
   return (
     <div className="h-screen w-screen overflow-hidden bg-[#111]">
       <Editor isVersionPreviewMode layoutVersion="v2" previewScene={scene} />
-      <RuntimeConfigurator />
+      {!inGame && <RuntimeConfigurator />}
+      <PlayGameLobby title={title} />
       <RuntimeCollaboration
         chatEnabled={scene.experience?.multiplayer.chat ?? true}
         enabled={scene.experience?.multiplayer.enabled ?? true}

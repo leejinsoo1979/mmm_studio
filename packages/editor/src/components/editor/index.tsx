@@ -70,8 +70,8 @@ import { Grid } from './grid'
 import { GroupMoveHandle } from './group-move-handle'
 import { GroupRotateHandle } from './group-rotate-handle'
 import { NodeArrowHandles } from './node-arrow-handles'
+import { RemotePlayers } from './remote-players'
 import { RiserDiagramPanel } from './riser-diagram-panel'
-import { RuntimePresenceAvatars } from './runtime-presence-avatars'
 import { SelectedWallGlass } from './selected-wall-glass'
 import { SelectionManager } from './selection-manager'
 import { EDITOR_HOVER_STYLES, EDITOR_SELECTION_STYLE } from './selection-styles'
@@ -723,7 +723,7 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
       {isFirstPersonMode && <FirstPersonControls />}
       <CustomCameraControls />
       <CameraPresetBridge />
-      <RuntimePresenceAvatars />
+      <RemotePlayers />
       <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />
       {!isFirstPersonMode && <SiteEdgeLabels />}
       <InteractiveSystem />
@@ -1292,6 +1292,8 @@ export default function Editor({
       <StairEditSystem />
       {isFirstPersonMode && <FirstPersonControls />}
       <CustomCameraControls />
+      <CameraPresetBridge />
+      <RemotePlayers />
       <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />
       <InteractiveSystem />
     </Viewer>

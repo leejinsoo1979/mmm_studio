@@ -45,7 +45,12 @@ import {
 } from 'three'
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh'
 import '../../three-types'
-import { BVHEcctrl, type BVHEcctrlApi, type MovementInput } from '@pascal-app/viewer'
+import {
+  BVHEcctrl,
+  type BVHEcctrlApi,
+  characterStatus,
+  type MovementInput,
+} from '@pascal-app/viewer'
 import {
   closeDoorOpenState,
   DOOR_SWING_OPEN_ANGLE,
@@ -69,6 +74,7 @@ import {
 } from './first-person/build-collider-world'
 import { CharacterPicker } from './first-person/character-picker'
 import { RUN_SPEED, WALK_SPEED } from './first-person/locomotion'
+import type { LocalPresence } from './first-person/presence'
 import { WalkthroughCharacter } from './first-person/walkthrough-character'
 
 const CAMERA_EYE_OFFSET = 0.45
@@ -152,6 +158,7 @@ function focusFirstPersonCanvas(canvas: HTMLCanvasElement) {
 }
 
 const cameraOffset = new Vector3(0, CAMERA_EYE_OFFSET, 0)
+const presenceFacing = new Vector3()
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 /**
  * The walker's eyes. Interaction rays start here rather than at the camera, so
@@ -988,6 +995,24 @@ export const FirstPersonControls = () => {
     }
   }, [rebuildColliderWorld])
 
+  // The live session asks where this player stands (feet), faces and who
+  // they are, to show them to everyone else.
+  useEffect(() => {
+    const capture = (event: Event) => {
+      const report = (event as CustomEvent<(presence: LocalPresence) => void>).detail
+      const group = controllerRef.current?.group
+      if (typeof report !== 'function' || !group) return
+      presenceFacing.set(0, 0, 1).applyQuaternion(characterStatus.quaternion)
+      report({
+        position: [group.position.x, group.position.y - FEET_BELOW_CENTER, group.position.z],
+        yaw: Math.atan2(presenceFacing.x, presenceFacing.z),
+        avatar: useWalkthroughView.getState().character,
+      })
+    }
+    window.addEventListener('mmm-player-pose', capture)
+    return () => window.removeEventListener('mmm-player-pose', capture)
+  }, [])
+
   useEffect(() => {
     emitter.on('door:animation-completed', rebuildColliderWorld)
     emitter.on('window:animation-completed', rebuildColliderWorld)
@@ -1573,6 +1598,8 @@ export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
   const hasPlacedSpawn = useScene((state) =>
     Object.values(state.nodes).some((node) => node.type === 'spawn'),
   )
+  // A shared play link's visitors can't place one: the hint is the author's.
+  const isPreviewMode = useEditor((state) => state.isPreviewMode)
   const doorInteractionLabel = useMemo(() => {
     if (hoveredNode?.type !== 'door' || hoveredNode.openingKind === 'opening') return null
 
@@ -1662,7 +1689,7 @@ export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
         </button>
       </div>
 
-      {!hasPlacedSpawn && (
+      {!(hasPlacedSpawn || isPreviewMode) && (
         <div className="absolute top-4 left-1/2 z-50 -translate-x-1/2">
           <div className="rounded-2xl border border-sky-300/35 bg-slate-950/88 px-4 py-2 text-center text-slate-100 text-sm shadow-lg backdrop-blur-xl">
             짓기 탭에서 시작 지점을 놓으면 투어가 그 자리에서 시작합니다.

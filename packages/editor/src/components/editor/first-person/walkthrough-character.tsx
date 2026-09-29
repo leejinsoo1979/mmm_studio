@@ -1,22 +1,11 @@
 'use client'
 
 import { characterStatus } from '@pascal-app/viewer'
-import { useGLTF } from '@react-three/drei/core/Gltf'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
-import {
-  type AnimationAction,
-  AnimationClip,
-  AnimationMixer,
-  type Group,
-  type Material,
-  type Mesh,
-  type Object3D,
-  Vector3,
-} from 'three'
-import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { type AnimationAction, AnimationMixer, type Group, Vector3 } from 'three'
 import useWalkthroughView from '../../../store/use-walkthrough-view'
-import { avatarGender, avatarUrl, findAvatar } from './avatar-catalog'
+import { useAvatarBody } from './avatar-rig'
 import {
   advanceGaitPhase,
   airborneJumpTime,
@@ -24,10 +13,8 @@ import {
   type Gait,
   type JumpKind,
   locomotionWeights,
-  MOTION_SETS,
   runningJumpWeight,
   type Span,
-  scaledGaits,
 } from './locomotion'
 
 /** A frame-to-frame jump faster than this (m/s) is a respawn or ride, not a step. */
@@ -99,51 +86,6 @@ const approach = (value: number, target: number, rate: number, delta: number) =>
 
 const spanTime = (span: Span, progress: number) => span.from + (span.to - span.from) * progress
 
-/** The hips carry the clips' only translation: their dips and bounce. */
-const HIP_TRACK = 'Bip01_Pelvis.position'
-
-/**
- * The shared clips fitted to one body. Every Rocketbox skeleton names and
- * orients its bones alike, so bone rotations carry over as they are; bone
- * offsets are the body's own (the clips' would impose the reference body's
- * proportions), except the hips' motion, scaled to this body's size.
- */
-function fitClips(clips: AnimationClip[], scale: number): AnimationClip[] {
-  return clips.map((clip) => {
-    const tracks = clip.tracks
-      .filter((track) => track.name.endsWith('.quaternion') || track.name === HIP_TRACK)
-      .map((track) => {
-        if (track.name !== HIP_TRACK || scale === 1) return track
-        const fitted = track.clone()
-        for (let i = 0; i < fitted.values.length; i++) fitted.values[i]! *= scale
-        return fitted
-      })
-    return new AnimationClip(clip.name, clip.duration, tracks)
-  })
-}
-
-function prepareModel(source: Object3D): Object3D {
-  const model = cloneSkinned(source)
-  model.traverse((object) => {
-    const mesh = object as Mesh
-    if (!mesh.isMesh) return
-    mesh.castShadow = true
-    mesh.receiveShadow = true
-    // Skinned bounds follow the bind pose, not the animated body.
-    mesh.frustumCulled = false
-    const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as Material[]
-    for (const material of materials) {
-      // Hair and lashes are alpha cards: cut them out instead of sorting them.
-      if (material.transparent) {
-        material.transparent = false
-        material.alphaTest = 0.4
-        material.depthWrite = true
-      }
-    }
-  })
-  return model
-}
-
 /**
  * The walkthrough's third-person body: any Rocketbox avatar, whose idle, walk,
  * brisk walk, run and sprint motion-capture loops blend by the speed the
@@ -159,13 +101,9 @@ export function WalkthroughCharacter({
   feetOffset: number
   visible: boolean
 }) {
-  const avatar = findAvatar(useWalkthroughView((state) => state.character))
-  const motion = MOTION_SETS[avatarGender(avatar.id)]
-  const body = useGLTF(avatarUrl(avatar.id))
-  const moves = useGLTF(motion.url)
-  const scale = avatar.hip / motion.hip
-  const gaitSet = useMemo(() => ({ gaits: scaledGaits(motion.gaits, scale) }), [motion, scale])
-  const clips = useMemo(() => fitClips(moves.animations, scale), [moves.animations, scale])
+  const { motion, model, clips, gaitSet } = useAvatarBody(
+    useWalkthroughView((state) => state.character),
+  )
   const rootRef = useRef<Group>(null)
   const lastPositionRef = useRef<Vector3 | null>(null)
   const leanRef = useRef({ vx: 0, vz: 0, curve: 0, speed: 0, acceleration: 0, roll: 0, pitch: 0 })
@@ -188,8 +126,6 @@ export function WalkthroughCharacter({
     weight: 0,
     clips: { crouchIn: 1, crouchIdle: 0, crouchOut: 0 },
   })
-
-  const model = useMemo(() => prepareModel(body.scene), [body.scene])
 
   const actions = useMemo<Actions | null>(() => {
     const mixer = new AnimationMixer(model)

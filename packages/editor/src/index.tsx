@@ -12,6 +12,17 @@ export { default as Editor } from './components/editor'
 // surface uses the shorter, shell-friendly names from the unified
 // preset-system spec.
 export { BakeExporter } from './components/editor/bake-exporter'
+// Walkthrough avatars and the live-session presence the app relays between players.
+export {
+  avatarLabel,
+  avatarThumbnailUrl,
+  findAvatar,
+} from './components/editor/first-person/avatar-catalog'
+export { CharacterGallery } from './components/editor/first-person/character-picker'
+export type {
+  LocalPresence,
+  RemotePresence,
+} from './components/editor/first-person/presence'
 export { FloatingActionMenu as FloatingMenu } from './components/editor/floating-action-menu'
 // Embed surface — the editor's real in-canvas affordances, so a host can mount
 // authentic selection handles, interactive build tools, and the mover on top
@@ -466,6 +477,7 @@ export { passesSelectionFilter, useSelectionFilter } from './store/use-selection
 export { useUiHidden } from './store/use-ui-hidden'
 export { type UiTheme, useUiTheme } from './store/use-ui-theme'
 export { useUploadStore } from './store/use-upload'
+export { default as useWalkthroughView } from './store/use-walkthrough-view'
 export { useWallMoveGhosts, type WallMoveGhostBridge } from './store/use-wall-move-ghosts'
 export {
   default as useWallSnapIndicator,

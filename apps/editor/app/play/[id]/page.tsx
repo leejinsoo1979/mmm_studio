@@ -45,5 +45,5 @@ export default async function PlayPage({ params }: { params: Promise<{ id: strin
     )
   }
 
-  return <PlaySceneLoader scene={scene.graph} sceneId={id} />
+  return <PlaySceneLoader scene={scene.graph} sceneId={id} title={scene.name} />
 }

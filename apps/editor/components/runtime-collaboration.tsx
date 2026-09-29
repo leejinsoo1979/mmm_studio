@@ -1,5 +1,7 @@
 'use client'
 
+import type { LocalPresence, RemotePresence } from '@pascal-app/editor'
+import { useEditor } from '@pascal-app/editor'
 import {
   addDoc,
   collection,
@@ -13,7 +15,7 @@ import {
   setDoc,
 } from 'firebase/firestore'
 import { Copy, MessageCircle, Send, Users, X } from 'lucide-react'
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { getFirebaseAuth, getFirebaseFirestore } from '@/lib/firebase-client'
 
 type RuntimeMessage = {
@@ -23,9 +25,12 @@ type RuntimeMessage = {
   text: string
 }
 
-type ParticipantPose = {
+type ParticipantPose = Partial<Omit<LocalPresence, 'position'>> & {
   position?: [number, number, number]
 }
+
+/** Firestore takes about one write a second per document: one pose report a second. */
+const POSE_INTERVAL = 1000
 
 export function RuntimeCollaboration({
   sceneId,
@@ -43,6 +48,8 @@ export function RuntimeCollaboration({
   const [messages, setMessages] = useState<RuntimeMessage[]>([])
   const [draft, setDraft] = useState('')
   const [status, setStatus] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const inGame = useEditor((state) => state.isFirstPersonMode)
   const auth = useMemo(() => getFirebaseAuth(), [])
   const db = useMemo(() => getFirebaseFirestore(), [])
   const user = auth?.currentUser ?? null
@@ -89,38 +96,52 @@ export function RuntimeCollaboration({
     const heartbeat = window.setInterval(() => {
       void setDoc(participantRef, { lastSeenAt: serverTimestamp() }, { merge: true })
     }, 30_000)
+    // Only a player walking the scene shows up for the others (as their
+    // character); someone orbiting the camera has no body to show.
+    let lastPose: LocalPresence | null = null
     const poseSync = window.setInterval(() => {
+      let pose: LocalPresence | null = null
       window.dispatchEvent(
-        new CustomEvent('mmm-camera-capture', {
-          detail: (snapshot: ParticipantPose) => {
-            if (!snapshot.position) return
-            void setDoc(
-              participantRef,
-              { pose: { position: snapshot.position }, lastSeenAt: serverTimestamp() },
-              { merge: true },
-            )
+        new CustomEvent('mmm-player-pose', {
+          detail: (presence: LocalPresence) => {
+            pose = presence
           },
         }),
       )
-    }, 1000)
+      if (!(pose || lastPose)) return
+      lastPose = pose
+      void setDoc(participantRef, { pose, lastSeenAt: serverTimestamp() }, { merge: true })
+    }, POSE_INTERVAL)
     const unsubscribeParticipants = onSnapshot(
       collection(db, 'runtimeSessions', sceneId, 'participants'),
       (snapshot) => {
         setParticipantCount(Math.max(1, snapshot.size))
         window.dispatchEvent(
-          new CustomEvent('mmm-presence-update', {
+          new CustomEvent<RemotePresence[]>('mmm-presence-update', {
             detail: snapshot.docs
               .filter((participant) => participant.id !== user.uid)
               .flatMap((participant) => {
-                const pose = participant.data().pose as ParticipantPose | undefined
+                const data = participant.data()
+                const pose = data.pose as ParticipantPose | null | undefined
                 return pose?.position
-                  ? [{ id: participant.id, position: pose.position, color: '#7567ff' }]
+                  ? [
+                      {
+                        id: participant.id,
+                        name: String(data.userName ?? 'Guest'),
+                        avatar: String(pose.avatar ?? ''),
+                        position: pose.position,
+                        yaw: Number(pose.yaw ?? 0),
+                      },
+                    ]
                   : []
               }),
           }),
         )
       },
     )
+    // New chat lines (not the history loaded on joining) float over their
+    // speaker's character.
+    let seenMessages: Set<string> | null = null
     const unsubscribeMessages = chatEnabled
       ? onSnapshot(
           query(
@@ -128,18 +149,29 @@ export function RuntimeCollaboration({
             orderBy('createdAt', 'asc'),
             limit(100),
           ),
-          (snapshot) =>
-            setMessages(
-              snapshot.docs.map((message) => {
-                const data = message.data()
-                return {
-                  id: message.id,
-                  userId: String(data.userId ?? ''),
-                  userName: String(data.userName ?? 'Guest'),
-                  text: String(data.text ?? ''),
-                }
-              }),
-            ),
+          (snapshot) => {
+            const next = snapshot.docs.map((message) => {
+              const data = message.data()
+              return {
+                id: message.id,
+                userId: String(data.userId ?? ''),
+                userName: String(data.userName ?? 'Guest'),
+                text: String(data.text ?? ''),
+              }
+            })
+            if (seenMessages) {
+              for (const message of next) {
+                if (seenMessages.has(message.id)) continue
+                window.dispatchEvent(
+                  new CustomEvent('mmm-chat-bubble', {
+                    detail: { userId: message.userId, text: message.text },
+                  }),
+                )
+              }
+            }
+            seenMessages = new Set(next.map((message) => message.id))
+            setMessages(next)
+          },
         )
       : () => {}
 
@@ -152,6 +184,19 @@ export function RuntimeCollaboration({
       void deleteDoc(participantRef)
     }
   }, [chatEnabled, db, enabled, sceneId, user, visibility])
+
+  // In the game, Enter opens the chat and puts the cursor in it.
+  useEffect(() => {
+    if (!(enabled && chatEnabled && inGame)) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || event.target instanceof HTMLInputElement) return
+      if (document.pointerLockElement) document.exitPointerLock()
+      setOpen(true)
+      window.setTimeout(() => inputRef.current?.focus(), 0)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [chatEnabled, enabled, inGame])
 
   if (!enabled) return null
 
@@ -166,6 +211,8 @@ export function RuntimeCollaboration({
     const text = draft.trim()
     if (!text || !db || !user) return
     setDraft('')
+    // Back to walking once the line is sent.
+    if (inGame) inputRef.current?.blur()
     await addDoc(collection(db, 'runtimeSessions', sceneId, 'messages'), {
       userId: user.uid,
       userName: user.displayName || user.email?.split('@')[0] || 'Guest',
@@ -215,10 +262,14 @@ export function RuntimeCollaboration({
           {chatEnabled && (
             <form className="flex gap-2 border-white/10 border-t p-3" onSubmit={sendMessage}>
               <input
+                ref={inputRef}
                 className="min-w-0 flex-1 rounded-xl bg-white/7 px-3 text-sm outline-none placeholder:text-white/30"
                 disabled={!user}
                 maxLength={1000}
                 onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') event.currentTarget.blur()
+                }}
                 placeholder="메시지 입력"
                 value={draft}
               />
