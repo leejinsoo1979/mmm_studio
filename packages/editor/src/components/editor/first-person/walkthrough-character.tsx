@@ -47,15 +47,21 @@ const CROUCH_SPEEDUP = 1.3
 /** Moving faster than this (m/s) while crouched stands the body straight up. */
 const CROUCH_BREAK_SPEED = 0.5
 
-/** Most the body leans (rad): into a turn, and forward when setting off. */
-const MAX_TURN_LEAN = 0.2
-const MAX_START_LEAN = 0.1
-/** A heading change faster than this (rad/s) is a snap (respawn, view reset), not a turn. */
-const MAX_TURN_RATE = 20
+/** Most the body leans (rad): into a curve, and forward when setting off. */
+const MAX_TURN_LEAN = 0.12
+const MAX_START_LEAN = 0.08
+/**
+ * Leaning into curves is a runner's: a walker barely tilts. It fades in
+ * between these speeds (m/s); a walk start keeps a trace of the forward lean.
+ */
+const LEAN_FROM_SPEED = 2.5
+const LEAN_FULL_SPEED = 4.5
+const WALK_START_LEAN = 0.3
+/** A velocity change faster than this (m/s²) is a respawn or a wall, not a curve. */
+const MAX_CURVE_ACCELERATION = 40
 const GRAVITY = 9.81
 
 const worldPosition = new Vector3()
-const facing = new Vector3()
 
 const JUMP_KINDS: JumpKind[] = ['jump', 'jumpRun']
 
@@ -162,7 +168,7 @@ export function WalkthroughCharacter({
   const clips = useMemo(() => fitClips(moves.animations, scale), [moves.animations, scale])
   const rootRef = useRef<Group>(null)
   const lastPositionRef = useRef<Vector3 | null>(null)
-  const leanRef = useRef({ yaw: Number.NaN, speed: 0, acceleration: 0, roll: 0, pitch: 0 })
+  const leanRef = useRef({ vx: 0, vz: 0, curve: 0, speed: 0, acceleration: 0, roll: 0, pitch: 0 })
   const speedRef = useRef(0)
   const phaseRef = useRef(0)
   const jumpRef = useRef<JumpState>({
@@ -236,28 +242,42 @@ export function WalkthroughCharacter({
       (stepped / delta - speedRef.current) * (1 - Math.exp(-delta * SPEED_RESPONSE))
     const speed = speedRef.current
 
-    // Lean like a runner: into a turn by the angle that balances the turn
-    // (tan θ = v·ω/g), and a little forward while speeding up.
+    // Lean like a runner: into a curve by the angle that balances it
+    // (tan θ = sideways acceleration / g, from how the path itself bends — not
+    // from the body snapping round to a new heading), and a little forward
+    // while speeding up.
     const lean = leanRef.current
-    root.parent?.getWorldDirection(facing)
-    const yaw = Math.atan2(facing.x, facing.z)
-    let yawRate = 0
-    if (!Number.isNaN(lean.yaw)) {
-      const turn = Math.atan2(Math.sin(yaw - lean.yaw), Math.cos(yaw - lean.yaw))
-      yawRate = Math.abs(turn / delta) > MAX_TURN_RATE ? 0 : turn / delta
+    const { x: vx, z: vz } = characterStatus.linvel
+    const moving = Math.hypot(vx, vz)
+    const dvx = (vx - lean.vx) / delta
+    const dvz = (vz - lean.vz) / delta
+    lean.vx = vx
+    lean.vz = vz
+    let sideways = 0
+    if (moving > CROUCH_BREAK_SPEED && Math.hypot(dvx, dvz) < MAX_CURVE_ACCELERATION) {
+      // Positive bends left (the body faces +Z, its left is +X).
+      sideways = (vz * dvx - vx * dvz) / moving
     }
-    lean.yaw = yaw
+    lean.curve = approach(lean.curve, sideways, 10, delta)
     lean.acceleration = approach(lean.acceleration, (speed - lean.speed) / delta, 8, delta)
     lean.speed = speed
+    const running = Math.min(
+      1,
+      Math.max(0, (speed - LEAN_FROM_SPEED) / (LEAN_FULL_SPEED - LEAN_FROM_SPEED)),
+    )
     const onGround = characterStatus.isOnGround
     const rollTarget = onGround
-      ? Math.max(-MAX_TURN_LEAN, Math.min(MAX_TURN_LEAN, -Math.atan((speed * yawRate) / GRAVITY)))
+      ? -Math.max(
+          -MAX_TURN_LEAN,
+          Math.min(MAX_TURN_LEAN, Math.atan(lean.curve / GRAVITY) * running),
+        )
       : 0
     const pitchTarget = onGround
-      ? Math.max(0, Math.min(MAX_START_LEAN, Math.atan(lean.acceleration / GRAVITY) * 0.6))
+      ? Math.max(0, Math.min(MAX_START_LEAN, Math.atan(lean.acceleration / GRAVITY) * 0.6)) *
+        (WALK_START_LEAN + (1 - WALK_START_LEAN) * running)
       : 0
-    lean.roll = approach(lean.roll, rollTarget, 6, delta)
-    lean.pitch = approach(lean.pitch, pitchTarget, 6, delta)
+    lean.roll = approach(lean.roll, rollTarget, 5, delta)
+    lean.pitch = approach(lean.pitch, pitchTarget, 5, delta)
     root.rotation.set(lean.pitch, 0, lean.roll)
 
     // Locomotion.
