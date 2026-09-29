@@ -30,6 +30,7 @@ import {
   Eye,
   EyeOff,
   Footprints,
+  Gamepad2,
   Gauge,
   Gem,
   Grid2X2,
@@ -586,6 +587,16 @@ export function CommunityViewerToolbarRight({
   return (
     <div className="flex h-11 items-center gap-2 min-[1500px]:gap-3">
       <TimeOfDaySlider />
+      <a
+        className="flex h-[38px] shrink-0 items-center gap-1.5 rounded-full bg-[#1f1f1f] px-4 font-semibold text-sm text-white shadow-[0_2px_8px_rgba(0,0,0,0.2)] transition-colors hover:bg-black dark:bg-white dark:text-black dark:hover:bg-neutral-200"
+        href={`/play/${encodeURIComponent(sceneId)}`}
+        rel="noreferrer"
+        target="_blank"
+        title="이 집을 게임으로 열기 (새 탭)"
+      >
+        <Gamepad2 className="size-4" />
+        게임 모드
+      </a>
       <ExportCenter sceneId={sceneId} sceneName={sceneName} />
       <DisplayMenu />
     </div>
