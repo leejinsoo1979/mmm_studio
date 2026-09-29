@@ -5,11 +5,13 @@ Sources (MIT, https://github.com/microsoft/Microsoft-Rocketbox):
   Assets/Animations/all_animations_max_motextr_*/<m|f>_{idle_neutral_01,walk_neutral_01,
     walk_fast_01,run_neutral_01,run_fast_01,crouch_in,crouch_idle,crouch_out}.max.fbx
 (save them as <m|f>_idle_neutral_01.fbx etc. in one folder)
-The jump is CMU motion capture 13_39 (http://mocap.cs.cmu.edu, free for any use)
-in Bruce Hahne's BVH conversion, retargeted onto the Rocketbox skeleton.
+The jumps are CMU motion capture (http://mocap.cs.cmu.edu, free for any use) in
+Bruce Hahne's BVH conversion (data/<subject>/<trial>.bvh of
+https://github.com/una-dinosauria/cmu-mocap), retargeted onto the Rocketbox
+skeleton: see JUMPS for the trials.
 
 Needs Blender's Python module and Pillow (`pip install bpy==5.0.1 pillow`, Python 3.11):
-  python build-rocketbox-character.py -- <avatar.fbx> <textures_dir> <m|f> <anims_dir> <13_39.bvh> <out.glb> <meta.json>
+  python build-rocketbox-character.py -- <avatar.fbx> <textures_dir> <m|f> <anims_dir> <cmu_bvh_dir> <out.glb> <meta.json>
 
 The clips' root motion is removed (the walkthrough controller moves the body)
 and its length is written to meta.json, which feeds WALKTHROUGH_CHARACTERS in
@@ -25,7 +27,7 @@ import bpy
 from mathutils import Matrix, Vector
 from PIL import Image
 
-avatar_fbx, tex_dir, gender, anims_dir, jump_bvh, out_glb, meta_json = sys.argv[sys.argv.index('--') + 1:]
+avatar_fbx, tex_dir, gender, anims_dir, cmu_dir, out_glb, meta_json = sys.argv[sys.argv.index('--') + 1:]
 work = os.path.join(os.path.dirname(out_glb), '_tex_' + gender)
 os.makedirs(work, exist_ok=True)
 
@@ -168,9 +170,19 @@ FOLLOWERS = {
     'Bip01 R Toe0': 'Bip01 R Foot',
 }
 
-# 13_39 at 120 fps: standing, crouch, take-off, flight, landing, recovery.
-JUMP_FRAMES = {'start': 150, 'takeoff': 163, 'apex': 193, 'land': 229, 'end': 297}
+# CMU trials at 120 fps, each cut from the lead-in to the recovery: its
+# take-off, top, touch-down and upright frames, and which way it faces — the
+# hips for a jump on the spot, the direction of travel for a running one.
+JUMPS = {
+    # A standing jump: dip, spring up, land softly.
+    'jump': {'trial': '16_01', 'start': 109, 'takeoff': 129, 'apex': 153, 'land': 181, 'end': 229, 'stand': 1, 'heading': 'hips'},
+    # A running jump: a quick hop out of a run, landing into the next stride.
+    'jumpRun': {'trial': '75_01', 'start': 121, 'takeoff': 137, 'apex': 153, 'land': 167, 'end': 189, 'stand': 250, 'heading': 'travel'},
+}
+if os.environ.get('JUMPS'):
+    JUMPS = json.loads(os.environ['JUMPS'])
 JUMP_STEP = 4  # 120 fps -> 30 fps
+JUMP_MARKS = ('takeoff', 'apex', 'land', 'end')
 
 
 def rest_head_world(obj, bone_name):
@@ -189,18 +201,30 @@ def basis(up, side):
     return Matrix((x, y, z)).transposed().to_quaternion()
 
 
-def retarget_jump(arm, bvh_path):
+def heading(direction):
+    return math.atan2(direction.y, direction.x)
+
+
+def retarget_jump(arm, name, spec):
     before = set(bpy.data.objects)
+    bvh_path = os.path.join(cmu_dir, spec['trial'] + '.bvh')
     bpy.ops.import_anim.bvh(filepath=bvh_path, global_scale=0.056444, frame_start=1, update_scene_fps=False)
     src = next(o for o in set(bpy.data.objects) - before if o.type == 'ARMATURE')
     bpy.context.scene.render.fps = 30
+    up = Vector((0.0, 0.0, 1.0))
 
-    # Face the source the same way as the avatar (hip line from right to left).
-    def facing(obj, left, right):
-        v = rest_head_world(obj, left) - rest_head_world(obj, right)
-        return math.atan2(v.y, v.x)
-
-    src.rotation_euler.z += facing(arm, 'Bip01 L Thigh', 'Bip01 R Thigh') - facing(src, 'LeftUpLeg', 'RightUpLeg')
+    # Face the source the way the avatar faces: its hips at the upright frame,
+    # or its run-up for a running jump (the actor ran diagonally).
+    avatar_forward = (rest_head_world(arm, 'Bip01 L Thigh') - rest_head_world(arm, 'Bip01 R Thigh')).cross(up)
+    if spec['heading'] == 'travel':
+        bpy.context.scene.frame_set(spec['start'])
+        run_up = pose_head_world(src, 'Hips')
+        bpy.context.scene.frame_set(spec['takeoff'])
+        source_forward = pose_head_world(src, 'Hips') - run_up
+    else:
+        bpy.context.scene.frame_set(spec['stand'])
+        source_forward = (pose_head_world(src, 'LeftUpLeg') - pose_head_world(src, 'RightUpLeg')).cross(up)
+    src.rotation_euler.z += heading(avatar_forward) - heading(source_forward)
     bpy.context.view_layer.update()
 
     arm_q = arm.matrix_world.to_quaternion()
@@ -218,21 +242,21 @@ def retarget_jump(arm, bvh_path):
 
     # The actor's standing posture is the avatar's upright rest, so the trunk
     # turns relative to it (the actor's neck leans further forward).
-    bpy.context.scene.frame_set(1)
+    bpy.context.scene.frame_set(spec['stand'])
     trunk_stand = {dst: trunk_now(cmu, cmu_up, cmu_pair) for dst, _, cmu, cmu_up, _, cmu_pair in TRUNK}
 
     # Hip height: source standing height -> avatar pelvis height.
     src_stand = pose_head_world(src, 'Hips').z
     hip_scale = rest_head_world(arm, 'Bip01 Pelvis').z / src_stand
 
-    action = bpy.data.actions.new('jump')
+    action = bpy.data.actions.new(name)
     arm.animation_data.action = action
     for pb in arm.pose.bones:
         pb.rotation_mode = 'QUATERNION'
     driven = {m[0] for m in LIMBS} | {t[0] for t in TRUNK} | set(FOLLOWERS)
     order = [b.name for b in bones if b.name in driven]  # parents before children
     out_frame = 1
-    for f in range(JUMP_FRAMES['start'], JUMP_FRAMES['end'] + 1, JUMP_STEP):
+    for f in range(spec['start'], spec['end'] + 1, JUMP_STEP):
         bpy.context.scene.frame_set(f)
         turn = {}
         for dst, _, cmu, cmu_up, _, cmu_pair in TRUNK:
@@ -242,7 +266,7 @@ def retarget_jump(arm, bvh_path):
         for follower, leader in FOLLOWERS.items():
             turn[follower] = turn[leader]
 
-        airborne = JUMP_FRAMES['takeoff'] <= f <= JUMP_FRAMES['land']
+        airborne = spec['takeoff'] <= f <= spec['land']
         desired = {}
         for name in order:
             arm_space_q = arm_q.inverted() @ (turn[name] @ rest_world_q[name])
@@ -274,17 +298,19 @@ def retarget_jump(arm, bvh_path):
         pb.matrix_basis = Matrix()
     bpy.data.objects.remove(src, do_unlink=True)
     fps = 120
-    marks = {k: round((v - JUMP_FRAMES['start']) / fps, 4) for k, v in JUMP_FRAMES.items() if k != 'start'}
-    return action, slot, out_frame - 1, marks
+    marks = {k: round((spec[k] - spec['start']) / fps, 4) for k in JUMP_MARKS}
+    return action, slot, marks
 
 
-jump_action, jump_slot, jump_frames, jump_marks = retarget_jump(arm, jump_bvh)
-track = arm.animation_data.nla_tracks.new()
-track.name = 'jump'
-strip = track.strips.new('jump', 1, jump_action)
-if jump_slot is not None:
-    strip.action_slot = jump_slot
-meta['jump'] = jump_marks
+meta['jumps'] = {}
+for jump_name, jump_spec in JUMPS.items():
+    jump_action, jump_slot, jump_marks = retarget_jump(arm, jump_name, jump_spec)
+    track = arm.animation_data.nla_tracks.new()
+    track.name = jump_name
+    strip = track.strips.new(jump_name, 1, jump_action)
+    if jump_slot is not None:
+        strip.action_slot = jump_slot
+    meta['jumps'][jump_name] = jump_marks
 
 
 def load_image(name, keep_alpha=False):

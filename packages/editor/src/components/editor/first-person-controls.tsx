@@ -70,11 +70,7 @@ import {
   type FirstPersonColliderWorld,
   type FirstPersonSpawn,
 } from './first-person/build-collider-world'
-import {
-  THIRD_PERSON_RUN_SPEED,
-  THIRD_PERSON_WALK_SPEED,
-  WALKTHROUGH_CHARACTERS,
-} from './first-person/locomotion'
+import { RUN_SPEED, WALK_SPEED, WALKTHROUGH_CHARACTERS } from './first-person/locomotion'
 import { WalkthroughCharacter } from './first-person/walkthrough-character'
 
 const CAMERA_EYE_OFFSET = 0.45
@@ -1538,9 +1534,9 @@ export const FirstPersonControls = () => {
             gravity={9.81}
             jumpVel={JUMP_SPEED}
             key="first-person-controller"
-            maxRunSpeed={view === 'third' ? THIRD_PERSON_RUN_SPEED : 5}
+            maxRunSpeed={RUN_SPEED}
             maxSlope={1.2}
-            maxWalkSpeed={view === 'third' ? THIRD_PERSON_WALK_SPEED : 2}
+            maxWalkSpeed={WALK_SPEED}
             paused={isElevatorRideLocked}
             position={controllerStart.position}
             ref={setControllerApi}

@@ -15,17 +15,23 @@ export type Span = { from: number; to: number }
 
 export type CrouchSpans = { down: Span; up: Span }
 
+/** A jump on the spot, and one out of a run. */
+export type JumpKind = 'jump' | 'jumpRun'
+
 export type WalkthroughCharacter = {
   url: string
   label: string
   gaits: Record<Gait, GaitClip>
-  jump: JumpMarks
+  jumps: Record<JumpKind, JumpMarks>
   /** Crouch-in and crouch-out clips, trimmed to the motion (they open and close on long holds). */
   crouch: CrouchSpans
 }
 
-/** CMU 13_39, retargeted onto both avatars, so both share its timing. */
-const JUMP_MARKS: JumpMarks = { takeoff: 0.1083, apex: 0.3583, land: 0.6583, end: 1.225 }
+/** CMU 16_01 and 75_01, retargeted onto both avatars, so both share their timing. */
+const JUMPS: Record<JumpKind, JumpMarks> = {
+  jump: { takeoff: 0.1667, apex: 0.3667, land: 0.6, end: 1 },
+  jumpRun: { takeoff: 0.1333, apex: 0.2667, land: 0.3833, end: 0.5667 },
+}
 
 /**
  * Microsoft Rocketbox avatars (MIT) with their own motion-capture clips plus a
@@ -43,7 +49,7 @@ export const WALKTHROUGH_CHARACTERS: Record<WalkthroughCharacterId, WalkthroughC
       run: { duration: 0.7333, distance: 2.1118 },
       runFast: { duration: 0.6, distance: 3.5037 },
     },
-    jump: JUMP_MARKS,
+    jumps: JUMPS,
     crouch: { down: { from: 1.4, to: 2.9 }, up: { from: 0.9, to: 2.3 } },
   },
   female: {
@@ -55,14 +61,25 @@ export const WALKTHROUGH_CHARACTERS: Record<WalkthroughCharacterId, WalkthroughC
       run: { duration: 0.7667, distance: 2.12 },
       runFast: { duration: 0.7, distance: 3.765 },
     },
-    jump: JUMP_MARKS,
+    jumps: JUMPS,
     crouch: { down: { from: 0.4, to: 1.8 }, up: { from: 0.2, to: 1.4 } },
   },
 }
 
-/** Third-person walking and running speeds (m/s); Shift runs. */
-export const THIRD_PERSON_WALK_SPEED = 1.65
-export const THIRD_PERSON_RUN_SPEED = 4.4
+/** Walking and running speeds (m/s); Shift runs. */
+export const WALK_SPEED = 2
+export const RUN_SPEED = 5.5
+
+/**
+ * Each gait plays alone at this multiple of the speed it was recorded at: the
+ * stride stays the performer's, the cadence picks up to a brisker, game pace.
+ */
+const GAIT_PACE = 1.25
+
+/** Taking off faster than this (m/s) starts to blend in the running jump… */
+const RUNNING_JUMP_FROM = 1.2
+/** …and from this speed it is the running jump alone. */
+const RUNNING_JUMP_TO = 3.2
 
 /** Below this horizontal speed (m/s) the body stands still. */
 const STANDING_SPEED = 0.05
@@ -75,13 +92,13 @@ export type LocomotionWeights = Record<'idle' | Gait, number> & {
 const smoothstep = (t: number) => t * t * (3 - 2 * t)
 const clamp01 = (t: number) => Math.min(1, Math.max(0, t))
 
-export const gaitSpeed = (clip: GaitClip) => clip.distance / clip.duration
+/** The speed (m/s) at which a gait plays alone. */
+export const gaitSpeed = (clip: GaitClip) => (GAIT_PACE * clip.distance) / clip.duration
 
 /**
  * Blend for a horizontal speed: standing fades into the walk, and each gait
- * hands over to the next one between their natural speeds (the speed the
- * performer actually moved at), so every speed is played by the clips
- * recorded closest to it.
+ * hands over to the next one between the speeds they play alone at, so every
+ * speed is played by the clips recorded closest to it.
  */
 export function locomotionWeights(
   speed: number,
@@ -154,4 +171,9 @@ export function airborneJumpTime(
   }
   const fall = air.peak > 0 ? clamp01(1 - air.height / air.peak) : 1
   return marks.apex + (marks.land - marks.apex) * fall
+}
+
+/** How much of a jump is the running jump, for the speed (m/s) it took off at. */
+export function runningJumpWeight(speed: number): number {
+  return smoothstep(clamp01((speed - RUNNING_JUMP_FROM) / (RUNNING_JUMP_TO - RUNNING_JUMP_FROM)))
 }

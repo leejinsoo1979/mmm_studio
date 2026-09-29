@@ -5,6 +5,9 @@ import {
   GAITS,
   gaitSpeed,
   locomotionWeights,
+  RUN_SPEED,
+  runningJumpWeight,
+  WALK_SPEED,
   WALKTHROUGH_CHARACTERS,
 } from './locomotion'
 
@@ -17,7 +20,7 @@ describe('locomotionWeights', () => {
     expect(locomotionWeights(0, male)).toMatchObject({ idle: 1, walk: 0, runFast: 0 })
   })
 
-  test('each gait plays alone at the speed it was recorded at', () => {
+  test('each gait plays alone at its own pace', () => {
     for (const gait of GAITS) {
       const weights = locomotionWeights(gaitSpeed(male.gaits[gait]), male)
       expect(weights[gait]).toBeCloseTo(1, 6)
@@ -54,7 +57,7 @@ describe('advanceGaitPhase', () => {
 })
 
 describe('airborneJumpTime', () => {
-  const marks = male.jump
+  const marks = male.jumps.jump
 
   test('leaving the ground plays take-off, the top of the arc plays the apex', () => {
     expect(airborneJumpTime(marks, { launchSpeed: 3, verticalSpeed: 3, height: 0, peak: 0 })).toBe(
@@ -79,5 +82,22 @@ describe('airborneJumpTime', () => {
       peak: 0,
     })
     expect(time).toBe(marks.land)
+  })
+})
+
+describe('speeds', () => {
+  test('walking is a brisk walk and running a run, for both characters', () => {
+    for (const character of Object.values(WALKTHROUGH_CHARACTERS)) {
+      const walk = locomotionWeights(WALK_SPEED, character)
+      expect(walk.walkFast).toBeGreaterThan(0.9)
+      const run = locomotionWeights(RUN_SPEED, character)
+      expect(run.run + run.runFast).toBeCloseTo(1, 6)
+    }
+  })
+
+  test('a standing jump on the spot, a running jump at a run', () => {
+    expect(runningJumpWeight(0)).toBe(0)
+    expect(runningJumpWeight(WALK_SPEED)).toBeGreaterThan(0)
+    expect(runningJumpWeight(RUN_SPEED)).toBe(1)
   })
 })

@@ -20,7 +20,9 @@ import {
   airborneJumpTime,
   GAITS,
   type Gait,
+  type JumpKind,
   locomotionWeights,
+  runningJumpWeight,
   type Span,
   WALKTHROUGH_CHARACTERS,
 } from './locomotion'
@@ -44,11 +46,13 @@ const CROUCH_BREAK_SPEED = 0.5
 
 const worldPosition = new Vector3()
 
+const JUMP_KINDS: JumpKind[] = ['jump', 'jumpRun']
+
 type CrouchClip = 'crouchIn' | 'crouchIdle' | 'crouchOut'
 const CROUCH_CLIPS: CrouchClip[] = ['crouchIn', 'crouchIdle', 'crouchOut']
 
 type Actions = { mixer: AnimationMixer } & Record<
-  'idle' | Gait | 'jump' | CrouchClip,
+  'idle' | Gait | JumpKind | CrouchClip,
   AnimationAction
 >
 
@@ -58,7 +62,11 @@ type JumpState = {
   launchSpeed: number
   takeoffY: number
   peak: number
-  time: number
+  /** How much of this jump is the running jump, fixed at take-off. */
+  running: number
+  /** Progress (0–1) through the landing recovery. */
+  landing: number
+  times: Record<JumpKind, number>
   weight: number
 }
 
@@ -100,9 +108,9 @@ function prepareModel(source: Object3D): Object3D {
  * The walkthrough's third-person body: a Rocketbox avatar whose idle, walk,
  * brisk walk, run and sprint motion-capture loops blend by the speed the
  * controller actually moves at — all sharing one gait phase driven by the
- * ground covered, so the feet stay planted at every speed. A motion-capture
- * jump follows the controller's flight (rising, top, falling, landing) and a
- * crouch plays in place.
+ * ground covered, so the feet stay planted at every speed. Motion-capture
+ * jumps (on the spot, or out of a run) follow the controller's flight
+ * (rising, top, falling, landing) and a crouch plays in place.
  */
 export function WalkthroughCharacter({
   feetOffset,
@@ -124,7 +132,9 @@ export function WalkthroughCharacter({
     launchSpeed: 0,
     takeoffY: 0,
     peak: 0,
-    time: 0,
+    running: 0,
+    landing: 0,
+    times: { jump: 0, jumpRun: 0 },
     weight: 0,
   })
   const crouchRef = useRef<CrouchState>({
@@ -139,7 +149,7 @@ export function WalkthroughCharacter({
   const actions = useMemo<Actions | null>(() => {
     const mixer = new AnimationMixer(model)
     const found: Partial<Actions> = { mixer }
-    for (const name of ['idle', ...GAITS, 'jump', ...CROUCH_CLIPS] as const) {
+    for (const name of ['idle', ...GAITS, ...JUMP_KINDS, ...CROUCH_CLIPS] as const) {
       const clip = gltf.animations.find((animation) => animation.name === name)
       if (!clip) return null
       found[name] = mixer.clipAction(clip)
@@ -196,8 +206,10 @@ export function WalkthroughCharacter({
       actions[name].time = phaseRef.current * actions[name].getClip().duration
     }
 
-    // Jump: follow the controller's flight.
+    // Jump: follow the controller's flight — on the spot or out of a run,
+    // by the speed it took off at.
     const jump = jumpRef.current
+    const { jumps } = character
     const verticalSpeed = characterStatus.linvel.y
     const grounded = characterStatus.isOnGround
     jump.unsupported = grounded ? 0 : jump.unsupported + delta
@@ -208,35 +220,48 @@ export function WalkthroughCharacter({
         jump.launchSpeed = launched ? verticalSpeed : 0
         jump.takeoffY = worldPosition.y
         jump.peak = 0
+        jump.running = runningJumpWeight(speed)
       }
     }
     if (jump.phase === 'air') {
       if (grounded) {
         jump.phase = 'landing'
-        jump.time = character.jump.land
+        jump.landing = 0
       } else {
         const height = worldPosition.y - jump.takeoffY
         jump.peak = Math.max(jump.peak, height)
-        jump.time = airborneJumpTime(character.jump, {
-          launchSpeed: jump.launchSpeed,
-          verticalSpeed,
-          height,
-          peak: jump.peak,
-        })
+        for (const kind of JUMP_KINDS) {
+          jump.times[kind] = airborneJumpTime(jumps[kind], {
+            launchSpeed: jump.launchSpeed,
+            verticalSpeed,
+            height,
+            peak: jump.peak,
+          })
+        }
       }
-    } else if (jump.phase === 'landing') {
+    }
+    if (jump.phase === 'landing') {
+      const recovery =
+        jumps.jump.end -
+        jumps.jump.land +
+        (jumps.jumpRun.end - jumps.jumpRun.land - (jumps.jump.end - jumps.jump.land)) * jump.running
       // Moving on out of a landing cuts the recovery short.
-      jump.time += delta * (speed > CROUCH_BREAK_SPEED ? 1.8 : 1)
-      if (jump.time >= character.jump.end) jump.phase = 'ground'
+      jump.landing += (delta * (speed > CROUCH_BREAK_SPEED ? 1.8 : 1)) / recovery
+      if (jump.landing >= 1) jump.phase = 'ground'
+      for (const kind of JUMP_KINDS) {
+        const marks = jumps[kind]
+        jump.times[kind] = marks.land + (marks.end - marks.land) * Math.min(1, jump.landing)
+      }
     }
     const jumpTarget =
       jump.phase === 'air' ||
-      (jump.phase === 'landing' &&
-        (speed <= CROUCH_BREAK_SPEED || jump.time < character.jump.land + 0.15))
+      (jump.phase === 'landing' && (speed <= CROUCH_BREAK_SPEED || jump.landing < 0.3))
         ? 1
         : 0
     jump.weight = approach(jump.weight, jumpTarget, jumpTarget ? 18 : 8, delta)
-    actions.jump.time = Math.min(jump.time, actions.jump.getClip().duration)
+    for (const kind of JUMP_KINDS) {
+      actions[kind].time = Math.min(jump.times[kind], actions[kind].getClip().duration)
+    }
 
     // Crouch: down, hold, up — any step or flight stands straight back up.
     const crouch = crouchRef.current
@@ -285,7 +310,8 @@ export function WalkthroughCharacter({
     const jumpWeight = jump.weight
     const crouchWeight = (1 - jumpWeight) * crouch.weight
     const gaitWeight = (1 - jumpWeight) * (1 - crouch.weight)
-    actions.jump.setEffectiveWeight(jumpWeight)
+    actions.jump.setEffectiveWeight(jumpWeight * (1 - jump.running))
+    actions.jumpRun.setEffectiveWeight(jumpWeight * jump.running)
     for (const clip of CROUCH_CLIPS) {
       actions[clip].setEffectiveWeight(
         clipTotal > 0 ? (crouchWeight * crouch.clips[clip]) / clipTotal : 0,
