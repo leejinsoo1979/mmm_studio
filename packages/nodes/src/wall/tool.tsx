@@ -52,6 +52,8 @@ import { BufferGeometry, DoubleSide, type Group, Vector3 } from 'three'
 import { DraftWallSlab } from './draft-wall-slab'
 import { RoomPresetTool } from './room-preset-tool'
 
+const WALL_DRAWING_TOOLS = new Set<string>(['wall', 'wall-arc', 'rectangle-room', 'room-preset'])
+
 /**
  * Phase 5 Stage D — wall placement tool (kind-owned).
  *
@@ -535,14 +537,14 @@ export const WallTool: React.FC = () => {
   const measurementColor = isDark ? '#ffffff' : '#111111'
 
   // Clear preset-seeded defaults on deactivation so a later manual wall draw
-  // isn't built with a stale preset's parameters. Unmount-only.
+  // isn't built with a stale preset's parameters. Unmount-only, and only when
+  // walls are really put away: StrictMode's remount and a switch to another
+  // wall shape (rectangle, room preset, arc) keep the tool's height and
+  // thickness, which the build panel seeds just before arming it.
   useEffect(
     () => () => {
-      // Switching from the straight-wall renderer to RectangleRoomTool
-      // unmounts this component while `tool` itself remains `wall`. Preserve
-      // the newly selected mode instead of immediately deleting it here.
-      const mode = useEditor.getState().toolDefaults.wall?.placementMode
-      if (mode !== 'rectangle-room' && mode !== 'room-preset') {
+      const { tool } = useEditor.getState()
+      if (!(tool && WALL_DRAWING_TOOLS.has(tool))) {
         useEditor.getState().setToolDefaults('wall', null)
       }
     },

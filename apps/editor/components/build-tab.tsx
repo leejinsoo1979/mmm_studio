@@ -779,6 +779,9 @@ export function BuildTab() {
   const wallToolArmed =
     mode === 'build' && !!activeTool && WALL_HEIGHT_TOOLS.has(activeTool) && !platformArmed
   const wallHeightShown = mode !== 'build' || !activeTool || wallToolArmed
+  const lineWallArmed =
+    mode === 'build' &&
+    ((activeTool === 'wall' && wallPlacementMode !== 'rectangle-room') || activeTool === 'wall-arc')
   const heightCard = (partial: boolean) => (h: number) => {
     const heights = partial ? PARTIAL_WALL_HEIGHTS : FULL_WALL_HEIGHTS
     const label = `${Number.isInteger(h * 10) ? h.toFixed(1) : h.toFixed(2)}m`
@@ -797,10 +800,11 @@ export function BuildTab() {
         key={h}
         label={`${label} ${partial ? '부분 벽' : '온 벽'}`}
         onClick={() => {
-          // An armed wall-drawing tool keeps its shape and picks the height up
-          // for the next wall; anything else switches to straight walls.
+          // A wall card draws walls: straight or curved walls keep their shape
+          // and pick the height up; anything else (a room shape included)
+          // switches to straight walls at this height.
           useWallDrawingDefaults.getState().setHeight(h)
-          if (!wallToolArmed) activateBuildTool('wall')
+          if (!lineWallArmed) activateBuildTool('wall')
         }}
         thumb={<WallHeightThumb height={h} max={heights[heights.length - 1]!} partial={partial} />}
       />
