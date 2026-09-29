@@ -1,7 +1,7 @@
 'use client'
 
-import { useEditor } from '@pascal-app/editor'
-import { useItemScreens } from '@pascal-app/nodes'
+import { Slider, useEditor } from '@pascal-app/editor'
+import { PROJECTION_WIDTH, PROJECTOR_ID, useItemScreens } from '@pascal-app/nodes'
 import {
   ChevronLeft,
   ChevronRight,
@@ -10,11 +10,12 @@ import {
   Film,
   MonitorUp,
   Power,
+  Projector,
   Tv,
-  X,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { presentationPages } from '@/lib/presentation-pages'
+import { enterFullscreen, ScreenFullscreen } from './play-screen-fullscreen'
 
 function playingVideo(setup: (video: HTMLVideoElement) => void) {
   const video = document.createElement('video')
@@ -30,10 +31,13 @@ function playingVideo(setup: (video: HTMLVideoElement) => void) {
   return video
 }
 
+const formatMetres = (metres: number) => `${metres.toFixed(metres < 1 ? 2 : 1)}m`
+
 /**
- * The remote for the TV last switched on: put a shared screen, a video file
- * or a presentation (PDF or images) on it, turn its pages (◀ ▶, or , and .),
- * see the page full-size, or switch the TV off.
+ * The remote for the TV (or the projector) last switched on: put a shared
+ * screen, a video file or a presentation (PDF or images) on it, turn its
+ * pages (◀ ▶, or , and .), show it full screen, throw it onto a wall, floor
+ * or ceiling at the size wanted (its proportions kept), or switch it off.
  */
 export function PlayTvRemote() {
   const inGame = useEditor((state) => state.isFirstPersonMode)
@@ -41,8 +45,13 @@ export function PlayTvRemote() {
   const content = useItemScreens((state) =>
     state.activeId ? state.screens[state.activeId]?.content : undefined,
   )
+  const projection = useItemScreens((state) =>
+    state.activeId ? state.screens[state.activeId]?.projection : undefined,
+  )
+  const placing = useItemScreens((state) => state.placing)
   const [busy, setBusy] = useState<string | null>(null)
   const [enlarged, setEnlarged] = useState(false)
+  const closeFullscreen = useCallback(() => setEnlarged(false), [])
   const videoInput = useRef<HTMLInputElement>(null)
   const deckInput = useRef<HTMLInputElement>(null)
 
@@ -58,8 +67,20 @@ export function PlayTvRemote() {
     return () => window.removeEventListener('keydown', onKey)
   }, [activeId, content?.kind])
 
+  // Leaving the game ends any aiming.
+  useEffect(() => {
+    if (!inGame) useItemScreens.getState().cancelPlacing()
+  }, [inGame])
+
+  // Full screen ends with the remote (the screen switched off, here or by another player).
+  const shown = Boolean(inGame && activeId && content && content.kind !== 'idle')
+  useEffect(() => {
+    if (!shown) setEnlarged(false)
+  }, [shown])
+
   if (!(inGame && activeId && content)) return null
   const screens = useItemScreens.getState()
+  const isProjector = activeId === PROJECTOR_ID
 
   const flash = (message: string) => {
     setBusy(message)
@@ -128,12 +149,18 @@ export function PlayTvRemote() {
         ? content.label
         : '대기 화면')
 
+  if (placing) return <ProjectionAimHint width={placing.width} />
+
   return (
     <>
       <div className="dark pointer-events-auto fixed bottom-24 left-1/2 z-[60] flex -translate-x-1/2 flex-col gap-2 rounded-2xl border border-white/10 bg-[#141414]/90 p-3 text-white shadow-2xl backdrop-blur-xl">
         <div className="flex items-center gap-2 px-1 text-xs">
-          <Tv className="size-4 text-white/60" />
-          <span className="font-semibold">TV 리모컨</span>
+          {isProjector ? (
+            <Projector className="size-4 text-white/60" />
+          ) : (
+            <Tv className="size-4 text-white/60" />
+          )}
+          <span className="font-semibold">{isProjector ? '빔 프로젝터' : 'TV 리모컨'}</span>
           <span className="max-w-[260px] truncate text-white/55">{status}</span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -170,10 +197,52 @@ export function PlayTvRemote() {
             </div>
           )}
           {content.kind !== 'idle' && (
-            <RemoteButton icon={Expand} label="크게 보기" onClick={() => setEnlarged(true)} />
+            <RemoteButton
+              icon={Expand}
+              label="전체화면"
+              onClick={() => {
+                setEnlarged(true)
+                enterFullscreen()
+              }}
+            />
           )}
+          <RemoteButton
+            icon={Projector}
+            label={projection ? '투영 옮기기' : '벽에 투영'}
+            onClick={() => screens.startPlacing(activeId)}
+          />
           <RemoteButton icon={Power} label="끄기" onClick={() => screens.setOn(activeId, false)} />
         </div>
+        {projection && (
+          <div className="flex items-center gap-3 rounded-xl bg-white/5 px-3 py-2 text-[11px] text-white/70">
+            <span className="shrink-0">투영 크기</span>
+            <Slider
+              aria-label="투영 크기"
+              className="w-40"
+              max={Math.log(PROJECTION_WIDTH.max)}
+              min={Math.log(PROJECTION_WIDTH.min)}
+              onValueChange={([next]) =>
+                next !== undefined && screens.setProjectionWidth(activeId, Math.exp(next))
+              }
+              onValueCommit={() => (document.activeElement as HTMLElement | null)?.blur()}
+              step={0.01}
+              value={[Math.log(projection.width)]}
+            />
+            <span className="w-12 shrink-0 font-mono text-white/85">
+              {formatMetres(projection.width)}
+            </span>
+            <button
+              className="shrink-0 rounded-lg px-2 py-1 text-white/70 hover:bg-white/10"
+              onClick={(event) => {
+                event.currentTarget.blur()
+                screens.setProjection(activeId, null)
+              }}
+              type="button"
+            >
+              투영 끄기
+            </button>
+          </div>
+        )}
         <input
           accept="video/*"
           className="hidden"
@@ -199,46 +268,31 @@ export function PlayTvRemote() {
       </div>
 
       {enlarged && content.kind !== 'idle' && (
-        <div className="fixed inset-0 z-[130] grid place-items-center bg-black/90 p-8">
-          <button
-            aria-label="닫기"
-            className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            onClick={() => setEnlarged(false)}
-            type="button"
-          >
-            <X className="size-5" />
-          </button>
-          {content.kind === 'slides' ? (
-            <img
-              alt={`${content.index + 1}쪽`}
-              className="max-h-full max-w-full object-contain"
-              src={content.pages[content.index]}
-            />
-          ) : (
-            <EnlargedVideo video={content.video} />
-          )}
-        </div>
+        <ScreenFullscreen content={content} onClose={closeFullscreen} screenId={activeId} />
       )}
     </>
   )
 }
 
-/** The TV's own video, mirrored full-size (the same stream, not a second copy). */
-function EnlargedVideo({ video }: { video: HTMLVideoElement }) {
-  const ref = useRef<HTMLVideoElement>(null)
-  useEffect(() => {
-    const mirror = ref.current
-    if (!mirror) return
-    if (video.srcObject) mirror.srcObject = video.srcObject
-    else {
-      mirror.src = video.src
-      mirror.currentTime = video.currentTime
-    }
-    mirror.muted = true
-    void mirror.play()
-  }, [video])
-  // biome-ignore lint/a11y/useMediaCaption: a muted mirror of the TV's picture; the TV plays its sound.
-  return <video className="max-h-full max-w-full" playsInline ref={ref} />
+/**
+ * While a projection is being aimed: a crosshair at the view's centre, where
+ * the picture lands, and what the keys do.
+ */
+function ProjectionAimHint({ width }: { width: number }) {
+  return (
+    <>
+      <div className="pointer-events-none fixed top-1/2 left-1/2 z-[60] size-5 -translate-x-1/2 -translate-y-1/2">
+        <div className="absolute top-1/2 left-0 h-px w-full bg-white/90 shadow" />
+        <div className="absolute top-0 left-1/2 h-full w-px bg-white/90 shadow" />
+      </div>
+      <div className="dark pointer-events-none fixed bottom-24 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-white/10 bg-[#141414]/90 px-4 py-3 text-xs text-white shadow-2xl backdrop-blur-xl">
+        <Projector className="size-4 text-sky-300" />
+        <span className="font-semibold">투영할 곳을 조준하세요</span>
+        <span className="font-mono text-white/85">가로 {formatMetres(width)}</span>
+        <span className="text-white/55">휠 또는 [ ] 크기 · 클릭 또는 E 투영 · Esc 취소</span>
+      </div>
+    </>
+  )
 }
 
 function RemoteButton({

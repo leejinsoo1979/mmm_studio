@@ -188,7 +188,15 @@ export { guideDefinition } from './guide'
 export { gutterDefinition } from './gutter'
 export { hvacEquipmentDefinition } from './hvac-equipment'
 export { itemDefinition } from './item'
-export { type ItemScreen, type ScreenContent, useItemScreens } from './item/screen'
+export {
+  clampProjectionWidth,
+  type ItemScreen,
+  PROJECTION_WIDTH,
+  PROJECTOR_ID,
+  type ScreenContent,
+  type ScreenProjection,
+  useItemScreens,
+} from './item/screen'
 export { levelDefinition } from './level'
 export { lightDefinition } from './light'
 export { lightSwitchDefinition } from './light-switch'

@@ -1,8 +1,19 @@
 'use client'
 
 import { Slider, useEditor } from '@pascal-app/editor'
+import { PROJECTOR_ID, useItemScreens } from '@pascal-app/nodes'
 import { useViewer, type Weather } from '@pascal-app/viewer'
-import { Cloud, CloudFog, CloudRain, Moon, Snowflake, Sun, SunMedium, UserPlus } from 'lucide-react'
+import {
+  Cloud,
+  CloudFog,
+  CloudRain,
+  Moon,
+  Projector,
+  Snowflake,
+  Sun,
+  SunMedium,
+  UserPlus,
+} from 'lucide-react'
 import { useState } from 'react'
 import { formatClock, setClock, useClock } from '@/lib/time-of-day'
 import { cn } from '@/lib/utils'
@@ -19,6 +30,18 @@ const WEATHER_OPTIONS: { id: Weather; label: string; icon: typeof Sun }[] = [
 const releaseFocus = () => (document.activeElement as HTMLElement | null)?.blur()
 
 /**
+ * The projector (no TV needed) takes the remote; switched on for the first
+ * time, it starts aiming its picture.
+ */
+function takeProjector() {
+  const screens = useItemScreens.getState()
+  const screen = screens.screens[PROJECTOR_ID]
+  if (!screen) screens.setOn(PROJECTOR_ID, true)
+  else useItemScreens.setState({ activeId: PROJECTOR_ID })
+  if (!screen?.projection) useItemScreens.getState().startPlacing(PROJECTOR_ID)
+}
+
+/**
  * The game's world panel: the time of day, the weather, and an invite to the
  * same scene. Shown while walking the scene.
  */
@@ -27,6 +50,7 @@ export function PlayGameHud() {
   const clock = useClock()
   const weather = useViewer((state) => state.weather)
   const [invited, setInvited] = useState(false)
+  const projectorOn = useItemScreens((state) => Boolean(state.screens[PROJECTOR_ID]))
 
   if (!inGame) return null
 
@@ -82,6 +106,21 @@ export function PlayGameHud() {
           ))}
         </div>
       </div>
+
+      <button
+        aria-pressed={projectorOn}
+        className={cn(
+          'flex items-center justify-center gap-2 rounded-xl border border-white/10 py-2 text-sm transition',
+          projectorOn ? 'bg-white text-black' : 'text-white/85 hover:bg-white/10',
+        )}
+        onClick={(event) => {
+          event.currentTarget.blur()
+          takeProjector()
+        }}
+        type="button"
+      >
+        <Projector className="size-4" />빔 프로젝터
+      </button>
 
       <button
         className="flex items-center justify-center gap-2 rounded-xl border border-white/10 py-2 text-sm text-white/85 transition hover:bg-white/10"

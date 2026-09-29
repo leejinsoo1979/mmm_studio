@@ -4,103 +4,11 @@ import { type AnyNodeId, sceneRegistry } from '@pascal-app/core'
 import { nearestHit, registerWalkthroughInteraction } from '@pascal-app/editor'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
-import {
-  CanvasTexture,
-  type Material,
-  type Mesh,
-  SRGBColorSpace,
-  type Texture,
-  VideoTexture,
-} from 'three'
+import type { Material, Mesh } from 'three'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
-import { type ScreenContent, screenMeshes, screenSlots, useItemScreens } from './screen'
-
-/** Pictures are fitted onto a 16:9 panel, letterboxed. */
-const PANEL = { width: 1600, height: 900 }
-
-function panelCanvas() {
-  const canvas = document.createElement('canvas')
-  canvas.width = PANEL.width
-  canvas.height = PANEL.height
-  return canvas
-}
-
-/** glTF models map their UVs with images the right way up (no flip). */
-function screenTexture<T extends Texture>(texture: T): T {
-  texture.flipY = false
-  texture.colorSpace = SRGBColorSpace
-  return texture
-}
-
-let standby: CanvasTexture | null = null
-/** The switched-on picture before anything is put on: a soft glow and the remote's hint. */
-function standbyTexture() {
-  if (standby) return standby
-  const canvas = panelCanvas()
-  const g = canvas.getContext('2d')!
-  const gradient = g.createLinearGradient(0, 0, PANEL.width, PANEL.height)
-  gradient.addColorStop(0, '#27457e')
-  gradient.addColorStop(1, '#5b2f7a')
-  g.fillStyle = gradient
-  g.fillRect(0, 0, PANEL.width, PANEL.height)
-  g.fillStyle = 'rgba(255,255,255,0.92)'
-  g.font = '600 96px sans-serif'
-  g.textAlign = 'center'
-  g.fillText('TV', PANEL.width / 2, PANEL.height / 2 - 20)
-  g.fillStyle = 'rgba(255,255,255,0.6)'
-  g.font = '40px sans-serif'
-  g.fillText(
-    '리모컨에서 화면 공유 · 동영상 · 발표 자료를 고르세요',
-    PANEL.width / 2,
-    PANEL.height / 2 + 60,
-  )
-  standby = screenTexture(new CanvasTexture(canvas))
-  return standby
-}
-
-const videoTextures = new WeakMap<HTMLVideoElement, VideoTexture>()
-function videoTexture(video: HTMLVideoElement) {
-  let texture = videoTextures.get(video)
-  if (!texture) {
-    texture = screenTexture(new VideoTexture(video))
-    videoTextures.set(video, texture)
-  }
-  return texture
-}
-
-const pageTextures = new Map<string, CanvasTexture | 'loading'>()
-/** A slide fitted onto the panel; null until its image has loaded. */
-function pageTexture(url: string): CanvasTexture | null {
-  const known = pageTextures.get(url)
-  if (known === 'loading') return null
-  if (known) return known
-  pageTextures.set(url, 'loading')
-  const image = new Image()
-  image.crossOrigin = 'anonymous'
-  image.onload = () => {
-    const canvas = panelCanvas()
-    const g = canvas.getContext('2d')!
-    g.fillStyle = '#000'
-    g.fillRect(0, 0, PANEL.width, PANEL.height)
-    const fit = Math.min(PANEL.width / image.width, PANEL.height / image.height)
-    const w = image.width * fit
-    const h = image.height * fit
-    g.drawImage(image, (PANEL.width - w) / 2, (PANEL.height - h) / 2, w, h)
-    pageTextures.set(url, screenTexture(new CanvasTexture(canvas)))
-  }
-  image.onerror = () => pageTextures.delete(url)
-  image.src = url
-  return null
-}
-
-function contentTexture(content: ScreenContent): Texture | null {
-  if (content.kind === 'video') return videoTexture(content.video)
-  if (content.kind === 'slides') {
-    const url = content.pages[content.index]
-    return url ? pageTexture(url) : null
-  }
-  return standbyTexture()
-}
+import { ScreenProjections } from './projector'
+import { screenMeshes, screenSlots, useItemScreens } from './screen'
+import { panelTexture, SCREEN_GAIN } from './screen-textures'
 
 /**
  * Puts `material` on a mesh's screen slot(s), keeping the model's own to
@@ -128,7 +36,8 @@ function restoreScreen(mesh: Mesh) {
 /**
  * TVs and monitors in the walkthrough: E switches the one in the aim on or
  * off, and a switched-on screen shows its standby picture, a video, a shared
- * screen or presentation slides on its `slot_screen` surface.
+ * screen or presentation slides on its `slot_screen` surface — and on the
+ * surface its picture is projected onto, if any.
  */
 export function ItemScreenSystem() {
   const materials = useRef(new Map<string, MeshBasicNodeMaterial>())
@@ -169,10 +78,11 @@ export function ItemScreenSystem() {
       if (!object) continue
       let material = materials.current.get(id)
       if (!material) {
-        material = new MeshBasicNodeMaterial({ toneMapped: false })
+        material = new MeshBasicNodeMaterial({ fog: false })
+        material.color.setScalar(SCREEN_GAIN)
         materials.current.set(id, material)
       }
-      const texture = contentTexture(screen.content)
+      const texture = panelTexture(screen.content)
       if (texture && material.map !== texture) {
         material.map = texture
         material.needsUpdate = true
@@ -189,5 +99,5 @@ export function ItemScreenSystem() {
     [],
   )
 
-  return null
+  return <ScreenProjections />
 }

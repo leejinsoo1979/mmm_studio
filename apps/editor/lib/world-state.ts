@@ -6,20 +6,42 @@ import {
   useScene,
 } from '@pascal-app/core'
 import { moveDoorTo, moveWindowTo } from '@pascal-app/editor'
-import { useCabinetDoors, useItemScreens } from '@pascal-app/nodes'
+import { type ScreenProjection, useCabinetDoors, useItemScreens } from '@pascal-app/nodes'
 import { useViewer, WEATHERS, type Weather } from '@pascal-app/viewer'
 import { getClock, setClock } from './time-of-day'
 import type { WorldEntries, WorldValue } from './world-sync'
 
 /**
- * What a TV shows, shared: another player can't receive a local video or a
- * screen capture, only that one is playing; slides travel as a shared deck
- * (`deck` is null while its pages are still being shared).
+ * What a TV (or the projector) shows, shared: another player can't receive a
+ * local video or a screen capture, only that one is playing; slides travel as
+ * a shared deck (`deck` is null while its pages are still being shared). `p`
+ * is where its picture is projected: position, quaternion, width.
  */
-export type SharedScreen =
+export type SharedScreen = (
   | { k: 'idle' }
   | { k: 'video'; label: string }
   | { k: 'slides'; deck: string | null; count: number; index: number; label: string }
+) & { p?: number[] }
+
+/** A projection as 8 numbers: millimetre positions and 4-decimal turns keep readings stable. */
+function sharedProjection({ position, quaternion, width }: ScreenProjection): number[] {
+  const round = (value: number, places: number) => Number(value.toFixed(places))
+  return [
+    ...position.map((value) => round(value, 3)),
+    ...quaternion.map((value) => round(value, 4)),
+    round(width, 3),
+  ]
+}
+
+function projectionFrom(p: unknown): ScreenProjection | null {
+  if (!(Array.isArray(p) && p.length === 8 && p.every((n) => Number.isFinite(n)))) return null
+  const [x, y, z, qx, qy, qz, qw, width] = p as number[]
+  return {
+    position: [x!, y!, z!],
+    quaternion: [qx!, qy!, qz!, qw!],
+    width: width!,
+  }
+}
 
 /** The shared deck each set of slide pages was shared as, or came from. */
 export const sharedDecks = new WeakMap<readonly string[], string>()
@@ -79,6 +101,7 @@ export function readWorld(): WorldEntries {
         : content.kind === 'video'
           ? { k: 'video', label: content.label }
           : { k: 'idle' }
+    if (screen.projection) shared.p = sharedProjection(screen.projection)
     entries[`screen:${id}`] = shared
   }
   return entries
@@ -157,13 +180,24 @@ function applyItem(id: AnyNodeId, value: WorldValue) {
 }
 
 function applyScreen(id: string, value: SharedScreen | null, loadDeck: DeckLoader) {
-  const screens = useItemScreens.getState()
-  const current = screens.screens[id]?.content
   if (value?.k !== 'slides') wantedDecks.delete(id)
   if (!value) {
-    if (current) screens.setOn(id, false)
+    if (useItemScreens.getState().screens[id]) useItemScreens.getState().setOn(id, false)
     return
   }
+  showSharedContent(id, value, loadDeck)
+  const screen = useItemScreens.getState().screens[id]
+  const projection = projectionFrom(value.p)
+  const current = screen?.projection ? sharedProjection(screen.projection) : null
+  const next = projection ? sharedProjection(projection) : null
+  if (screen && JSON.stringify(current) !== JSON.stringify(next)) {
+    useItemScreens.getState().setProjection(id, projection)
+  }
+}
+
+function showSharedContent(id: string, value: SharedScreen, loadDeck: DeckLoader) {
+  const screens = useItemScreens.getState()
+  const current = screens.screens[id]?.content
   if (value.k === 'slides' && value.deck) {
     if (current?.kind === 'slides' && sharedDecks.get(current.pages) === value.deck) {
       screens.goTo(id, value.index)

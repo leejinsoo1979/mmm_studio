@@ -81,6 +81,20 @@ describe('world entries round-trip through the stores', () => {
     expect(roundTrip('screen:item_tv', null)).toBeUndefined()
   })
 
+  test('a projection is thrown, moved and taken off with its screen', () => {
+    const p = [0, 1.5, -2.996, 0, 0, 0, 1, 2.4]
+    expect(roundTrip('screen:projector', { k: 'idle', p })).toEqual({ k: 'idle', p })
+    expect(useItemScreens.getState().screens.projector?.projection).toEqual({
+      position: [0, 1.5, -2.996],
+      quaternion: [0, 0, 0, 1],
+      width: 2.4,
+    })
+    const moved = [1, 1.2, -2.996, 0, 0, 0, 1, 3]
+    expect(roundTrip('screen:projector', { k: 'idle', p: moved })).toEqual({ k: 'idle', p: moved })
+    expect(roundTrip('screen:projector', { k: 'idle' })).toEqual({ k: 'idle' })
+    expect(useItemScreens.getState().activeId).toBeNull()
+  })
+
   test('a shared deck is downloaded once, then its pages turn', async () => {
     let downloads = 0
     const loadDeck = async (_deck: string, count: number) => {
