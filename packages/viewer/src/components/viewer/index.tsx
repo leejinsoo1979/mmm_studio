@@ -41,6 +41,7 @@ import { RegisteredSystems } from './registered-systems'
 import { SceneBvh } from './scene-bvh'
 import { SelectionManager } from './selection-manager'
 import { ViewerCamera } from './viewer-camera'
+import { WeatherSystem } from './weather-system'
 
 declare module '@react-three/fiber' {
   // The TS 7 native compiler (tsgo) rejects mapping the entire `three/webgpu`
@@ -561,6 +562,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         {/* <directionalLight position={[10, 10, 5]} intensity={0.5} castShadow
           /> */}
         <Lights />
+        <WeatherSystem />
         {useBvh ? (
           <SceneBvh>
             <SceneRenderer />

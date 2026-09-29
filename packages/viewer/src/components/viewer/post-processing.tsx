@@ -30,6 +30,7 @@ import { GRID_LAYER, OVERLAY_LAYER, SCENE_LAYER, ZONE_LAYER } from '../../lib/la
 import { mergedOutline } from '../../lib/merged-outline-node'
 import { getSceneTheme } from '../../lib/scene-themes'
 import { getSolarPosition } from '../../lib/solar-position'
+import { OVERCAST_SKY, WEATHER_LOOKS } from '../../lib/weather'
 import useViewer from '../../store/use-viewer'
 
 // SSGI Parameters - adjust these to fine-tune global illumination and ambient occlusion
@@ -204,6 +205,7 @@ const PostProcessingPasses = ({
   const bgCurrent = useRef(new Color(initBg))
   const bgTarget = useRef(new Color())
   const nightBackground = useRef(new Color('#080d19'))
+  const overcastBackground = useRef(new Color(OVERCAST_SKY))
 
   // Ink-line colour follows the scene-theme background luminance (dark lines on
   // light scenes, light on dark), refreshed each frame like the background.
@@ -653,6 +655,7 @@ const PostProcessingPasses = ({
     const viewerState = useViewer.getState()
     bgTarget.current
       .set(getSceneTheme(viewerState.sceneTheme).background)
+      .lerp(overcastBackground.current, WEATHER_LOOKS[viewerState.weather].overcast)
       .lerp(nightBackground.current, 1 - solarPosition.daylight)
     bgCurrent.current.lerp(bgTarget.current, Math.min(delta, 0.1) * 4)
     bgUniform.current.value.copy(bgCurrent.current)

@@ -2,12 +2,12 @@
 
 import type { AnyNode, BaseNode, BuildingNode, LevelNode, ZoneNode } from '@pascal-app/core'
 import type { Object3D } from 'three'
-
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { EdgeMode } from '../lib/edge-style'
 import type { ColorPreset, RenderShading } from '../lib/materials'
 import { SCENE_THEME_IDS } from '../lib/scene-themes'
+import type { Weather } from '../lib/weather'
 
 export type RenderContext = 'editor' | 'viewer'
 export type ViewerUnit = 'metric' | 'imperial' | 'millimeter' | 'centimeter'
@@ -45,6 +45,9 @@ type ViewerState = {
   setSunMonth: (month: number) => void
   sunAzimuth: number
   setSunAzimuth: (degrees: number) => void
+  /** The sky over the scene (a session setting: not saved with the preferences). */
+  weather: Weather
+  setWeather: (weather: Weather) => void
 
   renderContext: RenderContext
   setRenderContext: (context: RenderContext) => void
@@ -271,6 +274,8 @@ const useViewer = create<ViewerState>()(
       setSunMonth: (month) => set({ sunMonth: Math.min(12, Math.max(1, month)) }),
       sunAzimuth: 0,
       setSunAzimuth: (degrees) => set({ sunAzimuth: Math.min(359, Math.max(0, degrees)) }),
+      weather: 'clear',
+      setWeather: (weather) => set({ weather }),
 
       renderContext: 'editor',
       setRenderContext: (context) => set({ renderContext: context }),

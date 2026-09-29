@@ -3,6 +3,7 @@
 import { Editor, type SceneGraph, useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useState } from 'react'
+import { PlayGameHud } from './play-game-hud'
 import { PlayGameLobby } from './play-game-lobby'
 import { RuntimeCollaboration } from './runtime-collaboration'
 import { RuntimeConfigurator } from './runtime-configurator'
@@ -60,6 +61,7 @@ export function PlaySceneLoader({
       <Editor isVersionPreviewMode layoutVersion="v2" previewScene={scene} />
       {!inGame && <RuntimeConfigurator />}
       <PlayGameLobby title={title} />
+      <PlayGameHud />
       <RuntimeCollaboration
         chatEnabled={scene.experience?.multiplayer.chat ?? true}
         enabled={scene.experience?.multiplayer.enabled ?? true}

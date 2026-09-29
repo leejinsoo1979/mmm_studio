@@ -111,6 +111,7 @@ export {
   SCENE_THEMES,
   type SceneTheme,
 } from './lib/scene-themes'
+export { WEATHERS, type Weather } from './lib/weather'
 export { useItemLightPool } from './store/use-item-light-pool'
 export { default as useViewer, type ViewerUnit } from './store/use-viewer'
 export { CeilingSystem } from './systems/ceiling/ceiling-system'

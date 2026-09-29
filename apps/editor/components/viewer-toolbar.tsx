@@ -50,6 +50,7 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { flushSync } from 'react-dom'
+import { formatClock, setClock, useClock } from '@/lib/time-of-day'
 import { useArchipleBridge } from './archiple-floorplan-bridge'
 import { ExportCenter } from './export-center'
 import { Tooltip, TooltipContent, TooltipTrigger } from './toolbar-tooltip'
@@ -542,39 +543,6 @@ function DisplayMenu() {
   )
 }
 
-/** Theme shown for each part of the day; daytime keeps the user's theme. */
-function themeForTime(time: number): 'night' | 'twilight' | null {
-  if (time < 5.5 || time >= 19.5) return 'night'
-  if (time < 7 || time >= 18) return 'twilight'
-  return null
-}
-
-/**
- * The light source for a slider time. At night the moon lights the scene from
- * the sun's opposite hour: the night theme already darkens the sky and tints
- * the light, and a sun below the horizon on top of it would leave the scene
- * pitch black.
- */
-function lightTimeFor(time: number): number {
-  return themeForTime(time) === 'night' ? (time + 12) % 24 : time
-}
-
-let dayTheme = 'studio'
-/** The time last picked on the slider, which the sun position can't tell apart at night. */
-let sliderClock: number | null = null
-
-/** The clock the user set: the slider's own time while the moon stands in for the sun. */
-function useClock(): number {
-  const sunTime = useViewer((s) => s.sunTime)
-  return sliderClock !== null && lightTimeFor(sliderClock) === sunTime ? sliderClock : sunTime
-}
-
-const formatClock = (time: number) => {
-  const hh = Math.floor(time)
-  const mm = Math.round((time - hh) * 60)
-  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
-}
-
 /**
  * inZOI's sun ↔ moon slider: drags the time of day (the sun position) and
  * brings in the twilight / night themes after dusk, restoring the daytime
@@ -582,18 +550,6 @@ const formatClock = (time: number) => {
  */
 function TimeOfDaySlider() {
   const clock = useClock()
-  const setTime = (time: number) => {
-    const viewer = useViewer.getState()
-    if (
-      !themeForTime(viewer.sunTime) &&
-      viewer.sceneTheme !== 'night' &&
-      viewer.sceneTheme !== 'twilight'
-    )
-      dayTheme = viewer.sceneTheme
-    sliderClock = time
-    viewer.setSunTime(lightTimeFor(time))
-    viewer.setSceneTheme(themeForTime(time) ?? dayTheme)
-  }
   return (
     <div
       className="flex h-11 items-center gap-2"
@@ -606,7 +562,7 @@ function TimeOfDaySlider() {
         className="w-16 min-[1500px]:w-28 min-[1600px]:w-44 min-[1800px]:w-56 [&_[data-slot=slider-range]]:bg-transparent [&_[data-slot=slider-thumb]]:size-5 [&_[data-slot=slider-thumb]]:border-2 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-thumb]]:bg-[#ddd2a3] [&_[data-slot=slider-thumb]]:shadow-[0_1px_3px_rgba(0,0,0,0.3)] [&_[data-slot=slider-track]]:h-1.5 [&_[data-slot=slider-track]]:bg-[linear-gradient(90deg,#ebd964,#dedece_50%,#7ba6ef)]"
         max={24}
         min={0}
-        onValueChange={([next]) => next !== undefined && setTime(next)}
+        onValueChange={([next]) => next !== undefined && setClock(next)}
         step={0.25}
         value={[clock]}
       />

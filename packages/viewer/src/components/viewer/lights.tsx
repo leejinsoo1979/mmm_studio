@@ -10,6 +10,7 @@ import type {
 import * as THREE from 'three/webgpu'
 import { getSceneTheme } from '../../lib/scene-themes'
 import { getSolarPosition } from '../../lib/solar-position'
+import { WEATHER_LOOKS } from '../../lib/weather'
 import useViewer from '../../store/use-viewer'
 
 // Diagnostic toggle: `?disable=shadows` skips the shadow-map render pass
@@ -199,14 +200,17 @@ export function Lights() {
       return
     }
 
+    // Clouds hold back the direct sun most, the sky's fill light less.
+    const weather = WEATHER_LOOKS[useViewer.getState().weather]
+
     for (let index = 0; index < theme.lights.length; index++) {
       const config = theme.lights[index]
       const light = lightRefs.current[index]
       if (!(config && light)) continue
 
       const daylightScale = config.castShadow
-        ? 0.03 + solarPosition.daylight * 0.97
-        : 0.12 + solarPosition.daylight * 0.88
+        ? (0.03 + solarPosition.daylight * 0.97) * weather.sun
+        : (0.12 + solarPosition.daylight * 0.88) * weather.fill
       light.intensity = THREE.MathUtils.lerp(light.intensity, config.intensity * daylightScale, dt)
       let target = lightTargets.current[index]
       if (!target) {
@@ -224,7 +228,8 @@ export function Lights() {
         if (light.shadow.intensity !== undefined) {
           light.shadow.intensity = THREE.MathUtils.lerp(
             light.shadow.intensity,
-            config.intensity <= 1 ? config.intensity : MAX_SHADOW_INTENSITY,
+            (config.intensity <= 1 ? config.intensity : MAX_SHADOW_INTENSITY) *
+              Math.sqrt(weather.sun),
             dt,
           )
         }
@@ -234,7 +239,7 @@ export function Lights() {
     if (hemiRef.current && theme.hemi) {
       hemiRef.current.intensity = THREE.MathUtils.lerp(
         hemiRef.current.intensity,
-        theme.hemi.intensity * (0.15 + solarPosition.daylight * 0.85),
+        theme.hemi.intensity * (0.15 + solarPosition.daylight * 0.85) * weather.fill,
         dt,
       )
       targets.hemiSky.set(theme.hemi.sky)
@@ -248,7 +253,7 @@ export function Lights() {
     if (ambientRef.current) {
       ambientRef.current.intensity = THREE.MathUtils.lerp(
         ambientRef.current.intensity,
-        theme.ambient.intensity * (0.12 + solarPosition.daylight * 0.88),
+        theme.ambient.intensity * (0.12 + solarPosition.daylight * 0.88) * weather.fill,
         dt,
       )
       targets.ambColor.set(theme.ambient.color)
