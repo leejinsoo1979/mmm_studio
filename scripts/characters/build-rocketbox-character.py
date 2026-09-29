@@ -41,7 +41,8 @@ CLIPS = {
     'crouchIdle': f'{gender}_crouch_idle',
     'crouchOut': f'{gender}_crouch_out',
 }
-TEX_SIZE = 1024
+# The face is seen up close in third person: it keeps the source's full 2K.
+TEX_SIZE = {'head': 2048, 'body': 1024, 'opacity': 1024}
 
 
 def fcurves(act):
@@ -313,17 +314,35 @@ for jump_name, jump_spec in JUMPS.items():
     meta['jumps'][jump_name] = jump_marks
 
 
-def load_image(name, keep_alpha=False):
+def load_image(name, size, keep_alpha=False):
     src = os.path.join(tex_dir, name + '.tga')
     img = Image.open(src)
-    img = img.convert('RGBA' if keep_alpha else 'RGB').resize((TEX_SIZE, TEX_SIZE), Image.LANCZOS)
+    img = img.convert('RGBA' if keep_alpha else 'RGB').resize((size, size), Image.LANCZOS)
     ext = '.png' if keep_alpha else '.jpg'
     dst = os.path.join(work, name + ext)
     if keep_alpha:
         img.save(dst, optimize=True)
     else:
-        img.save(dst, quality=88, optimize=True)
+        img.save(dst, quality=90, optimize=True)
     return bpy.data.images.load(dst)
+
+
+def roughness_image(name, size):
+    """glTF metallic-roughness texture from a Rocketbox specular map.
+
+    The specular map is dark on dry skin and cloth, brighter on lips and
+    brightest on the wet eyes; roughness follows it inversely (G channel),
+    metal is none (B).
+    """
+    spec = Image.open(os.path.join(tex_dir, name + '.tga')).convert('L').resize((size, size), Image.LANCZOS)
+    rough = spec.point(lambda v: round(255 * (0.84 - 0.66 * min(1.0, v / 150))))
+    black = Image.new('L', (size, size), 0)
+    img = Image.merge('RGB', (Image.new('L', (size, size), 255), rough, black))
+    dst = os.path.join(work, name + '_roughness.jpg')
+    img.save(dst, quality=90, optimize=True)
+    image = bpy.data.images.load(dst)
+    image.colorspace_settings.name = 'Non-Color'
+    return image
 
 
 code = os.path.basename(os.path.join(tex_dir, os.listdir(tex_dir)[0])).split('_')[0]
@@ -338,22 +357,35 @@ for slot in mesh.material_slots:
     nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
     bsdf.inputs['Metallic'].default_value = 0.0
     bsdf.inputs['Roughness'].default_value = 0.62 if part != 'opacity' else 0.7
+    size = TEX_SIZE.get(part, TEX_SIZE['body'])
     if part == 'opacity':
         tex = nt.nodes.new('ShaderNodeTexImage')
-        tex.image = load_image(f'{code}_opacity_color', keep_alpha=True)
+        tex.image = load_image(f'{code}_opacity_color', size, keep_alpha=True)
         nt.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
         nt.links.new(tex.outputs['Alpha'], bsdf.inputs['Alpha'])
         mat.surface_render_method = 'DITHERED'
         continue
     col = nt.nodes.new('ShaderNodeTexImage')
-    col.image = load_image(f'{code}_{part}_color')
+    col.image = load_image(f'{code}_{part}_color', size)
     nt.links.new(col.outputs['Color'], bsdf.inputs['Base Color'])
     nrm_tex = nt.nodes.new('ShaderNodeTexImage')
-    nrm_tex.image = load_image(f'{code}_{part}_normal')
+    nrm_tex.image = load_image(f'{code}_{part}_normal', size)
     nrm_tex.image.colorspace_settings.name = 'Non-Color'
     nrm = nt.nodes.new('ShaderNodeNormalMap')
     nt.links.new(nrm_tex.outputs['Color'], nrm.inputs['Color'])
     nt.links.new(nrm.outputs['Normal'], bsdf.inputs['Normal'])
+    rough_tex = nt.nodes.new('ShaderNodeTexImage')
+    rough_tex.image = roughness_image(f'{code}_{part}_specular', size)
+    split = nt.nodes.new('ShaderNodeSeparateColor')
+    nt.links.new(rough_tex.outputs['Color'], split.inputs['Color'])
+    nt.links.new(split.outputs['Green'], bsdf.inputs['Roughness'])
+    nt.links.new(split.outputs['Blue'], bsdf.inputs['Metallic'])
+    if part == 'head':
+        # A warm grazing sheen: the soft glow light picks up on skin edges.
+        # (glTF carries the tint as the sheen's strength, so it stays dim.)
+        bsdf.inputs['Sheen Weight'].default_value = 1.0
+        bsdf.inputs['Sheen Roughness'].default_value = 0.45
+        bsdf.inputs['Sheen Tint'].default_value = (0.3, 0.17, 0.14, 1.0)
 
 bbox_h = max((mesh.matrix_world @ v.co).z for v in mesh.data.vertices) - min(
     (mesh.matrix_world @ v.co).z for v in mesh.data.vertices

@@ -93,6 +93,12 @@ const WHEEL_ZOOM_PER_PIXEL = 0.004
 /** How far (m) the eyes sink while crouching, and how fast (1/s) they get there. */
 const CROUCH_EYE_DROP = 0.55
 const CROUCH_EYE_RESPONSE = 7
+/**
+ * The body in third person gets going and slows down over a few steps
+ * (m/s²) rather than starting and stopping dead.
+ */
+const THIRD_PERSON_ACCELERATION = 7
+const THIRD_PERSON_DECELERATION = 8
 /** A brisk hop: about half a metre up. */
 const JUMP_SPEED = 3.2
 const CONTROLLER_CENTER_FROM_EYE = 0.85
@@ -1514,7 +1520,7 @@ export const FirstPersonControls = () => {
       {controllerStart && (
         <KeyboardControls map={keyboardMap}>
           <BVHEcctrl
-            acceleration={26}
+            acceleration={view === 'third' ? THIRD_PERSON_ACCELERATION : 14}
             airDragFactor={0.3}
             colliderCapsuleArgs={[CAPSULE_RADIUS, CAPSULE_LENGTH, 4, 8]}
             colliderMeshes={firstPersonColliderMeshes}
@@ -1522,7 +1528,7 @@ export const FirstPersonControls = () => {
             collisionPushBackDamping={0.1}
             collisionPushBackThreshold={0.001}
             debug={false}
-            deceleration={30}
+            deceleration={view === 'third' ? THIRD_PERSON_DECELERATION : 16}
             delay={0}
             fallGravityFactor={4}
             floatCheckType="BOTH"
@@ -1540,7 +1546,7 @@ export const FirstPersonControls = () => {
             paused={isElevatorRideLocked}
             position={controllerStart.position}
             ref={setControllerApi}
-            turnSpeed={9}
+            turnSpeed={7}
           >
             <Suspense fallback={null}>
               <WalkthroughCharacter feetOffset={FEET_BELOW_CENTER} visible={view === 'third'} />

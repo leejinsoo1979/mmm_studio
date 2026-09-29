@@ -44,7 +44,15 @@ const CROUCH_SPEEDUP = 1.3
 /** Moving faster than this (m/s) while crouched stands the body straight up. */
 const CROUCH_BREAK_SPEED = 0.5
 
+/** Most the body leans (rad): into a turn, and forward when setting off. */
+const MAX_TURN_LEAN = 0.2
+const MAX_START_LEAN = 0.1
+/** A heading change faster than this (rad/s) is a snap (respawn, view reset), not a turn. */
+const MAX_TURN_RATE = 20
+const GRAVITY = 9.81
+
 const worldPosition = new Vector3()
+const facing = new Vector3()
 
 const JUMP_KINDS: JumpKind[] = ['jump', 'jumpRun']
 
@@ -124,6 +132,7 @@ export function WalkthroughCharacter({
   const gltf = useGLTF(character.url)
   const rootRef = useRef<Group>(null)
   const lastPositionRef = useRef<Vector3 | null>(null)
+  const leanRef = useRef({ yaw: Number.NaN, speed: 0, acceleration: 0, roll: 0, pitch: 0 })
   const speedRef = useRef(0)
   const phaseRef = useRef(0)
   const jumpRef = useRef<JumpState>({
@@ -198,6 +207,30 @@ export function WalkthroughCharacter({
     }
     speedRef.current += (measured - speedRef.current) * (1 - Math.exp(-delta * SPEED_RESPONSE))
     const speed = speedRef.current
+
+    // Lean like a runner: into a turn by the angle that balances the turn
+    // (tan θ = v·ω/g), and a little forward while speeding up.
+    const lean = leanRef.current
+    root.parent?.getWorldDirection(facing)
+    const yaw = Math.atan2(facing.x, facing.z)
+    let yawRate = 0
+    if (!Number.isNaN(lean.yaw)) {
+      const turn = Math.atan2(Math.sin(yaw - lean.yaw), Math.cos(yaw - lean.yaw))
+      yawRate = Math.abs(turn / delta) > MAX_TURN_RATE ? 0 : turn / delta
+    }
+    lean.yaw = yaw
+    lean.acceleration = approach(lean.acceleration, (speed - lean.speed) / delta, 8, delta)
+    lean.speed = speed
+    const onGround = characterStatus.isOnGround
+    const rollTarget = onGround
+      ? Math.max(-MAX_TURN_LEAN, Math.min(MAX_TURN_LEAN, -Math.atan((speed * yawRate) / GRAVITY)))
+      : 0
+    const pitchTarget = onGround
+      ? Math.max(0, Math.min(MAX_START_LEAN, Math.atan(lean.acceleration / GRAVITY) * 0.6))
+      : 0
+    lean.roll = approach(lean.roll, rollTarget, 6, delta)
+    lean.pitch = approach(lean.pitch, pitchTarget, 6, delta)
+    root.rotation.set(lean.pitch, 0, lean.roll)
 
     // Locomotion.
     const gait = locomotionWeights(speed, character)

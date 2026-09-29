@@ -67,14 +67,15 @@ export const WALKTHROUGH_CHARACTERS: Record<WalkthroughCharacterId, WalkthroughC
 }
 
 /** Walking and running speeds (m/s); Shift runs. */
-export const WALK_SPEED = 2
-export const RUN_SPEED = 5.5
+export const WALK_SPEED = 1.8
+export const RUN_SPEED = 5
 
 /**
  * Each gait plays alone at this multiple of the speed it was recorded at: the
- * stride stays the performer's, the cadence picks up to a brisker, game pace.
+ * stride stays the performer's, the cadence picks up a little — any more and
+ * the legs look fast-forwarded.
  */
-const GAIT_PACE = 1.25
+const GAIT_PACE = 1.12
 
 /** Taking off faster than this (m/s) starts to blend in the running jump… */
 const RUNNING_JUMP_FROM = 1.2
