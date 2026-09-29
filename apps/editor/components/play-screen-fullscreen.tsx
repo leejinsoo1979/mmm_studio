@@ -7,11 +7,18 @@ import { useEffect, useRef } from 'react'
 const NEXT_KEYS = new Set(['ArrowRight', 'ArrowDown', 'PageDown', ' ', '.'])
 const PREVIOUS_KEYS = new Set(['ArrowLeft', 'ArrowUp', 'PageUp', ','])
 
-/** Takes the browser full screen; false when it refuses (no gesture, an iframe). */
+/**
+ * Takes the browser full screen, unless it already is or refuses (no
+ * gesture, an iframe): the view then fills the window instead.
+ */
 export function enterFullscreen() {
   if (document.pointerLockElement) document.exitPointerLock()
   if (document.fullscreenElement || !document.documentElement.requestFullscreen) return
   void document.documentElement.requestFullscreen().catch(() => {})
+}
+
+function exitOwnFullscreen(took: boolean) {
+  if (took && document.fullscreenElement) void document.exitFullscreen().catch(() => {})
 }
 
 /**
@@ -29,16 +36,18 @@ export function ScreenFullscreen({
   content: Exclude<ScreenContent, { kind: 'idle' }>
   onClose: () => void
 }) {
-  const wasFullscreen = useRef(false)
+  // Whether this view took the browser full screen: one the page already had
+  // (chosen from the command palette) is left as it was.
+  const tookFullscreen = useRef(false)
 
   useEffect(() => {
     const close = () => {
-      if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+      exitOwnFullscreen(tookFullscreen.current)
       onClose()
     }
     const onFullscreenChange = () => {
-      if (document.fullscreenElement) wasFullscreen.current = true
-      else if (wasFullscreen.current) onClose()
+      if (document.fullscreenElement) tookFullscreen.current = true
+      else onClose()
     }
     const onKey = (event: KeyboardEvent) => {
       // Before the walkthrough's own keys (Esc would leave the game, arrows walk).
@@ -63,17 +72,10 @@ export function ScreenFullscreen({
   }, [onClose, screenId])
 
   // Closed from elsewhere (the screen switched off, the game left): leave full screen too.
-  useEffect(
-    () => () => {
-      if (wasFullscreen.current && document.fullscreenElement) {
-        void document.exitFullscreen().catch(() => {})
-      }
-    },
-    [],
-  )
+  useEffect(() => () => exitOwnFullscreen(tookFullscreen.current), [])
 
   const close = () => {
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+    exitOwnFullscreen(tookFullscreen.current)
     onClose()
   }
 

@@ -67,22 +67,64 @@ function videoTexture(video: HTMLVideoElement) {
   return texture
 }
 
-const pageImages = new Map<string, HTMLImageElement | 'loading'>()
-/** A slide's image; null until it has loaded. */
+/**
+ * Slide pages kept at once (decoded, and on the GPU) for each kind of
+ * picture: the ones on screen and a few recent. A deck can run to 80 pages,
+ * and a photo to tens of megabytes.
+ */
+const KEPT_PAGES = 8
+/** Longest side a projected page is drawn at: sharp on a wall, well within GPU texture limits. */
+const PAGE_LONGEST = 2048
+
+/** A cache that keeps its most recent uses, handing what drops out to `drop`. */
+function recentCache<T>(limit: number, drop: (value: T) => void = () => {}) {
+  const entries = new Map<string, T>()
+  return {
+    get(key: string) {
+      const value = entries.get(key)
+      if (value !== undefined) {
+        entries.delete(key)
+        entries.set(key, value)
+      }
+      return value
+    },
+    set(key: string, value: T) {
+      entries.delete(key)
+      entries.set(key, value)
+      for (const [oldKey, oldValue] of entries) {
+        if (entries.size <= limit) break
+        entries.delete(oldKey)
+        drop(oldValue)
+      }
+    },
+    delete(key: string) {
+      const value = entries.get(key)
+      entries.delete(key)
+      if (value !== undefined) drop(value)
+    },
+  }
+}
+
+const disposeTexture = (texture: Texture) => texture.dispose()
+
+// A page that can't be decoded (say a HEIC photo) is remembered as failed,
+// not fetched again every frame.
+const pageImages = recentCache<HTMLImageElement | 'loading' | 'failed'>(KEPT_PAGES * 2)
+/** A slide's image; null until it has loaded, or if it can't be. */
 function pageImage(url: string): HTMLImageElement | null {
   const known = pageImages.get(url)
-  if (known === 'loading') return null
+  if (known === 'loading' || known === 'failed') return null
   if (known) return known
   pageImages.set(url, 'loading')
   const image = new Image()
   image.crossOrigin = 'anonymous'
   image.onload = () => pageImages.set(url, image)
-  image.onerror = () => pageImages.delete(url)
+  image.onerror = () => pageImages.set(url, 'failed')
   image.src = url
   return null
 }
 
-const panelPages = new Map<string, CanvasTexture>()
+const panelPages = recentCache<CanvasTexture>(KEPT_PAGES, disposeTexture)
 /** A slide fitted onto a TV panel; null until its image has loaded. */
 function panelPageTexture(url: string): CanvasTexture | null {
   const known = panelPages.get(url)
@@ -102,14 +144,19 @@ function panelPageTexture(url: string): CanvasTexture | null {
   return texture
 }
 
-const pageTextures = new Map<string, Texture>()
-/** A slide at its own proportions; null until its image has loaded. */
-function pageTexture(url: string): Texture | null {
+const pageTextures = recentCache<CanvasTexture>(KEPT_PAGES, disposeTexture)
+/** A slide at its own proportions (at most PAGE_LONGEST across); null until its image has loaded. */
+function pageTexture(url: string): CanvasTexture | null {
   const known = pageTextures.get(url)
   if (known) return known
   const image = pageImage(url)
   if (!image) return null
-  const texture = screenTexture(new CanvasTexture(image))
+  const fit = Math.min(1, PAGE_LONGEST / Math.max(image.width, image.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(image.width * fit))
+  canvas.height = Math.max(1, Math.round(image.height * fit))
+  canvas.getContext('2d')!.drawImage(image, 0, 0, canvas.width, canvas.height)
+  const texture = screenTexture(new CanvasTexture(canvas))
   pageTextures.set(url, texture)
   return texture
 }
@@ -121,11 +168,9 @@ export function releaseVideoTexture(video: HTMLVideoElement) {
 }
 
 /** Frees the pictures made for slide pages no screen shows any more. */
-export function releasePageTextures(urls: readonly string[]) {
+export function releasePageTextures(urls: Iterable<string>) {
   for (const url of urls) {
-    panelPages.get(url)?.dispose()
     panelPages.delete(url)
-    pageTextures.get(url)?.dispose()
     pageTextures.delete(url)
     pageImages.delete(url)
   }

@@ -15,13 +15,15 @@ import type { WorldEntries, WorldValue } from './world-sync'
  * What a TV (or the projector) shows, shared: another player can't receive a
  * local video or a screen capture, only that one is playing; slides travel as
  * a shared deck (`deck` is null while its pages are still being shared). `p`
- * is where its picture is projected: position, quaternion, width.
+ * is where its picture is projected (position, quaternion, width), null when
+ * it isn't — always written, since the store merges maps key by key and a
+ * left-out `p` would keep the old one.
  */
 export type SharedScreen = (
   | { k: 'idle' }
   | { k: 'video'; label: string }
   | { k: 'slides'; deck: string | null; count: number; index: number; label: string }
-) & { p?: number[] }
+) & { p: number[] | null }
 
 /** A projection as 8 numbers: millimetre positions and 4-decimal turns keep readings stable. */
 function sharedProjection({ position, quaternion, width }: ScreenProjection): number[] {
@@ -89,6 +91,7 @@ export function readWorld(): WorldEntries {
   }
   for (const [id, screen] of Object.entries(useItemScreens.getState().screens)) {
     const content = screen.content
+    const p = screen.projection ? sharedProjection(screen.projection) : null
     const shared: SharedScreen =
       content.kind === 'slides'
         ? {
@@ -97,11 +100,11 @@ export function readWorld(): WorldEntries {
             count: content.pages.length,
             index: content.index,
             label: content.label,
+            p,
           }
         : content.kind === 'video'
-          ? { k: 'video', label: content.label }
-          : { k: 'idle' }
-    if (screen.projection) shared.p = sharedProjection(screen.projection)
+          ? { k: 'video', label: content.label, p }
+          : { k: 'idle', p }
     entries[`screen:${id}`] = shared
   }
   return entries

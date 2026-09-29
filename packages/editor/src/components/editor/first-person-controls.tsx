@@ -865,14 +865,18 @@ export const FirstPersonControls = () => {
     }, [camera])
 
   const resolveInteractableTarget = useCallback((): FirstPersonInteractableTarget | null => {
-    const elevatorTarget = resolveInteractableElevatorTarget()
-    if (elevatorTarget) return elevatorTarget
-
     // Cabinets, lamps, switches, TVs — whatever node kinds registered.
     registeredInteractionRaycaster.setFromCamera(centerScreenPoint, camera)
     aimFromWalkerEye(registeredInteractionRaycaster)
     registeredInteractionRaycaster.far = DOOR_INTERACTION_DISTANCE
     const registered = resolveWalkthroughTarget(registeredInteractionRaycaster)
+    // One at distance 0 has taken E over (a projection being aimed): not even
+    // an elevator button in the aim comes first.
+    if (registered?.distance === 0) return { ...registered, type: 'registered' }
+
+    const elevatorTarget = resolveInteractableElevatorTarget()
+    if (elevatorTarget) return elevatorTarget
+
     if (registered) return { ...registered, type: 'registered' }
 
     const doorId = resolveInteractableDoorId()

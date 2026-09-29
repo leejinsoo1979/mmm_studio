@@ -72,8 +72,9 @@ export const useItemScreens = create<{
     const screens = { ...get().screens }
     if (on) screens[id] = screens[id] ?? { content: { kind: 'idle' } }
     else {
-      releaseContent(screens[id]?.content)
+      const content = screens[id]?.content
       delete screens[id]
+      releaseContent(content, screens)
     }
     const { activeId, placing } = get()
     set({
@@ -84,8 +85,9 @@ export const useItemScreens = create<{
   },
   setContent: (id, content) => {
     const current = get().screens[id]
-    if (current?.content !== content) releaseContent(current?.content)
-    set({ screens: { ...get().screens, [id]: { ...current, content } }, activeId: id })
+    const screens = { ...get().screens, [id]: { ...current, content } }
+    if (current?.content !== content) releaseContent(current?.content, screens)
+    set({ screens, activeId: id })
   },
   step: (id, by) => {
     const content = get().screens[id]?.content
@@ -127,11 +129,21 @@ export const useItemScreens = create<{
   cancelPlacing: () => set({ placing: null }),
 }))
 
-/** Stops a video (and a shared screen's capture), or frees slides, that nothing shows any more. */
-function releaseContent(content: ScreenContent | undefined) {
+/**
+ * Stops a video (and a shared screen's capture), or frees slides, that a
+ * screen no longer shows. Pages another of the `remaining` screens still
+ * shows (two screens can get the same shared deck) are kept.
+ */
+function releaseContent(content: ScreenContent | undefined, remaining: Record<string, ItemScreen>) {
   if (content?.kind === 'slides') {
-    releasePageTextures(content.pages)
-    for (const page of content.pages) if (page.startsWith('blob:')) URL.revokeObjectURL(page)
+    const shown = new Set(
+      Object.values(remaining).flatMap((screen) =>
+        screen.content.kind === 'slides' ? screen.content.pages : [],
+      ),
+    )
+    const unused = content.pages.filter((page) => !shown.has(page))
+    releasePageTextures(unused)
+    for (const page of unused) if (page.startsWith('blob:')) URL.revokeObjectURL(page)
     return
   }
   if (content?.kind !== 'video') return

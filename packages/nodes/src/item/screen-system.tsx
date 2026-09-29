@@ -79,12 +79,13 @@ export function ItemScreenSystem() {
       let material = materials.current.get(id)
       if (!material) {
         material = new MeshBasicNodeMaterial({ fog: false })
-        material.color.setScalar(SCREEN_GAIN)
         materials.current.set(id, material)
       }
+      // A freed picture is never left on: while the next page loads the panel is dark.
       const texture = panelTexture(screen.content)
-      if (texture && material.map !== texture) {
+      if (material.map !== texture) {
         material.map = texture
+        material.color.setScalar(texture ? SCREEN_GAIN : 0)
         material.needsUpdate = true
       }
       for (const mesh of screenMeshes(object)) showOnScreen(mesh, material)
