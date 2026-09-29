@@ -130,6 +130,68 @@ describe('createWallOnCurrentLevel', () => {
     expect(createWallOnCurrentLevel([0, 0], [4, 0])).toBeNull()
     expect(levelWalls()).toHaveLength(1)
   })
+
+  test('a wall drawn across another splits both at the crossing (+ is four walls)', () => {
+    useScene.temporal.getState().clear()
+    const created = createWallOnCurrentLevel([2, 2], [2, -2])
+
+    expect(created?.start).toEqual([2, 0])
+    expect(created?.end).toEqual([2, -2])
+    expect(useScene.getState().nodes['wall_a' as AnyNodeId]).toBeUndefined()
+    const ends = levelWalls()
+      .map((wall) =>
+        [wall.start, wall.end]
+          .map((p) => p.join(','))
+          .sort()
+          .join(' '),
+      )
+      .sort()
+    expect(ends).toEqual(['0,0 2,0', '2,-2 2,0', '2,0 2,2', '2,0 4,0'])
+    expect(useScene.temporal.getState().pastStates).toHaveLength(1)
+  })
+
+  test('a wall crossing several walls is cut at each crossing, in order', () => {
+    seedLevel([makeWall([0, 0], [4, 0], 'wall_a'), makeWall([0, 1], [4, 1], 'wall_b')])
+    const created = createWallOnCurrentLevel([1, -1], [1, 2])
+
+    expect(created?.start).toEqual([1, 1])
+    expect(created?.end).toEqual([1, 2])
+    expect(levelWalls()).toHaveLength(7)
+  })
+
+  test('a room drawn across a wall splits it where its walls cross', () => {
+    const created = createWallSegmentsOnCurrentLevel([
+      [
+        [1, -1],
+        [3, -1],
+      ],
+      [
+        [3, -1],
+        [3, 1],
+      ],
+      [
+        [3, 1],
+        [1, 1],
+      ],
+      [
+        [1, 1],
+        [1, -1],
+      ],
+    ])
+
+    expect(useScene.getState().nodes['wall_a' as AnyNodeId]).toBeUndefined()
+    expect(created).toHaveLength(6)
+    expect(levelWalls()).toHaveLength(9)
+  })
+
+  test("passing another wall's end cuts the new wall there without splitting the other", () => {
+    const created = createWallOnCurrentLevel([4, 2], [4, -2])
+
+    expect(created?.start).toEqual([4, 0])
+    expect(created?.end).toEqual([4, -2])
+    expect(useScene.getState().nodes['wall_a' as AnyNodeId]).toBeDefined()
+    expect(levelWalls()).toHaveLength(3)
+  })
 })
 
 describe('snapWallDraftPointDetailed', () => {

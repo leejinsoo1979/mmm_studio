@@ -408,6 +408,54 @@ function planWallSplit(
 }
 
 /**
+ * Where `start → end` crosses straight walls away from both segments' ends,
+ * splits each crossed wall there and returns the crossing points ordered from
+ * `start`. A `+` is then four walls meeting at a point, so removing one arm
+ * leaves a T instead of the whole crossing wall.
+ */
+function planCrossingSplits(
+  start: WallPlanPoint,
+  end: WallPlanPoint,
+  changes: WallCommitChanges,
+  include: (wall: WallNode) => boolean = isStraightWall,
+): WallPlanPoint[] {
+  const rx = end[0] - start[0]
+  const rz = end[1] - start[1]
+  const length = Math.hypot(rx, rz)
+  const eps = WALL_SPLIT_ENDPOINT_EPSILON
+  const crossings: { t: number; wallId: WallNode['id'] | null; point: WallPlanPoint }[] = []
+  for (const wall of changes.walls) {
+    if (!(isStraightWall(wall) && include(wall))) continue
+    const sx = wall.end[0] - wall.start[0]
+    const sz = wall.end[1] - wall.start[1]
+    const denominator = rx * sz - rz * sx
+    if (Math.abs(denominator) < 1e-9) continue
+    const qx = wall.start[0] - start[0]
+    const qz = wall.start[1] - start[1]
+    const t = (qx * sz - qz * sx) / denominator
+    const u = (qx * rz - qz * rx) / denominator
+    if (!(t * length > eps && (1 - t) * length > eps)) continue
+    const along = u * Math.hypot(sx, sz)
+    const hostLength = Math.hypot(sx, sz)
+    if (along > eps && hostLength - along > eps) {
+      crossings.push({ t, wallId: wall.id, point: [start[0] + rx * t, start[1] + rz * t] })
+    } else if (Math.abs(along) <= eps || Math.abs(hostLength - along) <= eps) {
+      // Passing another wall's end: the new wall is cut there so it joins it.
+      const corner = Math.abs(along) <= eps ? wall.start : wall.end
+      crossings.push({ t, wallId: null, point: [corner[0], corner[1]] })
+    }
+  }
+  crossings.sort((a, b) => a.t - b.t)
+  const stops: WallPlanPoint[] = []
+  for (const { wallId, point } of crossings) {
+    const stop = planWallSplit({ wallId, point }, changes) ?? point
+    const previous = stops[stops.length - 1]
+    if (!(previous && pointsEqual(previous, stop, eps))) stops.push(stop)
+  }
+  return stops
+}
+
+/**
  * mmmcraft 벽 분절: split a straight wall in two at its midpoint, carrying its
  * doors / windows onto the half they sit on, as one undo step. Returns false
  * (and changes nothing) for a curved wall or when an opening spans the
@@ -690,23 +738,38 @@ export function createWallOnCurrentLevel(
     return null
   }
 
+  const isCurved = (options?.props?.curveOffset ?? 0) !== 0
+  const crossings =
+    options?.preserveExactEndpoints || isCurved
+      ? []
+      : planCrossingSplits(resolvedStart, resolvedEnd, changes)
+  const stops = [resolvedStart, ...crossings, resolvedEnd]
+
   const wallCount = Object.values(nodes).filter((node) => node.type === 'wall').length
   // A placed wall preset seeds `toolDefaults.wall` (thickness, height,
   // materials, sides) before the tool activates; merge those first so the
   // drawn wall reproduces the preset. Identity + endpoints always win.
   const defaults = useEditor.getState().toolDefaults.wall ?? {}
-  const wall = WallSchema.parse({
-    ...defaults,
-    ...options?.props,
-    name: `Wall ${wallCount + 1}`,
-    start: resolvedStart,
-    end: resolvedEnd,
-  })
+  let wall: WallNode | null = null
+  for (let index = 1; index < stops.length; index++) {
+    const pieceStart = stops[index - 1]!
+    const pieceEnd = stops[index]!
+    if (!isSegmentLongEnough(pieceStart, pieceEnd)) continue
+    wall = WallSchema.parse({
+      ...defaults,
+      ...options?.props,
+      name: `Wall ${wallCount + index}`,
+      start: pieceStart,
+      end: pieceEnd,
+    })
+    changes.create.push({ node: wall, parentId: currentLevelId as AnyNodeId })
+  }
+  if (!wall) return null
 
-  changes.create.push({ node: wall, parentId: currentLevelId as AnyNodeId })
   applyNodeChanges({ create: changes.create, update: changes.update, delete: changes.delete })
   sfxEmitter.emit('sfx:structure-build')
 
+  // The last piece ends where the draft did, so a chain continues from it.
   return wall
 }
 
@@ -875,16 +938,20 @@ export function createWallSegmentsOnCurrentLevel(
     const end = join(segment[1])
     if (!isSegmentLongEnough(start, end)) continue
     for (const [from, to] of uncoveredStretches(start, end, changes.walls)) {
-      wallCount += 1
-      const wall = WallSchema.parse({
-        ...defaults,
-        name: `Wall ${wallCount}`,
-        start: from,
-        end: to,
-      })
-      walls.push(wall)
-      changes.create.push({ node: wall, parentId: levelId as AnyNodeId })
-      changes.walls = [...changes.walls, wall]
+      const stops = [from, ...planCrossingSplits(from, to, changes, joinable), to]
+      for (let index = 1; index < stops.length; index++) {
+        if (!isSegmentLongEnough(stops[index - 1]!, stops[index]!)) continue
+        wallCount += 1
+        const wall = WallSchema.parse({
+          ...defaults,
+          name: `Wall ${wallCount}`,
+          start: stops[index - 1],
+          end: stops[index],
+        })
+        walls.push(wall)
+        changes.create.push({ node: wall, parentId: levelId as AnyNodeId })
+        changes.walls = [...changes.walls, wall]
+      }
     }
   }
   if (walls.length === 0) return []
