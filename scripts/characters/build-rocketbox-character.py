@@ -7,6 +7,10 @@ built once per gender and shared, and each avatar ships only its body:
       Locomotion, crouch and jump clips baked onto a reference avatar's
       skeleton (no mesh). Clip lengths and root-motion distances go to
       meta.json, which feeds locomotion.ts.
+  emotes  <avatar.fbx> <m|f> <anims_dir> <out.glb> <meta.json>
+      The gestures, dances and idles a player plays on a key (EMOTES), baked
+      onto the reference avatar's skeleton like the anims (no mesh). Clip
+      lengths go to meta.json, which feeds emotes.ts.
   avatar  <avatar.fbx> <textures_dir> <out.glb> <meta.json>
       One avatar's skinned mesh and materials, no clips. Its hip height goes
       to meta.json (clips from another body are scaled to it).
@@ -15,6 +19,7 @@ Sources (MIT, https://github.com/microsoft/Microsoft-Rocketbox):
   Assets/Avatars/<group>/<Name>/Export/<Name>.fbx and its Textures/*.tga
   Assets/Animations/all_animations_max_motextr_*/<m|f>_{idle_neutral_01,walk_neutral_01,
     walk_fast_01,run_neutral_01,run_fast_01,crouch_in,crouch_idle,crouch_out}.max.fbx
+  Assets/Animations/all_animations_max_motextr_static/<m|f>_<EMOTES stem>.max.fbx
 (save them as <m|f>_idle_neutral_01.fbx etc. in one folder)
 The jumps are CMU motion capture (http://mocap.cs.cmu.edu, free for any use) in
 Bruce Hahne's BVH conversion (data/<subject>/<trial>.bvh of
@@ -39,11 +44,13 @@ from PIL import Image
 mode, *args = sys.argv[sys.argv.index('--') + 1:]
 if mode == 'anims':
     avatar_fbx, gender, anims_dir, cmu_dir, out_glb, meta_json = args
+elif mode == 'emotes':
+    avatar_fbx, gender, anims_dir, out_glb, meta_json = args
 elif mode == 'avatar':
     avatar_fbx, tex_dir, out_glb, meta_json = args
     gender = ''
 else:
-    raise SystemExit(f'unknown mode {mode!r}: anims or avatar')
+    raise SystemExit(f'unknown mode {mode!r}: anims, emotes or avatar')
 work = os.path.join(os.path.dirname(out_glb), '_tex_' + os.path.splitext(os.path.basename(out_glb))[0])
 os.makedirs(work, exist_ok=True)
 
@@ -57,6 +64,35 @@ CLIPS = {
     'crouchIdle': f'{gender}_crouch_idle',
     'crouchOut': f'{gender}_crouch_out',
 }
+# Played on the spot (motion extraction static), by the emote ids of emotes.ts.
+EMOTES = {
+    'wave': 'wave_01',
+    'waveBig': 'wave_02',
+    'clap': 'claphands_01',
+    'cheer': 'cheer_01',
+    'hooray': 'cheer_03',
+    'danceCool': 'dancing_cool',
+    'danceGroove': 'dancing_neutral',
+    'danceSilly': 'dancing_silly',
+    'danceHard': 'dancing_aggressive',
+    'laugh': 'gestic_laugh_loud',
+    'shrug': 'gestic_shrug_01',
+    'think': 'gestic_thoughtful_01',
+    'present': 'gestic_presentation_right_01',
+    'nod': 'gestic_listen_accept_01',
+    'headShake': 'gestic_listen_deny_01',
+    'talk': 'gestic_talk_excited_01',
+    'angry': 'gestic_listen_angry_01',
+    'sad': 'gestic_listen_sad_01',
+    'stretch': 'idle_stretch_arms_01',
+    'yawn': 'idle_yawn_01',
+    'lookAround': 'idle_look_around_01',
+    'scratchHead': 'idle_scratch_head_01',
+    'photo': 'take_picture',
+    'knock': 'knock_door',
+    'drink': 'drink_drinking',
+}
+EMOTES = {emote: f'{gender}_{stem}' for emote, stem in EMOTES.items()}
 # The face is seen up close in third person: it keeps the source's full 2K.
 TEX_SIZE = {'head': 2048, 'body': 1024, 'opacity': 1024}
 
@@ -97,11 +133,11 @@ if arm.animation_data:
     arm.animation_data_clear()
 arm.animation_data_create()
 
-def bake_clips():
+def bake_clips(clips):
     """Bakes the Rocketbox clips onto the avatar's skeleton, one NLA track each."""
     meta['clips'] = {}
     bpy.context.view_layer.objects.active = arm
-    for clip, stem in CLIPS.items():
+    for clip, stem in clips.items():
         before_objs = set(bpy.data.objects)
         before_acts = set(bpy.data.actions)
         bpy.ops.import_scene.fbx(filepath=os.path.join(anims_dir, stem + '.fbx'))
@@ -450,9 +486,10 @@ def dress():
 
 
 meta = {}
-if mode == 'anims':
-    bake_clips()
-    bake_jumps()
+if mode in ('anims', 'emotes'):
+    bake_clips(CLIPS if mode == 'anims' else EMOTES)
+    if mode == 'anims':
+        bake_jumps()
     # The clips drive any Rocketbox body by bone name: ship the skeleton only.
     bpy.data.objects.remove(mesh, do_unlink=True)
 else:
@@ -465,7 +502,7 @@ else:
 bpy.ops.export_scene.gltf(
     filepath=out_glb,
     export_format='GLB',
-    export_animations=mode == 'anims',
+    export_animations=mode != 'avatar',
     export_animation_mode='NLA_TRACKS',
     export_anim_single_armature=True,
     export_force_sampling=True,

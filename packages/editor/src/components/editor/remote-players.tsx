@@ -4,7 +4,11 @@ import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { type AnimationAction, AnimationMixer, type Group } from 'three'
+import type { AvatarLook } from '../../store/use-avatar-profile'
+import { useAvatarLook } from './first-person/avatar-look'
 import { useAvatarBody } from './first-person/avatar-rig'
+import { EmoteLayer, useEmoteClips } from './first-person/emote-player'
+import type { EmoteCue } from './first-person/emotes'
 import { advanceGaitPhase, GAITS, type Gait, locomotionWeights } from './first-person/locomotion'
 import {
   lerpAngle,
@@ -21,13 +25,14 @@ const BUBBLE_TIME = 6000
 const SPEED_RESPONSE = 6
 const TURN_RESPONSE = 10
 
-type Player = { id: string; name: string; avatar: string }
+type Player = { id: string; name: string; avatar: string; look: AvatarLook | null }
 type Bubble = { text: string; until: number }
 
 /**
- * Everyone else in the live session, as the Rocketbox body each picked:
- * walking where they walk (drawn a moment behind their reports, which come
- * about once a second), with their name, and their chat lines as bubbles.
+ * Everyone else in the live session, as the Rocketbox body each picked in
+ * the look they gave it: walking where they walk (drawn a moment behind
+ * their reports, which come about once a second), playing their emotes,
+ * with their name, and their chat lines as bubbles.
  *
  * The app feeds it through window events: `mmm-presence-update` with every
  * other player's `RemotePresence`, and `mmm-chat-bubble` with `{ userId, text }`.
@@ -36,6 +41,7 @@ export function RemotePlayers() {
   const [players, setPlayers] = useState<Player[]>([])
   const [bubbles, setBubbles] = useState<Record<string, Bubble>>({})
   const samplesRef = useRef(new Map<string, PresenceSample[]>())
+  const cuesRef = useRef(new Map<string, EmoteCue | null>())
 
   useEffect(() => {
     const update = (event: Event) => {
@@ -47,9 +53,11 @@ export function RemotePlayers() {
         const buffer = samples.get(presence.id) ?? []
         pushPresenceSample(buffer, { time: now, position: presence.position, yaw: presence.yaw })
         samples.set(presence.id, buffer)
+        cuesRef.current.set(presence.id, presence.emote ?? null)
       }
       const present = new Set(next.map((presence) => presence.id))
       for (const id of samples.keys()) if (!present.has(id)) samples.delete(id)
+      for (const id of cuesRef.current.keys()) if (!present.has(id)) cuesRef.current.delete(id)
       setPlayers((current) => {
         const changed =
           current.length !== next.length ||
@@ -57,9 +65,12 @@ export function RemotePlayers() {
             (presence, i) =>
               current[i]?.id !== presence.id ||
               current[i]?.name !== presence.name ||
-              current[i]?.avatar !== presence.avatar,
+              current[i]?.avatar !== presence.avatar ||
+              current[i]?.look !== (presence.look ?? null),
           )
-        return changed ? next.map(({ id, name, avatar }) => ({ id, name, avatar })) : current
+        return changed
+          ? next.map(({ id, name, avatar, look }) => ({ id, name, avatar, look: look ?? null }))
+          : current
       })
     }
     const say = (event: Event) => {
@@ -97,6 +108,7 @@ export function RemotePlayers() {
         <Suspense fallback={null} key={player.id}>
           <RemotePlayer
             bubble={bubbles[player.id]?.text}
+            cues={cuesRef.current}
             player={player}
             samples={samplesRef.current}
           />
@@ -111,13 +123,18 @@ type Actions = { mixer: AnimationMixer } & Record<'idle' | Gait, AnimationAction
 function RemotePlayer({
   player,
   samples,
+  cues,
   bubble,
 }: {
   player: Player
   samples: Map<string, PresenceSample[]>
+  cues: Map<string, EmoteCue | null>
   bubble?: string
 }) {
   const { avatar, model, clips, gaitSet } = useAvatarBody(player.avatar)
+  useAvatarLook(model, player.look)
+  const [emoted, setEmoted] = useState(false)
+  const emoteClips = useEmoteClips(avatar, emoted)
   const rootRef = useRef<Group>(null)
   const motionRef = useRef({ x: Number.NaN, z: 0, speed: 0, phase: 0, yaw: 0 })
 
@@ -131,6 +148,9 @@ function RemotePlayer({
     }
     return found as Actions
   }, [clips, model])
+
+  const emotes = useMemo(() => (actions ? new EmoteLayer(actions.mixer) : null), [actions])
+  useEffect(() => emotes?.setClips(emoteClips), [emotes, emoteClips])
 
   useEffect(() => {
     if (!actions) return
@@ -171,11 +191,16 @@ function RemotePlayer({
     root.position.set(x, y, z)
     root.rotation.y = motion.yaw
 
+    // Their emote, over the gait; walking off ends it here too.
+    const cue = cues.get(player.id) ?? null
+    if (cue && !emoted) setEmoted(true)
+    const rest = 1 - (emotes ? emotes.update(cue, motion.speed > 0.5, delta) : 0)
+
     const weights = locomotionWeights(motion.speed, gaitSet)
     motion.phase = advanceGaitPhase(motion.phase, stepped / delta, delta, weights.loopDistance)
-    actions.idle.setEffectiveWeight(weights.idle)
+    actions.idle.setEffectiveWeight(rest * weights.idle)
     for (const gait of GAITS) {
-      actions[gait].setEffectiveWeight(weights[gait])
+      actions[gait].setEffectiveWeight(rest * weights[gait])
       actions[gait].time = motion.phase * actions[gait].getClip().duration
     }
     actions.mixer.update(delta)

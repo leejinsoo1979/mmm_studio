@@ -10,6 +10,7 @@ import {
   Moon,
   Projector,
   Snowflake,
+  Sparkles,
   Sun,
   SunMedium,
   UserPlus,
@@ -17,6 +18,7 @@ import {
 import { useState } from 'react'
 import { formatClock, setClock, useClock } from '@/lib/time-of-day'
 import { cn } from '@/lib/utils'
+import { useCharacterStudio } from './character-studio/use-character-studio'
 
 const WEATHER_OPTIONS: { id: Weather; label: string; icon: typeof Sun }[] = [
   { id: 'clear', label: '맑음', icon: Sun },
@@ -120,6 +122,18 @@ export function PlayGameHud() {
         type="button"
       >
         <Projector className="size-4" />빔 프로젝터
+      </button>
+
+      <button
+        className="flex items-center justify-center gap-2 rounded-xl border border-white/10 py-2 text-sm text-white/85 transition hover:bg-white/10"
+        onClick={(event) => {
+          event.currentTarget.blur()
+          useCharacterStudio.getState().show()
+        }}
+        type="button"
+      >
+        <Sparkles className="size-4" />
+        캐릭터 꾸미기
       </button>
 
       <button

@@ -14,7 +14,7 @@ const HIP_TRACK = 'Bip01_Pelvis.position'
  * offsets are the body's own (the clips' would impose the reference body's
  * proportions), except the hips' motion, scaled to this body's size.
  */
-function fitClips(clips: AnimationClip[], scale: number): AnimationClip[] {
+export function fitClips(clips: AnimationClip[], scale: number): AnimationClip[] {
   return clips.map((clip) => {
     const tracks = clip.tracks
       .filter((track) => track.name.endsWith('.quaternion') || track.name === HIP_TRACK)

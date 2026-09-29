@@ -3,6 +3,8 @@
 import { Editor, type SceneGraph, useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useState } from 'react'
+import { CharacterStudio } from './character-studio/character-studio'
+import { PlayEmoteBar } from './play-emote-bar'
 import { PlayGameHud } from './play-game-hud'
 import { PlayGameLobby } from './play-game-lobby'
 import { PlayTvRemote } from './play-tv-remote'
@@ -65,6 +67,8 @@ export function PlaySceneLoader({
       <PlayGameLobby title={title} />
       <PlayGameHud />
       <PlayTvRemote />
+      <PlayEmoteBar />
+      <CharacterStudio />
       <RuntimeCollaboration
         chatEnabled={scene.experience?.multiplayer.chat ?? true}
         enabled={scene.experience?.multiplayer.enabled ?? true}

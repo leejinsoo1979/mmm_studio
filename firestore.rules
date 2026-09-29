@@ -37,6 +37,14 @@ service cloud.firestore {
         allow update, delete: if false;
       }
 
+      // A player's face photo for their character, fetched by the others.
+      match /faces/{userId} {
+        allow read: if canJoin(sessionId);
+        allow write: if canJoin(sessionId) && request.auth.uid == userId &&
+          request.resource.data.photo is string &&
+          request.resource.data.photo.size() <= 400000;
+      }
+
       match /state/{stateId} {
         allow read: if canJoin(sessionId);
         allow write: if canJoin(sessionId);

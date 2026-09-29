@@ -8,9 +8,10 @@ import {
   useEditor,
   useWalkthroughView,
 } from '@pascal-app/editor'
-import { Gamepad2, Orbit, Play } from 'lucide-react'
+import { Gamepad2, Orbit, Play, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { flushSync } from 'react-dom'
+import { useCharacterStudio } from './character-studio/use-character-studio'
 
 const CONTROLS: [string, string][] = [
   ['W A S D', '이동'],
@@ -19,6 +20,7 @@ const CONTROLS: [string, string][] = [
   ['C', '앉기'],
   ['V', '1인칭 / 3인칭'],
   ['E', '문 열기'],
+  ['1 ~ 9', '동작'],
   ['Enter', '채팅'],
   ['ESC', '나가기'],
 ]
@@ -76,10 +78,17 @@ export function PlayGameLobby({ title }: { title: string }) {
               className="h-20 w-12 object-contain"
               src={avatarThumbnailUrl(character.id)}
             />
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-[11px] text-white/45">내 캐릭터</p>
               <p className="font-semibold text-lg text-white">{avatarLabel(character.id)}</p>
             </div>
+            <button
+              className="flex shrink-0 items-center gap-1.5 rounded-xl bg-sky-500 px-3.5 py-2.5 font-semibold text-sm text-white shadow-[0_6px_18px_rgba(14,165,233,0.35)] transition hover:bg-sky-400"
+              onClick={() => useCharacterStudio.getState().show()}
+              type="button"
+            >
+              <Sparkles className="size-4" /> 나만의 캐릭터 만들기
+            </button>
           </div>
 
           <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">

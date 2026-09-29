@@ -14,11 +14,37 @@ export { default as Editor } from './components/editor'
 export { BakeExporter } from './components/editor/bake-exporter'
 // Walkthrough avatars and the live-session presence the app relays between players.
 export {
+  ALL_AVATARS,
+  AVATAR_TABS,
+  type AvatarTab,
   avatarLabel,
+  avatarTab,
   avatarThumbnailUrl,
   findAvatar,
 } from './components/editor/first-person/avatar-catalog'
+export {
+  type FaceLandmarks,
+  headLandmarks,
+  renderHeadFront,
+  useAvatarLook,
+} from './components/editor/first-person/avatar-look'
+export { useAvatarBody } from './components/editor/first-person/avatar-rig'
 export { CharacterGallery } from './components/editor/first-person/character-picker'
+export { EmoteLayer, useEmoteClips } from './components/editor/first-person/emote-player'
+export {
+  canBindKey,
+  DEFAULT_EMOTE_KEYS,
+  EMOTE_CATEGORIES,
+  EMOTE_IDS,
+  EMOTES,
+  type Emote,
+  type EmoteCategory,
+  type EmoteCue,
+  type EmoteId,
+  isEmoteId,
+  keyLabel,
+} from './components/editor/first-person/emotes'
+export { FACE_OVAL } from './components/editor/first-person/look-pixels'
 export type {
   LocalPresence,
   RemotePresence,
@@ -430,6 +456,14 @@ export {
 } from './lib/world-grid-snap'
 export { default as useAlignmentGuides } from './store/use-alignment-guides'
 export { default as useAudio } from './store/use-audio'
+export {
+  type AvatarFace,
+  type AvatarLook,
+  default as useAvatarProfile,
+  hasLook,
+  NO_LOOK,
+  useAvatarEmote,
+} from './store/use-avatar-profile'
 export { type CommandAction, useCommandRegistry } from './store/use-command-registry'
 export { default as useDraftReadout } from './store/use-draft-readout'
 export type {

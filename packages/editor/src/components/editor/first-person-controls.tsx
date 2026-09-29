@@ -69,6 +69,7 @@ import {
   isOperableWindowType,
   toggleWindowOpenState,
 } from '../../lib/window-interaction'
+import useAvatarProfile, { useAvatarEmote } from '../../store/use-avatar-profile'
 import useEditor from '../../store/use-editor'
 import useWalkthroughView, { THIRD_PERSON_DISTANCE } from '../../store/use-walkthrough-view'
 import {
@@ -1036,6 +1037,7 @@ export const FirstPersonControls = () => {
         position: [group.position.x, group.position.y - FEET_BELOW_CENTER, group.position.z],
         yaw: Math.atan2(presenceFacing.x, presenceFacing.z),
         avatar: useWalkthroughView.getState().character,
+        emote: useAvatarEmote.getState().emote,
       })
     }
     window.addEventListener('mmm-player-pose', capture)
@@ -1205,6 +1207,12 @@ export const FirstPersonControls = () => {
         event.preventDefault()
         event.stopPropagation()
         useWalkthroughView.getState().toggleCrouch()
+      } else if (!(event.repeat || event.metaKey || event.ctrlKey || event.altKey)) {
+        const emote = useAvatarProfile.getState().keys[event.code]
+        if (emote) {
+          event.preventDefault()
+          useAvatarEmote.getState().play(emote)
+        }
       }
     }
 

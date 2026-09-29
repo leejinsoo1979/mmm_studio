@@ -1,3 +1,6 @@
+import type { AvatarLook } from '../../../store/use-avatar-profile'
+import type { EmoteCue } from './emotes'
+
 /**
  * Other players' poses arrive about once a second. They are drawn a little in
  * the past, between the two reports around that moment, so they glide
@@ -9,11 +12,17 @@ export type PresencePose = { position: [number, number, number]; yaw: number }
 
 export type PresenceSample = PresencePose & { time: number }
 
-/** What this player reports: the pose and the body they picked. */
-export type LocalPresence = PresencePose & { avatar: string }
+/** What this player reports: the pose, the body they picked and the emote it plays. */
+export type LocalPresence = PresencePose & { avatar: string; emote: EmoteCue | null }
 
-/** What a remote player carries besides their pose. */
-export type RemotePresence = PresencePose & { id: string; name: string; avatar: string }
+/** What a remote player carries besides their pose: their body, its look and emote. */
+export type RemotePresence = PresencePose & {
+  id: string
+  name: string
+  avatar: string
+  look?: AvatarLook | null
+  emote?: EmoteCue | null
+}
 
 /** How far behind the latest report remote players are drawn (ms). */
 export const PRESENCE_DELAY = 1200

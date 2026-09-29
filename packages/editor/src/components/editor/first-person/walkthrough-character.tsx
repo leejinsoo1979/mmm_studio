@@ -4,8 +4,11 @@ import { characterStatus } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import { type AnimationAction, AnimationMixer, type Group, Vector3 } from 'three'
+import useAvatarProfile, { useAvatarEmote } from '../../../store/use-avatar-profile'
 import useWalkthroughView from '../../../store/use-walkthrough-view'
+import { useAvatarLook } from './avatar-look'
 import { useAvatarBody } from './avatar-rig'
+import { EmoteLayer, useEmoteClips } from './emote-player'
 import {
   advanceGaitPhase,
   airborneJumpTime,
@@ -92,7 +95,9 @@ const spanTime = (span: Span, progress: number) => span.from + (span.to - span.f
  * controller actually moves at — all sharing one gait phase driven by the
  * ground covered, so the feet stay planted at every speed. Motion-capture
  * jumps (on the spot, or out of a run) follow the controller's flight
- * (rising, top, falling, landing) and a crouch plays in place.
+ * (rising, top, falling, landing) and a crouch plays in place. The player's
+ * look (face photo, hair, skin) dresses it, and an emote plays over it until
+ * it ends or the player moves off.
  */
 export function WalkthroughCharacter({
   feetOffset,
@@ -101,9 +106,14 @@ export function WalkthroughCharacter({
   feetOffset: number
   visible: boolean
 }) {
-  const { motion, model, clips, gaitSet } = useAvatarBody(
+  const { avatar, motion, model, clips, gaitSet } = useAvatarBody(
     useWalkthroughView((state) => state.character),
   )
+  useAvatarLook(
+    model,
+    useAvatarProfile((state) => state.look),
+  )
+  const emoteClips = useEmoteClips(avatar, true)
   const rootRef = useRef<Group>(null)
   const lastPositionRef = useRef<Vector3 | null>(null)
   const leanRef = useRef({ vx: 0, vz: 0, curve: 0, speed: 0, acceleration: 0, roll: 0, pitch: 0 })
@@ -137,6 +147,9 @@ export function WalkthroughCharacter({
     }
     return found as Actions
   }, [clips, model])
+
+  const emotes = useMemo(() => (actions ? new EmoteLayer(actions.mixer) : null), [actions])
+  useEffect(() => emotes?.setClips(emoteClips), [emotes, emoteClips])
 
   // Started here rather than in the memo so a remount (StrictMode) restarts
   // the actions its cleanup stopped.
@@ -323,10 +336,22 @@ export function WalkthroughCharacter({
     const crouchTarget = crouch.phase === 'standing' ? 0 : 1
     crouch.weight = approach(crouch.weight, crouchTarget, crouchTarget ? 16 : 9, delta)
 
-    // Layers: a jump overrides everything, a crouch overrides the gait.
-    const jumpWeight = jump.weight
-    const crouchWeight = (1 - jumpWeight) * crouch.weight
-    const gaitWeight = (1 - jumpWeight) * (1 - crouch.weight)
+    // An emote plays standing still: stepping off (as soon as a move is
+    // asked for), jumping or crouching ends it.
+    const cue = useAvatarEmote.getState().emote
+    const busy =
+      characterStatus.inputDir.lengthSq() > 0 ||
+      speed > CROUCH_BREAK_SPEED ||
+      jump.phase !== 'ground' ||
+      crouch.phase !== 'standing'
+    const emoteWeight = emotes ? emotes.update(cue, busy, delta) : 0
+    if (cue && (busy || emotes?.finished(cue))) useAvatarEmote.getState().stop()
+
+    // Layers: an emote overrides everything, then a jump, then a crouch over the gait.
+    const rest = 1 - emoteWeight
+    const jumpWeight = rest * jump.weight
+    const crouchWeight = (rest - jumpWeight) * crouch.weight
+    const gaitWeight = (rest - jumpWeight) * (1 - crouch.weight)
     actions.jump.setEffectiveWeight(jumpWeight * (1 - jump.running))
     actions.jumpRun.setEffectiveWeight(jumpWeight * jump.running)
     for (const clip of CROUCH_CLIPS) {

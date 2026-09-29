@@ -1,12 +1,13 @@
 'use client'
 
-import type { LocalPresence, RemotePresence } from '@pascal-app/editor'
-import { useEditor } from '@pascal-app/editor'
+import type { AvatarLook, LocalPresence, RemotePresence } from '@pascal-app/editor'
+import { useAvatarProfile, useEditor } from '@pascal-app/editor'
 import {
   addDoc,
   collection,
   deleteDoc,
   doc,
+  getDoc,
   limit,
   onSnapshot,
   orderBy,
@@ -17,6 +18,7 @@ import {
 import { Copy, MessageCircle, Send, Users, X } from 'lucide-react'
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { getFirebaseAuth, getFirebaseFirestore } from '@/lib/firebase-client'
+import { fromSharedLook, toSharedLook, wantedPhotoId } from '@/lib/shared-look'
 
 type RuntimeMessage = {
   id: string
@@ -87,9 +89,69 @@ export function RuntimeCollaboration({
           },
           { merge: true },
         )
+        publishLook(useAvatarProfile.getState().look)
       } catch {
         setStatus('이 링크에 참여할 권한이 없습니다.')
       }
+    }
+
+    // This player's look: the dyes and face placement with the participant,
+    // the face photo on its own (written first, so it's there when asked for).
+    let publishedLook = ''
+    let publishedPhoto = ''
+    const publishLook = (look: AvatarLook) => {
+      const shared = toSharedLook(look)
+      const key = JSON.stringify(shared)
+      if (key === publishedLook) return
+      publishedLook = key
+      const write = async () => {
+        if (look.face && shared.face && shared.face.photoId !== publishedPhoto) {
+          publishedPhoto = shared.face.photoId
+          await setDoc(doc(db, 'runtimeSessions', sceneId, 'faces', user.uid), {
+            photo: look.face.photo,
+            photoId: shared.face.photoId,
+          })
+        }
+        await setDoc(participantRef, { look: shared }, { merge: true })
+      }
+      void write().catch(() => {
+        publishedLook = ''
+        publishedPhoto = ''
+      })
+    }
+    const unsubscribeLook = useAvatarProfile.subscribe((state, previous) => {
+      if (state.look !== previous.look) publishLook(state.look)
+    })
+
+    // Everyone else's looks: each face photo fetched once per version, and
+    // each look kept as one object while it stays the same (the bodies
+    // re-dress only when it changes).
+    const photos = new Map<string, { id: string; photo: string | null }>()
+    const looks = new Map<string, { key: string; look: AvatarLook | null }>()
+    const lookOf = (userId: string, shared: unknown) => {
+      const wanted = wantedPhotoId(shared)
+      const known = photos.get(userId)
+      if (wanted && known?.id !== wanted) {
+        photos.set(userId, { id: wanted, photo: null })
+        void getDoc(doc(db, 'runtimeSessions', sceneId, 'faces', userId))
+          .then((face) => {
+            const data = face.data()
+            if (data?.photoId === wanted && typeof data.photo === 'string') {
+              photos.set(userId, { id: wanted, photo: data.photo })
+            } else {
+              // Not written yet: ask again with the next report.
+              photos.delete(userId)
+            }
+          })
+          .catch(() => photos.delete(userId))
+      }
+      const photo = wanted ? (photos.get(userId)?.photo ?? null) : null
+      const key = `${JSON.stringify(shared ?? null)}|${photo ? wanted : ''}`
+      const cached = looks.get(userId)
+      if (cached?.key === key) return cached.look
+      const look = fromSharedLook(shared, photo)
+      looks.set(userId, { key, look })
+      return look
     }
 
     void connect()
@@ -129,6 +191,8 @@ export function RuntimeCollaboration({
                         id: participant.id,
                         name: String(data.userName ?? 'Guest'),
                         avatar: String(pose.avatar ?? ''),
+                        look: lookOf(participant.id, data.look),
+                        emote: pose.emote ?? null,
                         position: pose.position,
                         yaw: Number(pose.yaw ?? 0),
                       },
@@ -178,6 +242,7 @@ export function RuntimeCollaboration({
     return () => {
       window.clearInterval(heartbeat)
       window.clearInterval(poseSync)
+      unsubscribeLook()
       unsubscribeParticipants()
       unsubscribeMessages()
       window.dispatchEvent(new CustomEvent('mmm-presence-update', { detail: [] }))
