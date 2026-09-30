@@ -27,9 +27,10 @@ export type HairStyleEntry = {
 /**
  * The bald skull every head shares (Rocketbox heads are one template per
  * sex), which hairstyles are carried over by: its points and their normals
- * (bind pose, m), each point's share of hair (0 on the face and ears, 1
- * where nearly every character's hair volume stands out of the skull), and
- * the face bones it is fitted to a character by.
+ * (bind pose, in its own units: see avatar-hair.ts), each point's share of
+ * hair (0 on the face and ears, 1 where nearly every character's hair
+ * volume stands out of the skull), and the face bones it is fitted to a
+ * character by.
  */
 export type SkullData = {
   bones: Record<string, [number, number, number]>

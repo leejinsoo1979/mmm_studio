@@ -19,7 +19,7 @@ import {
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { avatarUrl } from './avatar-catalog'
-import { headOf, type Shaper } from './avatar-shape'
+import { headOf, type PointMove, type Shaper } from './avatar-shape'
 import {
   BALD,
   type HairLibrary,
@@ -47,6 +47,11 @@ import {
  * through a bald skull every head shares: fitted to each character by its
  * face bones, it says where the donor's hair stood over its skull and how
  * far the wearer's own hair volume is to be taken in under it.
+ *
+ * Lengths are in the bind pose's own units, not metres: each Rocketbox
+ * body is scaled to about two of them from its feet to the top of its
+ * head, so one is about 0.9 m on an adult and 0.7 m on a child. The sizes
+ * below are an adult's; on a child they are a fifth smaller in metres.
  *
  * The pure geometry comes first (tested in avatar-hair.test.ts), then the
  * meshes built from it, then loading and the hook.
@@ -89,29 +94,41 @@ export class PointGrid {
 
   /**
    * The `k` points nearest (x, y, z), nearest first, into `found` (their
-   * indices) and `distances` (squared); returns how many there are.
+   * indices) and `distances` (squared); returns how many there are. The
+   * search stops once all that is left is further than `within` off, so
+   * there may be fewer (none where nothing is that near).
    */
-  nearest(x: number, y: number, z: number, k: number, found: number[], distances: number[]) {
+  nearest(
+    x: number,
+    y: number,
+    z: number,
+    k: number,
+    found: number[],
+    distances: number[],
+    within = Number.POSITIVE_INFINITY,
+  ) {
     let count = 0
     const cell = this.cell
     const points = this.points
-    const at = [Math.floor(x / cell), Math.floor(y / cell), Math.floor(z / cell)]
+    const cx = Math.floor(x / cell)
+    const cy = Math.floor(y / cell)
+    const cz = Math.floor(z / cell)
     // Past this ring of cells there is nothing left to search.
-    let last = 0
-    for (let axis = 0; axis < 3; axis++) {
-      last = Math.max(
-        last,
-        Math.abs(at[axis]! - this.low[axis]!),
-        Math.abs(at[axis]! - this.high[axis]!),
-      )
-    }
+    const last = Math.max(
+      Math.abs(cx - this.low[0]!),
+      Math.abs(cx - this.high[0]!),
+      Math.abs(cy - this.low[1]!),
+      Math.abs(cy - this.high[1]!),
+      Math.abs(cz - this.low[2]!),
+      Math.abs(cz - this.high[2]!),
+    )
     for (let ring = 0; ring <= last; ring++) {
       for (let dx = -ring; dx <= ring; dx++) {
         for (let dy = -ring; dy <= ring; dy++) {
           // Only the ring's shell: its inside was searched already.
           const step = Math.abs(dx) === ring || Math.abs(dy) === ring ? 1 : 2 * ring
           for (let dz = -ring; dz <= ring; dz += Math.max(1, step)) {
-            const bucket = this.cells.get(cellKey(at[0]! + dx, at[1]! + dy, at[2]! + dz))
+            const bucket = this.cells.get(cellKey(cx + dx, cy + dy, cz + dz))
             if (!bucket) continue
             for (const i of bucket) {
               const ex = points[i * 3]! - x
@@ -132,7 +149,7 @@ export class PointGrid {
         }
       }
       // Anything in a further ring is at least `ring` cells away.
-      if (count === k && distances[k - 1]! <= (ring * cell) ** 2) break
+      if ((count === k && distances[k - 1]! <= (ring * cell) ** 2) || ring * cell > within) break
     }
     return count
   }
@@ -253,7 +270,8 @@ const distances: number[] = []
  * its nearest few: its height along the surface's normal (negative inside)
  * into out[0], the normal into out[1..3], and the neighbours' weighted zone
  * (when given) into out[4]. The nearest point's index is returned (-1 for
- * an empty surface), its squared distance left in `distances[0]`.
+ * an empty surface, or none within `within`), its squared distance left in
+ * `distances[0]`.
  */
 function standOver(
   surface: { points: Triples; normals: Triples; grid: PointGrid },
@@ -262,8 +280,9 @@ function standOver(
   y: number,
   z: number,
   out: number[],
+  within = Number.POSITIVE_INFINITY,
 ) {
-  const count = surface.grid.nearest(x, y, z, NEIGHBOURS, found, distances)
+  const count = surface.grid.nearest(x, y, z, NEIGHBOURS, found, distances, within)
   let height = 0
   let nx = 0
   let ny = 0
@@ -299,9 +318,9 @@ function standOver(
 const stand = [0, 0, 0, 0, 0]
 
 /**
- * How far each point stands over the skull (m, negative under it), the
- * skull's hair share where it stands, and how far it is off the skull's
- * nearest point.
+ * How far each point stands over the skull (bind units, negative under
+ * it), the skull's hair share where it stands, and how far it is off the
+ * skull's nearest point.
  */
 export function standingOver(points: Triples, skull: Skull) {
   const count = points.length / 3
@@ -318,103 +337,451 @@ export function standingOver(points: Triples, skull: Skull) {
 }
 
 /**
+ * Where a ray from (x, y, z) along (dx, dy, dz) (a unit direction), no
+ * further than `length`, first goes into a surface from outside it near its
+ * points (within `reach`: a surface may be only partly there), and on to
+ * `depth` under it: how far along, 0 for a point that deep already, -1
+ * where it never goes in. The surface's normal there is left in
+ * `stand[1..3]`.
+ */
+export function crossing(
+  surface: Surface,
+  x: number,
+  y: number,
+  z: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  length: number,
+  depth: number,
+  reach: number,
+): number {
+  // How far out of the surface the ray is `along` it (NaN off the
+  // surface), and how far on it surely still is.
+  let ahead = 0
+  const look = reach + CROSSING_LOOK
+  const over = (along: number) => {
+    const near = standOver(
+      surface,
+      null,
+      x + dx * along,
+      y + dy * along,
+      z + dz * along,
+      stand,
+      look,
+    )
+    if (near < 0) {
+      ahead = CROSSING_LOOK
+      return Number.NaN
+    }
+    const away = Math.sqrt(distances[0]!)
+    ahead = Math.max(CROSSING_STEP, away > reach ? away - reach : stand[0]!)
+    return away <= reach ? stand[0]! : Number.NaN
+  }
+  // On `depth` under the surface from where the ray goes into it.
+  const under = (along: number) => {
+    const falling = -(dx * stand[1]! + dy * stand[2]! + dz * stand[3]!)
+    return along + (depth + stand[0]!) / Math.max(falling, GRAZING)
+  }
+  const start = over(0)
+  if (start <= 0) return start <= -depth ? 0 : under(0)
+  // The last place it was out of the surface near it (if it has been), and how far out.
+  let outside = start > 0 ? 0 : Number.NaN
+  let outBy = start
+  let along = 0
+  while (along + ahead <= length + CROSSING_STEP) {
+    along += ahead
+    const at = over(along)
+    if (at > 0) {
+      outside = along
+      outBy = at
+    }
+    if (!(at <= 0 && outside >= 0)) continue
+    // Where it went in, between the two, as the surface lies straight.
+    const inside = outside + ((along - outside) * outBy) / (outBy - at)
+    if (!Number.isNaN(over(inside))) return under(inside)
+    over(along)
+    return under(along)
+  }
+  return -1
+}
+
+/**
+ * The least step (bind units) a ray is walked in — a longer one where it
+ * is surely that far from the surface.
+ */
+const CROSSING_STEP = 0.004
+
+/**
+ * How far (bind units) past its reach a ray looks for a surface's points,
+ * stepping that far on where there are none.
+ */
+const CROSSING_LOOK = 0.02
+
+/** A ray falling less steeply than this into a surface is taken under it as if this steeply. */
+const GRAZING = 0.3
+
+/**
  * How a head's own hair volume is taken in, for another's hair to go on —
  * or for none. Each point of its hair's shell (`shell`, 1 per such point)
- * goes down onto the skull, a little under it (so no scalp shows through a
- * borrowed cap): over the cranium above the top of the neck (`neck`, the
- * head bone's height) as much as the skull's zone there holds hair, and
- * anywhere else where it stands well off the skull, or out of the head's
- * own skin (`skin`: its points that aren't shell) — over the ears, down
- * the neck. A sideburn painted onto the face is neither, and stays. Long
- * hair lying on the body (`body`) goes into it instead: a long drape is a
- * closed shell round the neck with no skin under it, which becomes the
- * neck where the body doesn't hide it. Returns the moves, point by point.
+ * goes in towards the middle of the head (of the neck, down the neck: the
+ * skull's middle over its bottom's) until it is under the skull — fitted
+ * to the head's own skin (`skin`: its points that aren't shell) where that
+ * shows, see `skinFitted` — or the body (`body`), whichever it meets the
+ * deeper: a little under (so no scalp shows through a borrowed cap), and
+ * the further under the further out it stood (so a bun or a ponytail
+ * pressed flat lies under the scalp round it, not over it). It goes over
+ * the cranium above the top of the neck (`neck`, the head bone's height)
+ * as much as the skull's zone there holds hair, and anywhere else where it
+ * stands well off the skull, or out of the head's own skin: over the ears,
+ * down the neck. A sideburn painted onto the face is neither, and stays.
+ * Hair past the skull's edge that meets neither goes onto the skull's
+ * nearest points, or below its bottom (a drape over a neckline a shirt
+ * leaves open under long hair) to the body's, spanning the neckline.
+ *
+ * Returns each point's move, and the normal of the surface it is pressed
+ * onto as long as how far it is pressed (0 to 1), for its shading.
  */
 export function deflation(
   points: Triples,
   skull: Skull,
   shell: ArrayLike<number>,
   around: { skin: Surface; body: Surface; neck: number },
-): Float32Array {
+): { moves: Float32Array; pressed: Float32Array } {
   const count = points.length / 3
   const moves = new Float32Array(count * 3)
+  const pressed = new Float32Array(count * 3)
+  const middle = skullMiddle(skull, around.neck)
+  skull = skinFitted(skull, around.skin, around.neck)
   for (let i = 0; i < count; i++) {
     if (!shell[i]) continue
     const x = points[i * 3]!
     const y = points[i * 3 + 1]!
     const z = points[i * 3 + 2]!
-    const nearest = standOver(skull, skull.zone, x, y, z, stand)
-    if (nearest < 0) continue
+    if (standOver(skull, skull.zone, x, y, z, stand) < 0) continue
+    // Under the skull already (inside the head, not past its edge), it is
+    // hidden: left be.
+    if (stand[0]! <= -SINK && distances[0]! <= SKULL_REACH ** 2) continue
+    const over = stand[0]!
     const far = smoothstep(OFF_FROM, OFF_TO, Math.sqrt(distances[0]!))
     const onSkull =
       smoothstep(ZONE_FROM, ZONE_TO, stand[4]!) * smoothstep(-NECK_BAND, NECK_BAND, y - around.neck)
-    // Down onto the skull's surface…
-    const height = stand[0]! + SINK
-    let sx = x - stand[1]! * height
-    let sy = y - stand[2]! * height
-    let sz = z - stand[3]! * height
-    // …but no further along it than a step past its nearest point.
-    const ox = sx - skull.points[nearest * 3]!
-    const oy = sy - skull.points[nearest * 3 + 1]!
-    const oz = sz - skull.points[nearest * 3 + 2]!
-    const along = Math.hypot(ox, oy, oz)
-    if (along > SKULL_REACH) {
-      const keep = SKULL_REACH / along
-      sx = skull.points[nearest * 3]! + ox * keep
-      sy = skull.points[nearest * 3 + 1]! + oy * keep
-      sz = skull.points[nearest * 3 + 2]! + oz * keep
-    }
     const out =
       standOver(around.skin, null, x, y, z, stand) < 0 ? 0 : smoothstep(OUT_FROM, OUT_TO, stand[0]!)
-    const lying = standOver(around.body, null, x, y, z, stand)
-    const onBody =
-      lying < 0 ? 0 : far * smoothstep(BODY_NEAR, BODY_NEAR / 2, Math.sqrt(distances[0]!))
-    // Into the body…
-    const toBody = (1 - onSkull) * onBody
-    const at = around.body.points
-    const bx = lying < 0 ? x : at[lying * 3]! - stand[1]! * BODY_SINK
-    const by = lying < 0 ? y : at[lying * 3 + 1]! - stand[2]! * BODY_SINK
-    const bz = lying < 0 ? z : at[lying * 3 + 2]! - stand[3]! * BODY_SINK
-    // …or onto the skull, unless under it already.
-    const toSkull =
-      height > 0 || far > 0 ? onSkull + (1 - onSkull - toBody) * Math.max(far, out) : 0
-    moves[i * 3] = (sx - x) * toSkull + (bx - x) * toBody
-    moves[i * 3 + 1] = (sy - y) * toSkull + (by - y) * toBody
-    moves[i * 3 + 2] = (sz - z) * toSkull + (bz - z) * toBody
+    const taken = over > 0 || far > 0 ? onSkull + (1 - onSkull) * Math.max(far, out) : 0
+    if (taken === 0) continue
+    // In towards the middle…
+    const [mx, my, mz] = middle.nearest(x, y, z) as [number, number, number]
+    const length = Math.hypot(mx - x, my - y, mz - z) || 1
+    const dx = (mx - x) / length
+    const dy = (my - y) / length
+    const dz = (mz - z) / length
+    // …under the deeper of the surfaces it meets.
+    let along = -1
+    let nx = 0
+    let ny = 0
+    let nz = 0
+    const meet = (at: number) => {
+      if (at <= along) return
+      along = at
+      nx = stand[1]!
+      ny = stand[2]!
+      nz = stand[3]!
+    }
+    const depth = SINK + FOLD * Math.max(0, over)
+    meet(crossing(skull, x, y, z, dx, dy, dz, length, depth, SKULL_REACH))
+    meet(crossing(around.body, x, y, z, dx, dy, dz, length, BODY_SINK, BODY_REACH))
+    // Below the skull, where it has no neck, under the head's own.
+    if (y < middle.bottom)
+      meet(crossing(around.skin, x, y, z, dx, dy, dz, length, depth, SKULL_REACH))
+    let tx = x + dx * along
+    let ty = y + dy * along
+    let tz = z + dz * along
+    if (along < 0) {
+      // Meeting nothing (past the skull's edge): below its bottom, into the
+      // body's nearest point; above, down onto the skull as its nearest
+      // points lie.
+      const onto =
+        y < middle.bottom
+          ? standOver(around.body, null, x, y, z, stand)
+          : standOver(skull, null, x, y, z, stand)
+      if (onto < 0) continue
+      const from = y < middle.bottom ? around.body.points : skull.points
+      const sink = y < middle.bottom ? BODY_SINK : depth
+      nx = stand[1]!
+      ny = stand[2]!
+      nz = stand[3]!
+      tx = y < middle.bottom ? from[onto * 3]! - nx * sink : x - nx * (stand[0]! + sink)
+      ty = y < middle.bottom ? from[onto * 3 + 1]! - ny * sink : y - ny * (stand[0]! + sink)
+      tz = y < middle.bottom ? from[onto * 3 + 2]! - nz * sink : z - nz * (stand[0]! + sink)
+    }
+    moves[i * 3] = (tx - x) * taken
+    moves[i * 3 + 1] = (ty - y) * taken
+    moves[i * 3 + 2] = (tz - z) * taken
+    pressed[i * 3] = nx * taken
+    pressed[i * 3 + 1] = ny * taken
+    pressed[i * 3 + 2] = nz * taken
   }
-  return moves
+  return { moves, pressed }
 }
 
 /**
- * How far (m) out of the head's own skin a shell point starts to be volume
- * to take in, and surely is (a sideburn painted onto the face lies on it).
+ * A skull fitted to the head's own surface (`skin`) where it shows: to its
+ * neck, from NAPE above the top of the neck (`neck`) down — in where it is
+ * thinner than the skull's (a woman's is), so hair taken in over the nape
+ * meets the neck's skin below it without a step, and out where it is
+ * fuller; and out to a painted-haired head's scalp over the cranium (by
+ * the skull's zone), so a bun taken in lies under the scalp round it, not
+ * in a pit. Each skull point goes to the skin where it has some beside it,
+ * and as far as those round it do where it hasn't (under long hair, or a
+ * bun).
+ */
+function skinFitted(skull: Skull, skin: Surface, neck: number): Skull {
+  const count = skull.points.length / 3
+  const known = new Float32Array(count).fill(Number.NaN)
+  // How much of the way to the skin each point may go: down the neck
+  // either way, over the cranium only out.
+  const outward = (i: number) => smoothstep(ZONE_FROM, ZONE_TO, skull.zone[i]!)
+  const inward = (y: number) => smoothstep(neck + NAPE, neck, y)
+  for (let i = 0; i < count; i++) {
+    const y = skull.points[i * 3 + 1]!
+    if (outward(i) === 0 && inward(y) === 0) continue
+    if (standOver(skin, null, skull.points[i * 3]!, y, skull.points[i * 3 + 2]!, stand) < 0)
+      continue
+    const sideways = Math.sqrt(Math.max(0, distances[0]! - stand[0]! ** 2))
+    if (sideways <= SKIN_BESIDE && Math.abs(stand[0]!) <= SKIN_FIT) known[i] = stand[0]!
+  }
+  const points = new Float32Array(skull.points)
+  for (let i = 0; i < count; i++) {
+    let taken = known[i]!
+    if (Number.isNaN(taken)) {
+      // As far as the known ones round it, the nearer the more.
+      const near = skull.grid.nearest(
+        skull.points[i * 3]!,
+        skull.points[i * 3 + 1]!,
+        skull.points[i * 3 + 2]!,
+        FIT_AROUND,
+        found,
+        distances,
+      )
+      let sum = 0
+      let total = 0
+      for (let j = 0; j < near; j++) {
+        const other = known[found[j]!]!
+        if (Number.isNaN(other) || distances[j]! > FIT_REACH ** 2) continue
+        const weight = 1 / (distances[j]! + NEAR_SOFTEN)
+        sum += other * weight
+        total += weight
+      }
+      taken = total > 0 ? sum / total : 0
+    }
+    const down = inward(skull.points[i * 3 + 1]!)
+    taken *= taken > 0 ? down : Math.max(down, outward(i))
+    for (let axis = 0; axis < 3; axis++) {
+      points[i * 3 + axis]! -= skull.normals[i * 3 + axis]! * taken
+    }
+  }
+  return { ...skull, points, grid: new PointGrid(points, SKULL_CELL) }
+}
+
+/**
+ * How far (bind units) above the top of the neck the skull's back of the
+ * head comes in to the neck under it.
+ */
+const NAPE = 0.05
+
+/**
+ * How far (bind units) a skull point goes to the skin at most (further,
+ * the skin beside it is an ear, a nose), and how far to one side of the
+ * skin's nearest point it may be.
+ */
+const SKIN_FIT = 0.03
+const SKIN_BESIDE = 0.04
+
+/** How many skull points round one it goes as far as, and how far off they may be. */
+const FIT_AROUND = 12
+const FIT_REACH = 0.04
+
+/**
+ * The line down the middle of a fitted skull: from the middle of its
+ * bounds above the top of the neck (`neck`) through the middle of those of
+ * its bottom, and on down. `nearest` is a point's nearest place on it (no
+ * higher than its top); `bottom` the skull's lowest height.
+ */
+function skullMiddle(skull: Skull, neck: number) {
+  let bottom = Number.POSITIVE_INFINITY
+  for (let i = 1; i < skull.points.length; i += 3) bottom = Math.min(bottom, skull.points[i]!)
+  const low = [0, 1, 2].map(() => Number.POSITIVE_INFINITY)
+  const high = low.map(() => Number.NEGATIVE_INFINITY)
+  const bottomLow = [...low]
+  const bottomHigh = [...high]
+  for (let i = 0; i < skull.points.length / 3; i++) {
+    const y = skull.points[i * 3 + 1]!
+    const [from, to] = y > neck ? [low, high] : y < bottom + RIM ? [bottomLow, bottomHigh] : []
+    if (!(from && to)) continue
+    for (let axis = 0; axis < 3; axis++) {
+      from[axis] = Math.min(from[axis]!, skull.points[i * 3 + axis]!)
+      to[axis] = Math.max(to[axis]!, skull.points[i * 3 + axis]!)
+    }
+  }
+  const top = low.map((value, axis) => (value + high[axis]!) / 2)
+  const base = bottomLow.map((value, axis) => (value + bottomHigh[axis]!) / 2)
+  const length = Math.hypot(...base.map((value, axis) => value - top[axis]!)) || 1
+  const down = base.map((value, axis) => (value - top[axis]!) / length)
+  return {
+    bottom,
+    nearest: (x: number, y: number, z: number) => {
+      const along = Math.max(
+        0,
+        (x - top[0]!) * down[0]! + (y - top[1]!) * down[1]! + (z - top[2]!) * down[2]!,
+      )
+      return top.map((value, axis) => value + down[axis]! * along)
+    },
+  }
+}
+
+/**
+ * A head's hair volume taken in (see `deflation`) ironed flat: its points
+ * (`points`, joined by the triangles of `index`, and at one spot across a
+ * texture seam) each drawn a few times towards the middle of those round
+ * it, never out along the normal it was pressed onto — so the hem of long
+ * hair, its outside taken in past its inside, lies flat instead of folding
+ * out in flaps. Points not pressed at all (lying on the skin already) hold
+ * it in place, save one with pressed points all round it. Returns the
+ * ironed moves.
+ */
+export function ironed(
+  points: Triples,
+  index: ArrayLike<number>,
+  { moves, pressed }: { moves: Float32Array; pressed: Float32Array },
+): Float32Array {
+  const { spots, count } = spotsOf(points)
+  const around = Array.from({ length: count }, () => new Set<number>())
+  for (let t = 0; t < index.length; t += 3) {
+    for (let a = 0; a < 3; a++) {
+      for (let b = 0; b < 3; b++) {
+        if (a !== b) around[spots[index[t + a]!]!]!.add(spots[index[t + b]!]!)
+      }
+    }
+  }
+  let at = new Float32Array(count * 3)
+  const normal = new Float32Array(count * 3)
+  const pressing = new Uint8Array(count)
+  for (let i = 0; i < points.length / 3; i++) {
+    const spot = spots[i]!
+    for (let axis = 0; axis < 3; axis++) {
+      at[spot * 3 + axis] = points[i * 3 + axis]! + moves[i * 3 + axis]!
+      normal[spot * 3 + axis] = pressed[i * 3 + axis]!
+    }
+    if (pressed[i * 3]! || pressed[i * 3 + 1]! || pressed[i * 3 + 2]!) pressing[spot] = 1
+  }
+  // A few points the shell was missing (a speck the hair mask found none
+  // on) with pressed points all round them are ironed with them, as they lie.
+  const seen = new Uint8Array(count)
+  for (let spot = 0; spot < count; spot++) {
+    if (pressing[spot] || seen[spot]) continue
+    const hole = [spot]
+    seen[spot] = 1
+    for (let k = 0; k < hole.length; k++) {
+      for (const other of around[hole[k]!]!) {
+        if (pressing[other] || seen[other]) continue
+        seen[other] = 1
+        hole.push(other)
+      }
+    }
+    if (hole.length > HOLE || around[spot]!.size === 0) continue
+    for (const each of hole) {
+      for (const other of around[each]!) {
+        for (let axis = 0; axis < 3; axis++) normal[each * 3 + axis]! += normal[other * 3 + axis]!
+      }
+    }
+    for (const each of hole) pressing[each] = 1
+  }
+  const pull = [0, 0, 0]
+  for (let round = 0; round < IRON_ROUNDS; round++) {
+    const next = new Float32Array(at)
+    for (let spot = 0; spot < count; spot++) {
+      const others = around[spot]!
+      if (!pressing[spot] || others.size === 0) continue
+      pull.fill(0)
+      for (const other of others) {
+        for (let axis = 0; axis < 3; axis++) pull[axis]! += at[other * 3 + axis]! / others.size
+      }
+      for (let axis = 0; axis < 3; axis++)
+        pull[axis] = (pull[axis]! - at[spot * 3 + axis]!) * IRON_PULL
+      const nx = normal[spot * 3]!
+      const ny = normal[spot * 3 + 1]!
+      const nz = normal[spot * 3 + 2]!
+      const out =
+        (pull[0]! * nx + pull[1]! * ny + pull[2]! * nz) / (nx * nx + ny * ny + nz * nz || 1)
+      for (let axis = 0; axis < 3; axis++) {
+        next[spot * 3 + axis]! += pull[axis]! - Math.max(0, out) * normal[spot * 3 + axis]!
+      }
+    }
+    at = next
+  }
+  return Float32Array.from(
+    { length: points.length },
+    (_, j) => at[spots[Math.floor(j / 3)]! * 3 + (j % 3)]! - points[j]!,
+  )
+}
+
+/** The most points a hole in the shell has (more, and it is skin the hair surrounds, such as an ear). */
+const HOLE = 6
+
+/**
+ * How many times the taken-in hair is ironed, and how far each time
+ * towards the middle of the points round each.
+ */
+const IRON_ROUNDS = 12
+const IRON_PULL = 0.5
+
+/**
+ * How far (bind units) out of the head's own skin a shell point starts to
+ * be volume to take in, and surely is (a sideburn painted onto the face
+ * lies on it).
  */
 const OUT_FROM = 0.003
 const OUT_TO = 0.008
-
-/** Hair within this (m) of the body lies on it (down the back), and goes into it. */
-const BODY_NEAR = 0.02
 
 /** Where the skull's hair zone starts taking a head's volume in, and where it takes all of it. */
 const ZONE_FROM = 0.05
 const ZONE_TO = 0.3
 
 /**
- * How far (m) off the skull's nearest point shell starts to be taken in
- * whatever the zone, and where it all is (a face's own shape strays from
- * the skull's by 5 mm at most).
+ * How far (bind units) off the skull's nearest point shell starts to be
+ * taken in whatever the zone, and where it all is (a face's own shape
+ * strays from the skull's by 0.005 at most).
  */
 const OFF_FROM = 0.006
 const OFF_TO = 0.012
 
-/** How far (m) under the skull's surface a head's own hair volume is taken, and under the body's. */
+/**
+ * How far (bind units) under the skull's surface a head's own hair volume
+ * is taken, and under the body's (a collar's cloth is thin).
+ */
 const SINK = 0.002
 const BODY_SINK = 0.01
 
-/** How far (m) along the skull past its point nearest a point that point may be drawn. */
-const SKULL_REACH = 0.015
+/** How much further under the skull a point goes for each unit it stood out of it. */
+const FOLD = 0.1
 
-/** How far (m) either side of the top of the neck far-off shell turns from the skull to the skin and body. */
+/**
+ * How near (bind units) a point of the skull, or of the body, a ray must
+ * go into it for that to count: past the edge of either (a head's skull
+ * ends at its neck, a body at its neckline) the nearest point is further
+ * off. The body's points are sparser.
+ */
+const SKULL_REACH = 0.04
+const BODY_REACH = 0.06
+
+/** Skull points this near (bind units) its bottom are round the neck's bottom. */
+const RIM = 0.02
+
+/**
+ * How far (bind units) either side of the top of the neck the cranium's
+ * zone gives way to taking in only what stands off.
+ */
 const NECK_BAND = 0.02
 
 const smoothstep = (from: number, to: number, x: number) => {
@@ -428,25 +795,49 @@ export const HAIR = 1
 export const GEAR = 2
 export type CardKind = typeof LASH | typeof HAIR | typeof GEAR
 
-/** Every point of a lash is this near (m) an eyeball's centre; no hair comes within 6 cm of one. */
+/**
+ * Every point of a lash is this near (bind units) an eyeball's centre; no
+ * hair comes within 0.06 of one.
+ */
 const LASH_REACH = 0.04
 
 /**
- * A piece this far (m) in front of the eyes is gear worn over the face — a
- * visor, a mask, goggles (they reach 7.9 cm and more; the fullest afro 7.1
- * cm) — or, hanging from the shoulders, a scarf's fringe.
+ * A piece this far (bind units) in front of the eyes is gear worn over the
+ * face — a visor, a mask, goggles (they reach 0.079 and more; the fullest
+ * afro 0.071) — or, hanging from the shoulders, a scarf's fringe.
  */
 const GEAR_FRONT = 0.075
 
 /**
- * An earring is a card seen edge on from the front — no thicker (m) across
- * than EARRING_THIN — out at the side of the head (EARRING_SIDE from the
- * face's middle) and hanging below the eyes (EARRING_BELOW under them);
- * a lock of hair there lies the other way round.
+ * An earring is a card seen edge on from the front — no thicker across
+ * than EARRING_THIN (bind units) — out at the side of the head
+ * (EARRING_SIDE from the face's middle) and hanging below the eyes
+ * (EARRING_BELOW under them); a lock of hair there lies the other way
+ * round.
  */
 const EARRING_THIN = 0.015
 const EARRING_SIDE = 0.06
 const EARRING_BELOW = 0.02
+
+/** Points of a mesh this near (bind units) are at one spot (a texture seam splits them). */
+const SPOT = 1e-4
+
+/** Each point's spot (see SPOT), numbered in the order they are first met, and how many there are. */
+function spotsOf(positions: Triples) {
+  const count = positions.length / 3
+  const numbers = new Map<string, number>()
+  const spots = new Int32Array(count)
+  for (let i = 0; i < count; i++) {
+    const key = [0, 1, 2].map((axis) => Math.round(positions[i * 3 + axis]! / SPOT)).join()
+    let spot = numbers.get(key)
+    if (spot === undefined) {
+      spot = numbers.size
+      numbers.set(key, spot)
+    }
+    spots[i] = spot
+  }
+  return { spots, count: numbers.size }
+}
 
 /**
  * What each triangle of an opacity mesh is, by the piece it is part of
@@ -465,12 +856,12 @@ export function cardKinds(positions: Triples, index: ArrayLike<number>, eyes: Tr
     }
     return a
   }
-  const spots = new Map<string, number>()
+  const { spots } = spotsOf(positions)
+  const first = new Map<number, number>()
   for (let i = 0; i < count; i++) {
-    const spot = `${positions[i * 3]!.toFixed(4)},${positions[i * 3 + 1]!.toFixed(4)},${positions[i * 3 + 2]!.toFixed(4)}`
-    const first = spots.get(spot)
-    if (first === undefined) spots.set(spot, i)
-    else parent[find(i)] = find(first)
+    const other = first.get(spots[i]!)
+    if (other === undefined) first.set(spots[i]!, i)
+    else parent[find(i)] = find(other)
   }
   for (let t = 0; t < index.length; t += 3) {
     parent[find(index[t + 1]!)] = find(index[t]!)
@@ -573,9 +964,9 @@ export type Surface = { points: Triples; normals: Triples; grid: PointGrid }
 
 /**
  * Lifts points out of a surface (in place): each one inside it, or nearer
- * it than `clearance` (m), goes out along its normal to that clearance.
- * A point deeper in than `reach` (m) is left be: the surface nearest it is
- * not one it went through.
+ * it than `clearance` (bind units), goes out along its normal to that
+ * clearance. A point deeper in than `reach` is left be: the surface
+ * nearest it is not one it went through.
  */
 export function pushOut(points: Float32Array, surface: Surface, clearance: number, reach: number) {
   const count = points.length / 3
@@ -591,6 +982,9 @@ export function pushOut(points: Float32Array, surface: Surface, clearance: numbe
     points[i * 3 + 2] = z + stand[3]! * lift
   }
 }
+
+/** A triangle with less area (texels²) than this on its texture covers none of it. */
+const FLAT = 1e-12
 
 /**
  * Fills a triangle's texels on a `width` × `height` texture (corners in
@@ -611,7 +1005,7 @@ function fillTexels(
   const cx = u[2]! * width
   const cy = v[2]! * height
   const area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
-  if (Math.abs(area) < 1e-12) return
+  if (Math.abs(area) < FLAT) return
   const minX = Math.max(0, Math.floor(Math.min(ax, bx, cx)))
   const maxX = Math.min(width - 1, Math.ceil(Math.max(ax, bx, cx)))
   const minY = Math.max(0, Math.floor(Math.min(ay, by, cy)))
@@ -686,7 +1080,7 @@ export function capPixels(
   return out
 }
 
-/** How far (m) round a cheek bone the skin's colour is sampled. */
+/** How far (bind units) round a cheek bone the skin's colour is sampled. */
 const CHEEK_REACH = 0.015
 
 /**
@@ -930,7 +1324,7 @@ export type HairPart = {
   /** Which of those pixels a dye takes (all that show, when null), and their usual lightness. */
   dyeMask: Float32Array | null
   lum: number
-  /** How far (m) it is kept off the wearer's head and body. */
+  /** How far (bind units) it is kept off the wearer's head and body. */
   clearance: number
 }
 
@@ -954,11 +1348,11 @@ export type HairAsset = {
  */
 const CAP_ZONE = 0.1
 
-/** How far (m) the cap and the cards are kept off the wearer. */
+/** How far (bind units) the cap and the cards are kept off the wearer. */
 const CAP_CLEARANCE = 0.0015
 const CARD_CLEARANCE = 0.003
 
-/** Deeper (m) into the wearer than this, a point is left be by `pushOut`. */
+/** Deeper (bind units) into the wearer than this, a point is left be by `pushOut`. */
 const PUSH_REACH = 0.03
 
 /** The cards' cut-out, as the characters' own (see avatar-rig.ts). */
@@ -1081,19 +1475,23 @@ export function hairAssetOf(
   }
 }
 
-const deflations = new WeakMap<BufferGeometry, Float32Array>()
+/** A head's own hair volume taken in (see `deflation`), and where its points stood (bind pose). */
+type Deflation = { moves: Float32Array; pressed: Float32Array; points: Float32Array }
+
+const deflations = new WeakMap<BufferGeometry, Deflation>()
 
 /**
  * How a head's own hair volume is taken in under the skull (see
- * `deflation`), in its bind pose, worked out once per head geometry. Null
- * for a head whose hair is only painted on, or that the skull doesn't fit.
+ * `deflation`, `ironed`), in its bind pose, worked out once per head
+ * geometry. Null for a head whose hair is only painted on, or that the
+ * skull doesn't fit.
  */
-function headDeflation(model: Object3D, head: SkinnedMesh, basis: HairBasis): Float32Array | null {
+function headDeflation(model: Object3D, head: SkinnedMesh, basis: HairBasis): Deflation | null {
   const shell = shellOf(head, basis)
   if (!shell) return null
   const geometry = originalGeometry(head)
-  let moves = deflations.get(geometry)
-  if (!moves) {
+  let taken = deflations.get(geometry)
+  if (!taken) {
     const fit = faceFit(basis.skull, bonePlaces(head))
     if (!fit) return null
     const points = bindPoints(head, geometry, 'position')
@@ -1104,7 +1502,7 @@ function headDeflation(model: Object3D, head: SkinnedMesh, basis: HairBasis): Fl
       boneBindPositions(head)[
         head.skeleton.bones.findIndex((bone) => isHeadBone(bone.name)) * 3 + 1
       ]!
-    moves = deflation(points, fitSkull(basis.skull, fit), shell, {
+    const pressed = deflation(points, fitSkull(basis.skull, fit), shell, {
       skin: {
         points: skinPoints,
         normals: skin(normals),
@@ -1113,9 +1511,47 @@ function headDeflation(model: Object3D, head: SkinnedMesh, basis: HairBasis): Fl
       body: surfaceOf(ownMeshes(model, 'body')),
       neck,
     })
-    deflations.set(geometry, moves)
+    taken = {
+      moves: ironed(points, indexOf(geometry), pressed),
+      pressed: pressed.pressed,
+      points,
+    }
+    deflations.set(geometry, taken)
   }
-  return moves
+  return taken
+}
+
+/**
+ * Of the flatness a point pressed all the way onto a surface is given
+ * across it, what is kept (the reshaping needs its stretch not to vanish).
+ */
+const PRESS_KEEP = 0.02
+
+/**
+ * A deflation's moves for the reshaping: each point's own, the same
+ * wherever the point is — save across the surface it is pressed onto,
+ * where its surroundings are squashed flat. The reshaping turns a point's
+ * normal by how its surroundings stretch, so hair pressed flat is shaded
+ * as the skull it lies on, not as the bun or the lock it was.
+ */
+function pressedMoves({ moves, pressed, points }: Deflation): PointMove {
+  return (point, index, move) => {
+    move.fromArray(moves, index * 3)
+    const px = pressed[index * 3]!
+    const py = pressed[index * 3 + 1]!
+    const pz = pressed[index * 3 + 2]!
+    const press = Math.hypot(px, py, pz)
+    if (press === 0) return
+    const across =
+      (((point.x - points[index * 3]!) * px +
+        (point.y - points[index * 3 + 1]!) * py +
+        (point.z - points[index * 3 + 2]!) * pz) *
+        (1 - PRESS_KEEP)) /
+      press
+    move.x -= px * across
+    move.y -= py * across
+    move.z -= pz * across
+  }
 }
 
 /**
@@ -1126,13 +1562,9 @@ function headDeflation(model: Object3D, head: SkinnedMesh, basis: HairBasis): Fl
  */
 export function hairShaper(model: Object3D, basis: HairBasis): Shaper {
   const head = headOf(model) as SkinnedMesh | null
-  const moves = head?.isSkinnedMesh ? headDeflation(model, head, basis) : null
-  return (mesh) =>
-    moves && mesh === head
-      ? (_point, index, move) => {
-          move.fromArray(moves, index * 3)
-        }
-      : null
+  const taken = head?.isSkinnedMesh ? headDeflation(model, head, basis) : null
+  const move = taken && pressedMoves(taken)
+  return (mesh) => (move && mesh === head ? move : null)
 }
 
 /** Puts a new skinned mesh beside another, on its skeleton, bound as it is. */
@@ -1154,8 +1586,9 @@ function besides(beside: SkinnedMesh, geometry: BufferGeometry, material: Materi
 /**
  * Hides a character's own hair cards (steps to undo them into `undo`),
  * keeping what else its opacity mesh holds — its lashes, and gear such as
- * a visor — as a mesh of its own beside it: same material (so a look still
- * dresses it) and skeleton, its geometry reshaped with the rest.
+ * a visor — as a mesh of its own beside it: same skeleton, its geometry
+ * reshaped with the rest, and the same material, dressed as the mesh's is
+ * until the look (which finds it by that material's name) dresses it too.
  */
 function hideOwnHair(model: Object3D, undo: (() => void)[]) {
   for (const mesh of ownMeshes(model, 'opacity')) {
@@ -1169,10 +1602,13 @@ function hideOwnHair(model: Object3D, undo: (() => void)[]) {
         ? besides(
             mesh,
             subset(mesh, originalGeometry(mesh), kept, false),
-            ownMaterial(mesh),
+            mesh.material as Material,
             `${mesh.name}:kept`,
           )
         : null
+    if (keptMesh && mesh.userData.lookOriginal) {
+      keptMesh.userData.lookOriginal = mesh.userData.lookOriginal
+    }
     undo.push(() => {
       mesh.visible = wasVisible
       if (keptMesh) {
@@ -1242,7 +1678,7 @@ function wearBorrowed(
   const taken = headDeflation(model, head, asset.basis)
   if (taken) {
     const points = headSurface.points as Float32Array
-    for (let i = 0; i < points.length; i++) points[i]! += taken[i]!
+    for (let i = 0; i < points.length; i++) points[i]! += taken.moves[i]!
   }
   // The head as the borrowed hair will find it, its own volume taken in.
   const surface = surfaceOf([], [headSurface, surfaceOf(ownMeshes(model, 'body'))])
@@ -1404,9 +1840,10 @@ const warned = new Set<string>()
 
 /**
  * Keeps a character in a hairstyle: none (null) leaves its own; BALD takes
- * its hair cards off; a donor's id puts that donor's hair on, dyed `dye`
- * when given. A new style replaces the old one only once it has loaded, so
- * the character never shows bald in between.
+ * its hair cards off; a donor's id in the library puts that donor's hair
+ * on, dyed `dye` when given — any other id (an old or a foreign save) is
+ * the character's own hair. A new style replaces the old one only once it
+ * has loaded, so the character never shows bald in between.
  *
  * Returns the reshaping the hair needs (see `hairShaper`) — a new one each
  * time hair goes on, so the body's reshaping, given it, runs again over the
@@ -1420,16 +1857,23 @@ export function useAvatarHair(
   const worn = useRef<{ model: Object3D; undo: () => void } | null>(null)
   const [shaper, setShaper] = useState<{ model: Object3D; shaper: Shaper } | null>(null)
   useEffect(() => {
-    if (worn.current && (worn.current.model !== model || style === null)) {
-      worn.current.undo()
+    const takeOff = () => {
+      worn.current?.undo()
       worn.current = null
       setShaper(null)
     }
+    if (worn.current && (worn.current.model !== model || style === null)) takeOff()
     if (style === null) return
     let current = true
-    Promise.all([loadHairLibrary(), style === BALD ? null : loadHairAsset(style)])
-      .then(([library, asset]) => {
+    loadHairLibrary()
+      .then(async (library) => {
+        const offered = style === BALD || library.styles.some((entry) => entry.id === style)
+        const asset = offered && style !== BALD ? await loadHairAsset(style) : null
         if (!current) return
+        if (!offered) {
+          takeOff()
+          return
+        }
         worn.current?.undo()
         worn.current = { model, undo: wearHair(model, asset, { dye: dyeHex }) }
         setShaper({ model, shaper: hairShaper(model, library) })

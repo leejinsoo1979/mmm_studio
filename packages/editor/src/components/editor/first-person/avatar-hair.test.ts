@@ -5,6 +5,7 @@ import {
   cardKinds,
   carryPoints,
   composeFits,
+  crossing,
   deflation,
   faceFit,
   fitAxes,
@@ -12,6 +13,7 @@ import {
   GEAR,
   HAIR,
   invertFit,
+  ironed,
   LASH,
   PointGrid,
   pushOut,
@@ -188,25 +190,28 @@ describe('an opacity mesh’s pieces', () => {
   })
 
   test('takes triangles joined only at a spot (a texture seam) for one piece', () => {
-    // The crown card split in two, its halves meeting at points of their own.
-    const split = quads([
-      [
-        [-0.05, 1.72, 0],
-        [0, 1.72, 0],
-        [0, 1.74, -0.05],
-        [-0.05, 1.74, -0.05],
-      ],
-      [
-        [0, 1.72, 0],
-        [0.05, 1.72, 0],
-        [0.05, 1.74, -0.05],
-        [0, 1.74, -0.05],
-      ],
-    ])
-    // One half would be a lash if it stood alone near the eyes; the other isn't.
-    const near = split.positions.map((value, i) => (i < 12 && i % 3 === 1 ? value - 0.12 : value))
-    const kinds = cardKinds(near, split.index, eyes)
-    expect(new Set(kinds).size).toBe(1)
+    // A card split in two at a seam, its halves' corners there at one spot
+    // but points of their own: one half all round the left eye, which alone
+    // would be a lash; the other reaching well away from it.
+    const halves = (gap: number) =>
+      quads([
+        [
+          [0.02, 1.59, 0.1],
+          [0.05, 1.59, 0.1],
+          [0.05, 1.61, 0.1],
+          [0.02, 1.61, 0.1],
+        ],
+        [
+          [0.05 + gap, 1.59, 0.1],
+          [0.12, 1.59, 0.1],
+          [0.12, 1.61, 0.1],
+          [0.05 + gap, 1.61, 0.1],
+        ],
+      ])
+    const joined = halves(0)
+    expect([...cardKinds(joined.positions, joined.index, eyes)]).toEqual([HAIR, HAIR, HAIR, HAIR])
+    const apart = halves(0.01)
+    expect([...cardKinds(apart.positions, apart.index, eyes)]).toEqual([LASH, LASH, HAIR, HAIR])
   })
 })
 
@@ -274,7 +279,7 @@ describe('taking a head’s own hair in', () => {
     },
     IDENTITY,
   )
-  // The body: a floor of points facing up, 20 cm down.
+  // The body: a floor of points facing up, 0.2 down.
   const floor: number[] = []
   for (let x = -0.2; x <= 0.2; x += 0.01)
     for (let z = -0.2; z <= 0.2; z += 0.01) floor.push(x, -0.2, z)
@@ -282,24 +287,31 @@ describe('taking a head’s own hair in', () => {
     Float32Array.from(floor),
     Float32Array.from(floor, (_, i) => (i % 3 === 1 ? 1 : 0)),
   )
-  // The face's skin: the front of the skull's lower half.
+  // The head's own skin: the front of the skull's lower half, and a neck
+  // thinner than the skull's all round below the top of the neck.
   const face = sphere(0.1, 1500)
+  const neckSkin = sphere(0.085, 1500)
   const skinPoints: number[] = []
   const skinNormals: number[] = []
   for (let i = 0; i < 1500; i++) {
-    if (face.points[i * 3 + 1]! < 0 && face.points[i * 3 + 2]! > 0) {
+    if (face.points[i * 3 + 1]! < 0 && face.points[i * 3 + 2]! > 0.04) {
       skinPoints.push(...face.points.slice(i * 3, i * 3 + 3))
       skinNormals.push(...face.normals.slice(i * 3, i * 3 + 3))
+    }
+    if (neckSkin.points[i * 3 + 1]! < -0.06 && neckSkin.points[i * 3 + 2]! < 0) {
+      skinPoints.push(...neckSkin.points.slice(i * 3, i * 3 + 3))
+      skinNormals.push(...neckSkin.normals.slice(i * 3, i * 3 + 3))
     }
   }
   const skin = surfaceOf(Float32Array.from(skinPoints), Float32Array.from(skinNormals))
   const around = { skin, body, neck: -0.05 }
 
-  // A crown 2 cm thick, a point of the face, a drape lying on the body, and
-  // one more point on the crown that isn't shell.
-  const points = [0, 0.12, 0, 0, -0.06, 0.08, 0.05, -0.195, -0.1, 0.02, 0.118, 0]
-  const shell = [1, 1, 1, 0]
-  const moves = deflation(points, skull, shell, around)
+  // A crown 0.02 thick, a point of the face, a drape lying on the body, one
+  // more point on the crown that isn't shell, and a ponytail's end hanging
+  // over the nape.
+  const points = [0, 0.12, 0, 0, -0.06, 0.08, 0.05, -0.195, -0.1, 0.02, 0.118, 0, 0, -0.075, -0.14]
+  const shell = [1, 1, 1, 0, 1]
+  const { moves, pressed } = deflation(points, skull, shell, around)
   const moved = (i: number) =>
     points.slice(i * 3, i * 3 + 3).map((value, axis) => value + moves[i * 3 + axis]!)
 
@@ -309,12 +321,89 @@ describe('taking a head’s own hair in', () => {
     expect(Math.hypot(x!, y!, z!)).toBeLessThan(0.1)
   })
 
+  test('presses the crown flat onto the skull, all the way', () => {
+    // Along the skull's normal there (straight up), as long as all of it.
+    expect(Math.hypot(pressed[0]!, pressed[1]!, pressed[2]!)).toBeCloseTo(1, 6)
+    expect(pressed[1]).toBeGreaterThan(0.99)
+  })
+
   test('leaves the face, and what isn’t shell, be', () => {
     for (const move of [...moves.slice(3, 6), ...moves.slice(9, 12)]) expect(Math.abs(move)).toBe(0)
+    for (const press of [...pressed.slice(3, 6), ...pressed.slice(9, 12)]) expect(press).toBe(0)
   })
 
   test('takes a drape lying on the body into it', () => {
     expect(moved(2)[1]).toBeLessThan(-0.2)
+  })
+
+  test('takes a ponytail over the nape under the neck’s own skin', () => {
+    const [x, y, z] = moved(4)
+    expect(Math.hypot(x!, y!, z!)).toBeLessThan(0.085)
+  })
+})
+
+describe('a ray into a surface', () => {
+  const ball = sphere(0.1, 1500)
+  const surface = surfaceOf(ball.points, ball.normals)
+
+  test('goes in where it meets it, and on to a depth under it', () => {
+    const along = crossing(surface, 0.2, 0, 0, -1, 0, 0, 0.2, 0.005, 0.03)
+    expect(along).toBeGreaterThan(0.103)
+    expect(along).toBeLessThan(0.107)
+  })
+
+  test('is already in from a point that deep, and never in past the surface', () => {
+    expect(crossing(surface, 0.08, 0, 0, -1, 0, 0, 0.08, 0.005, 0.03)).toBe(0)
+    expect(crossing(surface, 0.2, 0.3, 0, -1, 0, 0, 0.3, 0.005, 0.03)).toBe(-1)
+  })
+})
+
+describe('ironing the hair taken in', () => {
+  // Two rows of five points 0.01 apart along x, joined by triangles: the
+  // ends lie on the skin (not pressed), the middle three were pressed down
+  // onto it (along -y, so their normal is +y).
+  const points: number[] = []
+  for (let column = 0; column < 5; column++)
+    points.push(column * 0.01, 0, 0, column * 0.01, 0, 0.01)
+  const index: number[] = []
+  for (let column = 0; column < 4; column++) {
+    const a = column * 2
+    index.push(a, a + 2, a + 1, a + 1, a + 2, a + 3)
+  }
+  const pressed = Float32Array.from({ length: 30 }, (_, i) => {
+    const column = Math.floor(i / 6)
+    return column > 0 && column < 4 && i % 3 === 1 ? 1 : 0
+  })
+  // The middle column taken in by `rise` along y, the rest where they are.
+  const moves = (rise: number) =>
+    Float32Array.from({ length: 30 }, (_, i) => (Math.floor(i / 6) === 2 && i % 3 === 1 ? rise : 0))
+  const heights = (moved: Float32Array) =>
+    Array.from({ length: 10 }, (_, point) => points[point * 3 + 1]! + moved[point * 3 + 1]!)
+
+  test('draws a fold standing out of the rest back in, holding to what lies on the skin', () => {
+    const after = heights(ironed(points, index, { moves: moves(0.02), pressed }))
+    expect(after[4]).toBeLessThan(0.01)
+    for (const end of [0, 1, 8, 9]) expect(after[end]).toBe(0)
+  })
+
+  test('irons a speck the shell missed along with the pressed points round it', () => {
+    // A fan: its middle not pressed, standing 0.02 over a ring pressed flat.
+    const fan = [0, 0.02, 0]
+    const ring: number[] = []
+    for (let k = 0; k < 6; k++) {
+      const turn = (k / 6) * 2 * Math.PI
+      fan.push(Math.cos(turn) * 0.01, 0, Math.sin(turn) * 0.01)
+      ring.push(0, 1 + k, 1 + ((k + 1) % 6))
+    }
+    const flat = Float32Array.from({ length: 21 }, (_, i) => (i >= 3 && i % 3 === 1 ? 1 : 0))
+    const after = ironed(fan, ring, { moves: new Float32Array(21), pressed: flat })
+    expect(fan[1]! + after[1]!).toBeLessThan(0.01)
+  })
+
+  test('never draws a point out along the normal it was pressed onto', () => {
+    const after = heights(ironed(points, index, { moves: moves(-0.02), pressed }))
+    expect(after[4]).toBeCloseTo(-0.02, 6)
+    for (const height of after) expect(height).toBeLessThanOrEqual(0)
   })
 })
 

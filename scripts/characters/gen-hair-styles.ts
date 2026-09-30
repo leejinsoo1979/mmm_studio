@@ -14,7 +14,9 @@
 // points, the share of the card-haired heads whose shell stands out of it
 // there. The styles are the characters with hair cards, once each (several
 // professions reuse a character's hair), told apart by sex and by how far
-// the hair falls.
+// the hair falls. Hair gear modelled in a head (a scrunchie, a tie, a pin)
+// is shell too. Lengths are in the bind pose's own units (about 0.9 m on an
+// adult: see avatar-hair.ts).
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import sharp from 'sharp'
@@ -28,6 +30,7 @@ import {
   type HairAsset,
   type HairBasis,
   hairAssetOf,
+  invertFit,
   PointGrid,
   standingOver,
 } from '../../packages/editor/src/components/editor/first-person/avatar-hair'
@@ -53,7 +56,7 @@ const out = join(charactersDir, 'hair-styles.json')
  * Characters whose hair is only painted on, but whose head mesh carries a
  * bun or a ponytail — the others with something standing off their skull
  * have a hat, a cap or a hood modelled there, which the hair mask can't
- * tell from hair. Their knot — what stands more than KNOT_OFF (m) off the
+ * tell from hair. Their knot — what stands more than KNOT_OFF off the
  * skull behind the head bone, a scrunchie too, in patches reaching up past
  * it (not the collar a head mesh may reach down to) — is shell to take in;
  * their painted cranium is not (a child's skull is larger than the shared
@@ -72,17 +75,17 @@ const KNOT_OFF = 0.03
 /** A bald man (shaved; Construction_Male_02 shares his head) whose skull is the smallest of the bald ones. */
 const SKULL_AVATAR = 'Business_Male_07'
 
-/** A shell standing this far (m) out of the skull carries hair volume there. */
+/** A shell standing this far out of the skull carries hair volume there. */
 const SHELL = 0.005
 
 /**
  * The hair mask finds "shell" on the face and down the neck where a pale
  * skin passes for blond hair, and on a painted goatee. Shell is kept where
  * at least FACE_ZONE of the heads carry hair volume, beside the face —
- * further out than FACE_MIDDLE (m) from its middle — where it stands more
- * than FACE_OFF (m) off the skull, and more than NAPE (m) under the head
- * bone only where it stands more than NECK_OFF (m) off it: long hair, not a
- * neck a little fuller than the skull's.
+ * further out than FACE_MIDDLE from its middle — where it stands more than
+ * FACE_OFF off the skull, and more than NAPE under the head bone only
+ * where it stands more than NECK_OFF off it: long hair, not a neck a
+ * little fuller than the skull's.
  */
 const FACE_ZONE = 0.05
 const FACE_MIDDLE = 0.04
@@ -90,7 +93,7 @@ const FACE_OFF = 0.006
 const NAPE = 0.02
 const NECK_OFF = 0.02
 
-/** Points at one spot within this (m) are one (texture seams split them). */
+/** Points at one spot within this are one (texture seams split them). */
 const WELD = 1e-4
 
 /** The texels round a point's own (each way) its hair mask is averaged over. */
@@ -115,23 +118,39 @@ const FILL_SHARE = 0.6
 const PATCH_SHARE = 0.1
 
 /**
- * Hair reaching no further down than this (m) under the head bone (the top
- * of the neck) is short — above the nape — and no further than MEDIUM, to
+ * Hair reaching no further down than this under the head bone (the top of
+ * the neck) is short — above the nape — and no further than MEDIUM, to
  * the shoulders at most; the rest is long.
  */
 const SHORT = 0.03
 const MEDIUM = 0.13
 
 /**
- * Two styles are one when their cards have as many points and nearly all
- * (SAME_SHARE) of one's, round their middles, lie this near (m) a point of
- * the other's: the files order a mesh's points as they please, and a
- * profession's copy of a character's hair may have a strand nudged.
+ * Two styles are one when their cards have as many points and, brought
+ * together by the skull's fits to their heads, half of one's lie this near
+ * a point of the other's: the files order a mesh's points as they please,
+ * and a profession's copy of a character's hair may have a strand or two
+ * nudged. Different styles' cards lie ten times that apart and more.
  */
-const SAME_STYLE = 0.002
-const SAME_SHARE = 0.9
+const SAME_STYLE = 0.001
 
-/** A shell point this far (m) over the skull is surely hair, not skin painted with a hairline. */
+/**
+ * Hair gear modelled in the head mesh — a scrunchie round a bun, a
+ * ponytail's tie, a hair pin — is neither hair to the mask nor skin, and
+ * would float where the hair was taken in: it is shell too. It is what
+ * stands more than GEAR_OFF off the skull, above the head bone and behind
+ * it, in patches touching the shell or in pieces of their own; and,
+ * GEAR_RINGS rings of neighbours round those, what stands more than
+ * GEAR_NEAR off (the part of a tie lying against the hair).
+ */
+const GEAR_OFF = 0.02
+const GEAR_NEAR = 0.01
+const GEAR_RINGS = 2
+
+/**
+ * A shell point this far over the skull is surely hair, not skin painted
+ * with a hairline.
+ */
 const SURELY_HAIR = 0.006
 
 type Character = { id: string; scene: Object3D; textures: Map<string, Pixels> }
@@ -422,8 +441,10 @@ const skull = skullOf(skullHead)
 const noZone: SkullData = { ...skull, zone: new Float32Array(skull.points.length / 3) }
 const bare: HairBasis = { skull: noZone, shells: new Map() }
 
-// The card-haired heads' shells.
+// The card-haired heads' shells, and every head with a shell, by its
+// material's name.
 const shells = new Map<string, Uint8Array>()
+const heads = new Map<string, SkinnedMesh>()
 const characters: Character[] = []
 for (const id of ids) {
   const scene = (await loadCharacter(id, false)).scene
@@ -436,6 +457,7 @@ for (const id of ids) {
   const head = meshOf(character.scene, 'head')!
   const name = (head.material as Material).name
   if (!shells.has(name)) shells.set(name, shellOf(character, head))
+  heads.set(name, head)
 }
 
 /**
@@ -531,14 +553,76 @@ for (const id of KNOTTED) {
     (head.material as Material).name,
     Uint8Array.from(weldOf, (w) => (reaching.has(patchOf[w]!) ? 1 : 0)),
   )
+  heads.set((head.material as Material).name, head)
   console.log(
     `${id}: knot of ${sizes.filter((_, patch) => reaching.has(patch)).reduce((a, b) => a + b, 0)} points`,
   )
 }
+
+/** A head's shell with its hair gear (see GEAR_OFF) added. */
+function withGear(head: SkinnedMesh, shell: Uint8Array): Uint8Array {
+  const { points, weldOf, neighbours } = welded(head)
+  const top = bindPlace(
+    head,
+    head.skeleton.bones.findIndex((bone) => /Head$/.test(bone.name)),
+  )
+  const { height } = standingOver(points, fitSkull(zoned, faceFit(zoned, bonePlaces(head))!))
+  const onShell = new Uint8Array(neighbours.length)
+  weldOf.forEach((w, i) => {
+    onShell[w] ||= shell[i]!
+  })
+  const standing = (w: number, off: number) =>
+    !onShell[w] && height[w]! > off && points[w * 3 + 1]! > top.y && points[w * 3 + 2]! < top.z
+  const gear = new Uint8Array(neighbours.length)
+  const seen = new Uint8Array(neighbours.length)
+  for (let w = 0; w < neighbours.length; w++) {
+    if (seen[w] || !standing(w, GEAR_OFF)) continue
+    const patch = [w]
+    seen[w] = 1
+    let touches = false
+    let alone = true
+    for (let k = 0; k < patch.length; k++) {
+      for (const n of neighbours[patch[k]!]!) {
+        if (onShell[n]) touches = true
+        else if (!standing(n, GEAR_OFF)) alone = false
+        else if (!seen[n]) {
+          seen[n] = 1
+          patch.push(n)
+        }
+      }
+    }
+    if (touches || alone) for (const each of patch) gear[each] = 1
+  }
+  let ring = [...gear.keys()].filter((w) => gear[w])
+  for (let round = 0; round < GEAR_RINGS; round++) {
+    const next: number[] = []
+    for (const w of ring) {
+      for (const n of neighbours[w]!) {
+        if (gear[n] || !standing(n, GEAR_NEAR)) continue
+        gear[n] = 1
+        next.push(n)
+      }
+    }
+    ring = next
+  }
+  return Uint8Array.from(weldOf, (w, i) => (shell[i] || gear[w] ? 1 : 0))
+}
+
+// The hair gear on every head with a shell.
+for (const [name, head] of heads) {
+  const shell = shells.get(name)!
+  const geared = withGear(head, shell)
+  const added = geared.reduce((sum, flag, i) => sum + flag - shell[i]!, 0)
+  if (added > 0) console.log(`${name}: ${added} points of hair gear`)
+  shells.set(name, geared)
+}
 const basis: HairBasis = { skull: { ...noZone, zone }, shells }
 console.log(`skull: ${zone.length} points; shells of ${shells.size} heads`)
 
-/** How far (m) under the head bone a hairstyle reaches: its cards, and its cap where it is surely hair. */
+/**
+ * How far under the head bone a hairstyle reaches: its cards, and its cap
+ * where it is surely hair.
+ */
 function reach(scene: Object3D, asset: HairAsset) {
   const head = meshOf(scene, 'head')!
   const top = bindPlace(
@@ -558,28 +642,30 @@ function reach(scene: Object3D, asset: HairAsset) {
   return top - lowest
 }
 
-/** The cards' points round their middle, to tell one character's hair from another's. */
+/**
+ * A style's cards' points in the shared skull's frame (its head's fit
+ * undone), to tell one character's hair from another's.
+ */
 function cardPoints(asset: HairAsset) {
-  const points = asset.parts
-    .find((part) => part.name === 'cards')!
-    .geometry.getAttribute('position')
-  const middle = [0, 1, 2].map((axis) => {
-    let sum = 0
-    for (let i = 0; i < points.count; i++) sum += points.getComponent(i, axis)
-    return sum / points.count
-  })
-  return Float32Array.from(points.array as Float32Array, (value, i) => value - middle[i % 3]!)
+  const points = asset.parts.find((part) => part.name === 'cards')!.geometry.getAttribute('position')
+  const back = invertFit(asset.fit)
+  return Float32Array.from(
+    points.array as Float32Array,
+    (value, i) => value * back.scale[i % 3]! + back.shift[i % 3]!,
+  )
 }
 
+/** Whether two styles' cards (see `cardPoints`) are one's (see SAME_STYLE). */
 function sameCards(a: Float32Array, b: Float32Array) {
   if (a.length !== b.length) return false
   const grid = new PointGrid(b, SAME_STYLE * 4)
-  let near = 0
+  const apart: number[] = []
   for (let i = 0; i < a.length; i += 3) {
     grid.nearest(a[i]!, a[i + 1]!, a[i + 2]!, 1, found, distances)
-    if (distances[0]! <= SAME_STYLE ** 2) near++
+    apart.push(distances[0]!)
   }
-  return near >= (SAME_SHARE * a.length) / 3
+  apart.sort((x, y) => x - y)
+  return apart[apart.length >> 1]! <= SAME_STYLE ** 2
 }
 
 const styles: (HairStyleEntry & { reach: number })[] = []
@@ -596,7 +682,7 @@ for (const { id, scene } of characters) {
   const falls = reach(scene, asset)
   const length = falls <= SHORT ? 'short' : falls <= MEDIUM ? 'medium' : 'long'
   styles.push({ id, gender: avatarGender(id), length, reach: falls })
-  console.log(`${id}: ${length} (${(falls * 100).toFixed(1)} cm under the head bone)`)
+  console.log(`${id}: ${length} (${falls.toFixed(3)} under the head bone)`)
 }
 
 // Women's, then men's; each short to long, and within a length by how far

@@ -300,14 +300,16 @@ export function useAvatarLook(
   )
 
   // Only the painted part of a look is dressed here: a new shape alone
-  // leaves the textures be. Any hairstyle but the character's own shaves
-  // its painted hair, which would otherwise show where its hair was taken
-  // in; and a hairstyle going on adds lashes to dress (`worn` changes).
+  // leaves the textures be. A hairstyle worn in place of the character's
+  // own shaves its painted hair, which would otherwise show where its hair
+  // was taken in; and a hairstyle going on adds lashes to dress (`worn`
+  // changes). One the library doesn't offer is never worn, so its painted
+  // hair stays with its own hair.
   const skin = look?.skin ?? null
   const face = look?.face ?? null
   const paint = look?.paint ?? NO_PAINT
   const feet = look?.feet ?? SHOD
-  const bald = hairStyle !== null
+  const bald = worn !== null
   useEffect(() => {
     const look: AvatarPaint = { hair, skin, face, paint, feet, bald }
     if (dressing.current && (dressing.current.model !== model || !hasLook(look))) {
