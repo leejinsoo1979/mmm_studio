@@ -277,6 +277,28 @@ export function analyseBody(
   }
 }
 
+/**
+ * Where a head with hair cards has their hair painted on — its hair shell,
+ * which the hairstyle library is built from (see
+ * scripts/characters/gen-hair-styles.ts). Unlike `analyseBody`'s mask, which
+ * the look tunes for dye and shave, it stays the one the library's shells
+ * were fitted to: the cards' colour told from the skin's down the middle of
+ * the face (the cheeks and nose), the face below the eyes kept whatever the
+ * hair's shade.
+ */
+export function cardHairMask(head: Pixels, opacity: Pixels, geometry: HeadGeometry): Float32Array {
+  const skin = colorWhere(
+    head,
+    geometry.skin,
+    (x, y, n) => n >= 0.6 && Math.abs(x - 0.5) <= 0.14 && y >= 0.55 && y <= 0.72,
+    [200, 160, 140],
+  )
+  const mask = hairMask(head, meanColor(opacity), skin)
+  clearHairlessTexels(mask, head, geometry, false)
+  keepConnectedHair(mask, head, geometry)
+  return mask
+}
+
 const copyPixels = (pixels: Pixels): Pixels => ({
   data: new Uint8ClampedArray(pixels.data),
   width: pixels.width,

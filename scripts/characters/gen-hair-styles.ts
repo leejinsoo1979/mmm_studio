@@ -7,16 +7,16 @@
 // A Rocketbox hairstyle is a shell of the head mesh (sculpted to the hair's
 // volume, painted with it) and hair cards on the `_opacity` mesh. For every
 // head with hair cards it finds which of its points are that shell: those
-// the look system's hair mask (look-job.ts) finds hair on, its texture
-// decoded by sharp (installed with Next.js). The skull is a bald head's
-// (SKULL_AVATAR), kept with its face bones — every head is one template per
-// sex, so the skull fits any of them by those — and, for each of its
-// points, the share of the card-haired heads whose shell stands out of it
-// there. The styles are the characters with hair cards, once each (several
-// professions reuse a character's hair), told apart by sex and by how far
-// the hair falls. Hair gear modelled in a head (a scrunchie, a tie, a pin)
-// is shell too. Lengths are in the bind pose's own units (about 0.9 m on an
-// adult: see avatar-hair.ts).
+// the look system's mask of the cards' hair (look-job.ts's cardHairMask)
+// finds hair on, its texture decoded by sharp (installed with Next.js). The
+// skull is a bald head's (SKULL_AVATAR), kept with its face bones — every
+// head is one template per sex, so the skull fits any of them by those —
+// and, for each of its points, the share of the card-haired heads whose
+// shell stands out of it there. The styles are the characters with hair
+// cards, once each (several professions reuse a character's hair), told
+// apart by sex and by how far the hair falls. Hair gear modelled in a head
+// (a scrunchie, a tie, a pin) is shell too. Lengths are in the bind pose's
+// own units (about 0.9 m on an adult: see avatar-hair.ts).
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import sharp from 'sharp'
@@ -44,7 +44,7 @@ import {
   ZONE_UNIT,
 } from '../../packages/editor/src/components/editor/first-person/hair-styles'
 import { headGeometry } from '../../packages/editor/src/components/editor/first-person/head-geometry'
-import { analyseBody } from '../../packages/editor/src/components/editor/first-person/look-job'
+import { cardHairMask } from '../../packages/editor/src/components/editor/first-person/look-job'
 import type { Pixels } from '../../packages/editor/src/components/editor/first-person/look-pixels'
 import { ROCKETBOX_AVATARS } from '../../packages/editor/src/components/editor/first-person/rocketbox-catalog'
 
@@ -155,12 +155,12 @@ const SURELY_HAIR = 0.006
 
 type Character = { id: string; scene: Object3D; textures: Map<string, Pixels> }
 
-/** Decodes a GLB's colour texture (WebP) for each material named `…_head`, `…_body` or `…_opacity`. */
+/** Decodes a GLB's colour texture (WebP) for each material named `…_head` or `…_opacity`. */
 async function colourTextures(json: GltfJson, bin: Uint8Array) {
   const textures = new Map<string, Pixels>()
   for (const material of json.materials ?? []) {
     const texture = material.pbrMetallicRoughness?.baseColorTexture?.index
-    if (texture === undefined || !/_(head|body|opacity)$/.test(material.name)) continue
+    if (texture === undefined || !/_(head|opacity)$/.test(material.name)) continue
     const source = json.textures![texture]!.extensions?.EXT_texture_webp?.source
     const view = json.bufferViews[json.images![source!]!.bufferView]!
     const bytes = bin.subarray(view.byteOffset ?? 0, (view.byteOffset ?? 0) + view.byteLength)
@@ -279,19 +279,16 @@ function welded(mesh: SkinnedMesh) {
 }
 
 /**
- * Which points of a head the look system's hair mask finds hair on,
- * averaged round each point's texel: 1 or 0 per welded point, with the
- * welds.
+ * Which points of a card-haired head the look system's mask of its cards'
+ * hair finds hair on, averaged round each point's texel: 1 or 0 per welded
+ * point, with the welds.
  */
 function hairOf(character: Character, head: SkinnedMesh) {
-  const material = (name: string) => character.textures.get(name) ?? null
-  const cards = meshOf(character.scene, 'opacity')
-  const body = meshOf(character.scene, 'body')
-  const headTexture = material((head.material as Material).name)!
-  const analysis = analyseBody(
+  const texture = (mesh: Mesh) => character.textures.get((mesh.material as Material).name)!
+  const headTexture = texture(head)
+  const mask = cardHairMask(
     headTexture,
-    (body && material((body.material as Material).name)) ?? headTexture,
-    cards && material((cards.material as Material).name),
+    texture(meshOf(character.scene, 'opacity')!),
     headGeometry(head),
   )
   const { width, height } = headTexture
@@ -308,7 +305,7 @@ function hairOf(character: Character, head: SkinnedMesh) {
       for (let dx = -MASK_SPREAD; dx <= MASK_SPREAD; dx++) {
         const tx = Math.min(width - 1, Math.max(0, x + dx))
         const ty = Math.min(height - 1, Math.max(0, y + dy))
-        sums[weldOf[i]!]! += analysis.hairMask[ty * width + tx]!
+        sums[weldOf[i]!]! += mask[ty * width + tx]!
         counts[weldOf[i]!]!++
       }
     }
