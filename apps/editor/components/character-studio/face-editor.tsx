@@ -684,7 +684,8 @@ export function FaceEditor({
         </button>
         <button
           className="flex flex-col items-center gap-1 rounded-xl border border-neutral-200 bg-white py-2 text-[11px] text-rose-500 transition hover:bg-rose-50"
-          onClick={() => onCommit({ face: null })}
+          // The skin tone taken from the photo goes with it.
+          onClick={() => onCommit(skinFromPhoto ? { face: null, skin: null } : { face: null })}
           type="button"
         >
           <Trash2 className="size-4" /> 얼굴 지우기
