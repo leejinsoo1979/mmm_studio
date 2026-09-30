@@ -110,12 +110,15 @@ const distance = (a: Point, b: Point) => Math.hypot(a[0] - b[0], a[1] - b[1])
  * (full strength inside `inner` of the way to its edge, fading out beyond),
  * points move by `move`, are scaled about `pivot` by 1 + `scale`, and
  * turned about it by `turn` radians. `move[2]` is out of the face (towards
- * the viewer). Lengths are fractions of the front view.
+ * the viewer). The ellipse reaches `radius` across and down, and `above`
+ * up: a brush can fade out gently over the forehead and still stop short
+ * of the eye under it. Lengths are fractions of the front view.
  */
 type Brush = {
   slider: FaceSliderId
   centre: Point
   radius: Point
+  above: number
   inner: number
   pivot: Point
   move: [number, number, number]
@@ -132,6 +135,7 @@ function brushes(
 ): Brush[] {
   const brush: Brush = {
     slider,
+    above: options.radius[1],
     inner: 0.35,
     pivot: options.centre,
     move: [0, 0, 0],
@@ -172,11 +176,12 @@ function faceBrushes(points: readonly Point[]): Brush[] {
   const brow = centroid(FACE_PARTS.brows.slice(half).map((i) => points[i]!))
   // The brows' brushes reach up more than down, so the lids under them stay.
   const browCentre: Point = [brow[0], brow[1] - 0.05 * e]
+  // The brow's inner half (its points nearest the nose), which a wider
+  // gap between the brows moves.
+  const browInner = centroid([65, 55, 66, 107].map(p))
   const eyeWidth = distance(p(33), p(133))
   const upperLid = p(159)
-  const irisRim = FACE_PARTS.rightIris.slice(1)
-  const irisRadius =
-    irisRim.reduce((sum, i) => sum + distance(points[i]!, rightIris), 0) / irisRim.length
+  const lowerLid = p(145)
   const mouth = mid(p(61), p(291))
   const mouthHalfWidth = distance(p(61), p(291)) / 2
   const lipLine = mid(p(13), p(14))
@@ -244,14 +249,18 @@ function faceBrushes(points: readonly Point[]): Brush[] {
       radius: [0.95 * e, 0.5 * e],
       move: [0, 0, 0.15 * e],
     }),
-    // The jaw's corner down and out (squarer) or up and in (softer, a V line).
+    // The jaw's corner down and out (squarer) or up and in (softer, a V
+    // line). The ear's lobe hangs just over the corner, where the outline
+    // (132) turns up to the ear: the brush fades out below it, so the lobe
+    // stays as it is.
     ...brushes(
       'jawAngle',
       middle,
       {
-        centre: mid(p(58), p(172)),
+        centre: p(172),
         radius: [0.55 * e, 0.6 * e],
-        move: [outward * 0.07 * e, 0.14 * e, 0],
+        above: 0.4 * e,
+        move: [outward * 0.07 * e, 0.1 * e, 0],
       },
       true,
     ),
@@ -261,15 +270,17 @@ function faceBrushes(points: readonly Point[]): Brush[] {
       { centre: rightIris, radius: [eyeWidth, eyeWidth * 0.75], scale: [0.3, 0.3] },
       true,
     ),
-    // A longer eye: its corners drawn apart, each by a brush too small to
-    // reach the iris between them, which would otherwise stretch oval.
+    // A longer eye: its corners drawn apart over the eyeball, which stays
+    // (see ROUND_THE_EYES). The outer corner slides round it — back as it
+    // goes out, forward as it comes in, where the eyeball stands further
+    // out — so the eyeball can't show through the skin beside it.
     ...brushes(
       'eyeWidth',
       middle,
       {
         centre: p(33),
         radius: [0.45 * eyeWidth, 0.45 * eyeWidth],
-        move: [outward * 0.07 * e, 0, 0],
+        move: [outward * 0.07 * e, 0, -0.07 * e],
       },
       true,
     ),
@@ -283,34 +294,26 @@ function faceBrushes(points: readonly Point[]): Brush[] {
       },
       true,
     ),
-    // The upper lid up (a wider-open eye), the lower barely down. The
-    // eyeball lies under the lids and moves with them, so opening them
-    // draws the iris taller; widening it about as much keeps it round.
+    // The upper lid up off the eyeball (a wider-open eye) or down over it
+    // (a sleepy one), sliding round it: in as it goes up, out as it comes
+    // down, so the eyeball stays under it. It fades out by the brow over
+    // it and most of the way down to the lower lid, which goes barely the
+    // other way. The eyeballs stay (see ROUND_THE_EYES).
     ...brushes(
       'eyeOpen',
       middle,
       {
-        centre: [upperLid[0], upperLid[1] - 0.08 * e],
-        radius: [0.65 * eyeWidth, 0.2 * e],
-        move: [0, -0.045 * e, 0],
+        centre: upperLid,
+        radius: [0.65 * eyeWidth, 0.7 * (lowerLid[1] - upperLid[1])],
+        above: upperLid[1] - brow[1],
+        move: [0, -0.045 * e, -0.015 * e],
       },
       true,
     ),
     ...brushes(
       'eyeOpen',
       middle,
-      { centre: p(145), radius: [0.55 * eyeWidth, 0.1 * e], move: [0, 0.012 * e, 0] },
-      true,
-    ),
-    ...brushes(
-      'eyeOpen',
-      middle,
-      {
-        centre: rightIris,
-        radius: [1.6 * irisRadius, 1.6 * irisRadius],
-        inner: 0.6,
-        scale: [0.25, 0],
-      },
+      { centre: lowerLid, radius: [0.55 * eyeWidth, 0.1 * e], move: [0, 0.012 * e, 0] },
       true,
     ),
     ...brushes(
@@ -350,10 +353,19 @@ function faceBrushes(points: readonly Point[]): Brush[] {
       { centre: browCentre, radius: [0.55 * e, 0.2 * e], pivot: brow, turn: 0.28 },
       true,
     ),
+    // The brows' inner halves apart, the gap between them widening; their
+    // outer ends, on the side of the head, stay (moved across, the skin
+    // there would stand out of it). Reaching far up the forehead, it fades
+    // out gently there; down, it stops at the lids.
     ...brushes(
       'browSpacing',
       middle,
-      { centre: browCentre, radius: [0.55 * e, 0.2 * e], move: [outward * 0.13 * e, 0, 0] },
+      {
+        centre: browInner,
+        radius: [0.42 * e, upperLid[1] - browInner[1]],
+        above: 0.45 * e,
+        move: [outward * 0.1 * e, 0, 0],
+      },
       true,
     ),
     // The brow's middle up; its ends, past the brush, stay.
@@ -445,7 +457,7 @@ function faceBrushes(points: readonly Point[]): Brush[] {
 /** Moves a brush makes at (x, y), at `setting`, added to `out` (dx, dy, dz). */
 function addBrush(brush: Brush, setting: number, x: number, y: number, out: number[]) {
   const u = (x - brush.centre[0]) / brush.radius[0]
-  const v = (y - brush.centre[1]) / brush.radius[1]
+  const v = (y - brush.centre[1]) / (y < brush.centre[1] ? brush.above : brush.radius[1])
   const reach = Math.sqrt(u * u + v * v)
   if (reach >= 1) return
   let weight = 1
@@ -563,16 +575,38 @@ const PHOTO_GAIN = 1.5
 /**
  * The shape's displacement of the head's front view: at a point there
  * (fractions), how far it moves across (dx, right), down (dy) and out of
- * the face (dz), in fractions of the front view. Null when the shape
- * changes nothing.
+ * the face (dz), in fractions of the front view.
  */
 export type ShapeField = (x: number, y: number, out: number[]) => void
 
+/**
+ * A face shape's field and, for the eyeballs (faceShaper tells them by
+ * their bones, and moves each whole), the same without the sliders that
+ * shape only the skin round them.
+ */
+export type FaceField = ShapeField & { eyeballs: ShapeField }
+
+/**
+ * The sliders that shape the skin round the eyes — the lids and their
+ * corners, the brows, the cheekbones under them — and not the eyeballs,
+ * which stay where they are under it.
+ */
+const ROUND_THE_EYES = new Set<FaceSliderId>([
+  'eyeOpen',
+  'eyeWidth',
+  'browHeight',
+  'browTilt',
+  'browSpacing',
+  'browArch',
+  'cheekbones',
+])
+
+/** The shape's field, or null when it changes nothing. */
 export function faceShapeField(
   targetFlat: readonly number[],
   shape: FaceShape,
   photo: readonly number[] | null,
-): ShapeField | null {
+): FaceField | null {
   const target = unpackPoints(targetFlat)
   const settings = Object.entries(shape.sliders).filter(([, setting]) => setting)
   const active = new Map(settings as [FaceSliderId, number][])
@@ -591,26 +625,31 @@ export function faceShapeField(
   const reach = 1 / (PULL_REACH * e) ** 2
   const cutoff = (3 * PULL_REACH * e) ** 2
 
-  return (x, y, out) => {
-    out[0] = 0
-    out[1] = 0
-    out[2] = 0
-    for (const brush of brushList) addBrush(brush, active.get(brush.slider)!, x, y, out)
-    if (pulls.length === 0) return
-    // The photo's offsets, spread smoothly between its points (a weighted
-    // average), dying away past the face where none are near.
-    let total = STAY
-    let dx = 0
-    let dy = 0
-    for (const { at, offset } of pulls) {
-      const d2 = (x - at[0]) ** 2 + (y - at[1]) ** 2
-      if (d2 > cutoff) continue
-      const weight = Math.exp(-d2 * reach)
-      total += weight
-      dx += weight * offset[0]
-      dy += weight * offset[1]
+  const fieldOf =
+    (used: readonly Brush[]): ShapeField =>
+    (x, y, out) => {
+      out[0] = 0
+      out[1] = 0
+      out[2] = 0
+      for (const brush of used) addBrush(brush, active.get(brush.slider)!, x, y, out)
+      if (pulls.length === 0) return
+      // The photo's offsets, spread smoothly between its points (a weighted
+      // average), dying away past the face where none are near.
+      let total = STAY
+      let dx = 0
+      let dy = 0
+      for (const { at, offset } of pulls) {
+        const d2 = (x - at[0]) ** 2 + (y - at[1]) ** 2
+        if (d2 > cutoff) continue
+        const weight = Math.exp(-d2 * reach)
+        total += weight
+        dx += weight * offset[0]
+        dy += weight * offset[1]
+      }
+      out[0]! += dx / total
+      out[1]! += dy / total
     }
-    out[0]! += dx / total
-    out[1]! += dy / total
-  }
+  return Object.assign(fieldOf(brushList), {
+    eyeballs: fieldOf(brushList.filter((brush) => !ROUND_THE_EYES.has(brush.slider))),
+  })
 }

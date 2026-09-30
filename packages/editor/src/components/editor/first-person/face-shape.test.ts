@@ -1,6 +1,19 @@
 import { describe, expect, test } from 'bun:test'
+import {
+  Bone,
+  BufferGeometry,
+  Float32BufferAttribute,
+  MeshBasicMaterial,
+  Skeleton,
+  SkinnedMesh,
+  SphereGeometry,
+  Uint16BufferAttribute,
+  Vector3,
+} from 'three'
+import { faceShaper } from './avatar-shape'
 import { FACE_PARTS, FACE_POINT_COUNT, facePointOf, type Point, packPoints } from './face-points'
 import { faceShapeField, hasSliders, photoResiduals, readFaceShape } from './face-shape'
+import type { HeadFrame } from './head-geometry'
 
 /**
  * A face's points, mirror-symmetric across x = 0.5: the outline, features
@@ -63,6 +76,29 @@ const MIDDLE: [number, number][] = [
   [17, 0.72],
 ]
 
+/**
+ * The image's left brow as a face has it, in FACE_PARTS.brows' order (its
+ * lower edge from the outer end in, then its upper edge): each point's
+ * place across from the face's middle and up from the irises, in the eyes'
+ * distances.
+ */
+const BROW: Point[] = [
+  [-0.87, -0.13],
+  [-0.78, -0.19],
+  [-0.64, -0.22],
+  [-0.46, -0.21],
+  [-0.21, -0.13],
+  [-0.94, -0.18],
+  [-0.83, -0.26],
+  [-0.68, -0.3],
+  [-0.48, -0.29],
+  [-0.24, -0.26],
+]
+
+/** The featured face's eyes' distance and the irises' height. */
+const EYES = 0.24
+const IRIS_HEIGHT = 0.46
+
 /** The face's points with its features where a face has them. */
 function featurePoints(): Point[] {
   const points = facePoints()
@@ -71,11 +107,12 @@ function featurePoints(): Point[] {
     points[facePointOf(left)] = [1 - x, y]
   }
   for (const [landmark, y] of MIDDLE) points[facePointOf(landmark)] = [0.5, y]
-  // The brows, a row over the eyes: the subject's left first (the image's right).
+  // The brows over the eyes: the subject's left first (the image's right).
   const half = FACE_PARTS.brows.length / 2
   FACE_PARTS.brows.forEach((i, k) => {
-    const x = 0.3 + ((k % half) / (half - 1)) * 0.15
-    points[i] = [k < half ? 1 - x : x, 0.4]
+    const [across, up] = BROW[k % half]!
+    const x = 0.5 + across * EYES
+    points[i] = [k < half ? 1 - x : x, IRIS_HEIGHT + up * EYES]
   })
   return points
 }
@@ -206,6 +243,10 @@ describe('the finer sliders', () => {
     expect(Math.abs(moveAt('jawAngle', 1, at(152))[1]!)).toBeLessThan(dy! / 4)
   })
 
+  test('a squarer jaw leaves the ear’s lobe, over the outline where it turns up (132), be', () => {
+    expect(moveAt('jawAngle', 1, at(132))).toEqual([0, 0, 0])
+  })
+
   test('a longer eye: its corners drawn apart, the iris left round', () => {
     expect(moveAt('eyeWidth', 1, at(33))[0]).toBeLessThan(0)
     expect(moveAt('eyeWidth', 1, at(133))[0]).toBeGreaterThan(0)
@@ -223,6 +264,21 @@ describe('the finer sliders', () => {
     expect(moveAt('eyeOpen', -1, at(159))[1]).toBeGreaterThan(0)
   })
 
+  test('the lid slides round the eyeball: in as it opens, out as it closes; the eyeball stays', () => {
+    expect(moveAt('eyeOpen', 1, at(159))[2]).toBeLessThan(0)
+    expect(moveAt('eyeOpen', -1, at(159))[2]).toBeGreaterThan(0)
+    const field = faceShapeField(featured, { fit: 1, sliders: { eyeOpen: 1, eyeSize: 1 } }, null)!
+    const [lids, eyeballs] = [
+      [0, 0, 0],
+      [0, 0, 0],
+    ]
+    field(...at(159), lids)
+    field.eyeballs(...at(159), eyeballs)
+    const eyeSizeOnly = moveAt('eyeSize', 1, at(159))
+    expect(eyeballs).toEqual(eyeSizeOnly)
+    expect(lids[1]).toBeLessThan(eyeSizeOnly[1]!)
+  })
+
   test('brows set apart: each out its own way, the middle between them stays', () => {
     const brow = featurePoints()[FACE_PARTS.brows.at(-1)!]!
     expect(moveAt('browSpacing', 1, brow)[0]).toBeLessThan(0)
@@ -230,11 +286,25 @@ describe('the finer sliders', () => {
     expect(moveAt('browSpacing', 1, [0.5, 0.4])[0]).toBeCloseTo(0, 9)
   })
 
+  test('brows set apart: their outer ends stay; the forehead goes along, fading gently; the lids stay', () => {
+    // The image's left brow's outer ends (46, 70), and its inner (107).
+    const inner = moveAt('browSpacing', 1, at(107))[0]!
+    for (const end of [46, 70]) expect(moveAt('browSpacing', 1, at(end))).toEqual([0, 0, 0])
+    const [x, y] = at(107)
+    const forehead = moveAt('browSpacing', 1, [x, y - 0.2 * EYES])[0]!
+    expect(Math.abs(forehead)).toBeGreaterThan(Math.abs(inner) / 2)
+    expect(moveAt('browSpacing', 1, at(159))).toEqual([0, 0, 0])
+  })
+
   test('an arched brow: its middle up, its ends barely', () => {
     const brows = FACE_PARTS.brows
       .slice(FACE_PARTS.brows.length / 2)
       .map((i) => featurePoints()[i]!)
-    const middle = moveAt('browArch', 1, [0.375, 0.4])[1]!
+    const centre: Point = [
+      brows.reduce((sum, [x]) => sum + x, 0) / brows.length,
+      brows.reduce((sum, [, y]) => sum + y, 0) / brows.length,
+    ]
+    const middle = moveAt('browArch', 1, centre)[1]!
     expect(middle).toBeLessThan(0)
     for (const end of [brows[0]!, brows.at(-1)!]) {
       expect(Math.abs(moveAt('browArch', 1, end)[1]!)).toBeLessThan(Math.abs(middle) / 3)
@@ -274,5 +344,97 @@ describe('the finer sliders', () => {
     expect(moveAt('mouthDepth', 1, at(13))[2]).toBeGreaterThan(0)
     expect(moveAt('mouthDepth', -1, at(13))[2]).toBeLessThan(0)
     expect(moveAt('mouthDepth', 1, [0.38, 0.46])).toEqual([0, 0, 0])
+  })
+})
+
+describe('the eyeballs, under the field', () => {
+  /** The featured face's front view as the bind pose: x across, y up, the face's front at z = 0. */
+  const FRAME: HeadFrame = { left: 0, top: 1, size: 1, neck: new Vector3(0.5, 0.2, -0.2), front: 0 }
+  const IRIS = at(468)
+  /** The image's left eyeball, and how far it reaches. */
+  const EYEBALL = new Vector3(IRIS[0], 1 - IRIS[1], -0.02)
+  const EYE_RADIUS = 0.02
+
+  /**
+   * A head of an eyeball (skinned to its own bone, as Rocketbox's are) and
+   * a point of skin on its upper lid (skinned to the head bone).
+   */
+  function head() {
+    const eyeball = new SphereGeometry(EYE_RADIUS, 8, 6).translate(EYEBALL.x, EYEBALL.y, EYEBALL.z)
+    const [lidX, lidY] = at(159)
+    const positions = [...eyeball.getAttribute('position').array, lidX, 1 - lidY, 0]
+    const count = positions.length / 3
+    const eyeCount = eyeball.getAttribute('position').count
+    const geometry = new BufferGeometry()
+    geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+    geometry.setAttribute(
+      'skinIndex',
+      new Uint16BufferAttribute(
+        Array.from({ length: count }, (_, i) => [i < eyeCount ? 1 : 0, 0, 0, 0]).flat(),
+        4,
+      ),
+    )
+    geometry.setAttribute(
+      'skinWeight',
+      new Float32BufferAttribute(Array.from({ length: count }, () => [1, 0, 0, 0]).flat(), 4),
+    )
+    const mesh = new SkinnedMesh(geometry, new MeshBasicMaterial())
+    const bones = [new Bone(), new Bone()]
+    bones[0]!.name = 'Bip01_Head'
+    bones[1]!.name = 'Bip01_REye'
+    mesh.bind(new Skeleton(bones))
+    return { mesh, eyeCount }
+  }
+
+  /** Every point's move under a slider, with where it was. */
+  function moved(slider: string, setting: number) {
+    const { mesh, eyeCount } = head()
+    const field = faceShapeField(featured, { fit: 1, sliders: { [slider]: setting } }, null)!
+    const move = faceShaper(field, FRAME)(mesh)!
+    const position = mesh.geometry.getAttribute('position')
+    const points = Array.from({ length: position.count }, (_, i) => {
+      const at = new Vector3().fromBufferAttribute(position, i)
+      const by = new Vector3()
+      move(at, i, by)
+      return { at, by }
+    })
+    return { eyeball: points.slice(0, eyeCount), lid: points[eyeCount]! }
+  }
+
+  test('opening the lids leaves the eyeball where it is', () => {
+    for (const setting of [1, -1]) {
+      const { eyeball, lid } = moved('eyeOpen', setting)
+      for (const { by } of eyeball) expect(by.length()).toBe(0)
+      expect(Math.sign(lid.by.y)).toBe(setting)
+    }
+  })
+
+  test('the skin round the eye moves over the eyeball, which stays: its corners, the brows', () => {
+    for (const slider of ['eyeWidth', 'browHeight', 'browSpacing']) {
+      for (const { by } of moved(slider, 1).eyeball) expect(by.length()).toBe(0)
+    }
+  })
+
+  test('the eyeball moves whole: turned and scaled evenly, so the iris stays round', () => {
+    for (const [slider, growth] of [
+      ['eyeSize', 1.3],
+      ['faceWidth', 1],
+      ['eyeTilt', 1],
+      ['eyeSpacing', 1],
+    ] as const) {
+      const { eyeball } = moved(slider, 1)
+      const [first, ...rest] = eyeball.map(({ at, by }) => ({ at, after: at.clone().add(by) }))
+      // Across the face, every point's distance from any other grows alike.
+      const grown = rest
+        .map(({ at, after }) => ({
+          before: at.clone().sub(first!.at).setZ(0).length(),
+          after: after.clone().sub(first!.after).setZ(0).length(),
+        }))
+        .filter(({ before }) => before > EYE_RADIUS / 10)
+        .map(({ before, after }) => after / before)
+      for (const each of grown) expect(each).toBeCloseTo(grown[0]!, 9)
+      expect(grown[0]).toBeCloseTo(growth, 1)
+      for (const { by } of eyeball) expect(by.z).toBeCloseTo(eyeball[0]!.by.z, 9)
+    }
   })
 })

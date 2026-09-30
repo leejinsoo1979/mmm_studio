@@ -36,12 +36,110 @@ export type PointMove = (point: Vector3, index: number, move: Vector3) => void
 /** A reshaping's moves for a mesh of the body, or null when it leaves that mesh be. */
 export type Shaper = (mesh: Mesh) => PointMove | null
 
-/** The face shape's field (on the head's front view) as moves of bind-pose points, for every mesh. */
-export function faceShaper(field: ShapeField, frame: HeadFrame): Shaper {
+/** The bones the eyeballs are skinned to (Rocketbox's `Bip01_REye`, `Bip01_LEye`; not the lids' `…EyeBlinkTop`). */
+const EYE_BONE = /Eye$/
+
+/** How many places round an eyeball's iris the field's turn and scale there are fitted to. */
+const IRIS_PLACES = 8
+
+/** The iris's radius as a share of its eyeball's, seen from the front: where those places lie. */
+const IRIS_SHARE = 0.35
+
+/** An eyeball in the bind pose: its middle, and how far it reaches across the face from it. */
+type Eyeball = { middle: Vector3; radius: number }
+
+/**
+ * A mesh's eyeballs: per vertex, which of them it is on (−1 for none, by
+ * the bone it is most skinned to), or null when it has none.
+ */
+function eyeballsOf(mesh: Mesh): { eyeOf: Int32Array; eyeballs: Eyeball[] } | null {
+  const skinned = mesh as SkinnedMesh
+  if (!skinned.isSkinnedMesh) return null
+  const bones = skinned.skeleton.bones.map((bone) => EYE_BONE.test(bone.name))
+  if (!bones.includes(true)) return null
+  const geometry = originalGeometry(mesh)
+  const position = geometry.getAttribute('position')
+  const joints = geometry.getAttribute('skinIndex')
+  const weights = geometry.getAttribute('skinWeight')
+  if (!(position && joints && weights)) return null
+  const eyeOf = new Int32Array(position.count).fill(-1)
+  const eyeOfBone = new Map<number, number>()
+  const points: Vector3[][] = []
+  for (let i = 0; i < position.count; i++) {
+    let bone = 0
+    for (let k = 1; k < 4; k++) {
+      if (weights.getComponent(i, k) > weights.getComponent(i, bone)) bone = k
+    }
+    const joint = joints.getComponent(i, bone)
+    if (!bones[joint]) continue
+    let eye = eyeOfBone.get(joint)
+    if (eye === undefined) {
+      eye = points.length
+      eyeOfBone.set(joint, eye)
+      points.push([])
+    }
+    eyeOf[i] = eye
+    points[eye]!.push(
+      new Vector3().fromBufferAttribute(position, i).applyMatrix4(skinned.bindMatrix),
+    )
+  }
+  if (points.length === 0) return null
+  const eyeballs = points.map((list) => {
+    const middle = list
+      .reduce((sum, point) => sum.add(point), new Vector3())
+      .divideScalar(list.length)
+    const radius = Math.max(
+      ...list.map((point) => Math.hypot(point.x - middle.x, point.y - middle.y)),
+    )
+    return { middle, radius }
+  })
+  return { eyeOf, eyeballs }
+}
+
+/**
+ * An eyeball's move as a whole: as `move` moves the places round its iris
+ * on average, turned and scaled evenly across the face by as much as it
+ * turns and scales them (the nearest such to their stretch), and in and out
+ * with them. Stretched point by point, the eyeball's triangles would fold
+ * the iris where a brush's edge crosses it, and a slider widening the face
+ * would make it oval.
+ */
+function eyeballMove({ middle, radius }: Eyeball, move: PointMove) {
+  const ring = Array.from({ length: IRIS_PLACES }, (_, k) => {
+    const angle = (k / IRIS_PLACES) * 2 * Math.PI
+    return new Vector3(Math.cos(angle), Math.sin(angle), 0).multiplyScalar(IRIS_SHARE * radius)
+  })
+  const moves = ring.map((offset) => {
+    const out = new Vector3()
+    move(offset.clone().add(middle), -1, out)
+    return out
+  })
+  const at = moves.reduce((sum, each) => sum.add(each), new Vector3()).divideScalar(IRIS_PLACES)
+  let scale = 0
+  let turn = 0
+  let spread = 0
+  ring.forEach((offset, k) => {
+    const dx = moves[k]!.x - at.x
+    const dy = moves[k]!.y - at.y
+    scale += offset.x * dx + offset.y * dy
+    turn += offset.x * dy - offset.y * dx
+    spread += offset.lengthSq()
+  })
+  scale /= spread
+  turn /= spread
+  return (point: Vector3, out: Vector3) => {
+    const x = point.x - middle.x
+    const y = point.y - middle.y
+    out.set(at.x + scale * x - turn * y, at.y + turn * x + scale * y, at.z)
+  }
+}
+
+/** A field on the head's front view as moves of bind-pose points. */
+function fieldMove(field: ShapeField, frame: HeadFrame): PointMove {
   const { left, top, size, neck, front } = frame
   const depth = Math.max(front - neck.z, 1e-6)
   const out = [0, 0, 0]
-  const move: PointMove = (point, _index, move) => {
+  return (point, _index, move) => {
     const t = ((point.z - neck.z) / depth - DEPTH_FROM) / (DEPTH_TO - DEPTH_FROM)
     if (t <= 0) {
       move.set(0, 0, 0)
@@ -51,7 +149,31 @@ export function faceShaper(field: ShapeField, frame: HeadFrame): Shaper {
     field((point.x - left) / size, (top - point.y) / size, out)
     move.set(out[0]! * size, -out[1]! * size, out[2]! * size).multiplyScalar(reach)
   }
-  return () => move
+}
+
+/**
+ * The face shape's field (on the head's front view) as moves of bind-pose
+ * points, for every mesh. Eyeballs move whole (see eyeballMove), by the
+ * field's `eyeballs` where it has one: they stay as the lids, the brows and
+ * the skin round them move over them.
+ */
+export function faceShaper(
+  field: ShapeField & { eyeballs?: ShapeField },
+  frame: HeadFrame,
+): Shaper {
+  const move = fieldMove(field, frame)
+  const eyeballField = field.eyeballs ? fieldMove(field.eyeballs, frame) : move
+  return (mesh) => {
+    const found = eyeballsOf(mesh)
+    if (!found) return move
+    const { eyeOf, eyeballs } = found
+    const whole = eyeballs.map((eyeball) => eyeballMove(eyeball, eyeballField))
+    return (point, index, out) => {
+      const eye = eyeOf[index]!
+      if (eye >= 0) whole[eye]!(point, out)
+      else move(point, index, out)
+    }
+  }
 }
 
 /** Finite-difference step for the normals, as a share of the front view. */
