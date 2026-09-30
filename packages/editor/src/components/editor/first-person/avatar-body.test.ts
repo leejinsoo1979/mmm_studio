@@ -11,8 +11,12 @@ import {
 } from 'three'
 import { applyBodyBones, bodyHeightScale } from './avatar-body'
 
-/** A body just big enough to hold the bones a build moves: a collarbone and its upper arm, and a head. */
-function body() {
+/**
+ * A body just big enough to hold the bones a build moves: a collarbone and
+ * its upper arm, and a head, skinned by a mesh of `material` (a head's, or
+ * a whole body made in one piece).
+ */
+function body(material = 'm001_head') {
   const pelvis = new Bone()
   pelvis.name = 'Bip01_Pelvis'
   const clavicle = new Bone()
@@ -37,9 +41,7 @@ function body() {
     'skinWeight',
     new Float32BufferAttribute([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0], 4),
   )
-  const material = new MeshBasicMaterial()
-  material.name = 'm001_head'
-  const mesh = new SkinnedMesh(geometry, material)
+  const mesh = new SkinnedMesh(geometry, new MeshBasicMaterial({ name: material }))
   const model = new Group()
   model.scale.setScalar(1.5)
   model.add(mesh, pelvis)
@@ -71,6 +73,33 @@ describe('a build’s bones', () => {
     undo()
     applyBodyBones(model, { height: 0, sliders: { weight: -1 } })
     expect(upperArm.position.length()).toBe(reach)
+  })
+
+  test('give the arms only so much room, so narrowed shoulders still read narrower', () => {
+    const { model, upperArm } = body()
+    const reach = upperArm.position.length()
+    const heaviest = { weight: 1, waist: 1, hips: 1, muscle: 1, belly: 1 }
+    let undo = applyBodyBones(model, { height: 0, sliders: heaviest })
+    const roomiest = upperArm.position.length()
+    undo()
+    undo = applyBodyBones(model, { height: 0, sliders: { weight: 1 } })
+    expect(upperArm.position.length()).toBeCloseTo(roomiest, 9)
+    undo()
+    undo = applyBodyBones(model, { height: 0, sliders: { shoulders: 1 } })
+    const widest = upperArm.position.length()
+    undo()
+    // The room is well short of what the shoulders slider reaches.
+    expect(roomiest - reach).toBeLessThan((widest - reach) * 0.6)
+    applyBodyBones(model, { height: 0, sliders: { ...heaviest, shoulders: -1 } })
+    expect(upperArm.position.length()).toBeLessThan(reach - (roomiest - reach) * 0.8)
+  })
+
+  test('reach the bones of a body made all in one piece, with no head mesh', () => {
+    const { model, upperArm, head } = body('f204')
+    const reach = upperArm.position.length()
+    applyBodyBones(model, { height: 0, sliders: { shoulders: 1, headSize: 1 } })
+    expect(upperArm.position.length()).toBeGreaterThan(reach * 1.1)
+    expect(head.scale.x).toBeGreaterThan(1.05)
   })
 
   test('are put back exactly', () => {
