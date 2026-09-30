@@ -28,6 +28,7 @@ import {
 import { useViewer } from '@pascal-app/viewer'
 import { KeyboardControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
+import { X } from 'lucide-react'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box3,
@@ -1699,8 +1700,8 @@ export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
         </div>
       )}
 
-      <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
-        <div className="pointer-events-auto flex items-center gap-0.5 rounded-xl border border-border/40 bg-background/90 p-1 shadow-lg backdrop-blur-xl">
+      <div className="pointer-events-auto absolute top-3 right-3 z-50 flex h-10 items-center gap-1 rounded-full border border-border/40 bg-background/90 px-1 shadow-lg backdrop-blur-xl">
+        <div className="flex items-center rounded-full bg-accent/50 p-0.5">
           {(
             [
               ['third', '3인칭'],
@@ -1710,7 +1711,7 @@ export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
             <button
               aria-pressed={view === id}
               className={cn(
-                'rounded-lg px-3 py-1.5 font-medium text-sm transition-colors',
+                'rounded-full px-2.5 py-1 font-medium text-xs transition-colors',
                 view === id
                   ? 'bg-foreground text-background'
                   : 'text-muted-foreground hover:text-foreground',
@@ -1725,14 +1726,17 @@ export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
         </div>
         {view === 'third' && <CharacterPicker />}
         <button
-          className="pointer-events-auto flex items-center gap-2 rounded-xl border border-border/40 bg-background/90 px-4 py-2 font-medium text-foreground text-sm shadow-lg backdrop-blur-xl transition-colors hover:bg-background"
+          aria-label="투어 종료 (ESC)"
+          className="flex items-center gap-1.5 rounded-full py-1 pr-2.5 pl-2 font-medium text-foreground text-xs transition-colors hover:bg-accent"
           onClick={handleExit}
+          title="투어 종료 (ESC)"
           type="button"
         >
-          <kbd className="rounded border border-border/50 bg-accent/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <X className="size-3.5" />
+          종료
+          <kbd className="rounded border border-border/50 px-1 font-mono text-[9px] text-muted-foreground leading-4">
             ESC
           </kbd>
-          투어 종료
         </button>
       </div>
 

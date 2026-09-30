@@ -1387,7 +1387,12 @@ export default function Editor({
               navbarSlot={navbarSlot}
               overlays={
                 <>
-                  {!(isVersionPreviewMode || isCaptureMode || isStudioMode) && (
+                  {!(
+                    isVersionPreviewMode ||
+                    isCaptureMode ||
+                    isStudioMode ||
+                    isFirstPersonMode
+                  ) && (
                     <div className="pointer-events-auto">
                       <ActionMenu />
                     </div>
@@ -1402,7 +1407,12 @@ export default function Editor({
                       <HelperManager />
                     </div>
                   )}
-                  {!(isCaptureMode || isVersionPreviewMode || isStudioMode) && <HintLine />}
+                  {!(
+                    isCaptureMode ||
+                    isVersionPreviewMode ||
+                    isStudioMode ||
+                    isFirstPersonMode
+                  ) && <HintLine />}
                   {isFirstPersonMode && (
                     <FirstPersonOverlay
                       onExit={() => useEditor.getState().setFirstPersonMode(false)}
@@ -1417,8 +1427,9 @@ export default function Editor({
               sidebarTabs={tabBarTabs}
               stageOverlay={stageOverlay}
               viewerContent={viewerCanvas}
-              viewerToolbarLeft={viewerToolbarLeft}
-              viewerToolbarRight={viewerToolbarRight}
+              // The walkthrough brings its own controls to the corners.
+              viewerToolbarLeft={isFirstPersonMode ? null : viewerToolbarLeft}
+              viewerToolbarRight={isFirstPersonMode ? null : viewerToolbarRight}
             />
             <EditorCommands />
             <CommandPalette emptyAction={commandPaletteEmptyAction} />

@@ -110,17 +110,20 @@ export function CharacterPicker() {
       <button
         aria-expanded={open}
         aria-label={`캐릭터 선택: ${avatarLabel(current.id)}`}
-        className="flex items-center gap-2 rounded-xl border border-border/40 bg-background/90 py-1 pr-2.5 pl-1 font-medium text-foreground text-sm shadow-lg backdrop-blur-xl transition-colors hover:bg-background"
+        className={cn(
+          'flex items-center gap-1.5 rounded-full py-1 pr-2 pl-1 font-medium text-foreground text-xs transition-colors hover:bg-accent',
+          open && 'bg-accent',
+        )}
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
         <img
           alt=""
-          className="h-8 w-5 rounded-md bg-accent/40 object-cover object-top"
+          className="size-6 rounded-full bg-accent/60 object-cover object-top"
           src={avatarThumbnailUrl(current.id)}
         />
         {avatarLabel(current.id)}
-        <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} />
+        <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} />
       </button>
 
       {open && (
