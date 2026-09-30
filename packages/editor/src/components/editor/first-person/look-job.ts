@@ -1,7 +1,8 @@
 import { connectedFrom } from './face-fill'
 import { runFaceJob } from './face-job'
+import { DEFAULT_BEARD, type FacePaint, hasFacePaint, paintFace, shaveHead } from './face-paint'
 import { maskImage } from './face-swap'
-import { forEachTexel, renderFront } from './front-render'
+import { forEachTexel, renderFront, tintIris } from './front-render'
 import type { HeadGeometry } from './head-geometry'
 import {
   colorDistance,
@@ -38,7 +39,7 @@ export type LookBody = {
   geometry: PackedGeometry
 }
 
-/** A look to put on a body (see `AvatarLook`), with the character's face landmarks. */
+/** A look to put on a body (see `AvatarPaint`), with the character's face landmarks. */
 export type LookJob = {
   body: LookBody
   /** The character, whose face landmarks `target` are. */
@@ -51,8 +52,15 @@ export type LookJob = {
     blend: number
     light: number
     eyes: string | null
-    target: number[]
   } | null
+  paint: FacePaint
+  bald: boolean
+  /**
+   * The character's face landmarks (packed fractions of its front view):
+   * without them (not loaded, or none for this character) the face photo
+   * and all the paint but the irises' are left out.
+   */
+  target: number[] | null
 }
 
 /**
@@ -68,6 +76,8 @@ export type Analysis = {
   opacity: Pixels | null
   geometry: HeadGeometry
   hairMask: Float32Array
+  /** The hair's colour (its cards', or what is painted on the head), null for a bare head. */
+  hairColor: Rgb | null
   headSkinMask: Float32Array
   bodySkinMask: Float32Array
   hairLum: number
@@ -226,6 +236,7 @@ export function analyseBody(
     opacity,
     geometry,
     hairMask: hairOnHead,
+    hairColor: hairColour,
     headSkinMask,
     bodySkinMask,
     hairLum: opacity ? luminance(...meanColor(opacity)) : 0,
@@ -241,45 +252,83 @@ const copyPixels = (pixels: Pixels): Pixels => ({
   height: pixels.height,
 })
 
+/** The last few heads dyed and shaved, by what they depend on: each holds 16 MB, and a paint slider's drag repeats them. */
+const bases = new Map<string, Pixels>()
+const BASES_KEPT = 2
+
 /**
- * A body's textures dressed in a look: the ones it changes (the swapped
- * face, hair dye, skin tone), each its own copy. `photo` is the face's
- * photo, read (null leaves the face out).
+ * A body's head dyed and shaved as a look asks (see `dressBody`), its own
+ * copy. `name` names the look's body, dyes and shave.
+ */
+function baseHead(
+  analysis: Analysis,
+  name: string,
+  { hair, skin, bald, target }: Pick<LookJob, 'hair' | 'skin' | 'bald' | 'target'>,
+): Pixels {
+  let base = bases.get(name)
+  if (base) {
+    bases.delete(name)
+  } else {
+    base = copyPixels(analysis.head)
+    if (skin) dye(base, hexToRgb(skin), analysis.skinLum, analysis.headSkinMask)
+    if (hair) dye(base, hexToRgb(hair), analysis.headHairLum, analysis.hairMask)
+    if (bald) shaveHead(base, analysis.geometry, analysis.hairMask, analysis.headSkinMask, target)
+  }
+  bases.set(name, base)
+  if (bases.size > BASES_KEPT) bases.delete(bases.keys().next().value!)
+  return copyPixels(base)
+}
+
+/**
+ * A body's textures dressed in a look: the ones it changes, each its own
+ * copy. On the head, in order: the skin tone, the hair dye, a shave, the
+ * swapped face (onto the skin as dyed, the dyes' masks being the
+ * character's own face and not the photo's), the face paint over it all,
+ * and the irises last (a face photo's, unless the paint picks one).
+ * `photo` is the face's photo, read (null leaves the face out).
  */
 export function dressBody(
   analysis: Analysis,
   job: Omit<LookJob, 'body'> & { key: string },
   photo: Pixels | null,
 ): Partial<Record<Part, Pixels>> {
-  const { face, hair, skin } = job
+  const { face, hair, skin, paint, bald, target } = job
+  const swap = face && photo && target
+  const eyes = paint.eyes ?? face?.eyes ?? null
   const changed: Partial<Record<Part, Pixels>> = {}
-  if ((face && photo) || hair || skin) {
-    let head = copyPixels(analysis.head)
-    if (hair) dye(head, hexToRgb(hair), analysis.headHairLum, analysis.hairMask)
-    if (skin) dye(head, hexToRgb(skin), analysis.skinLum, analysis.headSkinMask)
-    // The face goes on last: the dyes' masks are the character's own face,
-    // not the photo's, and the face's colours meet the skin as dyed.
-    if (face && photo) {
+  if (swap || hair || skin || bald || eyes || (target && hasFacePaint(paint))) {
+    // The shave keeps the face's features where the landmarks are known.
+    const base = `${job.key}|${hair}|${skin}|${bald && (target ? 'face' : 'head')}`
+    let head = baseHead(analysis, base, job)
+    // A shaved head has no hair left over its face.
+    const hairMask = bald ? null : analysis.hairMask
+    if (swap) {
       try {
         head = runFaceJob({
           head,
-          avatar: job.key,
-          front: `${job.key}|${hair}|${skin}`,
+          avatar: bald ? `${job.key}|bald` : job.key,
+          front: base,
           geometry: analysis.geometry,
-          hair: analysis.hairMask,
+          hair: hairMask ?? new Float32Array(head.width * head.height),
           photo,
           photoKey: face.photo,
           points: face.points,
-          target: face.target,
+          target,
           blend: face.blend,
           light: face.light,
-          eyes: face.eyes,
         })
       } catch (error) {
         // The dyes still go on; the face is left out.
         console.warn('[look] face swap failed', error)
       }
     }
+    if (target) {
+      paintFace(head, analysis.geometry, target, paint, {
+        beard: hair ? hexToRgb(hair) : (analysis.hairColor ?? DEFAULT_BEARD),
+        hair: hairMask,
+      })
+    }
+    if (eyes) for (const eye of analysis.geometry.eyes) tintIris(head, eye, hexToRgb(eyes))
     changed.head = head
   }
   if (hair && analysis.opacity) {

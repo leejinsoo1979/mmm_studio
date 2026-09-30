@@ -53,9 +53,11 @@ function prepareModel(source: Object3D): Object3D {
 /**
  * A Rocketbox body ready to animate: its own mesh (cloned, so one avatar can
  * appear more than once), its gender's shared clips fitted to it, and the
- * gaits' strides scaled to its size. Suspends while the files load.
+ * gaits' strides scaled to its size — times `heightScale`, how much taller
+ * a look makes it (bodyHeightScale), so its feet don't slide. Suspends
+ * while the files load.
  */
-export function useAvatarBody(avatarId: string) {
+export function useAvatarBody(avatarId: string, heightScale = 1) {
   const avatar = findAvatar(avatarId)
   const motion = MOTION_SETS[avatarGender(avatar.id)]
   const body = useGLTF(avatarUrl(avatar.id))
@@ -63,6 +65,9 @@ export function useAvatarBody(avatarId: string) {
   const scale = avatar.hip / motion.hip
   const model = useMemo(() => prepareModel(body.scene), [body.scene])
   const clips = useMemo(() => fitClips(moves.animations, scale), [moves.animations, scale])
-  const gaitSet = useMemo(() => ({ gaits: scaledGaits(motion.gaits, scale) }), [motion, scale])
+  const gaitSet = useMemo(
+    () => ({ gaits: scaledGaits(motion.gaits, scale * heightScale) }),
+    [motion, scale, heightScale],
+  )
   return { avatar, motion, model, clips, gaitSet }
 }

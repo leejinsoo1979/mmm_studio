@@ -1,17 +1,31 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import {
+  type BodyShape,
+  DEFAULT_BODY_SHAPE,
+  hasBodyShape,
+  readBodyShape,
+} from '../components/editor/first-person/body-shape'
+import {
   DEFAULT_EMOTE_KEYS,
   type EmoteCue,
   type EmoteId,
   isEmoteId,
 } from '../components/editor/first-person/emotes'
+import {
+  type FacePaint,
+  hasFacePaint,
+  NO_PAINT,
+  readFacePaint,
+} from '../components/editor/first-person/face-paint'
 import { isFacePoints } from '../components/editor/first-person/face-points'
 import {
   DEFAULT_FACE_SHAPE,
   type FaceShape,
+  hasSliders,
   readFaceShape,
 } from '../components/editor/first-person/face-shape'
+import { BALD, type HairStyle, readHairStyle } from '../components/editor/first-person/hair-styles'
 
 /**
  * The player's face, swapped onto their character's: the face cropped from
@@ -61,23 +75,69 @@ export const DEFAULT_FACE_LIGHT = 0.5
 
 /**
  * The player's changes to their character: hair and skin dyes (hex), a face
- * photo, and the face's shape (the photo's proportions, the sliders).
+ * photo, the face's shape (the photo's proportions, the sliders), the
+ * build, the hairstyle, and what is painted on the face.
  */
 export type AvatarLook = {
   hair: string | null
   skin: string | null
   face: AvatarFace | null
   shape: FaceShape
+  body: BodyShape
+  hairStyle: HairStyle
+  paint: FacePaint
 }
 
-export const NO_LOOK: AvatarLook = { hair: null, skin: null, face: null, shape: DEFAULT_FACE_SHAPE }
+export const NO_LOOK: AvatarLook = {
+  hair: null,
+  skin: null,
+  face: null,
+  shape: DEFAULT_FACE_SHAPE,
+  body: DEFAULT_BODY_SHAPE,
+  hairStyle: null,
+  paint: NO_PAINT,
+}
 
-/** What of a look is painted on the character's textures (the shape is the geometry's). */
-export type AvatarPaint = Pick<AvatarLook, 'hair' | 'skin' | 'face'>
+/** A look as saved or received, every part of it checked (an older save gets defaults). */
+export function readAvatarLook(value: unknown): AvatarLook {
+  const look = (value ?? {}) as Partial<AvatarLook>
+  const hex = (color: unknown) => (typeof color === 'string' && HEX.test(color) ? color : null)
+  return {
+    hair: hex(look.hair),
+    skin: hex(look.skin),
+    face: readAvatarFace(look.face),
+    shape: readFaceShape(look.shape),
+    body: readBodyShape(look.body),
+    hairStyle: readHairStyle(look.hairStyle),
+    paint: readFacePaint(look.paint),
+  }
+}
+
+/**
+ * What of a look is painted on the character's textures (the shapes are the
+ * geometry's, a borrowed hairstyle its own mesh): the dyes, the face photo,
+ * the face paint, and a shaved head.
+ */
+export type AvatarPaint = Pick<AvatarLook, 'hair' | 'skin' | 'face' | 'paint'> & { bald: boolean }
+
+export const paintOf = (look: AvatarLook): AvatarPaint => ({
+  hair: look.hair,
+  skin: look.skin,
+  face: look.face,
+  paint: look.paint,
+  bald: look.hairStyle === BALD,
+})
 
 /** Whether a look changes the character's textures. */
 export const hasLook = (look: AvatarPaint | null | undefined): look is AvatarPaint =>
-  Boolean(look && (look.hair || look.skin || look.face))
+  Boolean(look && (look.hair || look.skin || look.face || look.bald || hasFacePaint(look.paint)))
+
+/** Whether a look changes the character at all. */
+export const changesCharacter = (look: AvatarLook) =>
+  hasLook(paintOf(look)) ||
+  hasSliders(look.shape) ||
+  hasBodyShape(look.body) ||
+  look.hairStyle !== null
 
 type AvatarProfileState = {
   look: AvatarLook
@@ -105,12 +165,7 @@ const useAvatarProfile = create<AvatarProfileState>()(
         const keys = Object.fromEntries(
           Object.entries(saved.keys ?? current.keys).filter(([, emote]) => isEmoteId(emote)),
         ) as Record<string, EmoteId>
-        const look = { ...NO_LOOK, ...saved.look }
-        return {
-          ...current,
-          look: { ...look, face: readAvatarFace(look.face), shape: readFaceShape(look.shape) },
-          keys,
-        }
+        return { ...current, look: readAvatarLook(saved.look), keys }
       },
     },
   ),

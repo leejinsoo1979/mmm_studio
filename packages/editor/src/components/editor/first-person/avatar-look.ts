@@ -10,7 +10,11 @@ import {
   type Texture,
 } from 'three'
 import { type AvatarLook, type AvatarPaint, hasLook } from '../../../store/use-avatar-profile'
+import { applyBodyBones } from './avatar-body'
+import { useAvatarHair } from './avatar-hair'
 import { useAvatarShape } from './avatar-shape'
+import { hasBodyShape } from './body-shape'
+import { hasFacePaint, NO_PAINT } from './face-paint'
 import { loadFaceTargets } from './face-targets'
 import { headGeometry } from './head-geometry'
 import { type LookBody, type LookJob, type LookResult, type Part, runLookJob } from './look-job'
@@ -178,10 +182,11 @@ function makeLook(body: object, job: LookJob, signal: AbortSignal): Promise<Look
 
 /**
  * Dresses a body in a look: its own copies of the textures the look changes
- * (the swapped face, hair dye, skin tone) on its own copies of the materials.
- * Returns what undoes it (the original materials back, the copies freed),
- * or null when `signal` aborted it first; `retry` when the face couldn't be
- * loaded (the look went on without it) and may load later.
+ * (the dyes, a shave, the swapped face, the face paint) on its own copies
+ * of the materials. Returns what undoes it (the original materials back,
+ * the copies freed), or null when `signal` aborted it first; `retry` when
+ * the face or the landmarks it and the paint are placed by couldn't be
+ * loaded (the look went on without them) and may load later.
  */
 async function applyLook(
   model: Object3D,
@@ -193,10 +198,12 @@ async function applyLook(
   const gathering = lookBody(parts)
   if (!gathering) return { undo: () => {}, retry: false }
   let retry = false
-  const face = look.face
+  // The face, the paint and a shave's care for the brows and lashes all go
+  // by the character's face landmarks.
+  const placed = look.face || look.bald || hasFacePaint(look.paint)
   const [body, target] = await Promise.all([
     gathering,
-    face
+    placed
       ? loadFaceTargets().then(
           (targets) => targets[avatarId] ?? null,
           () => {
@@ -212,9 +219,14 @@ async function applyLook(
     avatar: avatarId,
     hair: look.hair,
     skin: look.skin,
-    face: face && target ? { ...face, target } : null,
+    face: target && look.face,
+    paint: look.paint,
+    bald: look.bald,
+    target,
   }
-  if (!(job.hair || job.skin || job.face)) return { undo: () => {}, retry }
+  // Without landmarks only the irises of the paint go on.
+  const painted = target ? hasFacePaint(job.paint) : job.paint.eyes
+  if (!(job.hair || job.skin || job.face || job.bald || painted)) return { undo: () => {}, retry }
   const result = await makeLook(model, job, signal)
   if (!result || signal.aborted) {
     for (const bitmap of Object.values(result?.parts ?? {})) bitmap.close()
@@ -274,15 +286,27 @@ export function useAvatarLook(
   avatarId: string,
 ) {
   const dressing = useRef<{ model: Object3D; undo: () => void } | null>(null)
-  useAvatarShape(model, look, avatarId)
+  const hairStyle = look?.hairStyle ?? null
+  const hair = look?.hair ?? null
+  const worn = useAvatarHair(model, hairStyle, hair)
+  useAvatarShape(model, look, avatarId, worn)
+
+  const body = look?.body
+  useEffect(
+    () => (body && hasBodyShape(body) ? applyBodyBones(model, body) : undefined),
+    [model, body],
+  )
 
   // Only the painted part of a look is dressed here: a new shape alone
-  // leaves the textures be.
-  const hair = look?.hair ?? null
+  // leaves the textures be. Any hairstyle but the character's own shaves
+  // its painted hair, which would otherwise show where its hair was taken
+  // in; and a hairstyle going on adds lashes to dress (`worn` changes).
   const skin = look?.skin ?? null
   const face = look?.face ?? null
+  const paint = look?.paint ?? NO_PAINT
+  const bald = hairStyle !== null
   useEffect(() => {
-    const look: AvatarPaint = { hair, skin, face }
+    const look: AvatarPaint = { hair, skin, face, paint, bald }
     if (dressing.current && (dressing.current.model !== model || !hasLook(look))) {
       dressing.current.undo()
       dressing.current = null
@@ -311,7 +335,8 @@ export function useAvatarLook(
       controller.abort()
       clearTimeout(timer)
     }
-  }, [model, hair, skin, face, avatarId])
+    // `worn` isn't read: a new one means new meshes to dress.
+  }, [model, hair, skin, face, paint, bald, avatarId, worn])
 
   useEffect(
     () => () => {

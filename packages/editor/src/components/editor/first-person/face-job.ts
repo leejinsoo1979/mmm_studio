@@ -8,14 +8,15 @@ import {
   swapFace,
   warpFace,
 } from './face-swap'
-import { type FrontImage, renderFront, tintIris } from './front-render'
+import { type FrontImage, renderFront } from './front-render'
 import type { HeadGeometry } from './head-geometry'
-import { hexToRgb, type Pixels } from './look-pixels'
+import type { Pixels } from './look-pixels'
 
 /**
  * Everything a face swap onto one head needs, as plain data (it crosses to
  * a worker). The keys name what cached results depend on: `avatar` the
- * character (its head, geometry and hair), `front` the character as dyed.
+ * character (its head, geometry and hair: a shaved one is another), `front`
+ * the character as dyed and shaved.
  */
 export type FaceJob = {
   /** The head texture, dyed: the face goes onto it (and it comes back). */
@@ -32,7 +33,6 @@ export type FaceJob = {
   target: number[]
   blend: number
   light: number
-  eyes: string | null
 }
 
 /** A few recent results kept, keyed by what they depend on (a slider drag repeats the rest). */
@@ -91,6 +91,5 @@ export function runFaceJob(job: FaceJob): Pixels {
   const warp = remember(warps, warpKey, () => warpFace(job.photo, job.points, job.target))
   const photo = remember(photoFaces, `${warpKey}|${job.light}`, () => photoFace(warp, job.light))
   swapFace(head, geometry.skin, front, hairFront(job), warp, photo, job.blend)
-  if (job.eyes) for (const eye of geometry.eyes) tintIris(head, eye, hexToRgb(job.eyes))
   return head
 }

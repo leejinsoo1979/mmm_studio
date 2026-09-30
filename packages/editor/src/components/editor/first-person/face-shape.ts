@@ -8,7 +8,7 @@ import { FACE_PARTS, facePointOf, type Point, unpackPoints } from './face-points
  * brush would, so it works on any head whose landmarks are known.
  */
 
-export const FACE_SLIDER_GROUPS = ['face', 'eyes', 'brows', 'nose', 'mouth'] as const
+export const FACE_SLIDER_GROUPS = ['face', 'eyes', 'brows', 'nose', 'mouth', 'ears'] as const
 export type FaceSliderGroup = (typeof FACE_SLIDER_GROUPS)[number]
 
 export const FACE_SLIDERS = [
@@ -21,21 +21,35 @@ export const FACE_SLIDERS = [
   { id: 'cheekbones', group: 'face' },
   { id: 'cheeks', group: 'face' },
   { id: 'forehead', group: 'face' },
+  { id: 'jawAngle', group: 'face' },
   { id: 'eyeSize', group: 'eyes' },
+  { id: 'eyeWidth', group: 'eyes' },
+  { id: 'eyeOpen', group: 'eyes' },
   { id: 'eyeSpacing', group: 'eyes' },
   { id: 'eyeHeight', group: 'eyes' },
   { id: 'eyeTilt', group: 'eyes' },
   { id: 'eyeDepth', group: 'eyes' },
   { id: 'browHeight', group: 'brows' },
   { id: 'browTilt', group: 'brows' },
+  { id: 'browSpacing', group: 'brows' },
+  { id: 'browArch', group: 'brows' },
   { id: 'noseWidth', group: 'nose' },
+  { id: 'noseBridge', group: 'nose' },
   { id: 'noseLength', group: 'nose' },
   { id: 'noseHeight', group: 'nose' },
   { id: 'noseTip', group: 'nose' },
   { id: 'mouthWidth', group: 'mouth' },
   { id: 'mouthHeight', group: 'mouth' },
   { id: 'lipFullness', group: 'mouth' },
+  { id: 'upperLip', group: 'mouth' },
+  { id: 'lowerLip', group: 'mouth' },
+  { id: 'philtrum', group: 'mouth' },
+  { id: 'mouthDepth', group: 'mouth' },
   { id: 'mouthCorners', group: 'mouth' },
+  { id: 'earSize', group: 'ears' },
+  { id: 'earAngle', group: 'ears' },
+  { id: 'earHeight', group: 'ears' },
+  { id: 'earPoint', group: 'ears' },
 ] as const satisfies readonly { id: string; group: FaceSliderGroup }[]
 
 export type FaceSliderId = (typeof FACE_SLIDERS)[number]['id']
@@ -159,12 +173,17 @@ function faceBrushes(points: readonly Point[]): Brush[] {
   // The brows' brushes reach up more than down, so the lids under them stay.
   const browCentre: Point = [brow[0], brow[1] - 0.05 * e]
   const eyeWidth = distance(p(33), p(133))
+  const upperLid = p(159)
+  const irisRim = FACE_PARTS.rightIris.slice(1)
+  const irisRadius =
+    irisRim.reduce((sum, i) => sum + distance(points[i]!, rightIris), 0) / irisRim.length
   const mouth = mid(p(61), p(291))
   const mouthHalfWidth = distance(p(61), p(291)) / 2
   const lipLine = mid(p(13), p(14))
   const noseBase = p(2)
   const noseTip = p(4)
   const alae = mid(p(64), p(294))
+  const bridge = mid(p(168), p(5))
   const lowerFace = mid(noseBase, chin)
   const jawLine = (p(172)[1] + p(397)[1]) / 2
   const outward = -1 // the image's left side moves out to the left
@@ -225,10 +244,73 @@ function faceBrushes(points: readonly Point[]): Brush[] {
       radius: [0.95 * e, 0.5 * e],
       move: [0, 0, 0.15 * e],
     }),
+    // The jaw's corner down and out (squarer) or up and in (softer, a V line).
+    ...brushes(
+      'jawAngle',
+      middle,
+      {
+        centre: mid(p(58), p(172)),
+        radius: [0.55 * e, 0.6 * e],
+        move: [outward * 0.07 * e, 0.14 * e, 0],
+      },
+      true,
+    ),
     ...brushes(
       'eyeSize',
       middle,
       { centre: rightIris, radius: [eyeWidth, eyeWidth * 0.75], scale: [0.3, 0.3] },
+      true,
+    ),
+    // A longer eye: its corners drawn apart, each by a brush too small to
+    // reach the iris between them, which would otherwise stretch oval.
+    ...brushes(
+      'eyeWidth',
+      middle,
+      {
+        centre: p(33),
+        radius: [0.45 * eyeWidth, 0.45 * eyeWidth],
+        move: [outward * 0.07 * e, 0, 0],
+      },
+      true,
+    ),
+    ...brushes(
+      'eyeWidth',
+      middle,
+      {
+        centre: p(133),
+        radius: [0.4 * eyeWidth, 0.4 * eyeWidth],
+        move: [-outward * 0.04 * e, 0, 0],
+      },
+      true,
+    ),
+    // The upper lid up (a wider-open eye), the lower barely down. The
+    // eyeball lies under the lids and moves with them, so opening them
+    // draws the iris taller; widening it about as much keeps it round.
+    ...brushes(
+      'eyeOpen',
+      middle,
+      {
+        centre: [upperLid[0], upperLid[1] - 0.08 * e],
+        radius: [0.65 * eyeWidth, 0.2 * e],
+        move: [0, -0.045 * e, 0],
+      },
+      true,
+    ),
+    ...brushes(
+      'eyeOpen',
+      middle,
+      { centre: p(145), radius: [0.55 * eyeWidth, 0.1 * e], move: [0, 0.012 * e, 0] },
+      true,
+    ),
+    ...brushes(
+      'eyeOpen',
+      middle,
+      {
+        centre: rightIris,
+        radius: [1.6 * irisRadius, 1.6 * irisRadius],
+        inner: 0.6,
+        scale: [0.25, 0],
+      },
       true,
     ),
     ...brushes(
@@ -268,10 +350,32 @@ function faceBrushes(points: readonly Point[]): Brush[] {
       { centre: browCentre, radius: [0.55 * e, 0.2 * e], pivot: brow, turn: 0.28 },
       true,
     ),
+    ...brushes(
+      'browSpacing',
+      middle,
+      { centre: browCentre, radius: [0.55 * e, 0.2 * e], move: [outward * 0.13 * e, 0, 0] },
+      true,
+    ),
+    // The brow's middle up; its ends, past the brush, stay.
+    ...brushes(
+      'browArch',
+      middle,
+      { centre: browCentre, radius: [0.3 * e, 0.2 * e], inner: 0.15, move: [0, -0.08 * e, 0] },
+      true,
+    ),
     ...brushes('noseWidth', middle, {
       centre: alae,
       radius: [0.5 * e, 0.3 * e],
       scale: [0.4, 0],
+    }),
+    // The bridge, from between the eyes to above the tip, narrow enough
+    // that the eyes' inner corners stay.
+    ...brushes('noseBridge', middle, {
+      centre: bridge,
+      radius: [0.32 * e, Math.abs(p(5)[1] - p(168)[1]) * 0.6],
+      inner: 0.25,
+      pivot: [middle, bridge[1]],
+      scale: [0.6, 0],
     }),
     ...brushes('noseLength', middle, {
       centre: mid(noseTip, noseBase),
@@ -304,6 +408,30 @@ function faceBrushes(points: readonly Point[]): Brush[] {
       pivot: lipLine,
       scale: [0, 0.55],
       move: [0, 0, 0.04 * e],
+    }),
+    // Each lip on its own: its outer edge moved, the line where the lips
+    // meet (the brush's edge) and the nose or chin (its far edge) left be.
+    ...brushes('upperLip', middle, {
+      centre: mid(noseBase, lipLine),
+      radius: [mouthHalfWidth * 1.2, Math.abs(lipLine[1] - noseBase[1]) / 2],
+      move: [0, -0.04 * e, 0.025 * e],
+    }),
+    ...brushes('lowerLip', middle, {
+      centre: mid(lipLine, chin),
+      radius: [mouthHalfWidth * 1.2, Math.abs(chin[1] - lipLine[1]) / 2],
+      move: [0, 0.05 * e, 0.025 * e],
+    }),
+    // The mouth and chin down together, away from the nose, which stays.
+    ...brushes('philtrum', middle, {
+      centre: mid(mouth, chin),
+      radius: [faceHalfWidth * 1.2, Math.abs(mid(mouth, chin)[1] - noseBase[1])],
+      inner: 0.55,
+      move: [0, 0.1 * e, 0],
+    }),
+    ...brushes('mouthDepth', middle, {
+      centre: mouth,
+      radius: [mouthHalfWidth * 1.8, 0.4 * e],
+      move: [0, 0, 0.12 * e],
     }),
     ...brushes(
       'mouthCorners',

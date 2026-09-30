@@ -8,6 +8,7 @@ import {
   avatarLabel,
   avatarTab,
   avatarThumbnailUrl,
+  BALD,
   canBindKey,
   DEFAULT_EMOTE_KEYS,
   EMOTE_CATEGORIES,
@@ -17,8 +18,11 @@ import {
   type EmoteCue,
   type EmoteId,
   findAvatar,
+  hasBodyShape,
+  hasFacePaint,
   hasSliders,
   keyLabel,
+  loadHairStyles,
   NO_LOOK,
   useAvatarProfile,
   useWalkthroughView,
@@ -26,7 +30,10 @@ import {
 import { useViewer } from '@pascal-app/viewer'
 import {
   ArrowLeft,
+  Brush,
   Check,
+  Dices,
+  Hand,
   Keyboard,
   type LucideIcon,
   Palette,
@@ -44,16 +51,20 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { ColorPicker } from '../color-picker'
+import { BodyPanel } from './body-panel'
 import { FaceEditor } from './face-editor'
 import { FaceShapePanel } from './face-shape-panel'
-import { EMOTE_ICONS, HAIR_SWATCHES, SKIN_SWATCHES, type Swatch } from './studio-data'
+import { HairPanel } from './hair-panel'
+import { MakeupPanel } from './makeup-panel'
+import { randomLook } from './random-look'
+import { ColorPanel, PanelSection, Segmented } from './studio-controls'
+import { EMOTE_ICONS, SKIN_SWATCHES } from './studio-data'
 import { type CameraFocus, StudioStage } from './studio-stage'
 import { useCharacterStudio } from './use-character-studio'
 
 type Draft = { avatar: string; look: AvatarLook; keys: Record<string, EmoteId> }
 
-type Tab = 'character' | 'face' | 'shape' | 'hair' | 'skin' | 'motion'
+type Tab = 'character' | 'body' | 'face' | 'shape' | 'makeup' | 'hair' | 'skin' | 'motion'
 
 const TABS: { id: Tab; label: string; icon: LucideIcon; title: string; hint: string }[] = [
   {
@@ -61,7 +72,14 @@ const TABS: { id: Tab; label: string; icon: LucideIcon; title: string; hint: str
     label: '캐릭터',
     icon: UserRound,
     title: '캐릭터',
-    hint: '바탕이 될 캐릭터를 골라요. 얼굴·머리·피부는 다음 단계에서 꾸며요.',
+    hint: '바탕이 될 캐릭터를 골라요. 체형·얼굴·머리·피부는 다음 단계에서 꾸며요.',
+  },
+  {
+    id: 'body',
+    label: '체형',
+    icon: PersonStanding,
+    title: '체형',
+    hint: '성별과 나이를 고르고, 키와 몸의 부위를 하나하나 다듬어요.',
   },
   {
     id: 'face',
@@ -75,14 +93,21 @@ const TABS: { id: Tab; label: string; icon: LucideIcon; title: string; hint: str
     label: '얼굴형',
     icon: SlidersHorizontal,
     title: '얼굴형 다듬기',
-    hint: '얼굴형·눈·눈썹·코·입을 부위별로 다듬어요.',
+    hint: '얼굴형·눈·눈썹·코·입·귀를 부위별로 다듬어요.',
+  },
+  {
+    id: 'makeup',
+    label: '메이크업',
+    icon: Brush,
+    title: '메이크업',
+    hint: '눈동자 색과 눈썹, 입술·볼·눈 화장, 수염과 주근깨를 그려요.',
   },
   {
     id: 'hair',
     label: '헤어',
     icon: Scissors,
-    title: '머리 색',
-    hint: '결과 윤기는 그대로, 색만 염색하듯 바꿔요.',
+    title: '헤어',
+    hint: '다른 캐릭터의 머리 모양을 빌려 쓰고, 결과 윤기는 두고 색만 바꿔요.',
   },
   {
     id: 'skin',
@@ -94,7 +119,7 @@ const TABS: { id: Tab; label: string; icon: LucideIcon; title: string; hint: str
   {
     id: 'motion',
     label: '동작',
-    icon: PersonStanding,
+    icon: Hand,
     title: '동작과 단축키',
     hint: '동작을 눌러 미리 보고, 게임에서 쓸 단축키에 넣어요.',
   },
@@ -102,8 +127,10 @@ const TABS: { id: Tab; label: string; icon: LucideIcon; title: string; hint: str
 
 const TAB_FOCUS: Record<Tab, CameraFocus> = {
   character: 'full',
+  body: 'full',
   face: 'face',
   shape: 'face',
+  makeup: 'face',
   hair: 'face',
   skin: 'upper',
   motion: 'full',
@@ -143,110 +170,12 @@ function useThrottled<T>(value: T, ms: number): T {
   return shown
 }
 
-function PanelSection({
-  title,
-  action,
-  children,
-}: {
-  title: string
-  action?: React.ReactNode
-  children: React.ReactNode
-}) {
-  return (
-    <section className="flex flex-col gap-2.5">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-[12px] text-neutral-500 tracking-wide">{title}</h3>
-        {action}
-      </div>
-      {children}
-    </section>
-  )
-}
-
-function SwatchGrid({
-  swatches,
-  value,
-  onPick,
-  original,
-}: {
-  swatches: Swatch[]
-  value: string | null
-  onPick: (hex: string | null) => void
-  original: string
-}) {
-  const [hover, setHover] = useState<string | null>(null)
-  const current = swatches.find((swatch) => swatch.hex.toLowerCase() === value?.toLowerCase())
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="grid grid-cols-6 gap-2">
-        <button
-          aria-label={original}
-          aria-pressed={value === null}
-          className={cn(
-            'relative grid aspect-square place-items-center rounded-full bg-[conic-gradient(#e5e7eb_0_25%,#fff_0_50%,#e5e7eb_0_75%,#fff_0)] bg-[length:10px_10px] ring-offset-2 transition hover:scale-105',
-            value === null ? 'ring-2 ring-sky-500' : 'ring-1 ring-black/10',
-          )}
-          onClick={() => onPick(null)}
-          onMouseEnter={() => setHover(original)}
-          onMouseLeave={() => setHover(null)}
-          title={original}
-          type="button"
-        >
-          <X className="size-3.5 text-neutral-400" />
-        </button>
-        {swatches.map((swatch) => {
-          const selected = swatch.hex.toLowerCase() === value?.toLowerCase()
-          return (
-            <button
-              aria-label={swatch.name}
-              aria-pressed={selected}
-              className={cn(
-                'relative grid aspect-square place-items-center rounded-full shadow-[inset_0_-3px_6px_rgba(0,0,0,0.18),inset_0_2px_4px_rgba(255,255,255,0.35)] ring-offset-2 transition hover:scale-105',
-                selected ? 'ring-2 ring-sky-500' : 'ring-1 ring-black/5',
-              )}
-              key={swatch.hex}
-              onClick={() => onPick(swatch.hex)}
-              onMouseEnter={() => setHover(swatch.name)}
-              onMouseLeave={() => setHover(null)}
-              style={{ background: swatch.hex }}
-              title={swatch.name}
-              type="button"
-            >
-              {selected && <Check className="size-3.5 text-white drop-shadow" strokeWidth={3} />}
-            </button>
-          )
-        })}
-      </div>
-      <p className="h-4 text-center text-[11px] text-neutral-500">
-        {hover ?? current?.name ?? (value ? value.toUpperCase() : original)}
-      </p>
-    </div>
-  )
-}
-
 function CharacterPanel({ avatar, onPick }: { avatar: string; onPick: (id: string) => void }) {
   const [tab, setTab] = useState<AvatarTab>(() => avatarTab(findAvatar(avatar)))
   const avatars = useMemo(() => ALL_AVATARS.filter((entry) => avatarTab(entry) === tab), [tab])
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex shrink-0 gap-1 overflow-x-auto rounded-full bg-neutral-100 p-1">
-        {AVATAR_TABS.map(({ id, label }) => (
-          <button
-            aria-pressed={tab === id}
-            className={cn(
-              'flex-1 whitespace-nowrap rounded-full px-2.5 py-1.5 font-medium text-[12px] transition',
-              tab === id
-                ? 'bg-white text-neutral-900 shadow-sm'
-                : 'text-neutral-500 hover:text-neutral-800',
-            )}
-            key={id}
-            onClick={() => setTab(id)}
-            type="button"
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <Segmented onPick={setTab} options={AVATAR_TABS} value={tab} />
       <div className="-mr-2 grid min-h-0 grid-cols-3 gap-2 overflow-y-auto pr-2 pb-2">
         {avatars.map((entry) => {
           const selected = entry.id === avatar
@@ -282,40 +211,6 @@ function CharacterPanel({ avatar, onPick }: { avatar: string; onPick: (id: strin
           )
         })}
       </div>
-    </div>
-  )
-}
-
-function ColorPanel({
-  swatches,
-  value,
-  fallback,
-  original,
-  onPreview,
-  onCommit,
-}: {
-  swatches: Swatch[]
-  value: string | null
-  fallback: string
-  original: string
-  onPreview: (hex: string | null) => void
-  onCommit: (hex: string | null) => void
-}) {
-  return (
-    <div className="flex flex-col gap-5">
-      <PanelSection title="추천 색상">
-        <SwatchGrid onPick={onCommit} original={original} swatches={swatches} value={value} />
-      </PanelSection>
-      <PanelSection title="직접 고르기">
-        <div className="rounded-2xl bg-neutral-50 p-3">
-          <ColorPicker
-            onClear={() => onCommit(null)}
-            onCommit={(hex) => onCommit(hex)}
-            onPreview={(hex) => onPreview(hex)}
-            value={value ?? fallback}
-          />
-        </div>
-      </PanelSection>
     </div>
   )
 }
@@ -444,24 +339,11 @@ function MotionPanel({
       </PanelSection>
 
       <PanelSection title="동작">
-        <div className="flex gap-1 rounded-full bg-neutral-100 p-1">
-          {[{ id: 'all' as const, label: '전체' }, ...EMOTE_CATEGORIES].map(({ id, label }) => (
-            <button
-              aria-pressed={category === id}
-              className={cn(
-                'flex-1 rounded-full py-1.5 font-medium text-[12px] transition',
-                category === id
-                  ? 'bg-white text-neutral-900 shadow-sm'
-                  : 'text-neutral-500 hover:text-neutral-800',
-              )}
-              key={id}
-              onClick={() => setCategory(id)}
-              type="button"
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          onPick={setCategory}
+          options={[{ id: 'all' as const, label: '전체' }, ...EMOTE_CATEGORIES]}
+          value={category}
+        />
         <div className="grid grid-cols-3 gap-2">
           {emotes.map((id) => {
             const emote = EMOTES[id]
@@ -527,9 +409,10 @@ function MotionPanel({
 
 /**
  * The character studio, inZOI-style: the character on a lit turntable in
- * the middle, a rail of steps on the left (캐릭터 · 얼굴 · 헤어 · 피부 ·
- * 동작) with each step's options beside it, undo / redo / reset on top, and
- * 완료 to keep the result (body, look and emote keys) for the game.
+ * the middle, a rail of steps on the left (캐릭터 · 체형 · 얼굴 · 얼굴형 ·
+ * 메이크업 · 헤어 · 피부 · 동작) with each step's options beside it, undo /
+ * redo / random / reset on top, and 완료 to keep the result (body, look and
+ * emote keys) for the game.
  */
 export function CharacterStudio() {
   const open = useCharacterStudio((state) => state.open)
@@ -668,6 +551,13 @@ function Studio() {
     if (commitIt) commit(next)
     else setPreview(next)
   }
+  // The hairstyle library may still be loading (or fail to): the random
+  // look is made once it answers, on the draft as it is by then.
+  const randomize = async () => {
+    const styles = await loadHairStyles().catch(() => null)
+    const current = draftRef.current
+    commit({ ...current, look: randomLook(current.look, current.avatar, styles) })
+  }
 
   return (
     <div className="fixed inset-0 z-[200] select-none overflow-hidden bg-[radial-gradient(ellipse_at_62%_42%,#ffffff_0%,#f1f4f8_38%,#dde4ec_100%)] text-neutral-900">
@@ -743,6 +633,14 @@ function Studio() {
           <span className="mx-1 h-4 w-px bg-neutral-200" />
           <button
             className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] text-neutral-700 transition hover:bg-neutral-100"
+            onClick={() => void randomize()}
+            title="캐릭터와 얼굴 사진은 두고, 얼굴형·체형·머리·메이크업을 무작위로 바꿔요"
+            type="button"
+          >
+            <Dices className="size-4" /> 무작위
+          </button>
+          <button
+            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] text-neutral-700 transition hover:bg-neutral-100"
             onClick={() => commit({ ...draft, look: NO_LOOK, keys: DEFAULT_EMOTE_KEYS })}
             type="button"
           >
@@ -770,12 +668,12 @@ function Studio() {
 
       {/* The rail of steps and the step's options. */}
       <aside className="absolute top-[84px] bottom-5 left-5 flex gap-3">
-        <nav className="flex w-[72px] flex-col items-center gap-1 self-start rounded-[28px] bg-white/85 p-2 shadow-[0_8px_30px_rgba(15,23,42,0.1)] backdrop-blur-xl">
+        <nav className="flex max-h-full w-[72px] flex-col items-center gap-0.5 self-start overflow-y-auto rounded-[28px] bg-white/85 p-2 shadow-[0_8px_30px_rgba(15,23,42,0.1)] backdrop-blur-xl">
           {TABS.map(({ id, label, icon: Icon }, index) => (
             <button
               aria-pressed={tab === id}
               className={cn(
-                'group flex w-full flex-col items-center gap-1 rounded-2xl py-2 transition',
+                'group flex w-full shrink-0 flex-col items-center gap-1 rounded-2xl py-1.5 transition',
                 tab === id ? 'text-sky-600' : 'text-neutral-500 hover:text-neutral-800',
               )}
               key={id}
@@ -784,7 +682,7 @@ function Studio() {
             >
               <span
                 className={cn(
-                  'relative grid size-11 place-items-center rounded-full transition',
+                  'relative grid size-10 place-items-center rounded-full transition',
                   tab === id
                     ? 'bg-sky-500 text-white shadow-[0_6px_14px_rgba(14,165,233,0.4)]'
                     : 'bg-neutral-100 group-hover:bg-neutral-200',
@@ -817,6 +715,15 @@ function Studio() {
                 onPick={(avatar) => avatar !== draft.avatar && commit({ ...draft, avatar })}
               />
             )}
+            {tab === 'body' && (
+              <BodyPanel
+                avatar={shown.avatar}
+                body={shown.look.body}
+                onAvatar={(avatar) => avatar !== draft.avatar && commit({ ...draft, avatar })}
+                onCommit={(body) => lookPatch({ body }, true)}
+                onPreview={(body) => lookPatch({ body }, false)}
+              />
+            )}
             {tab === 'face' && (
               <FaceEditor
                 avatar={shown.avatar}
@@ -832,14 +739,21 @@ function Studio() {
                 shape={shown.look.shape}
               />
             )}
+            {tab === 'makeup' && (
+              <MakeupPanel
+                onCommit={(paint) => lookPatch({ paint }, true)}
+                onPreview={(paint) => lookPatch({ paint }, false)}
+                paint={shown.look.paint}
+              />
+            )}
             {tab === 'hair' && (
-              <ColorPanel
-                fallback="#4F3426"
-                onCommit={(hair) => lookPatch({ hair }, true)}
-                onPreview={(hair) => lookPatch({ hair }, false)}
-                original="원래 머리색"
-                swatches={HAIR_SWATCHES}
-                value={shown.look.hair}
+              <HairPanel
+                avatar={shown.avatar}
+                hair={shown.look.hair}
+                hairStyle={shown.look.hairStyle}
+                onCommitColor={(hair) => lookPatch({ hair }, true)}
+                onPreviewColor={(hair) => lookPatch({ hair }, false)}
+                onStyle={(hairStyle) => lookPatch({ hairStyle }, true)}
               />
             )}
             {tab === 'skin' && (
@@ -883,7 +797,10 @@ function Studio() {
             {[
               shown.look.face && '내 얼굴',
               hasSliders(shown.look.shape) && '얼굴형',
+              hasBodyShape(shown.look.body) && '체형',
+              shown.look.hairStyle && (shown.look.hairStyle === BALD ? '민머리' : '헤어스타일'),
               shown.look.hair && '염색',
+              hasFacePaint(shown.look.paint) && '메이크업',
               shown.look.skin && '피부 톤',
             ]
               .filter(Boolean)

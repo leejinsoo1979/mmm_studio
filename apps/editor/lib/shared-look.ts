@@ -1,24 +1,18 @@
 import {
   type AvatarFace,
   type AvatarLook,
-  type FaceShape,
-  hasSliders,
-  readAvatarFace,
-  readFaceShape,
+  changesCharacter,
+  readAvatarLook,
 } from '@pascal-app/editor'
 
 /**
- * What a participant document carries of its player's look: the dyes, the
- * face's settings and its shape. The photo and its landmarks (tens of kB, and the
- * same for as long as the face is) live in their own document,
- * `faces/{uid}`, fetched once per `photoId` rather than with every pose
- * report.
+ * What a participant document carries of its player's look: all of it but
+ * the face photo and its landmarks (tens of kB, and the same for as long as
+ * the face is), which live in their own document, `faces/{uid}`, fetched
+ * once per `photoId` rather than with every pose report.
  */
-export type SharedLook = {
-  hair: string | null
-  skin: string | null
+export type SharedLook = Omit<AvatarLook, 'face'> & {
   face: (Omit<AvatarFace, 'photo' | 'points'> & { photoId: string }) | null
-  shape: FaceShape
 }
 
 /** What `faces/{uid}` holds: the photo and its landmarks, under the version the looks name. */
@@ -36,18 +30,10 @@ export function photoId({ photo, points }: SharedFace): string {
 }
 
 export function toSharedLook(look: AvatarLook): SharedLook {
-  if (!look.face) return { hair: look.hair, skin: look.skin, face: null, shape: look.shape }
+  if (!look.face) return { ...look, face: null }
   const { photo, points, ...settings } = look.face
-  return {
-    hair: look.hair,
-    skin: look.skin,
-    face: { ...settings, photoId: photoId({ photo, points }) },
-    shape: look.shape,
-  }
+  return { ...look, face: { ...settings, photoId: photoId({ photo, points }) } }
 }
-
-const HEX = /^#[0-9a-f]{6}$/i
-const hex = (value: unknown) => (typeof value === 'string' && HEX.test(value) ? value : null)
 
 /**
  * Another player's look from their participant document, with their face
@@ -57,13 +43,11 @@ const hex = (value: unknown) => (typeof value === 'string' && HEX.test(value) ? 
 export function fromSharedLook(value: unknown, face: SharedFace | null): AvatarLook | null {
   if (!value || typeof value !== 'object') return null
   const shared = value as Partial<SharedLook>
-  const look: AvatarLook = {
-    hair: hex(shared.hair),
-    skin: hex(shared.skin),
-    face: shared.face && face ? readAvatarFace({ ...shared.face, ...face }) : null,
-    shape: readFaceShape(shared.shape),
-  }
-  return look.hair || look.skin || look.face || hasSliders(look.shape) ? look : null
+  const look = readAvatarLook({
+    ...shared,
+    face: shared.face && face ? { ...shared.face, ...face } : null,
+  })
+  return changesCharacter(look) ? look : null
 }
 
 /** The photo version a shared look wants, if any. */

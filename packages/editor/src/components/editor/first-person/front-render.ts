@@ -189,7 +189,13 @@ export function forEachTexel(
 }
 
 /** A bilinear sample of an image's colour at pixel-centre coordinates (clamped to it), into `out` at `at`. */
-function sampleColor(image: Pixels, px: number, py: number, out: Uint8ClampedArray, at: number) {
+export function sampleColor(
+  image: Pixels,
+  px: number,
+  py: number,
+  out: Uint8ClampedArray,
+  at: number,
+) {
   const { data, width, height } = image
   const x = Math.min(width - 1, Math.max(0, px))
   const y = Math.min(height - 1, Math.max(0, py))

@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber'
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { type AnimationAction, AnimationMixer, type Group } from 'three'
 import type { AvatarLook } from '../../store/use-avatar-profile'
+import { bodyHeightScale } from './first-person/avatar-body'
 import { useAvatarLook } from './first-person/avatar-look'
 import { useAvatarBody } from './first-person/avatar-rig'
 import { EmoteLayer, useEmoteClips } from './first-person/emote-player'
@@ -131,7 +132,8 @@ function RemotePlayer({
   cues: Map<string, EmoteCue | null>
   bubble?: string
 }) {
-  const { avatar, model, clips, gaitSet } = useAvatarBody(player.avatar)
+  const heightScale = player.look ? bodyHeightScale(player.look.body) : 1
+  const { avatar, model, clips, gaitSet } = useAvatarBody(player.avatar, heightScale)
   useAvatarLook(model, player.look, avatar.id)
   const [emoted, setEmoted] = useState(false)
   const emoteClips = useEmoteClips(avatar, emoted)
@@ -207,7 +209,7 @@ function RemotePlayer({
   })
 
   // The top of the head sits at about twice the hip height.
-  const labelHeight = avatar.hip * 2 + 0.08
+  const labelHeight = avatar.hip * 2 * heightScale + 0.08
 
   return (
     <group ref={rootRef}>

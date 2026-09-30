@@ -8,7 +8,6 @@ import {
   FACE_POINT_INDICES,
   type FacePoint,
   loadFaceTargets,
-  Slider,
   unpackPoints,
 } from '@pascal-app/editor'
 import {
@@ -26,6 +25,7 @@ import { useEffect, useRef, useState } from 'react'
 import { cropFacePhoto, detectFace, poseMessage, sampleFaceColors } from '@/lib/face-detect'
 import { pointsFromMarks } from '@/lib/face-fit'
 import { cn } from '@/lib/utils'
+import { AmountSlider } from './studio-controls'
 
 /** A photo is kept this small: a face needs no more, and it travels to the other players. */
 const PHOTO_LONGEST = 768
@@ -317,52 +317,6 @@ function MarkFeatures({
   )
 }
 
-function Labeled({
-  label,
-  value,
-  children,
-}: {
-  label: string
-  value: string
-  children: React.ReactNode
-}) {
-  return (
-    <div>
-      <div className="mb-1.5 flex items-center justify-between text-[12px]">
-        <span className="text-neutral-600">{label}</span>
-        <span className="font-medium text-neutral-400 tabular-nums">{value}</span>
-      </div>
-      {children}
-    </div>
-  )
-}
-
-/** A 0–1 setting that previews while dragged and commits (one undo step) on release. */
-function UnitSlider({
-  label,
-  value,
-  onCommit,
-}: {
-  label: string
-  value: number
-  onCommit: (value: number) => void
-}) {
-  const [shown, setShown] = useState(value)
-  useEffect(() => setShown(value), [value])
-  return (
-    <Labeled label={label} value={`${Math.round(shown * 100)}%`}>
-      <Slider
-        max={100}
-        min={0}
-        onValueChange={([next]) => next !== undefined && setShown(next / 100)}
-        onValueCommit={([next]) => next !== undefined && onCommit(next / 100)}
-        step={1}
-        value={[shown * 100]}
-      />
-    </Labeled>
-  )
-}
-
 type Status =
   | { kind: 'idle' }
   | { kind: 'camera' }
@@ -643,13 +597,17 @@ export function FaceEditor({
         </p>
       )}
 
-      <UnitSlider
+      <AmountSlider
         label="사진 얼굴형 따르기"
         onCommit={(fit) => onCommit({ shape: { ...look.shape, fit } })}
         value={look.shape.fit}
       />
-      <UnitSlider label="경계 자연스럽게" onCommit={(blend) => set({ blend })} value={face.blend} />
-      <UnitSlider
+      <AmountSlider
+        label="경계 자연스럽게"
+        onCommit={(blend) => set({ blend })}
+        value={face.blend}
+      />
+      <AmountSlider
         label="사진 그림자 줄이기"
         onCommit={(light) => set({ light })}
         value={face.light}
