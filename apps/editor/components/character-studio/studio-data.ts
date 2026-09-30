@@ -38,8 +38,8 @@ import {
 
 export type Swatch = { hex: string; name: string }
 
-/** Hair dyes, natural shades first, then fashion colours. */
-export const HAIR_SWATCHES: Swatch[] = [
+/** Natural hair shades, darkest first: what a random look mostly dyes to. */
+export const NATURAL_HAIR_SWATCHES: Swatch[] = [
   { hex: '#1B1918', name: '자연 흑발' },
   { hex: '#1D2433', name: '블루 블랙' },
   { hex: '#3A2A22', name: '흑갈색' },
@@ -50,6 +50,11 @@ export const HAIR_SWATCHES: Swatch[] = [
   { hex: '#A06F3C', name: '골드 브라운' },
   { hex: '#A4532A', name: '오렌지 브라운' },
   { hex: '#C89B5D', name: '허니 블론드' },
+]
+
+/** Hair dyes, natural shades first, then fashion colours. */
+export const HAIR_SWATCHES: Swatch[] = [
+  ...NATURAL_HAIR_SWATCHES,
   { hex: '#E3D3B0', name: '플래티넘' },
   { hex: '#9A9A98', name: '애쉬 그레이' },
   { hex: '#C9CBCF', name: '실버' },

@@ -2,6 +2,7 @@
 
 import {
   type AvatarLook,
+  bodyHeightScale,
   type EmoteCue,
   EmoteLayer,
   findAvatar,
@@ -12,61 +13,112 @@ import {
 import { ContactShadows } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Suspense, useEffect, useMemo, useRef } from 'react'
-import { AnimationMixer, type Group, NeutralToneMapping, Vector3 } from 'three'
+import { AnimationMixer, type Group, NeutralToneMapping, type Object3D, Vector3 } from 'three'
+import { headFraming, headSpan } from './head-frame'
 
 export type CameraFocus = 'full' | 'upper' | 'face'
 
 /**
  * Framing per focus, as fractions of the body's height: where the camera
- * looks and how much of the body the view holds top to bottom.
+ * looks and how much of the body the view holds top to bottom. The face is
+ * framed by the head itself (head-frame.ts); its entry is only for until
+ * the body has loaded.
  */
 const FRAMING: Record<CameraFocus, { look: number; span: number }> = {
   full: { look: 0.47, span: 1.55 },
-  upper: { look: 0.76, span: 0.62 },
+  upper: { look: 0.76, span: 0.66 },
   face: { look: 0.9, span: 0.27 },
 }
 
 const FOV = 28
 /** A Rocketbox body stands about 1.95 of its hip height tall. */
 const HEIGHT_PER_HIP = 1.95
+/**
+ * How many times its own height the tallest look makes a body: the whole
+ * body is framed for that, so it fits at any height and the 키 slider
+ * shows as the body growing or shrinking on the stage.
+ */
+const TALLEST = bodyHeightScale({ height: 1, sliders: {} })
+/** How far above what it looks at the camera stands, as a share of its distance: it looks a little down. */
+const LOOK_DOWN = 0.04
 
 const lookTarget = new Vector3()
 const lookCurrent = new Vector3()
 const cameraTarget = new Vector3()
 
-/** Eases the camera to the focus's framing, straight in front of the body. */
-function CameraRig({ focus, zoom, hip }: { focus: CameraFocus; zoom: number; hip: number }) {
+/**
+ * Eases the camera to the focus's framing, straight in front of the body.
+ * The face and upper body go by where the head (and the hair or hat over
+ * it) is in `model` each frame, so they stay framed whatever the look's
+ * height, the head's size, the hairstyle or the clip — by `stature` (the
+ * body's own height) times `scale` (the look's) until it has loaded. The
+ * whole body goes by the tallest it can be.
+ */
+function CameraRig({
+  focus,
+  zoom,
+  stature,
+  scale,
+  model,
+}: {
+  focus: CameraFocus
+  zoom: number
+  stature: number
+  scale: number
+  model: { current: Object3D | null }
+}) {
   const camera = useThree((state) => state.camera)
+  const viewHeight = useThree((state) => state.size.height)
   const started = useRef(false)
   useFrame((_, delta) => {
-    const height = hip * HEIGHT_PER_HIP
-    const { look, span } = FRAMING[focus]
-    const distance = ((height * span) / 2 / Math.tan(((FOV / 2) * Math.PI) / 180)) * zoom
-    lookTarget.set(0, height * look, 0)
+    const head = focus !== 'full' && model.current ? headSpan(model.current) : null
+    let distance: number
+    if (focus === 'face' && head) {
+      const framing = headFraming(head, FOV, viewHeight)
+      lookTarget.set(framing.x, framing.y, 0)
+      distance = framing.distance * zoom
+    } else {
+      const height = focus === 'full' ? stature * TALLEST : (head?.top ?? stature * scale)
+      const { look, span } = FRAMING[focus]
+      lookTarget.set(0, height * look, 0)
+      distance = ((height * span) / 2 / Math.tan(((FOV / 2) * Math.PI) / 180)) * zoom
+    }
     const t = started.current ? 1 - Math.exp(-delta * 6) : 1
     started.current = true
     lookCurrent.lerp(lookTarget, t)
-    camera.position.lerp(cameraTarget.set(0, lookCurrent.y + distance * 0.04, distance), t)
+    camera.position.lerp(
+      cameraTarget.set(lookCurrent.x, lookCurrent.y + distance * LOOK_DOWN, distance),
+      t,
+    )
     camera.lookAt(lookCurrent)
   })
   return null
 }
 
+/** The character, idling or playing `cue`; its model is put in `shown` for the camera to frame. */
 function StudioAvatar({
   avatarId,
   look,
   cue,
   yaw,
+  shown,
   onCueEnd,
 }: {
   avatarId: string
   look: AvatarLook
   cue: EmoteCue | null
   yaw: { current: number }
+  shown: { current: Object3D | null }
   onCueEnd: () => void
 }) {
   const { avatar, model, clips } = useAvatarBody(avatarId)
   useAvatarLook(model, look, avatar.id)
+  useEffect(() => {
+    shown.current = model
+    return () => {
+      if (shown.current === model) shown.current = null
+    }
+  }, [model, shown])
   const emoteClips = useEmoteClips(avatar, true)
   const groupRef = useRef<Group>(null)
   const cueRef = useRef(cue)
@@ -146,7 +198,8 @@ export function StudioStage({
   yaw: { current: number }
   onCueEnd: () => void
 }) {
-  const hip = findAvatar(avatarId).hip
+  const stature = findAvatar(avatarId).hip * HEIGHT_PER_HIP
+  const model = useRef<Object3D | null>(null)
   return (
     <Canvas
       camera={{ fov: FOV, near: 0.05, far: 50, position: [0, 1, 4] }}
@@ -173,9 +226,22 @@ export function StudioStage({
       <Platform />
       <ContactShadows blur={2.6} far={2} opacity={0.35} position={[0, 0.002, 0]} scale={3} />
       <Suspense fallback={null}>
-        <StudioAvatar avatarId={avatarId} cue={cue} look={look} onCueEnd={onCueEnd} yaw={yaw} />
+        <StudioAvatar
+          avatarId={avatarId}
+          cue={cue}
+          look={look}
+          onCueEnd={onCueEnd}
+          shown={model}
+          yaw={yaw}
+        />
       </Suspense>
-      <CameraRig focus={focus} hip={hip} zoom={zoom} />
+      <CameraRig
+        focus={focus}
+        model={model}
+        scale={bodyHeightScale(look.body)}
+        stature={stature}
+        zoom={zoom}
+      />
     </Canvas>
   )
 }

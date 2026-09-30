@@ -570,6 +570,9 @@ export function FaceEditor({
 
   const set = (patch: Partial<AvatarFace>) => onCommit({ face: { ...face, ...patch } })
   const skinFromPhoto = colors && look.skin?.toLowerCase() === colors.skin.toLowerCase()
+  // An iris colour picked in 메이크업 covers the photo's: using the photo's
+  // takes that one off, so the choice shows.
+  const photoIris = Boolean(face.eyes && !look.paint.eyes)
 
   return (
     <div className="flex flex-col gap-4">
@@ -647,18 +650,32 @@ export function FaceEditor({
                   background: `radial-gradient(circle, #111 0 28%, ${colors.eyes} 30% 100%)`,
                 }}
               />
-              <span className="flex-1 text-[12px] text-neutral-700">눈동자 색</span>
+              <span className="flex flex-1 flex-col text-[12px] text-neutral-700">
+                눈동자 색
+                {look.paint.eyes && (
+                  <span className="text-[10px] text-neutral-400">
+                    메이크업에서 고른 색이 보여요
+                  </span>
+                )}
+              </span>
               <button
                 className={cn(
                   'rounded-full px-2.5 py-1 font-medium text-[11px]',
-                  face.eyes
+                  photoIris
                     ? 'bg-white text-neutral-600 shadow-sm hover:text-neutral-900'
                     : 'bg-sky-500 text-white hover:bg-sky-600',
                 )}
-                onClick={() => set({ eyes: face.eyes ? null : colors.eyes })}
+                onClick={() =>
+                  photoIris
+                    ? set({ eyes: null })
+                    : onCommit({
+                        face: { ...face, eyes: colors.eyes },
+                        paint: { ...look.paint, eyes: null },
+                      })
+                }
                 type="button"
               >
-                {face.eyes ? '캐릭터 눈동자' : '사진 눈동자 쓰기'}
+                {photoIris ? '캐릭터 눈동자' : '사진 눈동자 쓰기'}
               </button>
             </div>
           )}

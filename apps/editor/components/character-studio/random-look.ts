@@ -15,6 +15,7 @@ import {
   BLUSH_SWATCHES,
   HAIR_SWATCHES,
   LIP_SWATCHES,
+  NATURAL_HAIR_SWATCHES,
   SHADOW_SWATCHES,
   type Swatch,
 } from './studio-data'
@@ -24,24 +25,46 @@ export type Random = () => number
 
 /** How far a random face or body slider (and height) goes either way: faces told apart, none a caricature. */
 const REACH = 0.5
-/** HAIR_SWATCHES starts with this many natural shades, which a random look mostly keeps to. */
-const NATURAL_HAIR = 10
-const FASHION_HAIR_CHANCE = 0.15
+/** The chance of keeping the character's own hair colour rather than dyeing it. */
 const OWN_HAIR_COLOUR_CHANCE = 0.25
+/** The chance a dye is any of them, fashion colours too, rather than a natural shade. */
+const FASHION_HAIR_CHANCE = 0.15
+/** The chance of keeping the character's own hairstyle rather than borrowing one. */
 const OWN_HAIRSTYLE_CHANCE = 0.2
+/** The chance a woman wears lipstick. */
 const LIPS_CHANCE = 0.6
+/** The chance a woman wears blush. */
 const BLUSH_CHANCE = 0.5
+/** The chance a woman wears eyeshadow. */
 const SHADOW_CHANCE = 0.35
+/** The chance a woman wears eyeliner. */
 const LINER_CHANCE = 0.4
+/** The chance a man has stubble. */
 const STUBBLE_CHANCE = 0.4
 /** The chance of a fuller beard, for a man with no stubble. */
 const BEARD_CHANCE = 0.2
 
+/** An amount's least and most (0–1), for a random look. */
+type Range = readonly [low: number, high: number]
+
+/** Lipstick: visible, never garish. */
+const LIP_AMOUNT: Range = [0.35, 0.75]
+/** Blush: a flush, not a mark. */
+const BLUSH_AMOUNT: Range = [0.3, 0.6]
+/** Eyeshadow: a wash of colour. */
+const SHADOW_AMOUNT: Range = [0.3, 0.6]
+/** Eyeliner: from a fine line to a clear one. */
+const LINER_AMOUNT: Range = [0.3, 0.7]
+/** Stubble: enough to read as a shadow. */
+const STUBBLE_AMOUNT: Range = [0.5, 0.9]
+/** A fuller beard: grown in. */
+const BEARD_AMOUNT: Range = [0.6, 0.95]
+
 const pick = <T>(list: readonly T[], random: Random): T =>
   list[Math.min(list.length - 1, Math.floor(random() * list.length))]!
 
-/** An amount from `low` to `high`, to the percent the sliders show. */
-const between = (low: number, high: number, random: Random) =>
+/** An amount within `range`, to the percent the sliders show. */
+const between = ([low, high]: Range, random: Random) =>
   Math.round((low + (high - low) * random()) * 100) / 100
 
 /**
@@ -75,20 +98,20 @@ function randomPaint(look: AvatarLook, avatar: string, random: Random): FacePain
     return {
       ...paint,
       lips: colourOr(LIPS_CHANCE, LIP_SWATCHES, random),
-      lipAmount: between(0.35, 0.75, random),
+      lipAmount: between(LIP_AMOUNT, random),
       blush: colourOr(BLUSH_CHANCE, BLUSH_SWATCHES, random),
-      blushAmount: between(0.3, 0.6, random),
+      blushAmount: between(BLUSH_AMOUNT, random),
       shadow: colourOr(SHADOW_CHANCE, SHADOW_SWATCHES, random),
-      shadowAmount: between(0.3, 0.6, random),
-      liner: random() < LINER_CHANCE ? between(0.3, 0.7, random) : 0,
+      shadowAmount: between(SHADOW_AMOUNT, random),
+      liner: random() < LINER_CHANCE ? between(LINER_AMOUNT, random) : 0,
     }
   }
   if (random() < STUBBLE_CHANCE) {
-    return { ...paint, beard: 'stubble', beardAmount: between(0.5, 0.9, random) }
+    return { ...paint, beard: 'stubble', beardAmount: between(STUBBLE_AMOUNT, random) }
   }
   if (random() < BEARD_CHANCE) {
     const fuller = BEARD_STYLES.filter((style) => style !== 'none' && style !== 'stubble')
-    return { ...paint, beard: pick(fuller, random), beardAmount: between(0.6, 0.95, random) }
+    return { ...paint, beard: pick(fuller, random), beardAmount: between(BEARD_AMOUNT, random) }
   }
   return paint
 }
@@ -96,17 +119,17 @@ function randomPaint(look: AvatarLook, avatar: string, random: Random): FacePain
 /** Mostly a natural shade, sometimes a fashion colour, sometimes the character's own. */
 function randomHairColour(random: Random): string | null {
   if (random() < OWN_HAIR_COLOUR_CHANCE) return null
-  const swatches =
-    random() < FASHION_HAIR_CHANCE ? HAIR_SWATCHES : HAIR_SWATCHES.slice(0, NATURAL_HAIR)
+  const swatches = random() < FASHION_HAIR_CHANCE ? HAIR_SWATCHES : NATURAL_HAIR_SWATCHES
   return pick(swatches, random).hex
 }
 
 /**
  * A random look for the 무작위 button: the face and body sliders, height,
- * a hairstyle of the character's sex (sometimes its own; the one it has
- * while the library is unavailable), hair colour and face paint. The base
- * character, the face photo (and how closely the head follows it) and the
- * skin stay, as the player chose those deliberately.
+ * a hairstyle of the character's sex (sometimes its own, which is null as
+ * the gallery saves it, never its own id; the one it has while the library
+ * is unavailable), hair colour and face paint. The base character, the
+ * face photo (and how closely the head follows it) and the skin stay, as
+ * the player chose those deliberately.
  */
 export function randomLook(
   look: AvatarLook,
@@ -117,7 +140,7 @@ export function randomLook(
   const shape: FaceShape = { ...look.shape, sliders: settings(FACE_SLIDERS, random) }
   const body: BodyShape = { height: setting(random), sliders: settings(BODY_SLIDERS, random) }
   const gender = avatarGender(avatar)
-  const ofSex = styles?.filter((style) => style.gender === gender) ?? []
+  const ofSex = styles?.filter((style) => style.gender === gender && style.id !== avatar) ?? []
   const hairStyle = !styles
     ? look.hairStyle
     : ofSex.length === 0 || random() < OWN_HAIRSTYLE_CHANCE

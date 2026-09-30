@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { ALL_AVATARS, avatarGender } from '@pascal-app/editor'
-import { counterpartAvatar, isChild } from './avatar-counterpart'
+import { ALL_AVATARS, avatarGender, BALD, NO_LOOK } from '@pascal-app/editor'
+import { counterpartAvatar, isChild, lookOn } from './avatar-counterpart'
 
 describe('the avatar in the other sex or age', () => {
   test('keeps the line and number where the library has them', () => {
@@ -44,5 +44,19 @@ describe('the avatar in the other sex or age', () => {
         }
       }
     }
+  })
+})
+
+describe('a look moved onto another avatar', () => {
+  test('wears that avatar’s own hairstyle as its own hair', () => {
+    const look = { ...NO_LOOK, hairStyle: 'Female_Adult_07', hair: '#1B1918' }
+    expect(lookOn(look, 'Female_Adult_07')).toEqual({ ...look, hairStyle: null })
+  })
+
+  test('keeps any other hairstyle, and a shaved head', () => {
+    const borrowed = { ...NO_LOOK, hairStyle: 'Female_Adult_07' }
+    expect(lookOn(borrowed, 'Male_Adult_07')).toBe(borrowed)
+    const bald = { ...NO_LOOK, hairStyle: BALD }
+    expect(lookOn(bald, 'Male_Adult_07')).toBe(bald)
   })
 })

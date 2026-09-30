@@ -35,6 +35,7 @@ import {
   Dices,
   Hand,
   Keyboard,
+  Loader2,
   type LucideIcon,
   Palette,
   PersonStanding,
@@ -51,6 +52,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { lookOn } from './avatar-counterpart'
 import { BodyPanel } from './body-panel'
 import { FaceEditor } from './face-editor'
 import { FaceShapePanel } from './face-shape-panel'
@@ -422,14 +424,13 @@ export function CharacterStudio() {
 }
 
 function Studio() {
-  const initial = useMemo<Draft>(
-    () => ({
-      avatar: useWalkthroughView.getState().character,
-      look: useAvatarProfile.getState().look,
-      keys: useAvatarProfile.getState().keys,
-    }),
-    [],
-  )
+  // A look saved before the studio kept a character's own hairstyle as its
+  // own hair (null) may still name it: it opens as its own hair.
+  const initial = useMemo<Draft>(() => {
+    const avatar = useWalkthroughView.getState().character
+    const { look, keys } = useAvatarProfile.getState()
+    return { avatar, look: lookOn(look, avatar), keys }
+  }, [])
   const [draft, setDraft] = useState<Draft>(initial)
   const [preview, setPreview] = useState<Draft | null>(null)
   const [past, setPast] = useState<Draft[]>([])
@@ -441,6 +442,7 @@ function Studio() {
   const [confirming, setConfirming] = useState(false)
   const [listening, setListening] = useState<Listening>(null)
   const [keyMessage, setKeyMessage] = useState<string | null>(null)
+  const [randomizing, setRandomizing] = useState(false)
   const yaw = useRef(0)
   const dragRef = useRef<{ x: number; yaw: number } | null>(null)
 
@@ -485,6 +487,12 @@ function Studio() {
     close()
   }
   const cancel = () => (dirty ? setConfirming(true) : close())
+
+  // The hairstyle library is fetched as the studio opens, so 무작위 (and the
+  // 헤어 step) needn't wait for it; a failed fetch is tried again there.
+  useEffect(() => {
+    loadHairStyles().catch(() => {})
+  }, [])
 
   // The game underneath rests while the studio is open.
   useEffect(() => {
@@ -546,6 +554,11 @@ function Studio() {
     setKeyMessage(null)
   }
   const current = TABS.find((entry) => entry.id === tab)!
+  const pickAvatar = (avatar: string) => {
+    const current = draftRef.current
+    if (avatar !== current.avatar)
+      commit({ ...current, avatar, look: lookOn(current.look, avatar) })
+  }
   const lookPatch = (patch: Partial<AvatarLook>, commitIt: boolean) => {
     const current = draftRef.current
     const next = { ...current, look: { ...current.look, ...patch } }
@@ -553,11 +566,17 @@ function Studio() {
     else setPreview(next)
   }
   // The hairstyle library may still be loading (or fail to): the random
-  // look is made once it answers, on the draft as it is by then.
+  // look is made once it answers, on the draft as it is by then, and the
+  // button waits with it so a second click doesn't queue another.
   const randomize = async () => {
-    const styles = await loadHairStyles().catch(() => null)
-    const current = draftRef.current
-    commit({ ...current, look: randomLook(current.look, current.avatar, styles) })
+    setRandomizing(true)
+    try {
+      const styles = await loadHairStyles().catch(() => null)
+      const current = draftRef.current
+      commit({ ...current, look: randomLook(current.look, current.avatar, styles) })
+    } finally {
+      setRandomizing(false)
+    }
   }
 
   return (
@@ -612,40 +631,53 @@ function Studio() {
           </div>
         </div>
 
-        <div className="pointer-events-auto absolute left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-full bg-white/85 p-1 shadow-[0_2px_10px_rgba(15,23,42,0.1)] backdrop-blur md:left-[calc(50%+226px)]">
+        {/* Over the stage's middle only where that leaves room beside 취소 · 완료; words only where they fit. */}
+        <div className="pointer-events-auto flex items-center gap-0.5 rounded-full bg-white/85 p-1 shadow-[0_2px_10px_rgba(15,23,42,0.1)] backdrop-blur lg:absolute lg:left-[calc(50%+226px)] lg:-translate-x-1/2">
           <button
             aria-label="되돌리기"
             className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-30"
             disabled={past.length === 0}
             onClick={undo}
+            title="되돌리기"
             type="button"
           >
-            <Undo2 className="size-4" /> 되돌리기
+            <Undo2 className="size-4" /> <span className="hidden xl:inline">되돌리기</span>
           </button>
           <button
             aria-label="다시 하기"
             className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-30"
             disabled={future.length === 0}
             onClick={redo}
+            title="다시 하기"
             type="button"
           >
-            <Redo2 className="size-4" /> 다시 하기
+            <Redo2 className="size-4" /> <span className="hidden xl:inline">다시 하기</span>
           </button>
           <span className="mx-1 h-4 w-px bg-neutral-200" />
           <button
-            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] text-neutral-700 transition hover:bg-neutral-100"
+            aria-busy={randomizing}
+            aria-label="무작위"
+            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-60"
+            disabled={randomizing}
             onClick={() => void randomize()}
             title="캐릭터와 얼굴 사진은 두고, 얼굴형·체형·머리·메이크업을 무작위로 바꿔요"
             type="button"
           >
-            <Dices className="size-4" /> 무작위
+            {randomizing ? (
+              <Loader2 className="size-4 animate-spin text-sky-500" />
+            ) : (
+              <Dices className="size-4" />
+            )}
+            <span className="hidden xl:inline">무작위</span>
           </button>
           <button
+            aria-label="초기화"
             className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] text-neutral-700 transition hover:bg-neutral-100"
             onClick={() => commit({ ...draft, look: NO_LOOK, keys: DEFAULT_EMOTE_KEYS })}
+            title="처음 모습으로 초기화"
             type="button"
           >
-            <RotateCcw className="size-4" /> 초기화
+            <RotateCcw className="size-4" /> <span className="hidden xl:inline">초기화</span>
           </button>
         </div>
 
@@ -710,17 +742,12 @@ function Studio() {
             <p className="mt-1 text-[12px] text-neutral-500 leading-5">{current.hint}</p>
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4">
-            {tab === 'character' && (
-              <CharacterPanel
-                avatar={shown.avatar}
-                onPick={(avatar) => avatar !== draft.avatar && commit({ ...draft, avatar })}
-              />
-            )}
+            {tab === 'character' && <CharacterPanel avatar={shown.avatar} onPick={pickAvatar} />}
             {tab === 'body' && (
               <BodyPanel
                 avatar={shown.avatar}
                 body={shown.look.body}
-                onAvatar={(avatar) => avatar !== draft.avatar && commit({ ...draft, avatar })}
+                onAvatar={pickAvatar}
                 onCommit={(body) => lookPatch({ body }, true)}
                 onPreview={(body) => lookPatch({ body }, false)}
               />
@@ -745,6 +772,7 @@ function Studio() {
                 onCommit={(paint) => lookPatch({ paint }, true)}
                 onPreview={(paint) => lookPatch({ paint }, false)}
                 paint={shown.look.paint}
+                photoEyes={shown.look.face?.eyes ?? null}
               />
             )}
             {tab === 'hair' && (

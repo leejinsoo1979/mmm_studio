@@ -1,4 +1,10 @@
-import { ALL_AVATARS, type AvatarGender, avatarGender, findAvatar } from '@pascal-app/editor'
+import {
+  ALL_AVATARS,
+  type AvatarGender,
+  type AvatarLook,
+  avatarGender,
+  findAvatar,
+} from '@pascal-app/editor'
 
 const SEX: Record<AvatarGender, string> = { male: 'Male', female: 'Female' }
 
@@ -41,3 +47,11 @@ export function counterpartAvatar(id: string, gender: AvatarGender, child: boole
   }
   return id
 }
+
+/**
+ * A look moved onto `avatar`: a hairstyle borrowed from that very character
+ * is its own hair (null, as the gallery saves it), so it isn't taken off
+ * and put back on as a transplant.
+ */
+export const lookOn = (look: AvatarLook, avatar: string): AvatarLook =>
+  look.hairStyle === avatar ? { ...look, hairStyle: null } : look

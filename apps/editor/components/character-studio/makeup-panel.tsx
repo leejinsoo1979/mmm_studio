@@ -31,14 +31,23 @@ const PARTS: { id: Part; label: string }[] = [
   { id: 'beard', label: '수염' },
 ]
 
-/** Whether a part's paint differs from the character's own face, for the dot on its tab. */
-const PAINTED: Record<Part, (paint: FacePaint) => boolean> = {
-  eyes: (paint) => Boolean(paint.eyes || paint.shadow || paint.liner > 0),
-  brows: (paint) =>
-    Boolean(paint.browColor || paint.browDarkness !== 0 || paint.browThickness !== 0),
-  lips: (paint) => Boolean(paint.lips),
-  cheeks: (paint) => Boolean(paint.blush || paint.freckles > 0),
-  beard: (paint) => paint.beard !== 'none',
+/** Each part's own settings: between them, all of the paint's. */
+const PART_SETTINGS: Record<Part, (keyof FacePaint)[]> = {
+  eyes: ['eyes', 'shadow', 'shadowAmount', 'liner'],
+  brows: ['browColor', 'browDarkness', 'browThickness'],
+  lips: ['lips', 'lipAmount'],
+  cheeks: ['blush', 'blushAmount', 'freckles'],
+  beard: ['beard', 'beardAmount'],
+}
+
+/**
+ * Whether a part's paint shows on the face, for the dot on its tab: judged
+ * as the reset and the name badge judge the whole paint (hasFacePaint), so
+ * a colour turned down to 0% is no paint to any of them.
+ */
+function painted(part: Part, paint: FacePaint) {
+  const own = Object.fromEntries(PART_SETTINGS[part].map((key) => [key, paint[key]]))
+  return hasFacePaint({ ...NO_PAINT, ...own })
 }
 
 /** The paint's settings that are numbers: the amounts, and the brows' darkness and thickness. */
@@ -51,14 +60,18 @@ const BROW_THICKNESS: SliderText = { label: '굵기', low: '가늘게', high: '�
  * What is painted on the face (inZOI's make-up and the Sims' facial hair):
  * the irises, the brows, lips, blush, eyeshadow and liner, a beard and
  * freckles, a part at a time. Colours commit as they are picked; amounts
- * preview while dragged and commit on release.
+ * preview while dragged and commit on release. `photoEyes` is the iris
+ * colour the face photo puts on (얼굴 step), if any: what picking no colour
+ * here shows, and what picking one covers.
  */
 export function MakeupPanel({
   paint,
+  photoEyes,
   onPreview,
   onCommit,
 }: {
   paint: FacePaint
+  photoEyes: string | null
   onPreview: (paint: FacePaint) => void
   onCommit: (paint: FacePaint) => void
 }) {
@@ -72,7 +85,7 @@ export function MakeupPanel({
   return (
     <div className="flex flex-col gap-5">
       <Segmented
-        marked={(id) => PAINTED[id](paint)}
+        marked={(id) => painted(id, paint)}
         onPick={setPart}
         options={PARTS}
         value={part}
@@ -83,10 +96,23 @@ export function MakeupPanel({
           <PanelSection title="눈동자 색">
             <SwatchGrid
               onPick={(eyes) => set({ eyes })}
-              original="원래 눈"
+              original={photoEyes ? '사진 눈동자' : '원래 눈'}
               swatches={IRIS_SWATCHES}
               value={paint.eyes}
             />
+            {photoEyes && (
+              <p className="flex items-center gap-2 rounded-xl bg-neutral-50 px-3 py-2 text-[11px] text-neutral-500 leading-4">
+                <span
+                  className="size-4 shrink-0 rounded-full ring-1 ring-black/10"
+                  style={{
+                    background: `radial-gradient(circle, #111 0 28%, ${photoEyes} 30% 100%)`,
+                  }}
+                />
+                {paint.eyes
+                  ? '고른 색이 얼굴 사진의 눈동자 색 대신 보여요'
+                  : '얼굴 사진의 눈동자 색을 쓰고 있어요'}
+              </p>
+            )}
           </PanelSection>
           <PanelSection title="아이섀도">
             <SwatchGrid

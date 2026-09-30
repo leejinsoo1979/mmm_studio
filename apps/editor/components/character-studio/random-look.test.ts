@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  type AvatarFace,
   type AvatarLook,
+  FACE_POINT_COUNT,
   type HairStyleEntry,
   NO_LOOK,
   NO_PAINT,
@@ -27,8 +29,18 @@ const STYLES: HairStyleEntry[] = [
   { id: 'Male_Adult_09', gender: 'male', length: 'long' },
 ]
 
+/** A face photo as the studio saves one: a JPEG data URL and a point for each landmark. */
+const FACE: AvatarFace = {
+  photo: 'data:image/jpeg;base64,/9j/4AAQ',
+  points: Array.from({ length: FACE_POINT_COUNT * 2 }, (_, i) => (i % 7) / 7),
+  blend: 0.8,
+  light: 0.4,
+  eyes: '#5A3A24',
+}
+
 const LOOK: AvatarLook = {
   ...NO_LOOK,
+  face: FACE,
   skin: '#C68D63',
   shape: { fit: 0.4, sliders: { eyeSize: 0.9 } },
   hairStyle: 'Female_Adult_04',
@@ -42,7 +54,7 @@ describe('a random look', () => {
   test('keeps the skin, the photo fit and the chosen iris colour', () => {
     for (const look of draws('Female_Adult_07')) {
       expect(look.skin).toBe(LOOK.skin)
-      expect(look.face).toBe(LOOK.face)
+      expect(look.face).toBe(FACE)
       expect(look.shape.fit).toBe(0.4)
       expect(look.paint.eyes).toBe('#3E6AA8')
     }
@@ -71,6 +83,12 @@ describe('a random look', () => {
     expect(styles).toContain(null)
     expect(styles).toContain('Male_Adult_09')
     for (const style of styles) expect([null, 'Male_Adult_07', 'Male_Adult_09']).toContain(style)
+  })
+
+  test('keeps the character’s own hair as its own, never borrowing it from itself', () => {
+    const styles = draws('Male_Adult_07').map((look) => look.hairStyle)
+    expect(styles).toContain(null)
+    expect(styles).not.toContain('Male_Adult_07')
   })
 
   test('keeps the hairstyle it has while the library is unavailable', () => {
