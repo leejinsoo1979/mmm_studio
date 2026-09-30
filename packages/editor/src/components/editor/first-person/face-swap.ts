@@ -49,6 +49,9 @@ export type FaceWarp = {
    * shadowed cheek on a dark skin can be as dark as the hair).
    */
   hairless: Float32Array
+  /** Each brow's outline (grown to take in its fringe), and the distance between the irises, in pixels. */
+  brows: Point[][]
+  eyes: number
 }
 
 /**
@@ -68,7 +71,11 @@ export function warpFace(
   const to = [...FACE_PARTS.warp.map((i) => dest[i]!), ...marginRing(dest)]
   const outline = faceRegion(dest)
   const inner = polygonMask(outline, FRONT, FRONT, FRONT * 0.04)
-  const features = featureMask(featureRegions(dest))
+  const regions = featureRegions(dest)
+  const features = featureMask(regions)
+  const [rightIris, leftIris] = [FACE_PARTS.rightIris[0]!, FACE_PARTS.leftIris[0]!].map(
+    (i) => dest[i]!,
+  )
   const fringe = dilate(features, FRONT, FRONT, FRONT * 0.012)
   const oval = polygonMask(
     FACE_PARTS.oval.map((i) => dest[i]!),
@@ -110,6 +117,8 @@ export function warpFace(
     cheeks: FACE_PARTS.cheeks.map((i) => dest[i]!),
     crown,
     hairless,
+    brows: regions.slice(0, 2),
+    eyes: Math.hypot(rightIris![0] - leftIris![0], rightIris![1] - leftIris![1]),
   }
 }
 
@@ -180,12 +189,75 @@ export function maskImage(mask: Float32Array, width: number, height: number): Pi
 }
 
 /**
- * The photo's face on the character's front view, ready to blend: its
- * shading evened out (`light`), and whatever in it isn't face — hair across
- * the forehead, the background past a jaw the landmarks missed — filled in
- * from the skin around it.
+ * How much of the band just above a brow the photo's hair must cover for
+ * the brow to count as under a fringe; how far above the brow that band
+ * lies, and how far past the brow the character's own is kept (× the
+ * distance between the eyes).
  */
-export function photoFace(warp: FaceWarp, light: number): Pixels {
+const COVERED = 0.45
+const BAND_ABOVE = 0.1
+const KEEP_PAST = 0.1
+
+/**
+ * Where the photo's fringe hides its brows: the brows, and the forehead
+ * above them, whose hair (`hair`, connected to the crown's) covers the
+ * band just above them. The photo shows no brow there to take — its own
+ * would come out as a smear of hair — so the character keeps its own.
+ */
+function fringeCover(warp: FaceWarp, hair: Float32Array): Float32Array {
+  const shift = Math.max(1, Math.round(BAND_ABOVE * warp.eyes))
+  const covered: [number, number, number][] = []
+  for (const outline of warp.brows) {
+    const brow = polygonMask(outline, FRONT, FRONT, 0)
+    let band = 0
+    let hidden = 0
+    for (let i = 0; i + shift * FRONT < brow.length; i++) {
+      const above = brow[i + shift * FRONT]! * (1 - brow[i]!)
+      band += above
+      hidden += above * hair[i]!
+    }
+    if (band > 0 && hidden / band > COVERED) {
+      const xs = outline.map(([x]) => x)
+      covered.push([Math.min(...xs), Math.max(...xs), Math.max(...outline.map(([, y]) => y))])
+    }
+  }
+  const cover = new Float32Array(FRONT * FRONT)
+  const reach = KEEP_PAST * warp.eyes
+  // Both brows hidden: the fringe hides between them too.
+  const spans: [number, number, number][] =
+    covered.length === 2
+      ? [
+          [
+            Math.min(covered[0]![0], covered[1]![0]),
+            Math.max(covered[0]![1], covered[1]![1]),
+            Math.max(covered[0]![2], covered[1]![2]),
+          ],
+        ]
+      : covered
+  for (const [from, to, bottom] of spans) {
+    for (let py = 0; py < Math.min(FRONT, Math.ceil(bottom + reach)); py++) {
+      const down = smoothstep(bottom + reach, bottom, py)
+      const last = Math.min(FRONT, Math.ceil(to + reach))
+      for (let px = Math.max(0, Math.floor(from - reach)); px < last; px++) {
+        const side = Math.min(smoothstep(from - reach, from, px), smoothstep(to + reach, to, px))
+        const i = py * FRONT + px
+        cover[i] = Math.max(cover[i]!, down * side)
+      }
+    }
+  }
+  return cover
+}
+
+/**
+ * The photo's face on the character's front view, ready to blend (`image`):
+ * its shading evened out (`light`), and whatever in it isn't face — hair
+ * across the forehead, the background past a jaw the landmarks missed —
+ * filled in from the skin around it. `covered` (0–1 per pixel) is where a
+ * fringe hid the photo's brows: the character's own stay there.
+ */
+export type PhotoFace = { image: Pixels; covered: Float32Array }
+
+export function photoFace(warp: FaceWarp, light: number): PhotoFace {
   // Bare skin in the photo: all but its hair — anything no nearer the
   // skin's colour than the hair's by a clear margin (so a strand's soft edge
   // goes too) that reaches the hair past the top of the face (a mole,
@@ -195,6 +267,7 @@ export function photoFace(warp: FaceWarp, light: number): Pixels {
   const photoSkin = colorAround(warp.warped, warp.cheeks, FRONT * 0.012)
   const photoHair = photoSkin && hairColor(warp.warped, warp.crown, photoSkin)
   const skinLike = new Float32Array(FRONT * FRONT).fill(1)
+  let covered: Float32Array = new Float32Array(FRONT * FRONT)
   if (photoSkin && photoHair) {
     const skinLum = luminance(...photoSkin)
     const hairLum = luminance(...photoHair)
@@ -210,6 +283,7 @@ export function photoFace(warp: FaceWarp, light: number): Pixels {
       hairy[i] = smoothstep(-0.15, -0.02, margin) * (1 - warp.hairless[i]!)
     }
     const reaching = connectedFrom(hairy, warp.crown, FRONT, FRONT, 0.5)
+    covered = fringeCover(warp, reaching)
     const grown = dilate(reaching, FRONT, FRONT, FRONT * 0.02)
     for (let i = 0; i < skinLike.length; i++) skinLike[i] = 1 - grown[i]!
   }
@@ -249,7 +323,7 @@ export function photoFace(warp: FaceWarp, light: number): Pixels {
     width: FRONT,
     height: FRONT,
   }
-  return seamlessClone(flat, filled, holes, 1)
+  return { image: seamlessClone(flat, filled, holes, 1), covered }
 }
 
 /**
@@ -265,7 +339,7 @@ export function composeFace(
   front: FrontImage,
   hair: Float32Array,
   warp: FaceWarp,
-  photo: Pixels,
+  { image: photo, covered }: PhotoFace,
   blend: number,
 ): { image: Pixels; weight: Float32Array } {
   // The character's bare skin, its hair over the face filled in: the tone
@@ -289,7 +363,7 @@ export function composeFace(
   for (let i = 0, p = 0; i < weight.length; i++, p += 4) {
     const w = warp.weight[i]!
     if (w <= 0) continue
-    weight[i] = w * (1 - over[i]!)
+    weight[i] = w * (1 - over[i]!) * (1 - covered[i]!)
     // Less than a full blend brings the photo's colours back, faded out
     // towards the rim (a partial solve would leave a step there instead).
     const own = (1 - blend) * w
@@ -309,7 +383,7 @@ export function swapFace(
   front: FrontImage,
   hair: Float32Array,
   warp: FaceWarp,
-  photo: Pixels,
+  photo: PhotoFace,
   blend: number,
 ) {
   const { image, weight } = composeFace(front, hair, warp, photo, blend)

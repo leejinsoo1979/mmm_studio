@@ -7,6 +7,11 @@ import {
   isEmoteId,
 } from '../components/editor/first-person/emotes'
 import { isFacePoints } from '../components/editor/first-person/face-points'
+import {
+  DEFAULT_FACE_SHAPE,
+  type FaceShape,
+  readFaceShape,
+} from '../components/editor/first-person/face-shape'
 
 /**
  * The player's face, swapped onto their character's: the face cropped from
@@ -54,16 +59,24 @@ export function readAvatarFace(value: unknown): AvatarFace | null {
 export const DEFAULT_FACE_BLEND = 1
 export const DEFAULT_FACE_LIGHT = 0.5
 
-/** The player's changes to their character: hair and skin dyes (hex) and a face photo. */
+/**
+ * The player's changes to their character: hair and skin dyes (hex), a face
+ * photo, and the face's shape (the photo's proportions, the sliders).
+ */
 export type AvatarLook = {
   hair: string | null
   skin: string | null
   face: AvatarFace | null
+  shape: FaceShape
 }
 
-export const NO_LOOK: AvatarLook = { hair: null, skin: null, face: null }
+export const NO_LOOK: AvatarLook = { hair: null, skin: null, face: null, shape: DEFAULT_FACE_SHAPE }
 
-export const hasLook = (look: AvatarLook | null | undefined): look is AvatarLook =>
+/** What of a look is painted on the character's textures (the shape is the geometry's). */
+export type AvatarPaint = Pick<AvatarLook, 'hair' | 'skin' | 'face'>
+
+/** Whether a look changes the character's textures. */
+export const hasLook = (look: AvatarPaint | null | undefined): look is AvatarPaint =>
   Boolean(look && (look.hair || look.skin || look.face))
 
 type AvatarProfileState = {
@@ -93,7 +106,11 @@ const useAvatarProfile = create<AvatarProfileState>()(
           Object.entries(saved.keys ?? current.keys).filter(([, emote]) => isEmoteId(emote)),
         ) as Record<string, EmoteId>
         const look = { ...NO_LOOK, ...saved.look }
-        return { ...current, look: { ...look, face: readAvatarFace(look.face) }, keys }
+        return {
+          ...current,
+          look: { ...look, face: readAvatarFace(look.face), shape: readFaceShape(look.shape) },
+          keys,
+        }
       },
     },
   ),

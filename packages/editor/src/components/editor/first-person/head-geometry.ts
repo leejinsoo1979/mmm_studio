@@ -1,4 +1,4 @@
-import { Matrix3, Matrix4, type Mesh, type SkinnedMesh, Vector3 } from 'three'
+import { type BufferGeometry, Matrix3, Matrix4, type Mesh, type SkinnedMesh, Vector3 } from 'three'
 import type { HeadTriangle } from './look-pixels'
 
 /**
@@ -23,8 +23,71 @@ const triangleArea = (tri: HeadTriangle) =>
 const triangleCentre = (tri: HeadTriangle) =>
   [(tri.x[0]! + tri.x[1]! + tri.x[2]!) / 3, (tri.y[0]! + tri.y[1]! + tri.y[2]!) / 3] as const
 
+/**
+ * Where the head sits in its front view: a point (x, y in the bind pose)
+ * is at ((x − left) / size, (top − y) / size) in it. `neck` is the head
+ * bone's place (the top of the neck), `front` how far forward the face
+ * reaches.
+ */
+export type HeadFrame = { left: number; top: number; size: number; neck: Vector3; front: number }
+
+/**
+ * The geometry a head had as loaded: a face shape (avatar-shape.ts) swaps
+ * in a reshaped copy, but looks are made from the original, which their
+ * landmarks were found on.
+ */
+export function originalGeometry(mesh: Mesh): BufferGeometry {
+  return (mesh.userData.shapeOriginal as BufferGeometry | undefined) ?? mesh.geometry
+}
+
+/** A head's points in the bind pose. */
+function bindPoints(head: Mesh): Vector3[] {
+  const position = originalGeometry(head).getAttribute('position')
+  const skinned = head as SkinnedMesh
+  const bind = skinned.isSkinnedMesh ? skinned.bindMatrix : new Matrix4()
+  const points: Vector3[] = []
+  for (let i = 0; i < (position?.count ?? 0); i++) {
+    points.push(new Vector3().fromBufferAttribute(position!, i).applyMatrix4(bind))
+  }
+  return points
+}
+
+function frameOf(head: Mesh, points: readonly Vector3[]): HeadFrame {
+  // The skull: from the top of the head down to the head bone (the top of
+  // the neck), plus the chin under it.
+  let top = Number.NEGATIVE_INFINITY
+  const neck = new Vector3(0, Number.NEGATIVE_INFINITY, 0)
+  const skinned = head as SkinnedMesh
+  if (skinned.isSkinnedMesh) {
+    const bones = skinned.skeleton.bones
+    const index = bones.findIndex((bone) => /Head$/.test(bone.name))
+    if (index >= 0) {
+      neck.setFromMatrixPosition(new Matrix4().copy(skinned.skeleton.boneInverses[index]!).invert())
+    }
+  }
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let front = Number.NEGATIVE_INFINITY
+  for (const point of points) top = Math.max(top, point.y)
+  if (!Number.isFinite(neck.y)) neck.set(0, top - 0.2, 0)
+  for (const point of points) {
+    if (point.y > neck.y) {
+      minX = Math.min(minX, point.x)
+      maxX = Math.max(maxX, point.x)
+      front = Math.max(front, point.z)
+    }
+  }
+  const size = (top - neck.y) * 1.45
+  return { left: (minX + maxX) / 2 - size / 2, top: top + size * 0.03, size, neck, front }
+}
+
+/** Where a head sits in its front view (see HeadFrame). */
+export function headFrame(head: Mesh): HeadFrame {
+  return frameOf(head, bindPoints(head))
+}
+
 export function headGeometry(head: Mesh): HeadGeometry {
-  const geometry = head.geometry
+  const geometry = originalGeometry(head)
   const position = geometry.getAttribute('position')
   const normal = geometry.getAttribute('normal')
   const uv = geometry.getAttribute('uv')
@@ -32,41 +95,14 @@ export function headGeometry(head: Mesh): HeadGeometry {
   const skinned = head as SkinnedMesh
   const bind = skinned.isSkinnedMesh ? skinned.bindMatrix : new Matrix4()
   const normalMatrix = new Matrix3().getNormalMatrix(bind)
-  const points: Vector3[] = []
+  const points = bindPoints(head)
   const normals: number[] = []
   const v = new Vector3()
   for (let i = 0; i < position.count; i++) {
-    points.push(new Vector3().fromBufferAttribute(position, i).applyMatrix4(bind))
     v.fromBufferAttribute(normal, i).applyMatrix3(normalMatrix).normalize()
     normals.push(v.z)
   }
-
-  // The skull: from the top of the head down to the head bone (the top of
-  // the neck), plus the chin under it.
-  let top = Number.NEGATIVE_INFINITY
-  let headBoneY = Number.NEGATIVE_INFINITY
-  if (skinned.isSkinnedMesh) {
-    const bones = skinned.skeleton.bones
-    const index = bones.findIndex((bone) => /Head$/.test(bone.name))
-    if (index >= 0) {
-      headBoneY = new Vector3().setFromMatrixPosition(
-        new Matrix4().copy(skinned.skeleton.boneInverses[index]!).invert(),
-      ).y
-    }
-  }
-  let minX = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  for (const point of points) {
-    top = Math.max(top, point.y)
-    if (point.y > headBoneY) {
-      minX = Math.min(minX, point.x)
-      maxX = Math.max(maxX, point.x)
-    }
-  }
-  if (!Number.isFinite(headBoneY)) headBoneY = top - 0.2
-  const size = (top - headBoneY) * 1.45
-  const left = (minX + maxX) / 2 - size / 2
-  const frameTop = top + size * 0.03
+  const { left, top: frameTop, size } = frameOf(head, points)
 
   // Pieces: corners at one spot are one (texture seams split vertices that
   // the surface still joins).

@@ -1,5 +1,13 @@
 import { FACE_PARTS, unpackPoints } from './face-points'
-import { type FaceWarp, FRONT, maskImage, photoFace, swapFace, warpFace } from './face-swap'
+import {
+  type FaceWarp,
+  FRONT,
+  maskImage,
+  type PhotoFace,
+  photoFace,
+  swapFace,
+  warpFace,
+} from './face-swap'
 import { type FrontImage, renderFront, tintIris } from './front-render'
 import type { HeadGeometry } from './head-geometry'
 import { hexToRgb, type Pixels } from './look-pixels'
@@ -41,7 +49,7 @@ function remember<T>(cache: Map<string, T>, key: string, make: () => T): T {
 const fronts = new Map<string, FrontImage>()
 const hairFronts = new Map<string, Float32Array>()
 const warps = new Map<string, FaceWarp>()
-const photoFaces = new Map<string, Pixels>()
+const photoFaces = new Map<string, PhotoFace>()
 
 /** Where the character's hair covers its front view (0–1 per pixel). */
 function hairFront(job: FaceJob): Float32Array {

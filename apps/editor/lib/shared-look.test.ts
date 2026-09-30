@@ -8,6 +8,7 @@ const look = {
   hair: '#A0522D',
   skin: null,
   face: { photo, points, blend: 0.9, light: 0.4, eyes: '#5A3B22' },
+  shape: { fit: 0.6, sliders: { eyeSize: 0.4, jawWidth: -0.25 } },
 }
 
 describe('a look shared through the participant document', () => {
@@ -30,6 +31,22 @@ describe('a look shared through the participant document', () => {
     expect(photoId({ photo, points })).not.toBe(photoId({ photo: `${photo}B`, points }))
     const moved = points.map((value, i) => (i === 0 ? value + 0.01 : value))
     expect(photoId({ photo, points })).not.toBe(photoId({ photo, points: moved }))
+  })
+
+  test('a face shaped by sliders alone is a look; a broken shape is none', () => {
+    const shaped = {
+      hair: null,
+      skin: null,
+      face: null,
+      shape: { fit: 1, sliders: { noseWidth: 0.5 } },
+    }
+    expect(fromSharedLook(JSON.parse(JSON.stringify(toSharedLook(shaped))), null)).toEqual(shaped)
+    expect(
+      fromSharedLook(
+        { hair: null, skin: null, face: null, shape: { sliders: { noseWidth: 'x' } } },
+        null,
+      ),
+    ).toBeNull()
   })
 
   test('nothing usable in it: no look', () => {

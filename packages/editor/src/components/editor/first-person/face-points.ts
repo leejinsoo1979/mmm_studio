@@ -53,6 +53,9 @@ export const FACE_POINT_COUNT = FACE_POINT_INDICES.length
 const at = new Map(FACE_POINT_INDICES.map((index, i) => [index, i]))
 const positions = (indices: readonly number[]) => indices.map((index) => at.get(index)!)
 
+/** Where a MediaPipe landmark sits among the face points (it must be one of FACE_POINT_INDICES). */
+export const facePointOf = (landmark: number): number => at.get(landmark)!
+
 /** Where the named parts sit among the face points. */
 export const FACE_PARTS = {
   oval: positions(OVAL),

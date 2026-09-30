@@ -632,7 +632,7 @@ export function FaceEditor({
             <Check className="size-4 text-sky-500" strokeWidth={3} /> 내 얼굴을 입혔어요
           </p>
           <p className="text-[11px] text-neutral-500 leading-4">
-            사진 속 얼굴을 캐릭터 얼굴에 맞추고 피부와 이어지게 섞었어요
+            사진 속 얼굴형을 분석해 캐릭터 얼굴을 다시 빚고, 피부와 이어지게 입혔어요
           </p>
         </div>
       </div>
@@ -643,6 +643,11 @@ export function FaceEditor({
         </p>
       )}
 
+      <UnitSlider
+        label="사진 얼굴형 따르기"
+        onCommit={(fit) => onCommit({ shape: { ...look.shape, fit } })}
+        value={look.shape.fit}
+      />
       <UnitSlider label="경계 자연스럽게" onCommit={(blend) => set({ blend })} value={face.blend} />
       <UnitSlider
         label="사진 그림자 줄이기"

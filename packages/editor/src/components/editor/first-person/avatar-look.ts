@@ -9,7 +9,8 @@ import {
   Source,
   type Texture,
 } from 'three'
-import { type AvatarLook, hasLook } from '../../../store/use-avatar-profile'
+import { type AvatarLook, type AvatarPaint, hasLook } from '../../../store/use-avatar-profile'
+import { useAvatarShape } from './avatar-shape'
 import { loadFaceTargets } from './face-targets'
 import { headGeometry } from './head-geometry'
 import { type LookBody, type LookJob, type LookResult, type Part, runLookJob } from './look-job'
@@ -184,7 +185,7 @@ function makeLook(body: object, job: LookJob, signal: AbortSignal): Promise<Look
  */
 async function applyLook(
   model: Object3D,
-  look: AvatarLook,
+  look: AvatarPaint,
   avatarId: string,
   signal: AbortSignal,
 ): Promise<{ undo: () => void; retry: boolean } | null> {
@@ -262,9 +263,10 @@ const RETRIES = 4
 const RETRY_AFTER = 3000
 
 /**
- * Keeps a body dressed in a look. A new look replaces the old one only once
- * it's ready (a face takes a moment), so the body never shows undressed in
- * between; no look, another body, or unmounting undresses it at once.
+ * Keeps a body dressed in a look, and its face shaped by it. A new look
+ * replaces the old one only once it's ready (a face takes a moment), so the
+ * body never shows undressed in between; no look, another body, or
+ * unmounting undresses it at once.
  */
 export function useAvatarLook(
   model: Object3D,
@@ -272,8 +274,15 @@ export function useAvatarLook(
   avatarId: string,
 ) {
   const dressing = useRef<{ model: Object3D; undo: () => void } | null>(null)
+  useAvatarShape(model, look, avatarId)
 
+  // Only the painted part of a look is dressed here: a new shape alone
+  // leaves the textures be.
+  const hair = look?.hair ?? null
+  const skin = look?.skin ?? null
+  const face = look?.face ?? null
   useEffect(() => {
+    const look: AvatarPaint = { hair, skin, face }
     if (dressing.current && (dressing.current.model !== model || !hasLook(look))) {
       dressing.current.undo()
       dressing.current = null
@@ -302,7 +311,7 @@ export function useAvatarLook(
       controller.abort()
       clearTimeout(timer)
     }
-  }, [model, look, avatarId])
+  }, [model, hair, skin, face, avatarId])
 
   useEffect(
     () => () => {

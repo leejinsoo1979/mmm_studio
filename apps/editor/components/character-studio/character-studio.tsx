@@ -17,6 +17,7 @@ import {
   type EmoteCue,
   type EmoteId,
   findAvatar,
+  hasSliders,
   keyLabel,
   NO_LOOK,
   useAvatarProfile,
@@ -36,6 +37,7 @@ import {
   RotateCw,
   ScanFace,
   Scissors,
+  SlidersHorizontal,
   Undo2,
   UserRound,
   X,
@@ -44,13 +46,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { ColorPicker } from '../color-picker'
 import { FaceEditor } from './face-editor'
+import { FaceShapePanel } from './face-shape-panel'
 import { EMOTE_ICONS, HAIR_SWATCHES, SKIN_SWATCHES, type Swatch } from './studio-data'
 import { type CameraFocus, StudioStage } from './studio-stage'
 import { useCharacterStudio } from './use-character-studio'
 
 type Draft = { avatar: string; look: AvatarLook; keys: Record<string, EmoteId> }
 
-type Tab = 'character' | 'face' | 'hair' | 'skin' | 'motion'
+type Tab = 'character' | 'face' | 'shape' | 'hair' | 'skin' | 'motion'
 
 const TABS: { id: Tab; label: string; icon: LucideIcon; title: string; hint: string }[] = [
   {
@@ -66,6 +69,13 @@ const TABS: { id: Tab; label: string; icon: LucideIcon; title: string; hint: str
     icon: ScanFace,
     title: '내 얼굴 입히기',
     hint: '사진 한 장으로 캐릭터에 내 얼굴을 입혀요.',
+  },
+  {
+    id: 'shape',
+    label: '얼굴형',
+    icon: SlidersHorizontal,
+    title: '얼굴형 다듬기',
+    hint: '얼굴형·눈·눈썹·코·입을 부위별로 다듬어요.',
   },
   {
     id: 'hair',
@@ -93,6 +103,7 @@ const TABS: { id: Tab; label: string; icon: LucideIcon; title: string; hint: str
 const TAB_FOCUS: Record<Tab, CameraFocus> = {
   character: 'full',
   face: 'face',
+  shape: 'face',
   hair: 'face',
   skin: 'upper',
   motion: 'full',
@@ -599,8 +610,8 @@ function Studio() {
   }, [])
 
   // Keys belong to the studio: waiting for a key to bind takes the next
-  // one; otherwise they don't reach the game underneath (typing in a field
-  // still works).
+  // one; otherwise they don't reach the game underneath (typing in a field,
+  // and a slider's arrow keys, still work: movement leaves those be).
   const listeningRef = useRef(listening)
   listeningRef.current = listening
   const commitRef = useRef(commit)
@@ -636,7 +647,7 @@ function Studio() {
         return
       }
       const target = event.target as HTMLElement | null
-      if (target?.closest('input, textarea')) return
+      if (target?.closest('input, textarea, [role="slider"]')) return
       event.stopPropagation()
     }
     window.addEventListener('keydown', onKey, true)
@@ -813,6 +824,14 @@ function Studio() {
                 onCommit={(patch) => lookPatch(patch, true)}
               />
             )}
+            {tab === 'shape' && (
+              <FaceShapePanel
+                hasPhoto={Boolean(shown.look.face)}
+                onCommit={(shape) => lookPatch({ shape }, true)}
+                onPreview={(shape) => lookPatch({ shape }, false)}
+                shape={shown.look.shape}
+              />
+            )}
             {tab === 'hair' && (
               <ColorPanel
                 fallback="#4F3426"
@@ -861,7 +880,12 @@ function Studio() {
         <div className="leading-tight">
           <p className="font-semibold text-[13px]">{avatarLabel(shown.avatar)}</p>
           <p className="text-[10px] text-neutral-500">
-            {[shown.look.face && '내 얼굴', shown.look.hair && '염색', shown.look.skin && '피부 톤']
+            {[
+              shown.look.face && '내 얼굴',
+              hasSliders(shown.look.shape) && '얼굴형',
+              shown.look.hair && '염색',
+              shown.look.skin && '피부 톤',
+            ]
               .filter(Boolean)
               .join(' · ') || '기본 모습'}
           </p>

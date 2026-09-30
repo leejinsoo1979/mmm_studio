@@ -47,6 +47,16 @@ export {
   packPoints,
   unpackPoints,
 } from './components/editor/first-person/face-points'
+export {
+  DEFAULT_FACE_SHAPE,
+  FACE_SLIDER_GROUPS,
+  FACE_SLIDERS,
+  type FaceShape,
+  type FaceSliderGroup,
+  type FaceSliderId,
+  hasSliders,
+  readFaceShape,
+} from './components/editor/first-person/face-shape'
 export { loadFaceTargets } from './components/editor/first-person/face-targets'
 export type {
   LocalPresence,
@@ -462,6 +472,7 @@ export { default as useAudio } from './store/use-audio'
 export {
   type AvatarFace,
   type AvatarLook,
+  type AvatarPaint,
   DEFAULT_FACE_BLEND,
   DEFAULT_FACE_LIGHT,
   default as useAvatarProfile,

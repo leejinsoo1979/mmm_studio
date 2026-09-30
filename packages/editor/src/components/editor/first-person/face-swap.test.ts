@@ -82,7 +82,7 @@ describe('face swap', () => {
   const warp = warpFace(photo(), points, points)
 
   test('the photo’s face keeps its features but loses its hair', () => {
-    const face = photoFace(warp, 0.5)
+    const face = photoFace(warp, 0.5).image
     // The strand by the temple is skin now; so is the hair over the top of the face.
     expect(near(at(face, 0.75, 0.4), SKIN, 30)).toBe(true)
     expect(near(at(face, 0.5, 0.285), SKIN, 30)).toBe(true)
@@ -96,10 +96,10 @@ describe('face swap', () => {
   test('leaves a face be when past its top is nothing clearly unlike its skin', () => {
     // A short haircut against a beige wall: the band past the face is near the skin.
     const wall: Rgb = [200, 170, 150]
-    const walled = photoFace(warpFace(photo(wall), points, points), 0.5)
+    const walled = photoFace(warpFace(photo(wall), points, points), 0.5).image
     expect(near(at(walled, 0.36, 0.62), SKIN, 6)).toBe(true)
     expect(luminance(...at(walled, 0.66, 0.62))).toBeLessThan(luminance(...SKIN) * 0.6)
-    const bare = photoFace(warpFace(photo(null), points, points), 0.5)
+    const bare = photoFace(warpFace(photo(null), points, points), 0.5).image
     expect(near(at(bare, 0.5, 0.33), SKIN, 6)).toBe(true)
     expect(near(at(bare, 0.75, 0.4), SKIN, 6)).toBe(true)
     expect(luminance(...at(bare, 0.66, 0.62))).toBeLessThan(luminance(...SKIN) * 0.6)
@@ -144,13 +144,39 @@ describe('face swap', () => {
     expect(luminance(...at(image, 0.62, 0.4))).toBeLessThan(luminance(...at(image, 0.62, 0.52)))
   })
 
+  test('a fringe over the brows leaves the character its own brows', () => {
+    // Hair down over the brows and past them: the photo has no brows to give.
+    const fringed = photo()
+    for (let py = 0; py < FRONT * 0.42; py++) {
+      for (let px = 0; px < FRONT; px++) fringed.data.set([...HAIR, 255], (py * FRONT + px) * 4)
+    }
+    const covered = photoFace(warpFace(fringed, points, points), 0.5).covered
+    const cover = (x: number, y: number) =>
+      covered[Math.floor(y * FRONT) * FRONT + Math.floor(x * FRONT)]!
+    expect(cover(0.38, 0.4)).toBeGreaterThan(0.9)
+    expect(cover(0.62, 0.4)).toBeGreaterThan(0.9)
+    expect(cover(0.5, 0.4)).toBeGreaterThan(0.9)
+    expect(cover(0.5, 0.62)).toBe(0)
+    const { front, hair } = character()
+    const { weight } = composeFace(
+      front,
+      hair,
+      warp,
+      photoFace(warpFace(fringed, points, points), 0.5),
+      1,
+    )
+    expect(weight[Math.floor(0.4 * FRONT) * FRONT + Math.floor(0.62 * FRONT)]).toBeLessThan(0.1)
+    // A fringe that stops short of them hides nothing.
+    expect(photoFace(warp, 0.5).covered.every((value) => value === 0)).toBe(true)
+  })
+
   test('less than a full blend brings the photo’s own colours back', () => {
     const { front, hair } = character()
     const face = photoFace(warp, 0.5)
     const none = at(composeFace(front, hair, warp, face, 0).image, 0.36, 0.62)
     const half = at(composeFace(front, hair, warp, face, 0.5).image, 0.36, 0.62)
     const full = at(composeFace(front, hair, warp, face, 1).image, 0.36, 0.62)
-    expect(near(none, at(face, 0.36, 0.62), 4)).toBe(true)
+    expect(near(none, at(face.image, 0.36, 0.62), 4)).toBe(true)
     for (let c = 0; c < 3; c++) expect(half[c]).toBeCloseTo((none[c]! + full[c]!) / 2, -1)
   })
 })

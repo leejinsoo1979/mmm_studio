@@ -1,4 +1,4 @@
-import type { EmoteId } from '@pascal-app/editor'
+import type { EmoteId, FaceSliderGroup, FaceSliderId } from '@pascal-app/editor'
 import {
   Angry,
   Brain,
@@ -97,3 +97,40 @@ export const EMOTE_ICONS: Record<EmoteId, LucideIcon> = {
   knock: DoorClosed,
   drink: Coffee,
 }
+
+export const FACE_GROUP_LABELS: Record<FaceSliderGroup, string> = {
+  face: '얼굴형',
+  eyes: '눈',
+  brows: '눈썹',
+  nose: '코',
+  mouth: '입',
+}
+
+/** Each face slider's name, and what its two ends do. */
+export const FACE_SLIDER_TEXT: Record<FaceSliderId, { label: string; low: string; high: string }> =
+  {
+    faceWidth: { label: '얼굴 너비', low: '좁게', high: '넓게' },
+    faceLength: { label: '얼굴 길이', low: '짧게', high: '길게' },
+    jawWidth: { label: '턱선 너비', low: '갸름하게', high: '각지게' },
+    chinWidth: { label: '턱끝 너비', low: '뾰족하게', high: '넓게' },
+    chinLength: { label: '턱끝 길이', low: '짧게', high: '길게' },
+    chinDepth: { label: '턱끝 돌출', low: '들어가게', high: '나오게' },
+    cheekbones: { label: '광대', low: '낮게', high: '도드라지게' },
+    cheeks: { label: '볼살', low: '홀쭉하게', high: '통통하게' },
+    forehead: { label: '이마', low: '평평하게', high: '볼록하게' },
+    eyeSize: { label: '눈 크기', low: '작게', high: '크게' },
+    eyeSpacing: { label: '눈 사이', low: '좁게', high: '넓게' },
+    eyeHeight: { label: '눈 높이', low: '아래로', high: '위로' },
+    eyeTilt: { label: '눈꼬리', low: '처지게', high: '올라가게' },
+    eyeDepth: { label: '눈 깊이', low: '나오게', high: '깊게' },
+    browHeight: { label: '눈썹 높이', low: '아래로', high: '위로' },
+    browTilt: { label: '눈썹 꼬리', low: '처지게', high: '올라가게' },
+    noseWidth: { label: '콧볼 너비', low: '좁게', high: '넓게' },
+    noseLength: { label: '코 길이', low: '짧게', high: '길게' },
+    noseHeight: { label: '콧대 높이', low: '낮게', high: '높게' },
+    noseTip: { label: '코끝', low: '내려가게', high: '들리게' },
+    mouthWidth: { label: '입 너비', low: '좁게', high: '넓게' },
+    mouthHeight: { label: '입 위치', low: '아래로', high: '위로' },
+    lipFullness: { label: '입술 두께', low: '얇게', high: '도톰하게' },
+    mouthCorners: { label: '입꼬리', low: '내려가게', high: '올라가게' },
+  }
