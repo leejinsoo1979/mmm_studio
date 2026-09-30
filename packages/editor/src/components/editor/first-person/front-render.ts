@@ -147,7 +147,7 @@ function rasterise(
  * `active` triangles are walked; the rest keep the texels inside them from
  * the margins, but give way to an active triangle sharing their texels.
  */
-function forEachTexel(
+export function forEachTexel(
   texture: Pixels,
   triangles: readonly HeadTriangle[],
   active: (tri: HeadTriangle) => boolean,

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import {
   type Material,
   type Mesh,
@@ -12,8 +12,10 @@ import {
 import { type AvatarLook, hasLook } from '../../../store/use-avatar-profile'
 import { type FaceJob, runFaceJob } from './face-job'
 import { loadFaceTargets } from './face-targets'
+import { forEachTexel } from './front-render'
 import { type HeadGeometry, headGeometry } from './head-geometry'
 import {
+  colorDistance,
   dye,
   type HeadTriangle,
   hairMask,
@@ -26,7 +28,11 @@ import {
   similarityMask,
 } from './look-pixels'
 
-/** A Rocketbox body's materials: `<code>_head`, `<code>_body`, `<code>_opacity` (hair cards and lashes; children have none). */
+/**
+ * A Rocketbox body's materials: `<code>_head`, `<code>_body` and, on about
+ * half of them, `<code>_opacity` (hair cards and lashes); the rest have
+ * their hair, if any, painted on the head.
+ */
 type Part = 'head' | 'body' | 'opacity'
 
 type PartMesh = { mesh: Mesh; material: MeshStandardMaterial }
@@ -120,7 +126,7 @@ const skinColor = (head: Pixels, geometry: HeadGeometry) =>
     [200, 160, 140],
   )
 
-/** The hair's colour on the crown, for heads whose hair is all texture (no hair cards). */
+/** The crown's colour: a head without hair cards has its hair, if any, painted there. */
 const crownColor = (head: Pixels, geometry: HeadGeometry) =>
   colorWhere(
     head,
@@ -129,10 +135,45 @@ const crownColor = (head: Pixels, geometry: HeadGeometry) =>
     [60, 45, 35],
   )
 
+/**
+ * A crown nearer the skin's colour than this is bare (a bald or shaved head)
+ * or cut off under a covering: the head has no painted hair to find.
+ */
+const BARE_CROWN = 0.2
+
+/**
+ * Clears a head's hair mask where no hair is: the eyeballs, whatever their
+ * colour, and — when the mask comes from a guess at painted hair's colour —
+ * the face and jaw below the eyes (the lowest brows sit above 0.45 of the
+ * front view on every character), where a shadowed cheek or a dark skin can
+ * match that colour. The back of the head keeps its hair.
+ */
+function clearHairlessTexels(
+  mask: Float32Array,
+  head: Pixels,
+  geometry: HeadGeometry,
+  painted: boolean,
+) {
+  const clear = (texel: number) => {
+    mask[texel] = 0
+  }
+  forEachTexel(head, geometry.eyes.flat(), () => true, clear)
+  if (!painted) return
+  forEachTexel(
+    head,
+    geometry.skin,
+    (tri) => {
+      const x = (tri.x[0]! + tri.x[1]! + tri.x[2]!) / 3
+      const y = (tri.y[0]! + tri.y[1]! + tri.y[2]!) / 3
+      return Math.abs(x - 0.5) < 0.28 && y > 0.45 && tri.n[0]! + tri.n[1]! + tri.n[2]! > -0.6
+    },
+    clear,
+  )
+}
+
 function analyse(parts: Record<Part, PartMesh[]>): Analysis | null {
   const headMap = parts.head[0]?.material.map
   const bodyMap = parts.body[0]?.material.map
-  // Children have no hair cards: their hair is painted on the head.
   const opacityMap = parts.opacity[0]?.material.map
   if (!(headMap && bodyMap)) return null
   const cached = analyses.get(headMap)
@@ -142,8 +183,14 @@ function analyse(parts: Record<Part, PartMesh[]>): Analysis | null {
   const opacity = opacityMap ? readPixels(opacityMap) : null
   const geometry = headGeometry(parts.head[0]!.mesh)
   const skin = skinColor(head, geometry)
-  const hair = opacity ? meanColor(opacity) : crownColor(head, geometry)
-  const hairOnHead = hairMask(head, hair, skin)
+  const skinLum = luminance(...skin)
+  const crown = opacity ? null : crownColor(head, geometry)
+  const painted = crown && colorDistance(...crown, skin, skinLum) > BARE_CROWN ? crown : null
+  const hairColour = opacity ? meanColor(opacity) : painted
+  const hairOnHead = hairColour
+    ? hairMask(head, hairColour, skin)
+    : new Float32Array(head.width * head.height)
+  if (hairColour) clearHairlessTexels(hairOnHead, head, geometry, !opacity)
   const headSkinMask = similarityMask(head, skin)
   for (let i = 0; i < headSkinMask.length; i++) headSkinMask[i]! *= 1 - hairOnHead[i]!
   const bodySkinMask = similarityMask(body, skin, 0.08, 0.2)
@@ -155,9 +202,9 @@ function analyse(parts: Record<Part, PartMesh[]>): Analysis | null {
     hairMask: hairOnHead,
     headSkinMask,
     bodySkinMask,
-    hairLum: luminance(...hair),
+    hairLum: opacity ? luminance(...meanColor(opacity)) : 0,
     headHairLum: maskedLuminance(head, hairOnHead),
-    skinLum: luminance(...skin),
+    skinLum,
     bodySkinLum: maskedLuminance(body, bodySkinMask),
   }
   analyses.set(headMap, analysis)
@@ -183,6 +230,8 @@ function photoPixels(photo: string): Promise<Pixels> {
       image.onerror = () => reject(new Error('얼굴 사진을 읽지 못했습니다'))
       image.src = photo
     })
+    // A photo that didn't load can be tried again.
+    found.catch(() => photos.delete(photo))
     photos.set(photo, found)
     if (photos.size > 4) photos.delete(photos.keys().next().value!)
   }
@@ -203,23 +252,42 @@ function textureFrom(pixels: Pixels, original: Texture): Texture {
   return texture
 }
 
-let worker: Worker | null | undefined
-let nextJob = 0
-const pending = new Map<
-  number,
-  { job: FaceJob; resolve: (head: Pixels) => void; reject: (error: unknown) => void }
->()
-
-/** Runs a job here, settling its promise. */
-function runHere(task: {
+/** A face swap waiting or running: settles with the head, or null when a newer one for the same body replaced it. */
+type Task = {
   job: FaceJob
-  resolve: (head: Pixels) => void
+  signal: AbortSignal
+  resolve: (head: Pixels | null) => void
   reject: (error: unknown) => void
-}) {
+}
+
+let worker: Worker | null | undefined
+/** The task the worker is on (it runs one at a time). */
+let running: Task | null = null
+/** The next task for each body: a newer look replaces the one still waiting (a colour drag makes many). */
+const waiting = new Map<object, Task>()
+
+/** Runs a task here, settling it. */
+function runHere(task: Task) {
   try {
     task.resolve(runFaceJob(task.job))
   } catch (error) {
     task.reject(error)
+  }
+}
+
+/** Starts the next waiting task (skipping those no longer wanted), if the worker is free. */
+function next() {
+  if (running || !worker) return
+  for (const [body, task] of waiting) {
+    waiting.delete(body)
+    if (task.signal.aborted) {
+      task.resolve(null)
+      continue
+    }
+    running = task
+    // Copied, not transferred: the job must still be runnable here if the worker fails.
+    worker.postMessage({ job: task.job })
+    return
   }
 }
 
@@ -230,22 +298,23 @@ function faceWorker(): Worker | null {
   if (typeof Worker === 'undefined') return null
   try {
     const started = new Worker(new URL('./face-worker.ts', import.meta.url), { type: 'module' })
-    started.onmessage = (event: MessageEvent<{ id: number; head?: Pixels; error?: string }>) => {
-      const { id, head, error } = event.data
-      const task = pending.get(id)
-      if (!task) return
-      pending.delete(id)
-      if (head) task.resolve(head)
-      else task.reject(new Error(error))
+    started.onmessage = (event: MessageEvent<{ head?: Pixels; error?: string }>) => {
+      const task = running
+      running = null
+      const { head, error } = event.data
+      if (head) task?.resolve(head)
+      else task?.reject(new Error(error))
+      next()
     }
-    // It didn't load: the jobs waiting on it, and all later ones, run here.
+    // It didn't load: the tasks for it, and all later ones, run here.
     started.onerror = (event) => {
       event.preventDefault()
       started.terminate()
       worker = null
-      const waiting = [...pending.values()]
-      pending.clear()
-      for (const task of waiting) runHere(task)
+      const left = [...(running ? [running] : []), ...waiting.values()]
+      running = null
+      waiting.clear()
+      for (const task of left) runHere(task)
     }
     worker = started
   } catch {
@@ -257,67 +326,93 @@ function faceWorker(): Worker | null {
 /**
  * Swaps a face onto a head (see face-job.ts) in the worker, so the game
  * doesn't stall for the second or more it takes; here if there is no worker.
+ * Only the latest swap for each body waits its turn: settles with null for
+ * one a newer swap for that body replaced, or `signal` aborted, before it
+ * started.
  */
-function swapFaceAside(job: FaceJob): Promise<Pixels> {
+function swapFaceAside(body: object, job: FaceJob, signal: AbortSignal): Promise<Pixels | null> {
   return new Promise((resolve, reject) => {
-    const task = { job, resolve, reject }
-    const aside = faceWorker()
-    if (!aside) {
+    const task = { job, signal, resolve, reject }
+    if (!faceWorker()) {
       runHere(task)
       return
     }
-    const id = nextJob++
-    pending.set(id, task)
-    // Copied, not transferred: the job must still be runnable here if the worker fails.
-    aside.postMessage({ id, job })
+    waiting.get(body)?.resolve(null)
+    waiting.set(body, task)
+    next()
   })
 }
 
 /**
  * Dresses a body in a look: its own copies of the textures the look changes
  * (the swapped face, hair dye, skin tone) on its own copies of the materials.
- * Returns what undoes it (the original materials back, the copies freed).
+ * Returns what undoes it (the original materials back, the copies freed),
+ * or null when `signal` aborted it first; `retry` when the face couldn't be
+ * loaded (the look went on without it) and may load later.
  */
-export async function applyLook(
+async function applyLook(
   model: Object3D,
   look: AvatarLook,
   avatarId: string,
-): Promise<() => void> {
+  signal: AbortSignal,
+): Promise<{ undo: () => void; retry: boolean } | null> {
   const parts = partMeshes(model)
   const analysis = analyse(parts)
-  if (!analysis) return () => {}
+  if (!analysis) return { undo: () => {}, retry: false }
   const face = look.face
+  let retry = false
   const [photo, target] = face
     ? await Promise.all([
-        photoPixels(face.photo).catch(() => null),
-        loadFaceTargets()
-          .then((targets) => targets[avatarId] ?? null)
-          .catch(() => null),
+        photoPixels(face.photo).catch(() => {
+          retry = true
+          return null
+        }),
+        loadFaceTargets().then(
+          (targets) => targets[avatarId] ?? null,
+          () => {
+            retry = true
+            return null
+          },
+        ),
       ])
     : [null, null]
+  if (signal.aborted) return null
 
   const changed: Partial<Record<Part, Pixels>> = {}
   if ((face && photo && target) || look.hair || look.skin) {
-    let head = copyPixels(analysis.head)
-    if (look.hair) dye(head, hexToRgb(look.hair), analysis.headHairLum, analysis.hairMask)
-    if (look.skin) dye(head, hexToRgb(look.skin), analysis.skinLum, analysis.headSkinMask)
+    const dyed = copyPixels(analysis.head)
+    if (look.hair) dye(dyed, hexToRgb(look.hair), analysis.headHairLum, analysis.hairMask)
+    if (look.skin) dye(dyed, hexToRgb(look.skin), analysis.skinLum, analysis.headSkinMask)
+    let head = dyed
     // The face goes on last: the dyes' masks are the character's own face,
     // not the photo's, and the face's colours meet the skin as dyed.
     if (face && photo && target) {
-      head = await swapFaceAside({
-        head,
-        avatar: avatarId,
-        front: `${avatarId}|${look.hair}|${look.skin}`,
-        geometry: analysis.geometry,
-        hair: analysis.hairMask,
-        photo,
-        photoKey: face.photo,
-        points: face.points,
-        target,
-        blend: face.blend,
-        light: face.light,
-        eyes: face.eyes,
-      })
+      try {
+        const swapped = await swapFaceAside(
+          model,
+          {
+            head: dyed,
+            avatar: avatarId,
+            front: `${avatarId}|${look.hair}|${look.skin}`,
+            geometry: analysis.geometry,
+            hair: analysis.hairMask,
+            photo,
+            photoKey: face.photo,
+            points: face.points,
+            target,
+            blend: face.blend,
+            light: face.light,
+            eyes: face.eyes,
+          },
+          signal,
+        )
+        if (!swapped) return null
+        head = swapped
+      } catch (error) {
+        // The dyes still go on; the face is left out.
+        console.warn('[look] face swap failed', error)
+      }
+      if (signal.aborted) return null
     }
     changed.head = head
   }
@@ -352,28 +447,66 @@ export async function applyLook(
       })
     }
   }
-  return () => {
-    for (const step of undo) step()
+  return {
+    undo: () => {
+      for (const step of undo) step()
+    },
+    retry,
   }
 }
 
-/** Keeps a body dressed in a look (undressed again when the look or body changes). */
+/** How many times, and how long after (ms, doubling), a look whose face didn't load tries again. */
+const RETRIES = 4
+const RETRY_AFTER = 3000
+
+/**
+ * Keeps a body dressed in a look. A new look replaces the old one only once
+ * it's ready (a face takes a moment), so the body never shows undressed in
+ * between; no look, another body, or unmounting undresses it at once.
+ */
 export function useAvatarLook(
   model: Object3D,
   look: AvatarLook | null | undefined,
   avatarId: string,
 ) {
+  const dressing = useRef<{ model: Object3D; undo: () => void } | null>(null)
+
   useEffect(() => {
+    if (dressing.current && (dressing.current.model !== model || !hasLook(look))) {
+      dressing.current.undo()
+      dressing.current = null
+    }
     if (!hasLook(look)) return
-    let undo: (() => void) | null = null
-    let cancelled = false
-    void applyLook(model, look, avatarId).then((done) => {
-      if (cancelled) done()
-      else undo = done
-    })
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const dress = (attempt: number) => {
+      applyLook(model, look, avatarId, controller.signal)
+        .then((applied) => {
+          if (!applied) return
+          if (controller.signal.aborted) {
+            applied.undo()
+            return
+          }
+          dressing.current?.undo()
+          dressing.current = { model, undo: applied.undo }
+          if (applied.retry && attempt < RETRIES) {
+            timer = setTimeout(() => dress(attempt + 1), RETRY_AFTER * 2 ** attempt)
+          }
+        })
+        .catch((error: unknown) => console.warn('[look] could not dress the character', error))
+    }
+    dress(0)
     return () => {
-      cancelled = true
-      undo?.()
+      controller.abort()
+      clearTimeout(timer)
     }
   }, [model, look, avatarId])
+
+  useEffect(
+    () => () => {
+      dressing.current?.undo()
+      dressing.current = null
+    },
+    [],
+  )
 }
