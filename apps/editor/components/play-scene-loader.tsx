@@ -39,7 +39,9 @@ export function PlaySceneLoader({
     editor.setPreviewMode(true)
     viewer.setShading('hyper')
     viewer.setTextures(true)
-    viewer.setEdges('soft')
+    // Ink lines are a drafting look: in play they outline every hair strand,
+    // eyelid and seam of the characters, drawn white on a night sky.
+    viewer.setEdges('off')
     viewer.setShadows(true)
     viewer.setShowGrid(false)
     viewer.setShowGuides(false)
