@@ -176,7 +176,8 @@ function CharacterPanel({ avatar, onPick }: { avatar: string; onPick: (id: strin
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <Segmented onPick={setTab} options={AVATAR_TABS} value={tab} />
-      <div className="-mr-2 grid min-h-0 grid-cols-3 gap-2 overflow-y-auto pr-2 pb-2">
+      {/* Rows as tall as their tiles: a long list (직업) must scroll, not squash its rows to fit. */}
+      <div className="-mr-2 grid min-h-0 auto-rows-max grid-cols-3 content-start gap-2 overflow-y-auto pr-2 pb-2">
         {avatars.map((entry) => {
           const selected = entry.id === avatar
           return (
@@ -195,7 +196,7 @@ function CharacterPanel({ avatar, onPick }: { avatar: string; onPick: (id: strin
             >
               <img
                 alt=""
-                className="aspect-[128/208] w-full object-contain transition group-hover:scale-[1.03]"
+                className="aspect-[128/208] h-auto w-full shrink-0 object-contain transition group-hover:scale-[1.03]"
                 loading="lazy"
                 src={avatarThumbnailUrl(entry.id)}
               />

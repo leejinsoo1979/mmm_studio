@@ -112,6 +112,105 @@ export function dye(pixels: Pixels, target: Rgb, refLum: number, mask?: Float32A
   }
 }
 
+/** sRGB channel (0–255) to linear light (0–1), looked up. */
+const LINEAR = Float32Array.from({ length: 256 }, (_, v) => {
+  const c = v / 255
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+})
+
+const toSrgb = (linear: number) => {
+  const c = linear <= 0.0031308 ? linear * 12.92 : 1.055 * linear ** (1 / 2.4) - 0.055
+  return Math.min(255, Math.max(0, c * 255))
+}
+
+const labF = (t: number) => (t > 216 / 24389 ? Math.cbrt(t) : ((24389 / 27) * t + 16) / 116)
+const labInverse = (f: number) => (f ** 3 > 216 / 24389 ? f ** 3 : (116 * f - 16) / (24389 / 27))
+
+/** D65 white, the reference of sRGB. */
+const WHITE = [0.95047, 1, 1.08883] as const
+
+/** An sRGB colour (0–255 channels, not necessarily whole) in CIELAB, written into `out`. */
+function toLab(r: number, g: number, b: number, out: number[]) {
+  const lr = LINEAR[Math.round(r)]!
+  const lg = LINEAR[Math.round(g)]!
+  const lb = LINEAR[Math.round(b)]!
+  const x = labF((0.4124 * lr + 0.3576 * lg + 0.1805 * lb) / WHITE[0])
+  const y = labF(0.2126 * lr + 0.7152 * lg + 0.0722 * lb)
+  const z = labF((0.0193 * lr + 0.1192 * lg + 0.9505 * lb) / WHITE[2])
+  out[0] = 116 * y - 16
+  out[1] = 500 * (x - y)
+  out[2] = 200 * (y - z)
+}
+
+/** A CIELAB colour back in sRGB (0–255, clamped), written into `out`. */
+function fromLab(l: number, a: number, b: number, out: number[]) {
+  const fy = (l + 16) / 116
+  const x = labInverse(fy + a / 500) * WHITE[0]
+  const y = labInverse(fy)
+  const z = labInverse(fy - b / 200) * WHITE[2]
+  out[0] = toSrgb(3.2406 * x - 1.5372 * y - 0.4986 * z)
+  out[1] = toSrgb(-0.9689 * x + 1.8758 * y + 0.0415 * z)
+  out[2] = toSrgb(0.0557 * x - 0.204 * y + 1.057 * z)
+}
+
+/**
+ * How much of the skin's own light and shade a new tone keeps, by how much
+ * lighter it is: as much when darkening, a little less when lightening a
+ * lot (shading lifted whole off a dark skin reads as grime), never below
+ * this share.
+ */
+const LEAST_SHADE = 0.6
+
+/**
+ * The least chroma a skin's usual colour is taken to have (a nearly grey
+ * reference would scale colour differences up without bound), and the
+ * most a tone scales them either way.
+ */
+const LEAST_CHROMA = 6
+const CHROMA_SCALE: readonly [number, number] = [0.7, 1.4]
+
+/**
+ * Tones skin to `target` in CIELAB: the skin's usual colour (`ref`) goes to
+ * the target and every pixel keeps where it stands against it — its
+ * lightness difference, and its colour difference turned to the target's
+ * hue and scaled halfway (geometrically) to the target's colourfulness — so
+ * the cheeks' flush, the lips' red, pores and shadows stay what they were
+ * on the new skin instead of all being painted the one colour (which turns
+ * lips skin-coloured and a lightened face into a chalk mask). `mask` (0–1
+ * per pixel) sets how much of the tone takes.
+ */
+export function toneSkin(pixels: Pixels, target: Rgb, ref: Rgb, mask: Float32Array) {
+  const { data } = pixels
+  const from = [0, 0, 0]
+  const to = [0, 0, 0]
+  toLab(...ref, from)
+  toLab(...target, to)
+  const shade = Math.max(LEAST_SHADE, Math.min(1, (100 - to[0]!) / Math.max(1, 100 - from[0]!)))
+  const ratio = Math.hypot(to[1]!, to[2]!) / Math.max(LEAST_CHROMA, Math.hypot(from[1]!, from[2]!))
+  const scale = Math.min(CHROMA_SCALE[1], Math.max(CHROMA_SCALE[0], Math.sqrt(ratio)))
+  const turn = Math.atan2(to[2]!, to[1]!) - Math.atan2(from[2]!, from[1]!)
+  // Lightened a long way, a skin's colour differences even out with its
+  // shading: kept whole they read as blotches on fair skin.
+  const cos = Math.cos(turn) * scale * shade
+  const sin = Math.sin(turn) * scale * shade
+  const lab = [0, 0, 0]
+  const rgb = [0, 0, 0]
+  for (let i = 0, p = 0; p < data.length; i++, p += 4) {
+    const w = mask[i]!
+    if (w <= 0) continue
+    toLab(data[p]!, data[p + 1]!, data[p + 2]!, lab)
+    const a = lab[1]! - from[1]!
+    const b = lab[2]! - from[2]!
+    fromLab(
+      Math.min(100, Math.max(0, to[0]! + (lab[0]! - from[0]!) * shade)),
+      to[1]! + a * cos - b * sin,
+      to[2]! + a * sin + b * cos,
+      rgb,
+    )
+    for (let c = 0; c < 3; c++) data[p + c] = data[p + c]! + (rgb[c]! - data[p + c]!) * w
+  }
+}
+
 /** The mean lightness of the pixels under a mask. */
 export function maskedLuminance(pixels: Pixels, mask: Float32Array | null): number {
   return luminance(...meanColor(pixels, mask))

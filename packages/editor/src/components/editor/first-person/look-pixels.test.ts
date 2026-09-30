@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { dye, hairMask, luminance, type Pixels, similarityMask } from './look-pixels'
+import { dye, hairMask, luminance, type Pixels, similarityMask, toneSkin } from './look-pixels'
 
 function image(width: number, height: number, fill: (x: number, y: number) => number[]): Pixels {
   const data = new Uint8ClampedArray(width * height * 4)
@@ -75,5 +75,45 @@ describe('masks', () => {
     expect(mask[1]).toBeCloseTo(0, 2)
     // UV padding.
     expect(mask[2]).toBe(0)
+  })
+})
+
+describe('toning skin', () => {
+  const SKIN = [150, 110, 85]
+  const LIPS = [170, 90, 95]
+  const SHADOW = [90, 60, 45]
+  const face = () => image(4, 1, (x) => [SKIN, LIPS, SHADOW, SKIN][x]!)
+  const at = (pixels: Pixels, x: number) => [...pixels.data.slice(x * 4, x * 4 + 3)]
+  const redness = ([r, g]: number[]) => r! - g!
+
+  test('the skin’s usual colour becomes the tone; the lips stay redder and the shadow darker', () => {
+    const toned = face()
+    toneSkin(
+      toned,
+      [234, 195, 166],
+      SKIN as [number, number, number],
+      new Float32Array([1, 1, 1, 0]),
+    )
+    for (const [i, c] of at(toned, 0).entries()) {
+      expect(Math.abs(c - [234, 195, 166][i]!)).toBeLessThanOrEqual(1)
+    }
+    expect(redness(at(toned, 1))).toBeGreaterThan(redness(at(toned, 0)) + 10)
+    expect(luminance(...(at(toned, 2) as [number, number, number]))).toBeLessThan(
+      luminance(...(at(toned, 0) as [number, number, number])) - 30,
+    )
+    // Outside the mask, nothing changes.
+    expect(at(toned, 3)).toEqual(SKIN)
+  })
+
+  test('a much lighter tone keeps some shading but no chalk: the shadow keeps its warmth', () => {
+    const toned = face()
+    toneSkin(
+      toned,
+      [243, 217, 200],
+      SKIN as [number, number, number],
+      new Float32Array([1, 1, 1, 1]),
+    )
+    const [r, , b] = at(toned, 2)
+    expect(r! - b!).toBeGreaterThan(15)
   })
 })

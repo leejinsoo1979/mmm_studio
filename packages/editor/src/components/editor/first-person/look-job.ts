@@ -16,6 +16,7 @@ import {
   type Pixels,
   type Rgb,
   similarityMask,
+  toneSkin,
   unpackTriangles,
 } from './look-pixels'
 
@@ -82,8 +83,9 @@ export type Analysis = {
   bodySkinMask: Float32Array
   hairLum: number
   headHairLum: number
-  skinLum: number
-  bodySkinLum: number
+  /** The skin's usual colour on the head's texture and on the body's. */
+  skin: Rgb
+  bodySkin: Rgb
 }
 
 /**
@@ -116,12 +118,30 @@ function colorWhere(
   return samples[Math.floor(samples.length / 2)]!
 }
 
-/** The skin's colour: the cheeks and nose, facing the front. */
+/**
+ * The cheeks on the front view, either side of the nose between the eyes
+ * and the mouth: bare skin on every face (the middle strip lower down
+ * takes in lips and nostrils, and a lip-red skin colour leaves the skin
+ * itself out of the skin's mask).
+ */
+const CHEEK_SIDE: readonly [number, number] = [0.07, 0.2]
+const CHEEK_HEIGHT: readonly [number, number] = [0.52, 0.64]
+
+/** The skin's colour: the cheeks, facing the front. */
 const skinColor = (head: Pixels, geometry: HeadGeometry) =>
   colorWhere(
     head,
     geometry.skin,
-    (x, y, n) => n >= 0.6 && Math.abs(x - 0.5) <= 0.14 && y >= 0.55 && y <= 0.72,
+    (x, y, n) => {
+      const side = Math.abs(x - 0.5)
+      return (
+        n >= 0.5 &&
+        side >= CHEEK_SIDE[0] &&
+        side <= CHEEK_SIDE[1] &&
+        y >= CHEEK_HEIGHT[0] &&
+        y <= CHEEK_HEIGHT[1]
+      )
+    },
     [200, 160, 140],
   )
 
@@ -252,8 +272,8 @@ export function analyseBody(
     bodySkinMask,
     hairLum: cards ? luminance(...cards) : 0,
     headHairLum: maskedLuminance(head, hairOnHead),
-    skinLum,
-    bodySkinLum: maskedLuminance(body, bodySkinMask),
+    skin,
+    bodySkin: meanColor(body, bodySkinMask),
   }
 }
 
@@ -281,7 +301,7 @@ function baseHead(
     bases.delete(name)
   } else {
     base = copyPixels(analysis.head)
-    if (skin) dye(base, hexToRgb(skin), analysis.skinLum, analysis.headSkinMask)
+    if (skin) toneSkin(base, hexToRgb(skin), analysis.skin, analysis.headSkinMask)
     if (hair) dye(base, hexToRgb(hair), analysis.headHairLum, analysis.hairMask)
     if (bald && target) {
       shaveHead(base, analysis.geometry, analysis.headSkinMask, target, analysis.hairColor)
@@ -353,7 +373,7 @@ export function dressBody(
   }
   if (skin) {
     const body = copyPixels(analysis.body)
-    dye(body, hexToRgb(skin), analysis.bodySkinLum, analysis.bodySkinMask)
+    toneSkin(body, hexToRgb(skin), analysis.bodySkin, analysis.bodySkinMask)
     changed.body = body
   }
   return changed
