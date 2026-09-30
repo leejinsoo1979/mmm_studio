@@ -1161,7 +1161,12 @@ export const FirstPersonControls = () => {
     const canvas = gl.domElement
 
     const applyMovementKey = (event: KeyboardEvent, active: boolean) => {
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+      // A focused field or slider (a HUD's time of day) takes its own arrows.
+      if (
+        active &&
+        event.target instanceof HTMLElement &&
+        event.target.closest('input, textarea, [role="slider"]')
+      ) {
         return false
       }
 

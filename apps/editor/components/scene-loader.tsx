@@ -69,6 +69,7 @@ import { MaterialSurfaceInspector } from './material-surface-inspector'
 import { MaterialTab } from './material-tab'
 import { SceneStatusBanner } from './scene-status-banner'
 import { CommunityViewerToolbarRight } from './viewer-toolbar'
+import { TourEnvironment } from './world-environment'
 
 export interface SceneMeta {
   id: string
@@ -1146,6 +1147,7 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
             <ArchipleFloorplanBridge />
             <CabinetDoorControls />
             <MaterialPalette />
+            <TourEnvironment />
           </>
         }
         viewerToolbarRight={<CommunityViewerToolbarRight sceneId={meta.id} sceneName={sceneName} />}
