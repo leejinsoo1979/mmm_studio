@@ -78,6 +78,12 @@ export {
 } from './components/editor/first-person/face-shape'
 export { loadFaceTargets } from './components/editor/first-person/face-targets'
 export {
+  type AvatarFeet,
+  FOOTWEAR,
+  type Footwear,
+  SHOD,
+} from './components/editor/first-person/footwear'
+export {
   BALD,
   type HairStyle,
   type HairStyleEntry,

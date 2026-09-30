@@ -25,7 +25,8 @@ import {
   hasSliders,
   readFaceShape,
 } from '../components/editor/first-person/face-shape'
-import { BALD, type HairStyle, readHairStyle } from '../components/editor/first-person/hair-styles'
+import { type AvatarFeet, readAvatarFeet, SHOD } from '../components/editor/first-person/footwear'
+import { type HairStyle, readHairStyle } from '../components/editor/first-person/hair-styles'
 
 /**
  * The player's face, swapped onto their character's: the face cropped from
@@ -86,6 +87,7 @@ export type AvatarLook = {
   body: BodyShape
   hairStyle: HairStyle
   paint: FacePaint
+  feet: AvatarFeet
 }
 
 export const NO_LOOK: AvatarLook = {
@@ -96,6 +98,7 @@ export const NO_LOOK: AvatarLook = {
   body: DEFAULT_BODY_SHAPE,
   hairStyle: null,
   paint: NO_PAINT,
+  feet: SHOD,
 }
 
 /** A look as saved or received, every part of it checked (an older save gets defaults). */
@@ -110,6 +113,7 @@ export function readAvatarLook(value: unknown): AvatarLook {
     body: readBodyShape(look.body),
     hairStyle: readHairStyle(look.hairStyle),
     paint: readFacePaint(look.paint),
+    feet: readAvatarFeet(look.feet),
   }
 }
 
@@ -118,19 +122,32 @@ export function readAvatarLook(value: unknown): AvatarLook {
  * geometry's, a borrowed hairstyle its own mesh): the dyes, the face photo,
  * the face paint, and a shaved head.
  */
-export type AvatarPaint = Pick<AvatarLook, 'hair' | 'skin' | 'face' | 'paint'> & { bald: boolean }
+export type AvatarPaint = Pick<AvatarLook, 'hair' | 'skin' | 'face' | 'paint' | 'feet'> & {
+  bald: boolean
+}
 
 export const paintOf = (look: AvatarLook): AvatarPaint => ({
   hair: look.hair,
   skin: look.skin,
   face: look.face,
   paint: look.paint,
-  bald: look.hairStyle === BALD,
+  feet: look.feet,
+  // Any hairstyle but the character's own shaves its painted hair, which
+  // would otherwise show where its own hair was taken in.
+  bald: look.hairStyle !== null,
 })
 
 /** Whether a look changes the character's textures. */
 export const hasLook = (look: AvatarPaint | null | undefined): look is AvatarPaint =>
-  Boolean(look && (look.hair || look.skin || look.face || look.bald || hasFacePaint(look.paint)))
+  Boolean(
+    look &&
+      (look.hair ||
+        look.skin ||
+        look.face ||
+        look.bald ||
+        hasFacePaint(look.paint) ||
+        look.feet.wear !== 'shoes'),
+  )
 
 /** Whether a look changes the character at all. */
 export const changesCharacter = (look: AvatarLook) =>

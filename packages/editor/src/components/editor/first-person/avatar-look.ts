@@ -16,6 +16,7 @@ import { useAvatarShape } from './avatar-shape'
 import { hasBodyShape } from './body-shape'
 import { hasFacePaint, NO_PAINT } from './face-paint'
 import { loadFaceTargets } from './face-targets'
+import { SHOD } from './footwear'
 import { headGeometry } from './head-geometry'
 import { type LookBody, type LookJob, type LookResult, type Part, runLookJob } from './look-job'
 import { packTriangles } from './look-pixels'
@@ -305,9 +306,10 @@ export function useAvatarLook(
   const skin = look?.skin ?? null
   const face = look?.face ?? null
   const paint = look?.paint ?? NO_PAINT
+  const feet = look?.feet ?? SHOD
   const bald = hairStyle !== null
   useEffect(() => {
-    const look: AvatarPaint = { hair, skin, face, paint, bald }
+    const look: AvatarPaint = { hair, skin, face, paint, feet, bald }
     if (dressing.current && (dressing.current.model !== model || !hasLook(look))) {
       dressing.current.undo()
       dressing.current = null
@@ -337,7 +339,7 @@ export function useAvatarLook(
       clearTimeout(timer)
     }
     // `worn` isn't read: a new one means new meshes to dress.
-  }, [model, hair, skin, face, paint, bald, avatarId, worn])
+  }, [model, hair, skin, face, paint, feet, bald, avatarId, worn])
 
   useEffect(
     () => () => {
