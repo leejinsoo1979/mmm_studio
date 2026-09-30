@@ -10,9 +10,8 @@ import {
   type Texture,
 } from 'three'
 import { type AvatarLook, hasLook } from '../../../store/use-avatar-profile'
-import { type FaceWarp, FRONT, maskImage, photoFace, swapFace, warpFace } from './face-swap'
+import { type FaceJob, runFaceJob } from './face-job'
 import { loadFaceTargets } from './face-targets'
-import { type FrontImage, renderFront, tintIris } from './front-render'
 import { type HeadGeometry, headGeometry } from './head-geometry'
 import {
   dye,
@@ -204,37 +203,74 @@ function textureFrom(pixels: Pixels, original: Texture): Texture {
   return texture
 }
 
-/** A few recent results kept, keyed by what they depend on (a slider drag repeats the rest). */
-function remember<T>(cache: Map<string, T>, key: string, make: () => T): T {
-  let value = cache.get(key)
-  if (value === undefined) {
-    value = make()
-    cache.set(key, value)
-    if (cache.size > 3) cache.delete(cache.keys().next().value!)
+let worker: Worker | null | undefined
+let nextJob = 0
+const pending = new Map<
+  number,
+  { job: FaceJob; resolve: (head: Pixels) => void; reject: (error: unknown) => void }
+>()
+
+/** Runs a job here, settling its promise. */
+function runHere(task: {
+  job: FaceJob
+  resolve: (head: Pixels) => void
+  reject: (error: unknown) => void
+}) {
+  try {
+    task.resolve(runFaceJob(task.job))
+  } catch (error) {
+    task.reject(error)
   }
-  return value
 }
 
-const warps = new Map<string, FaceWarp>()
-const photoFaces = new Map<string, Pixels>()
-const fronts = new Map<string, FrontImage>()
-const hairFronts = new WeakMap<Analysis, Float32Array>()
-
-/** Where the character's hair covers its front view (0–1 per pixel). */
-function hairFront(analysis: Analysis): Float32Array {
-  let hair = hairFronts.get(analysis)
-  if (!hair) {
-    const { width, height } = analysis.head
-    const drawn = renderFront(
-      maskImage(analysis.hairMask, width, height),
-      analysis.geometry.all,
-      FRONT,
-    ).image.data
-    hair = new Float32Array(FRONT * FRONT)
-    for (let i = 0; i < hair.length; i++) hair[i] = drawn[i * 4]! / 255
-    hairFronts.set(analysis, hair)
+/** The face swap worker, started on first use; null where there are no workers, or it failed to start. */
+function faceWorker(): Worker | null {
+  if (worker !== undefined) return worker
+  worker = null
+  if (typeof Worker === 'undefined') return null
+  try {
+    const started = new Worker(new URL('./face-worker.ts', import.meta.url), { type: 'module' })
+    started.onmessage = (event: MessageEvent<{ id: number; head?: Pixels; error?: string }>) => {
+      const { id, head, error } = event.data
+      const task = pending.get(id)
+      if (!task) return
+      pending.delete(id)
+      if (head) task.resolve(head)
+      else task.reject(new Error(error))
+    }
+    // It didn't load: the jobs waiting on it, and all later ones, run here.
+    started.onerror = (event) => {
+      event.preventDefault()
+      started.terminate()
+      worker = null
+      const waiting = [...pending.values()]
+      pending.clear()
+      for (const task of waiting) runHere(task)
+    }
+    worker = started
+  } catch {
+    worker = null
   }
-  return hair
+  return worker
+}
+
+/**
+ * Swaps a face onto a head (see face-job.ts) in the worker, so the game
+ * doesn't stall for the second or more it takes; here if there is no worker.
+ */
+function swapFaceAside(job: FaceJob): Promise<Pixels> {
+  return new Promise((resolve, reject) => {
+    const task = { job, resolve, reject }
+    const aside = faceWorker()
+    if (!aside) {
+      runHere(task)
+      return
+    }
+    const id = nextJob++
+    pending.set(id, task)
+    // Copied, not transferred: the job must still be runnable here if the worker fails.
+    aside.postMessage({ id, job })
+  })
 }
 
 /**
@@ -262,24 +298,26 @@ export async function applyLook(
 
   const changed: Partial<Record<Part, Pixels>> = {}
   if ((face && photo && target) || look.hair || look.skin) {
-    const head = copyPixels(analysis.head)
+    let head = copyPixels(analysis.head)
     if (look.hair) dye(head, hexToRgb(look.hair), analysis.headHairLum, analysis.hairMask)
     if (look.skin) dye(head, hexToRgb(look.skin), analysis.skinLum, analysis.headSkinMask)
     // The face goes on last: the dyes' masks are the character's own face,
     // not the photo's, and the face's colours meet the skin as dyed.
     if (face && photo && target) {
-      const front = remember(fronts, `${avatarId}|${look.hair}|${look.skin}`, () =>
-        renderFront(head, analysis.geometry.all, FRONT),
-      )
-      const warpKey = `${avatarId}|${face.points.join(',')}|${face.photo}`
-      const warp = remember(warps, warpKey, () => warpFace(photo, face.points, target))
-      const cleaned = remember(photoFaces, `${warpKey}|${face.light}`, () =>
-        photoFace(warp, face.light),
-      )
-      swapFace(head, analysis.geometry.skin, front, hairFront(analysis), warp, cleaned, face.blend)
-      if (face.eyes) {
-        for (const eye of analysis.geometry.eyes) tintIris(head, eye, hexToRgb(face.eyes))
-      }
+      head = await swapFaceAside({
+        head,
+        avatar: avatarId,
+        front: `${avatarId}|${look.hair}|${look.skin}`,
+        geometry: analysis.geometry,
+        hair: analysis.hairMask,
+        photo,
+        photoKey: face.photo,
+        points: face.points,
+        target,
+        blend: face.blend,
+        light: face.light,
+        eyes: face.eyes,
+      })
     }
     changed.head = head
   }
