@@ -18,7 +18,7 @@ import {
 import { Copy, MessageCircle, Send, Users, X } from 'lucide-react'
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { getFirebaseAuth, getFirebaseFirestore } from '@/lib/firebase-client'
-import { fromSharedLook, toSharedLook, wantedPhotoId } from '@/lib/shared-look'
+import { fromSharedLook, type SharedFace, toSharedLook, wantedPhotoId } from '@/lib/shared-look'
 
 type RuntimeMessage = {
   id: string
@@ -95,8 +95,9 @@ export function RuntimeCollaboration({
       }
     }
 
-    // This player's look: the dyes and face placement with the participant,
-    // the face photo on its own (written first, so it's there when asked for).
+    // This player's look: the dyes and face settings with the participant,
+    // the face's photo and landmarks on their own (written first, so they're
+    // there when asked for).
     let publishedLook = ''
     let publishedPhoto = ''
     const publishLook = (look: AvatarLook) => {
@@ -109,6 +110,7 @@ export function RuntimeCollaboration({
           publishedPhoto = shared.face.photoId
           await setDoc(doc(db, 'runtimeSessions', sceneId, 'faces', user.uid), {
             photo: look.face.photo,
+            points: look.face.points,
             photoId: shared.face.photoId,
           })
         }
@@ -123,21 +125,25 @@ export function RuntimeCollaboration({
       if (state.look !== previous.look) publishLook(state.look)
     })
 
-    // Everyone else's looks: each face photo fetched once per version, and
-    // each look kept as one object while it stays the same (the bodies
-    // re-dress only when it changes).
-    const photos = new Map<string, { id: string; photo: string | null }>()
+    // Everyone else's looks: each face fetched once per version, and each
+    // look kept as one object while it stays the same (the bodies re-dress
+    // only when it changes).
+    const photos = new Map<string, { id: string; face: SharedFace | null }>()
     const looks = new Map<string, { key: string; look: AvatarLook | null }>()
     const lookOf = (userId: string, shared: unknown) => {
       const wanted = wantedPhotoId(shared)
       const known = photos.get(userId)
       if (wanted && known?.id !== wanted) {
-        photos.set(userId, { id: wanted, photo: null })
+        photos.set(userId, { id: wanted, face: null })
         void getDoc(doc(db, 'runtimeSessions', sceneId, 'faces', userId))
           .then((face) => {
             const data = face.data()
-            if (data?.photoId === wanted && typeof data.photo === 'string') {
-              photos.set(userId, { id: wanted, photo: data.photo })
+            if (
+              data?.photoId === wanted &&
+              typeof data.photo === 'string' &&
+              Array.isArray(data.points)
+            ) {
+              photos.set(userId, { id: wanted, face: { photo: data.photo, points: data.points } })
             } else {
               // Not written yet: ask again with the next report.
               photos.delete(userId)
@@ -145,11 +151,11 @@ export function RuntimeCollaboration({
           })
           .catch(() => photos.delete(userId))
       }
-      const photo = wanted ? (photos.get(userId)?.photo ?? null) : null
-      const key = `${JSON.stringify(shared ?? null)}|${photo ? wanted : ''}`
+      const face = wanted ? (photos.get(userId)?.face ?? null) : null
+      const key = `${JSON.stringify(shared ?? null)}|${face ? wanted : ''}`
       const cached = looks.get(userId)
       if (cached?.key === key) return cached.look
-      const look = fromSharedLook(shared, photo)
+      const look = fromSharedLook(shared, face)
       looks.set(userId, { key, look })
       return look
     }

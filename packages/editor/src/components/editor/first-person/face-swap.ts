@@ -43,6 +43,12 @@ export type FaceWarp = {
   cheeks: Point[]
   /** Just past the top of the face, where the photo's hair shows (if it has any), to learn its colour. */
   crown: Float32Array
+  /**
+   * Where no hair can be, whatever its colour: the middle of the face below
+   * the brows (hair falls over the forehead and down the face's sides; a
+   * shadowed cheek on a dark skin can be as dark as the hair).
+   */
+  hairless: Float32Array
 }
 
 /**
@@ -78,6 +84,22 @@ export function warpFace(
       crown[y * FRONT + x] = ring[y * FRONT + x]! * (1 - oval[y * FRONT + x]!)
     }
   }
+  const outlinePoints = FACE_PARTS.oval.map((i) => dest[i]!)
+  const [ox, oy] = [
+    outlinePoints.reduce((sum, [x]) => sum + x, 0) / outlinePoints.length,
+    outlinePoints.reduce((sum, [, y]) => sum + y, 0) / outlinePoints.length,
+  ]
+  const middle = polygonMask(
+    outlinePoints.map(([x, y]) => [ox + (x - ox) * 0.82, oy + (y - oy) * 0.82] as Point),
+    FRONT,
+    FRONT,
+    FRONT * 0.02,
+  )
+  const browBottom = Math.max(...FACE_PARTS.brows.map((i) => dest[i]![1]))
+  const hairless = new Float32Array(FRONT * FRONT)
+  for (let y = Math.max(0, Math.floor(browBottom)); y < FRONT; y++) {
+    for (let x = 0; x < FRONT; x++) hairless[y * FRONT + x] = middle[y * FRONT + x]!
+  }
   return {
     warped: warpTriangles(photo, from, to, delaunay(to), FRONT, FRONT),
     region: polygonMask(outline, FRONT, FRONT, 1),
@@ -87,6 +109,7 @@ export function warpFace(
     clear: inner.map((value, i) => value * (1 - fringe[i]!)),
     cheeks: FACE_PARTS.cheeks.map((i) => dest[i]!),
     crown,
+    hairless,
   }
 }
 
@@ -122,9 +145,17 @@ function colorAround(image: Pixels, points: readonly Point[], radius: number): R
 }
 
 /**
+ * How unlike the skin the hair past the top of the face must be to be told
+ * from it. Past a short haircut that band is mostly the wall behind, often
+ * a beige near the skin's; taking that for hair would wipe the face's own
+ * shading. Hair that close to the skin (light blonde) is left in.
+ */
+const HAIR_APART = 0.3
+
+/**
  * The photo's hair: the darker half of what shows past the top of the face
- * (its median by lightness). Null when that is no different from the skin
- * (a bald head, a forehead running up to the photo's edge).
+ * (its median by lightness). Null when that is hardly different from the
+ * skin (a bald head, a forehead running up to the photo's edge).
  */
 function hairColor(image: Pixels, crown: Float32Array, skin: Rgb): Rgb | null {
   const samples: Rgb[] = []
@@ -135,7 +166,7 @@ function hairColor(image: Pixels, crown: Float32Array, skin: Rgb): Rgb | null {
   if (samples.length < 50) return null
   samples.sort((a, b) => luminance(...a) - luminance(...b))
   const hair = samples[Math.floor(samples.length / 4)]!
-  return colorDistance(...hair, skin, luminance(...skin)) > 0.3 ? hair : null
+  return colorDistance(...hair, skin, luminance(...skin)) > HAIR_APART ? hair : null
 }
 
 /** A mask (0–1 per texel) as an image renderFront can draw: its value in red. */
@@ -155,10 +186,12 @@ export function maskImage(mask: Float32Array, width: number, height: number): Pi
  * from the skin around it.
  */
 export function photoFace(warp: FaceWarp, light: number): Pixels {
-  // Bare skin in the photo: all but its hair (anything no nearer the skin's
-  // colour than the hair's by a clear margin, so a strand's soft edge goes
-  // too) and the skin just by it, which the hair shades darker and redder;
-  // the features are kept whatever their colour.
+  // Bare skin in the photo: all but its hair — anything no nearer the
+  // skin's colour than the hair's by a clear margin (so a strand's soft edge
+  // goes too) that reaches the hair past the top of the face (a mole,
+  // freckles, a beard or a shadow inside the face stay) — and the skin just
+  // by it, which the hair shades darker and redder. The features are kept
+  // whatever their colour.
   const photoSkin = colorAround(warp.warped, warp.cheeks, FRONT * 0.012)
   const photoHair = photoSkin && hairColor(warp.warped, warp.crown, photoSkin)
   const skinLike = new Float32Array(FRONT * FRONT).fill(1)
@@ -174,9 +207,10 @@ export function photoFace(warp: FaceWarp, light: number): Pixels {
       const b = data[p + 2]!
       const margin =
         colorDistance(r, g, b, photoSkin, skinLum) - colorDistance(r, g, b, photoHair, hairLum)
-      hairy[i] = smoothstep(-0.15, -0.02, margin)
+      hairy[i] = smoothstep(-0.15, -0.02, margin) * (1 - warp.hairless[i]!)
     }
-    const grown = dilate(hairy, FRONT, FRONT, FRONT * 0.02)
+    const reaching = connectedFrom(hairy, warp.crown, FRONT, FRONT, 0.5)
+    const grown = dilate(reaching, FRONT, FRONT, FRONT * 0.02)
     for (let i = 0; i < skinLike.length; i++) skinLike[i] = 1 - grown[i]!
   }
   const bareSkin = new Float32Array(FRONT * FRONT)
@@ -191,11 +225,15 @@ export function photoFace(warp: FaceWarp, light: number): Pixels {
   const lit: Pixels = { data: new Uint8ClampedArray(warp.warped.data), width: FRONT, height: FRONT }
   flattenLighting(lit, known, light, FRONT * 0.05)
   const filled = fillFrom(lit, bareSkin)
+  // What's known beyond the bare skin (the features) comes back over the
+  // fill by the share the fill left out.
   for (let i = 0, p = 0; i < known.length; i++, p += 4) {
+    const bare = bareSkin[i]!
     const keep = known[i]!
-    if (keep <= bareSkin[i]!) continue
+    if (keep <= bare) continue
+    const share = (keep - bare) / (1 - bare)
     for (let c = 0; c < 3; c++) {
-      filled.data[p + c] = filled.data[p + c]! + (lit.data[p + c]! - filled.data[p + c]!) * keep
+      filled.data[p + c] = filled.data[p + c]! + (lit.data[p + c]! - filled.data[p + c]!) * share
     }
   }
   // Inside the face, what the photo showed no face in is filled again as a

@@ -11,28 +11,35 @@ const look = {
 }
 
 describe('a look shared through the participant document', () => {
-  test('leaves the photo out, naming it instead', () => {
+  test('leaves the photo and its landmarks out, naming them instead', () => {
     const shared = toSharedLook(look)
-    expect(JSON.stringify(shared)).not.toContain(photo)
-    expect(shared.face?.photoId).toBe(photoId(photo))
-    expect(wantedPhotoId(shared)).toBe(photoId(photo))
+    const text = JSON.stringify(shared)
+    expect(text).not.toContain(photo)
+    expect(text).not.toContain('points')
+    expect(shared.face?.photoId).toBe(photoId({ photo, points }))
+    expect(wantedPhotoId(shared)).toBe(photoId({ photo, points }))
   })
 
-  test('comes back whole once the photo is fetched, and without the face before', () => {
+  test('comes back whole once the face is fetched, and without the face before', () => {
     const shared = JSON.parse(JSON.stringify(toSharedLook(look)))
-    expect(fromSharedLook(shared, photo)).toEqual(look)
+    expect(fromSharedLook(shared, { photo, points })).toEqual(look)
     expect(fromSharedLook(shared, null)).toEqual({ ...look, face: null })
   })
 
-  test('another version of the photo gets another id', () => {
-    expect(photoId(photo)).not.toBe(photoId(`${photo}B`))
+  test('another photo, or the same photo placed again, gets another id', () => {
+    expect(photoId({ photo, points })).not.toBe(photoId({ photo: `${photo}B`, points }))
+    const moved = points.map((value, i) => (i === 0 ? value + 0.01 : value))
+    expect(photoId({ photo, points })).not.toBe(photoId({ photo, points: moved }))
   })
 
   test('nothing usable in it: no look', () => {
     expect(fromSharedLook({ hair: 'red', skin: 42, face: null }, null)).toBeNull()
     expect(fromSharedLook(null, null)).toBeNull()
     expect(
-      fromSharedLook({ hair: null, skin: null, face: { photoId: 'x' } }, 'https://x'),
+      fromSharedLook(
+        { hair: null, skin: null, face: { photoId: 'x' } },
+        { photo: 'https://x', points },
+      ),
     ).toBeNull()
   })
 })

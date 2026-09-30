@@ -182,13 +182,18 @@ export function featureRegions(points: readonly Point[]): Point[][] {
  */
 function grown(outline: readonly Point[], distance: number): Point[] {
   if (outline.length < 3) {
-    // Too few points for sides: a square around them.
-    const [cx, cy] = centroid(outline)
+    // Too few corners for sides (points in a line): the box round them, grown.
+    const xs = outline.map(([x]) => x)
+    const ys = outline.map(([, y]) => y)
+    const left = Math.min(...xs) - distance
+    const right = Math.max(...xs) + distance
+    const top = Math.min(...ys) - distance
+    const bottom = Math.max(...ys) + distance
     return [
-      [cx - distance, cy - distance],
-      [cx + distance, cy - distance],
-      [cx + distance, cy + distance],
-      [cx - distance, cy + distance],
+      [left, top],
+      [right, top],
+      [right, bottom],
+      [left, bottom],
     ]
   }
   const [cx, cy] = centroid(outline)

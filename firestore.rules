@@ -42,7 +42,9 @@ service cloud.firestore {
         allow read: if canJoin(sessionId);
         allow write: if canJoin(sessionId) && request.auth.uid == userId &&
           request.resource.data.photo is string &&
-          request.resource.data.photo.size() <= 400000;
+          request.resource.data.photo.size() <= 400000 &&
+          request.resource.data.points is list &&
+          request.resource.data.points.size() <= 1000;
       }
 
       match /state/{stateId} {

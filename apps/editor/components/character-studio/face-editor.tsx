@@ -59,6 +59,51 @@ function shrink(source: CanvasImageSource, width: number, height: number) {
   return canvas.toDataURL('image/jpeg', 0.9)
 }
 
+/** Where a square `size` long starts along an axis `extent` long: inside it when it fits, centred on it when not. */
+const slideInside = (start: number, size: number, extent: number) =>
+  size <= extent ? Math.min(Math.max(start, 0), extent - size) : (extent - size) / 2
+
+/**
+ * The part of a photo its marks (the eyes, then the mouth; fractions of it)
+ * outline, framed as a found face is cropped (cropFacePhoto): only the face
+ * is kept and shared, not the whole photo. The marks come back as
+ * fractions of the crop.
+ */
+async function cropToMarks(photo: string, marks: [FacePoint, FacePoint, FacePoint]) {
+  const image = await loadImage(photo)
+  const width = image.naturalWidth
+  const height = image.naturalHeight
+  const [a, b, mouth] = marks.map(([x, y]) => [x * width, y * height] as FacePoint) as [
+    FacePoint,
+    FacePoint,
+    FacePoint,
+  ]
+  const eyes: FacePoint = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+  const across = Math.hypot(b[0] - a[0], b[1] - a[1])
+  const down = Math.hypot(mouth[0] - eyes[0], mouth[1] - eyes[1])
+  const size = Math.max(across * 3.8, down * 4.8)
+  const x = slideInside((eyes[0] + mouth[0]) / 2 - size / 2, size, width)
+  const y = slideInside((eyes[1] + mouth[1]) / 2 - size * 0.58, size, height)
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = Math.max(1, Math.round(Math.min(PHOTO_LONGEST, size)))
+  const context = canvas.getContext('2d')!
+  context.fillStyle = '#808080'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  const scale = canvas.width / size
+  context.drawImage(image, -x * scale, -y * scale, width * scale, height * scale)
+  return {
+    photo: canvas.toDataURL('image/jpeg', 0.9),
+    marks: [a, b, mouth].map(([mx, my]) => [(mx - x) / size, (my - y) / size]) as [
+      FacePoint,
+      FacePoint,
+      FacePoint,
+    ],
+  }
+}
+
+/** Marks closer than this (a fraction of the photo's longer side) are one spot clicked twice. */
+const MARK_APART = 0.03
+
 /**
  * The stored face's points as MediaPipe's full list (the ones not kept left
  * empty), in pixels of the stored photo: what the colour samplers read.
@@ -185,11 +230,14 @@ const MARK_STEPS = ['화면 왼쪽 눈을', '화면 오른쪽 눈을', '입 가�
 function MarkFeatures({
   photo,
   aspect,
+  note,
   onDone,
   onCancel,
 }: {
   photo: string
   aspect: number
+  /** Why the face is marked by hand, when not because none was found. */
+  note: string | null
   onDone: (marks: [FacePoint, FacePoint, FacePoint]) => void
   onCancel: () => void
 }) {
@@ -203,7 +251,7 @@ function MarkFeatures({
   return (
     <div className="flex flex-col gap-3">
       <div className="rounded-xl bg-amber-50 px-3 py-2 text-[12px] text-amber-800 leading-5">
-        사진에서 얼굴을 찾지 못했어요. 눈과 입을 직접 알려 주세요.
+        {note ?? '사진에서 얼굴을 찾지 못했어요. 눈과 입을 직접 알려 주세요.'}
       </div>
       <div className="flex items-center gap-2 rounded-xl bg-sky-500 px-3 py-2 text-[12px] text-white shadow-[0_4px_12px_rgba(14,165,233,0.35)]">
         <span className="grid size-5 shrink-0 place-items-center rounded-full bg-white font-bold text-[11px] text-sky-600">
@@ -220,6 +268,11 @@ function MarkFeatures({
           const x = (event.clientX - box.left - left) / width
           const y = (event.clientY - box.top - top) / height
           if (x < 0 || y < 0 || x > 1 || y > 1) return
+          const apart = MARK_APART * Math.max(width, height)
+          const near = marks.some(
+            ([mx, my]) => Math.hypot((mx - x) * width, (my - y) * height) < apart,
+          )
+          if (near) return
           const next = [...marks, [x, y] as FacePoint]
           if (next.length === 3) onDone(next as [FacePoint, FacePoint, FacePoint])
           else setMarks(next)
@@ -314,7 +367,7 @@ type Status =
   | { kind: 'idle' }
   | { kind: 'camera' }
   | { kind: 'reading'; step: string }
-  | { kind: 'marking'; photo: string; aspect: number }
+  | { kind: 'marking'; photo: string; aspect: number; note: string | null }
 
 /**
  * The face tab: a photo of the player's face (a file or the camera). Its
@@ -337,9 +390,16 @@ export function FaceEditor({
   const [error, setError] = useState<string | null>(null)
   const [pose, setPose] = useState<string | null>(null)
   const [colors, setColors] = useState<{ skin: string; eyes: string | null } | null>(null)
-  const [skinBefore, setSkinBefore] = useState<string | null | undefined>(undefined)
   const [covered, setCovered] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  // The photo being read: a newer one (or leaving) drops an older one's result.
+  const reading = useRef(0)
+  useEffect(
+    () => () => {
+      reading.current++
+    },
+    [],
+  )
 
   // A face hidden by a mask or veil has no landmarks to swap onto.
   useEffect(() => {
@@ -368,22 +428,47 @@ export function FaceEditor({
   }, [face])
 
   const takeImage = async (image: HTMLImageElement | HTMLCanvasElement) => {
+    const request = ++reading.current
+    const stale = () => request !== reading.current
     setError(null)
     setPose(null)
     setStatus({ kind: 'reading', step: '얼굴을 찾고 있어요…' })
+    const width = image instanceof HTMLImageElement ? image.naturalWidth : image.width
+    const height = image instanceof HTMLImageElement ? image.naturalHeight : image.height
+    const markByHand = (note: string | null) =>
+      setStatus({
+        kind: 'marking',
+        photo: shrink(image, width, height),
+        aspect: height / width,
+        note,
+      })
+    let found: Awaited<ReturnType<typeof detectFace>>
     try {
-      const found = await detectFace(image)
-      const width = image instanceof HTMLImageElement ? image.naturalWidth : image.width
-      const height = image instanceof HTMLImageElement ? image.naturalHeight : image.height
-      if (!found) {
-        setStatus({ kind: 'marking', photo: shrink(image, width, height), aspect: height / width })
+      found = await detectFace(image)
+    } catch {
+      // No face finder here (or it failed to load): the eyes and mouth can
+      // still be marked by hand.
+      if (!stale()) markByHand('자동 얼굴 인식을 쓸 수 없어서, 눈과 입을 직접 알려 주세요.')
+      return
+    }
+    if (stale()) return
+    if (!found) {
+      markByHand(null)
+      return
+    }
+    try {
+      setStatus({ kind: 'reading', step: '얼굴을 입히고 있어요…' })
+      const targets = await loadFaceTargets().catch(() => null)
+      if (stale()) return
+      if (!targets?.[avatar]) {
+        setError('이 캐릭터의 얼굴 정보를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.')
+        setStatus({ kind: 'idle' })
         return
       }
-      setStatus({ kind: 'reading', step: '얼굴을 입히고 있어요…' })
       const crop = cropFacePhoto(image, found, PHOTO_LONGEST)
       const { skin, eyes } = await faceColors(crop)
+      if (stale()) return
       setPose(poseMessage(found))
-      setSkinBefore(look.skin)
       onCommit({
         face: {
           photo: crop.photo,
@@ -396,7 +481,8 @@ export function FaceEditor({
       })
       setStatus({ kind: 'idle' })
     } catch {
-      setError('얼굴 인식을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.')
+      if (stale()) return
+      setError('사진에서 얼굴을 입히지 못했어요. 다른 사진으로 다시 시도해 주세요.')
       setStatus({ kind: 'idle' })
     }
   }
@@ -459,19 +545,21 @@ export function FaceEditor({
     return (
       <MarkFeatures
         aspect={status.aspect}
+        note={status.note}
         onCancel={() => setStatus({ kind: 'idle' })}
         onDone={async (marks) => {
           const targets = await loadFaceTargets().catch(() => null)
           const target = targets?.[avatar]
           if (!target) {
-            setError('이 캐릭터의 얼굴 정보를 불러오지 못했어요.')
+            setError('이 캐릭터의 얼굴 정보를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.')
             setStatus({ kind: 'idle' })
             return
           }
+          const crop = await cropToMarks(status.photo, marks)
           onCommit({
             face: {
-              photo: status.photo,
-              points: pointsFromMarks(marks, status.aspect, target),
+              photo: crop.photo,
+              points: pointsFromMarks(crop.marks, 1, target),
               blend: face?.blend ?? DEFAULT_FACE_BLEND,
               light: face?.light ?? DEFAULT_FACE_LIGHT,
               eyes: null,
@@ -517,7 +605,10 @@ export function FaceEditor({
         <ul className="space-y-1 rounded-xl bg-neutral-50 p-3 text-[12px] text-neutral-500 leading-5">
           <li>· 정면을 보고 찍은, 밝고 고른 빛의 사진이 가장 자연스러워요</li>
           <li>· 얼굴의 눈·코·입·턱선을 찾아 캐릭터 얼굴에 하나하나 맞춰 입혀요</li>
-          <li>· 사진은 이 브라우저에서만 처리되고, 얼굴 부분만 저장돼요</li>
+          <li>
+            · 사진은 이 브라우저에서 처리돼요. 얼굴 부분만 잘라 저장하고, 같은 공간에 함께 있는
+            사람들에게 내 캐릭터의 얼굴로 보여요
+          </li>
         </ul>
       </div>
     )
@@ -541,7 +632,7 @@ export function FaceEditor({
             <Check className="size-4 text-sky-500" strokeWidth={3} /> 내 얼굴을 입혔어요
           </p>
           <p className="text-[11px] text-neutral-500 leading-4">
-            눈·코·입·턱선을 캐릭터 얼굴에 하나하나 맞추고 피부와 이어지게 섞었어요
+            사진 속 얼굴을 캐릭터 얼굴에 맞추고 피부와 이어지게 섞었어요
           </p>
         </div>
       </div>
@@ -570,7 +661,7 @@ export function FaceEditor({
             {skinFromPhoto ? (
               <button
                 className="flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[11px] text-neutral-600 shadow-sm hover:text-neutral-900"
-                onClick={() => onCommit({ skin: skinBefore ?? null })}
+                onClick={() => onCommit({ skin: null })}
                 type="button"
               >
                 <Undo2 className="size-3" /> 원래 피부
@@ -578,10 +669,7 @@ export function FaceEditor({
             ) : (
               <button
                 className="rounded-full bg-sky-500 px-2.5 py-1 font-medium text-[11px] text-white hover:bg-sky-600"
-                onClick={() => {
-                  setSkinBefore(look.skin)
-                  onCommit({ skin: colors.skin })
-                }}
+                onClick={() => onCommit({ skin: colors.skin })}
                 type="button"
               >
                 사진 피부색 쓰기

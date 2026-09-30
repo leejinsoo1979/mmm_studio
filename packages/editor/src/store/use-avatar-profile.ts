@@ -26,6 +26,8 @@ export type AvatarFace = {
 }
 
 const HEX = /^#[0-9a-f]{6}$/i
+/** The pictures a face photo may be (what the studio makes, and nothing a browser might choke on, like SVG). */
+const PHOTO = /^data:image\/(jpeg|png|webp);base64,/
 const unit = (value: unknown, fallback: number) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : fallback
 
@@ -35,7 +37,7 @@ export function readAvatarFace(value: unknown): AvatarFace | null {
   if (
     !face ||
     typeof face.photo !== 'string' ||
-    !face.photo.startsWith('data:image/') ||
+    !PHOTO.test(face.photo) ||
     !isFacePoints(face.points)
   ) {
     return null

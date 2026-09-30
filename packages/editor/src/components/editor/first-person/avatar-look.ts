@@ -213,6 +213,9 @@ function analyse(parts: Record<Part, PartMesh[]>): Analysis | null {
 
 const photos = new Map<string, Promise<Pixels>>()
 
+/** Larger than this a side, a face photo is none the studio made: it isn't read. */
+const PHOTO_MAX = 2048
+
 /** A face photo's pixels (a few recent ones kept). */
 function photoPixels(photo: string): Promise<Pixels> {
   let found = photos.get(photo)
@@ -220,12 +223,20 @@ function photoPixels(photo: string): Promise<Pixels> {
     found = new Promise<Pixels>((resolve, reject) => {
       const image = new Image()
       image.onload = () => {
-        const canvas = document.createElement('canvas')
-        canvas.width = image.naturalWidth
-        canvas.height = image.naturalHeight
-        const context = canvas.getContext('2d', { willReadFrequently: true })!
-        context.drawImage(image, 0, 0)
-        resolve(context.getImageData(0, 0, canvas.width, canvas.height))
+        try {
+          const { naturalWidth: width, naturalHeight: height } = image
+          if (!(width > 0 && height > 0 && width <= PHOTO_MAX && height <= PHOTO_MAX)) {
+            throw new Error(`face photo ${width}×${height}`)
+          }
+          const canvas = document.createElement('canvas')
+          canvas.width = width
+          canvas.height = height
+          const context = canvas.getContext('2d', { willReadFrequently: true })!
+          context.drawImage(image, 0, 0)
+          resolve(context.getImageData(0, 0, width, height))
+        } catch (error) {
+          reject(error)
+        }
       }
       image.onerror = () => reject(new Error('얼굴 사진을 읽지 못했습니다'))
       image.src = photo

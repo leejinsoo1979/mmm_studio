@@ -1,3 +1,4 @@
+import { FACE_PARTS, unpackPoints } from './face-points'
 import { type FaceWarp, FRONT, maskImage, photoFace, swapFace, warpFace } from './face-swap'
 import { type FrontImage, renderFront, tintIris } from './front-render'
 import type { HeadGeometry } from './head-geometry'
@@ -56,8 +57,26 @@ function hairFront(job: FaceJob): Float32Array {
   })
 }
 
-/** Swaps the photo's face onto the job's head texture (in place, and returned). */
+/**
+ * Irises closer than this (a fraction of the photo's longer side) are no
+ * face: landmarks collapsed to a point (a double-clicked mark, a bad save)
+ * would warp one pixel of the photo over the whole face.
+ */
+const MIN_EYE_SPACING = 0.02
+
+function photoFaceIsOpen(job: FaceJob) {
+  const points = unpackPoints(job.points)
+  const [rx, ry] = points[FACE_PARTS.rightIris[0]!]!
+  const [lx, ly] = points[FACE_PARTS.leftIris[0]!]!
+  const { width, height } = job.photo
+  return (
+    Math.hypot((rx - lx) * width, (ry - ly) * height) >= MIN_EYE_SPACING * Math.max(width, height)
+  )
+}
+
+/** Swaps the photo's face onto the job's head texture (in place, and returned; untouched for a face that isn't one). */
 export function runFaceJob(job: FaceJob): Pixels {
+  if (!photoFaceIsOpen(job)) return job.head
   const { head, geometry } = job
   const front = remember(fronts, job.front, () => renderFront(head, geometry.all, FRONT))
   const warpKey = `${job.avatar}|${job.points.join(',')}|${job.photoKey}`

@@ -553,15 +553,18 @@ function Studio() {
   const stageLook = useThrottled(shown.look, 90)
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial)
 
-  const commit = useCallback(
-    (next: Draft) => {
-      setPast((list) => [...list.slice(-49), draft])
-      setFuture([])
-      setDraft(next)
-      setPreview(null)
-    },
-    [draft],
-  )
+  // The draft as it is now, for changes made after a wait (a photo being
+  // read) that must build on whatever was done meanwhile.
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  const commit = useCallback((next: Draft) => {
+    const current = draftRef.current
+    draftRef.current = next
+    setPast((list) => [...list.slice(-49), current])
+    setFuture([])
+    setDraft(next)
+    setPreview(null)
+  }, [])
   const undo = () => {
     const previous = past[past.length - 1]
     if (!previous) return
@@ -600,8 +603,6 @@ function Studio() {
   // still works).
   const listeningRef = useRef(listening)
   listeningRef.current = listening
-  const draftRef = useRef(draft)
-  draftRef.current = draft
   const commitRef = useRef(commit)
   commitRef.current = commit
   useEffect(() => {
@@ -651,7 +652,8 @@ function Studio() {
   }
   const current = TABS.find((entry) => entry.id === tab)!
   const lookPatch = (patch: Partial<AvatarLook>, commitIt: boolean) => {
-    const next = { ...draft, look: { ...draft.look, ...patch } }
+    const current = draftRef.current
+    const next = { ...current, look: { ...current.look, ...patch } }
     if (commitIt) commit(next)
     else setPreview(next)
   }

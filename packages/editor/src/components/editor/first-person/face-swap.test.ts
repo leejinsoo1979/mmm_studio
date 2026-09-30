@@ -43,8 +43,15 @@ const inEllipse = (x: number, y: number, cx: number, cy: number, rx: number, ry:
 /** A strand of hair down the forehead's side, by the temple, clear of the brow. */
 const onStrand = (x: number, y: number) => x > 0.72 && x < 0.78 && y > 0.28 && y < 0.46
 
-/** A photo (the front view's size, so the warp is one to one) of a face with hair over its top and a strand by the temple. */
-function photo(): Pixels {
+/** A mole on the cheek: dark as hair, but no hair. */
+const onMole = (x: number, y: number) => Math.hypot(x - 0.66, y - 0.62) < 0.008
+
+/**
+ * A photo (the front view's size, so the warp is one to one) of a face with
+ * a mole on its cheek and, unless `hair` is null, that hair over its top and
+ * a strand of it by the temple.
+ */
+function photo(hair: Rgb | null = HAIR): Pixels {
   const data = new Uint8ClampedArray(FRONT * FRONT * 4)
   for (let py = 0; py < FRONT; py++) {
     for (let px = 0; px < FRONT; px++) {
@@ -55,7 +62,8 @@ function photo(): Pixels {
       if (inEllipse(x, y, 0.62, 0.4, 0.07, 0.012) || inEllipse(x, y, 0.38, 0.4, 0.07, 0.012)) {
         colour = BROW
       }
-      if (y < 0.3 || onStrand(x, y)) colour = HAIR
+      if (onMole(x, y)) colour = HAIR
+      if (hair && (y < 0.3 || onStrand(x, y))) colour = hair
       data.set([...colour, 255], (py * FRONT + px) * 4)
     }
   }
@@ -75,13 +83,26 @@ describe('face swap', () => {
 
   test('the photo’s face keeps its features but loses its hair', () => {
     const face = photoFace(warp, 0.5)
-    // The strand by the temple is skin now; so is the forehead under the hairline.
+    // The strand by the temple is skin now; so is the hair over the top of the face.
     expect(near(at(face, 0.75, 0.4), SKIN, 30)).toBe(true)
-    expect(near(at(face, 0.5, 0.33), SKIN, 30)).toBe(true)
-    // The brow, dark as the hair nearly, stays.
+    expect(near(at(face, 0.5, 0.285), SKIN, 30)).toBe(true)
+    // The brow, dark as the hair nearly, stays; so does the mole, hair-dark but apart from it.
     expect(luminance(...at(face, 0.62, 0.4))).toBeLessThan(luminance(...SKIN) * 0.6)
+    expect(luminance(...at(face, 0.66, 0.62))).toBeLessThan(luminance(...SKIN) * 0.6)
     // The cheek is untouched.
     expect(near(at(face, 0.36, 0.62), SKIN, 6)).toBe(true)
+  })
+
+  test('leaves a face be when past its top is nothing clearly unlike its skin', () => {
+    // A short haircut against a beige wall: the band past the face is near the skin.
+    const wall: Rgb = [200, 170, 150]
+    const walled = photoFace(warpFace(photo(wall), points, points), 0.5)
+    expect(near(at(walled, 0.36, 0.62), SKIN, 6)).toBe(true)
+    expect(luminance(...at(walled, 0.66, 0.62))).toBeLessThan(luminance(...SKIN) * 0.6)
+    const bare = photoFace(warpFace(photo(null), points, points), 0.5)
+    expect(near(at(bare, 0.5, 0.33), SKIN, 6)).toBe(true)
+    expect(near(at(bare, 0.75, 0.4), SKIN, 6)).toBe(true)
+    expect(luminance(...at(bare, 0.66, 0.62))).toBeLessThan(luminance(...SKIN) * 0.6)
   })
 
   /** The character's front view: its own skin, hair over its forehead, and its own brow. */
@@ -126,7 +147,10 @@ describe('face swap', () => {
   test('less than a full blend brings the photo’s own colours back', () => {
     const { front, hair } = character()
     const face = photoFace(warp, 0.5)
-    const { image } = composeFace(front, hair, warp, face, 0)
-    expect(near(at(image, 0.36, 0.62), at(face, 0.36, 0.62), 4)).toBe(true)
+    const none = at(composeFace(front, hair, warp, face, 0).image, 0.36, 0.62)
+    const half = at(composeFace(front, hair, warp, face, 0.5).image, 0.36, 0.62)
+    const full = at(composeFace(front, hair, warp, face, 1).image, 0.36, 0.62)
+    expect(near(none, at(face, 0.36, 0.62), 4)).toBe(true)
+    for (let c = 0; c < 3; c++) expect(half[c]).toBeCloseTo((none[c]! + full[c]!) / 2, -1)
   })
 })
