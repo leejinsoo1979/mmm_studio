@@ -24,8 +24,8 @@ export type FaceJob = {
   avatar: string
   front: string
   geometry: HeadGeometry
-  /** Where the head texture shows hair (0–1 per texel). */
-  hair: Float32Array
+  /** Where the head texture shows hair (0–1 per texel); null for none (a shaved head). */
+  hair: Float32Array | null
   photo: Pixels
   photoKey: string
   /** The photo's face points and the character's (packed fractions). */
@@ -51,17 +51,25 @@ const hairFronts = new Map<string, Float32Array>()
 const warps = new Map<string, FaceWarp>()
 const photoFaces = new Map<string, PhotoFace>()
 
+/** A front view no hair covers: one for every shaved head. */
+let bareFront: Float32Array | null = null
+
 /** Where the character's hair covers its front view (0–1 per pixel). */
 function hairFront(job: FaceJob): Float32Array {
+  const { hair } = job
+  if (!hair) {
+    bareFront ??= new Float32Array(FRONT * FRONT)
+    return bareFront
+  }
   return remember(hairFronts, job.avatar, () => {
     const drawn = renderFront(
-      maskImage(job.hair, job.head.width, job.head.height),
+      maskImage(hair, job.head.width, job.head.height),
       job.geometry.all,
       FRONT,
     ).image.data
-    const hair = new Float32Array(FRONT * FRONT)
-    for (let i = 0; i < hair.length; i++) hair[i] = drawn[i * 4]! / 255
-    return hair
+    const covered = new Float32Array(FRONT * FRONT)
+    for (let i = 0; i < covered.length; i++) covered[i] = drawn[i * 4]! / 255
+    return covered
   })
 }
 

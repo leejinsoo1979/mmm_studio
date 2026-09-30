@@ -9,6 +9,7 @@ import {
 } from './face-paint'
 import { FACE_PARTS, facePointOf, type Point, unpackPoints } from './face-points'
 import type { HeadGeometry } from './head-geometry'
+import { analyseBody, dressBody } from './look-job'
 import { luminance, type Pixels, type Rgb } from './look-pixels'
 
 /** A real character's face landmarks (Male_Adult_10's, rounded): the paint is laid out by them. */
@@ -61,27 +62,40 @@ const BROW: Rgb = [60, 42, 32]
 const LIPS: Rgb = [190, 110, 105]
 const BEARD: Rgb = [40, 30, 25]
 
-/** A head whose texture is its own front view: one square facing the front, the texture across it. */
-const FLAT: HeadGeometry = (() => {
-  const square = [
-    [0, 0],
-    [1, 0],
-    [1, 1],
-    [0, 1],
-  ]
-  const triangles = [
-    [0, 1, 2],
-    [0, 2, 3],
-  ].map((corners) => ({
-    u: corners.map((i) => square[i]![0]!),
-    v: corners.map((i) => square[i]![1]!),
-    x: corners.map((i) => square[i]![0]!),
-    y: corners.map((i) => square[i]![1]!),
-    z: [0, 0, 0],
-    n: [1, 1, 1],
-  }))
+/**
+ * A head whose texture is its own front view: `cells` × `cells` squares
+ * facing the front, the texture across them (a fine grid for analyseBody,
+ * which samples triangles' centres).
+ */
+function flatHead(cells: number): HeadGeometry {
+  const triangles = []
+  for (let j = 0; j < cells; j++) {
+    for (let i = 0; i < cells; i++) {
+      const square = [
+        [i / cells, j / cells],
+        [(i + 1) / cells, j / cells],
+        [(i + 1) / cells, (j + 1) / cells],
+        [i / cells, (j + 1) / cells],
+      ]
+      for (const corners of [
+        [0, 1, 2],
+        [0, 2, 3],
+      ]) {
+        triangles.push({
+          u: corners.map((k) => square[k]![0]!),
+          v: corners.map((k) => square[k]![1]!),
+          x: corners.map((k) => square[k]![0]!),
+          y: corners.map((k) => square[k]![1]!),
+          z: [0, 0, 0],
+          n: [1, 1, 1],
+        })
+      }
+    }
+  }
   return { all: triangles, skin: triangles, eyes: [] }
-})()
+}
+
+const FLAT = flatHead(1)
 
 function inside(outline: readonly Point[], x: number, y: number) {
   let crossings = false
@@ -112,23 +126,55 @@ const LIP_OUTLINE = FACE_PARTS.lips.map((i) => points[i]!)
 
 const onBrow = (x: number, y: number) => BROW_HAIRS.some((brow) => inside(brow, x, y))
 
+/** Whether a point lies within `margin` of some points' box. */
+const nearBox = (box: readonly Point[], margin: number) => (x: number, y: number) =>
+  x >= Math.min(...box.map(([bx]) => bx)) - margin &&
+  x <= Math.max(...box.map(([bx]) => bx)) + margin &&
+  y >= Math.min(...box.map(([, by]) => by)) - margin &&
+  y <= Math.max(...box.map(([, by]) => by)) + margin
+
+/** What the face is drawn with; `over` draws something on top of it (null where it doesn't). */
+type Drawing = {
+  skin?: Rgb
+  brow?: Rgb
+  /** How far above their landmarks the lips' colour reaches (a fraction of the view). */
+  lipsUp?: number
+  over?: (x: number, y: number) => Rgb | null
+}
+
 /** The face drawn on its front view: skin, brows and lips. */
-function faceTexture(): Pixels {
+function drawFace({ skin = SKIN, brow = BROW, lipsUp = 0, over }: Drawing = {}): Pixels {
   const data = new Uint8ClampedArray(SIZE * SIZE * 4)
   for (let py = 0; py < SIZE; py++) {
     for (let px = 0; px < SIZE; px++) {
       const x = (px + 0.5) / SIZE
       const y = (py + 0.5) / SIZE
-      const colour = onBrow(x, y) ? BROW : inside(LIP_OUTLINE, x, y) ? LIPS : SKIN
+      const lips =
+        inside(LIP_OUTLINE, x, y) || (y < at(13)[1] && inside(LIP_OUTLINE, x, y + lipsUp))
+      const colour = over?.(x, y) ?? (onBrow(x, y) ? brow : lips ? LIPS : skin)
       data.set([...colour, 255], (py * SIZE + px) * 4)
     }
   }
   return { data, width: SIZE, height: SIZE }
 }
 
-function painted(paint: Partial<FacePaint>, hair: Float32Array | null = null): Pixels {
-  const head = faceTexture()
-  paintFace(head, FLAT, FACE, { ...NO_PAINT, ...paint }, { beard: BEARD, hair })
+const copy = (image: Pixels): Pixels => ({
+  data: new Uint8ClampedArray(image.data),
+  width: image.width,
+  height: image.height,
+})
+
+/** The plain face, drawn once (the tests paint copies of it). */
+const FACE_TEXTURE = drawFace()
+
+function painted(
+  paint: Partial<FacePaint>,
+  hair: Float32Array | null = null,
+  beard: Rgb | null = BEARD,
+  face: Pixels = FACE_TEXTURE,
+): Pixels {
+  const head = copy(face)
+  paintFace(head, FLAT, FACE, { ...NO_PAINT, ...paint }, { beard, hair })
   return head
 }
 
@@ -139,9 +185,19 @@ const colourAt = (image: Pixels, [x, y]: Point): Rgb => {
 const lightAt = (image: Pixels, point: Point) => luminance(...colourAt(image, point))
 const redness = ([r, g]: Rgb) => r - g
 
-/** The pixels a paint changed where `allowed` doesn't hold. */
-function strayChanges(image: Pixels, allowed: (x: number, y: number) => boolean) {
-  const original = faceTexture()
+/** The mean lightness along a short row of pixels centred on a point. */
+function meanLight(image: Pixels, [x, y]: Point) {
+  let sum = 0
+  for (let k = -8; k <= 8; k++) sum += lightAt(image, [x + k / SIZE, y])
+  return sum / 17
+}
+
+/** The pixels a paint changed from `original` where `allowed` doesn't hold. */
+function strayChanges(
+  image: Pixels,
+  allowed: (x: number, y: number) => boolean,
+  original: Pixels = FACE_TEXTURE,
+) {
   let stray = 0
   for (let i = 0; i < SIZE * SIZE; i++) {
     const x = ((i % SIZE) + 0.5) / SIZE
@@ -151,13 +207,6 @@ function strayChanges(image: Pixels, allowed: (x: number, y: number) => boolean)
   }
   return stray
 }
-
-/** Whether a point lies within `margin` of some points' box. */
-const nearBox = (box: readonly Point[], margin: number) => (x: number, y: number) =>
-  x >= Math.min(...box.map(([bx]) => bx)) - margin &&
-  x <= Math.max(...box.map(([bx]) => bx)) + margin &&
-  y >= Math.min(...box.map(([, by]) => by)) - margin &&
-  y <= Math.max(...box.map(([, by]) => by)) + margin
 
 /** The share of a box's pixels as dark as a brow's hair (nearer the brow's lightness than the skin's). */
 function darkShare(image: Pixels, box: readonly Point[]) {
@@ -174,6 +223,20 @@ function darkShare(image: Pixels, box: readonly Point[]) {
       dark++
   }
   return dark / total
+}
+
+/** The mean colour of the pixels within `reach` of a point. */
+function patchColour(image: Pixels, [x, y]: Point, reach = 6): Rgb {
+  const sum = [0, 0, 0]
+  let count = 0
+  for (let j = -reach; j <= reach; j++) {
+    for (let i = -reach; i <= reach; i++) {
+      const colour = colourAt(image, [x + i / SIZE, y + j / SIZE])
+      for (let c = 0; c < 3; c++) sum[c]! += colour[c]!
+      count++
+    }
+  }
+  return sum.map((c) => c / count) as Rgb
 }
 
 describe('face paint as saved', () => {
@@ -219,7 +282,7 @@ describe('face paint as saved', () => {
 })
 
 describe('painting a face', () => {
-  test('no paint, or only an iris colour, leaves the head as it was', () => {
+  test('no paint leaves the head as it was, nor does an iris colour (tintIris’s to put on)', () => {
     expect(strayChanges(painted({}), () => false)).toBe(0)
     expect(strayChanges(painted({ eyes: '#3070e0' }), () => false)).toBe(0)
   })
@@ -233,10 +296,20 @@ describe('painting a face', () => {
     expect(strayChanges(heavy, nearBox(LIP_OUTLINE, 0.01))).toBe(0)
   })
 
+  test('lipstick reaches the lips’ own edge where it lies above their landmarks', () => {
+    const face = drawFace({ lipsUp: 0.008 })
+    const heavy = painted({ lips: '#d01020', lipAmount: 1 }, null, BEARD, face)
+    // Inside the lips as drawn, past the landmarks' outline and its feather.
+    expect(redness(colourAt(heavy, [at(0)[0], at(0)[1] - 0.006]))).toBeGreaterThan(
+      redness(LIPS) + 20,
+    )
+    expect(strayChanges(heavy, nearBox(LIP_OUTLINE, 0.015), face)).toBe(0)
+  })
+
   test('brows grow and thin, darken and fade, and nothing else changes', () => {
     const brows = BROW_HAIRS.flat()
     const around = nearBox(brows, 0.04)
-    const as = darkShare(faceTexture(), brows)
+    const as = darkShare(FACE_TEXTURE, brows)
     const thick = painted({ browThickness: 1 })
     const thin = painted({ browThickness: -1 })
     expect(darkShare(thick, brows)).toBeGreaterThan(as * 1.3)
@@ -246,11 +319,30 @@ describe('painting a face', () => {
 
     const spine = between(at(105), at(52), 0.5)
     expect(lightAt(painted({ browDarkness: 1 }), spine)).toBeLessThan(luminance(...BROW) * 0.7)
-    expect(lightAt(painted({ browDarkness: -1 }), spine)).toBeGreaterThan(luminance(...BROW) * 2)
+    const faded = lightAt(painted({ browDarkness: -1 }), spine)
+    expect(faded).toBeGreaterThan(luminance(...BROW) * 2)
+    // Into the skin round the brow, not a patch paler than it.
+    expect(faded).toBeLessThan(luminance(...SKIN) * 1.02)
     // A new colour for the brow hairs, the skin round them as it was.
     const blonde = painted({ browColor: '#c8a060' })
     expect(colourAt(blonde, spine)[0]).toBeGreaterThan(150)
     expect(colourAt(blonde, between(at(105), at(52), -1.2))).toEqual(SKIN)
+  })
+
+  test('a new colour keeps to the brows, not a fringe lying over one', () => {
+    const [x0] = between(at(334), at(282), 0.5)
+    const strip = (x: number, y: number) => Math.abs(x - x0) < 0.012 && y < at(282)[1] + 0.01
+    const face = drawFace({ over: (x, y) => (strip(x, y) ? BEARD : null) })
+    const hair = new Float32Array(SIZE * SIZE)
+    for (let i = 0; i < hair.length; i++) {
+      if (strip(((i % SIZE) + 0.5) / SIZE, (Math.floor(i / SIZE) + 0.5) / SIZE)) hair[i] = 1
+    }
+    const blonde = painted({ browColor: '#c8a060' }, hair, BEARD, face)
+    // Its middle, clear of its tip (where it thins, it is partly the brow's).
+    const core = (x: number, y: number) =>
+      strip(x, y) && Math.abs(x - x0) < 0.006 && y < at(282)[1] - 0.005
+    expect(strayChanges(blonde, (x, y) => !core(x, y), face)).toBe(0)
+    expect(colourAt(blonde, between(at(105), at(52), 0.5))[0]).toBeGreaterThan(150)
   })
 
   test('each beard covers its own part of the face, thicker the more of it', () => {
@@ -271,16 +363,34 @@ describe('painting a face', () => {
     for (const beard of [mustache, goatee, full]) expect(colourAt(beard, forehead)).toEqual(SKIN)
 
     // Over the cheek, on average: sparser at a lower amount, and stubble lighter still.
-    const mean = (image: Pixels) => {
-      let sum = 0
-      for (let k = -8; k <= 8; k++) sum += lightAt(image, [cheek[0] + k / SIZE, cheek[1]])
-      return sum / 17
-    }
     const sparse = painted({ beard: 'full', beardAmount: 0.2 })
     const stubble = painted({ beard: 'stubble', beardAmount: 0.5 })
-    expect(mean(sparse)).toBeGreaterThan(mean(full) + 10)
-    expect(mean(stubble)).toBeGreaterThan(mean(sparse))
-    expect(mean(stubble)).toBeLessThan(luminance(...SKIN) - 10)
+    expect(meanLight(sparse, cheek)).toBeGreaterThan(meanLight(full, cheek) + 10)
+    expect(meanLight(stubble, cheek)).toBeGreaterThan(meanLight(sparse, cheek))
+    expect(meanLight(stubble, cheek)).toBeLessThan(luminance(...SKIN) - 10)
+  })
+
+  test('a mustache hangs over the top of the upper lip', () => {
+    const top = between(at(0), at(13), 0.2)
+    const mustache = painted({ beard: 'mustache', beardAmount: 1 })
+    expect(meanLight(mustache, top)).toBeLessThan(luminance(...LIPS) * 0.7)
+  })
+
+  test('a beard grows in the character’s own brows’ colour, unless it is dyed', () => {
+    const cheek = at(214)
+    const own = patchColour(painted({ beard: 'full', beardAmount: 1 }, null, null), cheek)
+    // Brown, as the brows are, and well darker than the skin.
+    expect(own[0]).toBeGreaterThan(own[2] + 5)
+    expect(luminance(...own)).toBeLessThan(luminance(...SKIN) * 0.7)
+    const dyed = patchColour(painted({ beard: 'full', beardAmount: 1 }, null, [40, 80, 200]), cheek)
+    expect(dyed[2]).toBeGreaterThan(dyed[0] + 20)
+  })
+
+  test('on dark skin, brows hardly apart from it, a beard is still much darker than the skin', () => {
+    const skin: Rgb = [90, 58, 42]
+    const face = drawFace({ skin, brow: [82, 52, 38] })
+    const beard = painted({ beard: 'full', beardAmount: 1 }, null, null, face)
+    expect(luminance(...patchColour(beard, at(214)))).toBeLessThan(luminance(...skin) * 0.6)
   })
 
   test('the character’s hair lies over the beard, blush and freckles, not the lipstick', () => {
@@ -320,51 +430,144 @@ describe('painting a face', () => {
   })
 })
 
-describe('shaving a head', () => {
-  const HAIR: Rgb = [45, 32, 24]
-  const HAIRLINE = 0.3
+const HAIR: Rgb = [45, 32, 24]
+const HAIRLINE = 0.3
+const OVAL = FACE_PARTS.oval.map((i) => points[i]!)
 
-  /**
-   * A head with hair over its crown, down to a fringe over the left brow
-   * (`fringe`), and a hair mask that took in a scattering of the brows'
-   * darkest hairs, as the hair's mask does.
-   */
-  function hairy(fringe: boolean) {
-    const head = faceTexture()
-    const hair = new Float32Array(SIZE * SIZE)
-    const skin = new Float32Array(SIZE * SIZE)
-    const leftBrow = BROW_HAIRS[1]!
-    for (let i = 0; i < SIZE * SIZE; i++) {
-      const x = ((i % SIZE) + 0.5) / SIZE
-      const y = (Math.floor(i / SIZE) + 0.5) / SIZE
-      const lock = fringe && nearBox(leftBrow, 0.02)(x, y)
-      if (y < HAIRLINE || lock) {
-        head.data.set(HAIR, i * 4)
-        hair[i] = 1
-      } else if (onBrow(x, y)) {
-        hair[i] = i % 4 === 0 ? 1 : 0
-      } else {
-        skin[i] = inside(LIP_OUTLINE, x, y) ? 0 : 1
-      }
-    }
-    return { head, hair, skin }
+/**
+ * A head with hair over its crown, and whatever else `over` draws; and
+ * its skin's mask (1 where it shows the skin's colour, as analyseBody's
+ * would be).
+ */
+function hairy(over?: (x: number, y: number) => Rgb | null) {
+  const head = drawFace({ over: (x, y) => over?.(x, y) ?? (y < HAIRLINE ? HAIR : null) })
+  const skin = new Float32Array(SIZE * SIZE)
+  for (let i = 0; i < skin.length; i++) {
+    const p = i * 4
+    if (SKIN.every((c, k) => head.data[p + k] === c)) skin[i] = 1
   }
+  return { head, skin, original: copy(head) }
+}
 
+describe('shaving a head', () => {
   test('the crown goes to the skin’s colour, the face and its brows stay', () => {
-    const { head, hair, skin } = hairy(false)
-    shaveHead(head, FLAT, hair, skin, FACE)
+    const { head, skin, original } = hairy()
+    shaveHead(head, FLAT, skin, FACE, HAIR)
     let crown = 0
     for (let k = 0; k < 20; k++) crown += lightAt(head, [0.1 + k * 0.04, HAIRLINE / 2])
     expect(Math.abs(crown / 20 - luminance(...SKIN))).toBeLessThan(20)
-    expect(strayChanges(head, (_, y) => y < HAIRLINE + 0.06)).toBe(0)
+    expect(strayChanges(head, (_, y) => y < HAIRLINE + 0.06, original)).toBe(0)
   })
 
-  test('a lock of hair over a brow goes, the brow under it with it', () => {
-    const { head, hair, skin } = hairy(true)
-    shaveHead(head, FLAT, hair, skin, FACE)
-    const [x, y] = between(at(334), at(282), 0.5)
-    expect(lightAt(head, [x, y])).toBeGreaterThan(luminance(...SKIN) * 0.8)
-    // The other brow, only scattered with hair, stays.
+  test('a beard of the hair’s colour stays, as does all the face below the eyes', () => {
+    const beard = (x: number, y: number) => y > at(17)[1] && inside(OVAL, x, y)
+    const { head, skin, original } = hairy((x, y) => (beard(x, y) ? HAIR : null))
+    shaveHead(head, FLAT, skin, FACE, HAIR)
+    expect(strayChanges(head, (_, y) => y < HAIRLINE + 0.06, original)).toBe(0)
+    expect(luminance(...patchColour(head, [0.5, HAIRLINE / 2]))).toBeGreaterThan(
+      luminance(...SKIN) * 0.85,
+    )
+  })
+
+  test('a fringe over a brow goes, and the brow under it is put back from the other', () => {
+    const brow = BROW_HAIRS[1]!
+    const xs = brow.map(([x]) => x)
+    const [left, right] = [Math.min(...xs) - 0.015, Math.max(...xs) + 0.015]
+    const bottom = Math.max(...brow.map(([, y]) => y)) + 0.015
+    const fringe = (x: number, y: number) => x > left && x < right && y < bottom
+    const { head, skin } = hairy((x, y) => (fringe(x, y) ? HAIR : null))
+    shaveHead(head, FLAT, skin, FACE, HAIR)
+    expect(luminance(...patchColour(head, [(left + right) / 2, HAIRLINE + 0.03]))).toBeGreaterThan(
+      luminance(...SKIN) * 0.85,
+    )
+    expect(lightAt(head, between(at(334), at(282), 0.5))).toBeLessThan(luminance(...SKIN) * 0.6)
+    // The other brow stays as it was.
     expect(colourAt(head, between(at(105), at(52), 0.5))).toEqual(BROW)
+  })
+
+  test('a cap of another colour stays, the hair under its rim goes', () => {
+    const CAP: Rgb = [40, 70, 150]
+    const RIM = 0.2
+    // Hair down the sides, beside the eyes, where its colour is read.
+    const sides = (x: number, y: number) =>
+      Math.abs(y - at(159)[1]) < 0.08 &&
+      !inside(OVAL, x, y) &&
+      Math.abs(x - 0.5) < Math.abs(at(234)[0] - 0.5) + 0.1
+    const { head, skin } = hairy((x, y) => (y < RIM ? CAP : sides(x, y) ? HAIR : null))
+    shaveHead(head, FLAT, skin, FACE, null)
+    expect(colourAt(head, [0.5, RIM / 2])).toEqual(CAP)
+    expect(luminance(...patchColour(head, [0.5, (RIM + HAIRLINE) / 2]))).toBeGreaterThan(
+      luminance(...SKIN) * 0.85,
+    )
+  })
+})
+
+describe('a body dressed in a look, placed by its landmarks', () => {
+  const GRID = flatHead(16)
+  const BODY: Pixels = { data: new Uint8ClampedArray(16 * 16 * 4).fill(200), width: 16, height: 16 }
+  const dress = (face: Pixels, change: Partial<Parameters<typeof dressBody>[1]>) =>
+    dressBody(
+      analyseBody(face, BODY, null, GRID),
+      {
+        key: 'look',
+        avatar: 'look',
+        hair: null,
+        skin: null,
+        face: null,
+        paint: NO_PAINT,
+        bald: false,
+        target: FACE,
+        ...change,
+      },
+      null,
+    ).head!
+
+  test('a beard takes the hair’s dye, else the character’s own brows’ colour — never a cap’s', () => {
+    const capped = drawFace({ over: (_, y) => (y < 0.2 ? [40, 70, 150] : null) })
+    const paint = { ...NO_PAINT, beard: 'full' as const, beardAmount: 1 }
+    const own = patchColour(dress(capped, { paint }), at(214))
+    expect(own[0]).toBeGreaterThan(own[2] + 5)
+    const dyed = patchColour(dress(capped, { paint, hair: '#c03020' }), at(214))
+    expect(dyed[0]).toBeGreaterThan(dyed[1] * 1.5)
+  })
+
+  test('face paint goes on over the skin as dyed', () => {
+    const skin = '#8a5a40'
+    const plain = dress(FACE_TEXTURE, { skin })
+    const blushed = dress(FACE_TEXTURE, { skin, paint: { ...NO_PAINT, blush: '#e06070' } })
+    const forehead = at(151)
+    expect(luminance(...colourAt(plain, forehead))).toBeLessThan(luminance(...SKIN) - 20)
+    expect(colourAt(blushed, forehead)).toEqual(colourAt(plain, forehead))
+    const cheek = between(at(50), at(33), 0.3)
+    expect(redness(colourAt(blushed, cheek))).toBeGreaterThan(redness(colourAt(plain, cheek)) + 5)
+  })
+
+  test('a shaved head: the crown’s hair goes to the skin’s colour, the face stays', () => {
+    const { head } = hairy()
+    const shaved = dress(head, { bald: true })
+    let crown = 0
+    for (let k = 0; k < 20; k++) crown += lightAt(shaved, [0.1 + k * 0.04, HAIRLINE / 2])
+    expect(Math.abs(crown / 20 - luminance(...SKIN))).toBeLessThan(25)
+    expect(strayChanges(shaved, (_, y) => y < HAIRLINE + 0.06, head)).toBe(0)
+  })
+
+  test('the same body shaved and then not: its own hair again', () => {
+    const { head } = hairy()
+    const analysis = analyseBody(head, BODY, null, GRID)
+    const job = {
+      key: 'again',
+      avatar: 'again',
+      hair: '#c03020',
+      skin: null,
+      face: null,
+      paint: NO_PAINT,
+      target: FACE,
+    }
+    dressBody(analysis, { ...job, bald: true }, null)
+    const dyed = dressBody(analysis, { ...job, bald: false }, null).head!
+    const [r, g, b] = patchColour(dyed, [0.5, HAIRLINE / 2])
+    // Dyed red, not shaved to the skin.
+    expect(r).toBeGreaterThan(g * 2)
+    expect(luminance(r, g, b)).toBeLessThan(luminance(...SKIN) / 2)
   })
 })

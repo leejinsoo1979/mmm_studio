@@ -5,11 +5,18 @@
  * (0 leaving them as they are).
  */
 
-import { dilate, fillFrom } from './face-fill'
-import { FACE_PARTS, facePointOf, featureRegions, type Point, unpackPoints } from './face-points'
+import { connectedFrom, dilate, fillFrom } from './face-fill'
+import { FACE_PARTS, facePointOf, type Point, unpackPoints } from './face-points'
 import { forEachTexel, renderFront, sampleColor } from './front-render'
 import type { HeadGeometry } from './head-geometry'
-import { type HeadTriangle, hexToRgb, luminance, type Pixels, type Rgb } from './look-pixels'
+import {
+  colorDistance,
+  type HeadTriangle,
+  hexToRgb,
+  luminance,
+  type Pixels,
+  type Rgb,
+} from './look-pixels'
 
 export const BEARD_STYLES = ['none', 'stubble', 'mustache', 'goatee', 'full'] as const
 export type BeardStyle = (typeof BEARD_STYLES)[number]
@@ -243,12 +250,21 @@ function tintKeepingLight(colour: Float64Array, tint: Rgb, ref: number, w: numbe
 }
 
 /** Mixes a colour (in place) towards another by `w`. */
-function mixTowards(colour: Float64Array, towards: Rgb, w: number) {
+function mixTowards(colour: Float64Array, towards: ArrayLike<number>, w: number) {
   for (let c = 0; c < 3; c++) colour[c] = colour[c]! + (towards[c]! - colour[c]!) * w
 }
 
-/** A face's landmarks on its front view, and its scale: the distance between its eyes' centres. */
-type Face = { points: Point[]; at: (landmark: number) => Point; eyes: number }
+/**
+ * A face's landmarks on its front view, its scale (`eyes`: the distance
+ * between its eyes' centres) and the height of the line through those
+ * centres at any `x`.
+ */
+type Face = {
+  points: Point[]
+  at: (landmark: number) => Point
+  eyes: number
+  eyeLine: (x: number) => number
+}
 
 function faceOf(target: readonly number[]): Face {
   const points = unpackPoints(target)
@@ -258,10 +274,12 @@ function faceOf(target: readonly number[]): Face {
   ]
   const [rx, ry] = centre(FACE_PARTS.rightEye)
   const [lx, ly] = centre(FACE_PARTS.leftEye)
+  const slope = lx === rx ? 0 : (ly - ry) / (lx - rx)
   return {
     points,
     at: (landmark) => points[facePointOf(landmark)]!,
     eyes: Math.hypot(lx - rx, ly - ry),
+    eyeLine: (x) => ry + (x - rx) * slope,
   }
 }
 
@@ -315,11 +333,69 @@ function skinColour(face: Face, front: Pixels): Rgb {
 
 /**
  * How the character's hair over a painted layer hides it: texel by texel
- * (`strands`), only where the hair lies thick all round (`locks`: the
- * hair's mask takes in a brow's darkest hairs too, but a fringe over the
- * brow is hair throughout), or not at all (null).
+ * (`strands`); where the hair lies thick all round, and its strands near a
+ * lot more of it (`locks`: the hair's mask takes in a brow's darkest hairs
+ * too, scattered, and those are the brow's; a fringe over the brow is hair
+ * throughout, and its tips lie by it); or not at all (null).
  */
 type UnderHair = 'strands' | 'locks' | null
+
+/** The coarse grid (texels a cell) the hair's density is read on to tell a fringe's strands from a brow's hairs, and how many cells round each it takes in. */
+const FRINGE_CELL = 8
+const FRINGE_REACH = 2
+
+/** The share of the texture round a strand the hair must take for the strand to be a fringe's (fully from the second). */
+const FRINGE_FROM = 0.25
+const FRINGE_TO = 0.5
+
+const fringes = new WeakMap<Float32Array, Float32Array>()
+
+/** How much of the texture round each cell of a coarse grid (see `FRINGE_*`) the hair's mask takes: worked out once per mask. */
+function fringeDensity(hair: Float32Array, width: number, height: number): Float32Array {
+  const found = fringes.get(hair)
+  if (found) return found
+  const cw = Math.ceil(width / FRINGE_CELL)
+  const ch = Math.ceil(height / FRINGE_CELL)
+  const sums = new Float32Array(cw * ch)
+  const counts = new Float32Array(cw * ch)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const j = Math.floor(y / FRINGE_CELL) * cw + Math.floor(x / FRINGE_CELL)
+      sums[j]! += hair[y * width + x]!
+      counts[j]!++
+    }
+  }
+  for (let j = 0; j < sums.length; j++) sums[j]! /= Math.max(1, counts[j]!)
+  const density = blurField(sums, cw, ch, FRINGE_REACH)
+  fringes.set(hair, density)
+  return density
+}
+
+/**
+ * How much a lock of hair covers a texel (0–1, see `UnderHair`): where the
+ * hair lies thick all round, or the texel is a strand near a lot more of
+ * it (`fringe`, its density on a coarse grid `fw` × `fh`: see
+ * fringeDensity).
+ */
+function lockOver(
+  hair: Float32Array,
+  fringe: Float32Array,
+  fw: number,
+  fh: number,
+  width: number,
+  height: number,
+  texel: number,
+) {
+  const lock = smoothstep(LOCK_FROM, LOCK_TO, hairAround(hair, width, height, texel))
+  const x = texel % width
+  const y = (texel - x) / width
+  const near = smoothstep(
+    FRINGE_FROM,
+    FRINGE_TO,
+    sampleField(fringe, fw, fh, (x + 0.5) / FRINGE_CELL - 0.5, (y + 0.5) / FRINGE_CELL - 0.5),
+  )
+  return Math.max(lock, smoothstep(STRAND_FROM, STRAND_TO, hair[texel]!) * near)
+}
 
 /** How far round a texel (texels) the hair is taken in to tell locks of it from a brow's hairs. */
 const LOCK_REACH = 4
@@ -327,6 +403,10 @@ const LOCK_REACH = 4
 /** The share of the texels round it that must be hair for a lock to hide what is under it (fully from the second). */
 const LOCK_FROM = 0.4
 const LOCK_TO = 0.75
+
+/** How much hair a texel must be (fully from the second) to be a strand of a lock (see `lockOver`). */
+const STRAND_FROM = 0.05
+const STRAND_TO = 0.4
 
 /** How thickly hair lies round a texel: the share of the texels near it the hair's mask takes. */
 function hairAround(hair: Float32Array, width: number, height: number, texel: number) {
@@ -343,36 +423,127 @@ function hairAround(hair: Float32Array, width: number, height: number, texel: nu
   return sum / count
 }
 
+/** Reads the head's texture as it was, before any paint (into `out`), at an offset on the front view from the texel being painted. */
+type Look = (dx: number, dy: number, out: Uint8ClampedArray) => void
+
 /**
  * One thing painted on the face: the box on the front view it keeps to,
  * how the character's hair over it hides it, and what it does to a texel
  * showing at a point there — `paint` changes the texel's colour (in place,
  * by `strength` 0–1; `texel` is its index, for detail as fine as the
- * texture's own), and `moves`, where there is one, says where on the front
- * view the texel takes its colour from instead (an offset into `offset`;
- * false for nowhere else).
+ * texture's own; `look` reads the texture round it, for a layer that
+ * `looks`), and `moves`, where there is one, says where on the front view
+ * the texel takes its colour from instead (an offset into `offset`; false
+ * for nowhere else).
  */
 type Layer = {
   box: Box
   underHair: UnderHair
+  looks?: boolean
   moves?: (x: number, y: number, offset: Float64Array) => boolean
-  paint: (colour: Float64Array, x: number, y: number, strength: number, texel: number) => void
+  paint: (
+    colour: Float64Array,
+    x: number,
+    y: number,
+    strength: number,
+    texel: number,
+    look: Look,
+  ) => void
 }
 
 /** How far lipstick fades across the lips' edge, either side, as a share of the mouth's height. */
 const LIP_FEATHER = 0.1
 
-function lipsLayer(face: Face, front: Pixels, tint: Rgb, amount: number): Layer {
+/** The upper lip's outer edge between the mouth's corners (MediaPipe landmarks), and the inner edge each point of it faces. */
+const UPPER_LIP = [185, 40, 39, 37, 0, 267, 269, 270, 409] as const
+const UPPER_LIP_INNER = [191, 80, 81, 82, 13, 312, 311, 310, 415] as const
+
+/**
+ * How far up past its landmarks the upper lip's edge is looked for (a
+ * share of the lip's height there), in this many steps: a character's
+ * landmarks can sit inside its lips, and the lip reaches as far as the
+ * front view stays nearer the lips' colour than the skin's.
+ */
+const LIP_SEARCH = 0.6
+const LIP_SEARCH_STEPS = 6
+
+/** How far above the upper lip the skin by it is read (a share of the lip's height past the search). */
+const LIP_SKIN_ABOVE = 0.4
+
+/** The side (px) of the close front view the lips' edge is found on: finer than a whole view drawn at once. */
+const MOUTH_VIEW = 256
+
+/**
+ * The lips' outline (as FACE_PARTS.lips), the upper lip's edge moved up
+ * to where its colour ends (see `LIP_SEARCH`), by the median of how far
+ * it reaches past each of its landmarks. `own` is the lips' colour.
+ */
+function lipOutline(face: Face, head: Pixels, geometry: HeadGeometry, own: Rgb): Point[] {
   const outline = FACE_PARTS.lips.map((i) => face.points[i]!)
-  const height = Math.hypot(face.at(0)[0] - face.at(17)[0], face.at(0)[1] - face.at(17)[1])
-  const lips = areaOf(outline, LIP_FEATHER * height)
-  // The lips' own lightness: the tint keeps each texel's relative to it.
-  const own = frontColours(
-    front,
-    lips.box,
-    (x, y) => outlineDistance(outline, x, y) < -lips.feather,
+  const tops = UPPER_LIP.map(face.at)
+  const inner = UPPER_LIP_INNER.map(face.at)
+  // Framing the lips and all the search above them, the skin's colour too.
+  const farthest = tops.map(([tx, ty], k): Point => {
+    const [ix, iy] = inner[k]!
+    const share = LIP_SEARCH + LIP_SKIN_ABOVE
+    return [tx + (tx - ix) * share, ty + (ty - iy) * share]
+  })
+  const view = closeView(head, geometry.all, boxAround([...outline, ...farthest], 0), MOUTH_VIEW)
+  const sample = new Uint8ClampedArray(3)
+  const at = (k: number, share: number): Rgb => {
+    const [tx, ty] = tops[k]!
+    const [ix, iy] = inner[k]!
+    view(tx + (tx - ix) * share, ty + (ty - iy) * share, sample)
+    return [sample[0]!, sample[1]!, sample[2]!]
+  }
+  const skins = tops.map((_, k) => at(k, LIP_SEARCH + LIP_SKIN_ABOVE))
+  const skin = quantile(
+    skins.sort((a, b) => luminance(...a) - luminance(...b)),
+    0.5,
+    FALLBACK_SKIN,
   )
-  const ref = luminance(...quantile(own, 0.5, tint))
+  const ownLum = luminance(...own)
+  const skinLum = luminance(...skin)
+  const reaches = tops.map((_, k) => {
+    let reach = 0
+    for (let step = 1; step <= LIP_SEARCH_STEPS; step++) {
+      const share = (LIP_SEARCH * step) / LIP_SEARCH_STEPS
+      const colour = at(k, share)
+      if (colorDistance(...colour, own, ownLum) >= colorDistance(...colour, skin, skinLum)) break
+      reach = share
+    }
+    return reach
+  })
+  const reach = [...reaches].sort((a, b) => a - b)[Math.floor(reaches.length / 2)]!
+  const moved = new Map(
+    UPPER_LIP.map((landmark, k): [number, Point] => {
+      const [tx, ty] = tops[k]!
+      const [ix, iy] = inner[k]!
+      return [facePointOf(landmark), [tx + (tx - ix) * reach, ty + (ty - iy) * reach]]
+    }),
+  )
+  return FACE_PARTS.lips.map((i) => moved.get(i) ?? face.points[i]!)
+}
+
+/** The lips' own colour: the median of what the front view shows well inside their landmarks. */
+function lipColour(face: Face, front: Pixels): Rgb {
+  const outline = FACE_PARTS.lips.map((i) => face.points[i]!)
+  const lips = areaOf(outline, LIP_FEATHER * mouthHeight(face))
+  return quantile(
+    frontColours(front, lips.box, (x, y) => outlineDistance(outline, x, y) < -lips.feather),
+    0.5,
+    FALLBACK_SKIN,
+  )
+}
+
+/** The mouth's height, the upper lip's top to the lower lip's bottom. */
+const mouthHeight = (face: Face) =>
+  Math.hypot(face.at(0)[0] - face.at(17)[0], face.at(0)[1] - face.at(17)[1])
+
+function lipsLayer(face: Face, outline: Point[], own: Rgb, tint: Rgb, amount: number): Layer {
+  const lips = areaOf(outline, LIP_FEATHER * mouthHeight(face))
+  // The tint keeps each texel's lightness relative to the lips'.
+  const ref = luminance(...own)
   const covered = fieldOf(lips.box, lips.feather, (x, y) => cover(lips, x, y))
   return {
     box: lips.box,
@@ -390,6 +561,12 @@ function lipsLayer(face: Face, front: Pixels, tint: Rgb, amount: number): Layer 
 const BLUSH_ALONG = 0.42
 const BLUSH_ACROSS = 0.26
 const BLUSH_STRENGTH = 0.5
+
+/** How a patch of colour (a blush, freckles' density) falls off: e^−(this × distance²), distance in its reaches — a seventh at its reach. */
+const PATCH_FALLOFF = 2
+
+/** How far past its reach (× it) a patch's box goes: it has faded to under a hundredth there. */
+const PATCH_BOX = 1.6
 
 /** How far from the cheek's landmark towards the eye's outer corner a blush sits (a share of the way): up on the cheekbone. */
 const BLUSH_LIFT = 0.3
@@ -417,7 +594,7 @@ function blushLayer(face: Face, skinLum: number, tint: Rgb, amount: number): Lay
   return {
     box: boxAround(
       spots.map(({ x, y }): Point => [x, y]),
-      along * 1.5,
+      along * PATCH_BOX,
     ),
     underHair: 'strands',
     paint: (colour, x, y, strength) => {
@@ -427,7 +604,7 @@ function blushLayer(face: Face, skinLum: number, tint: Rgb, amount: number): Lay
         const dy = y - spot.y
         const a = (dx * spot.ax + dy * spot.ay) / along
         const b = (dx * spot.ay - dy * spot.ax) / across
-        glow = Math.max(glow, Math.exp(-2 * (a * a + b * b)))
+        glow = Math.max(glow, Math.exp(-PATCH_FALLOFF * (a * a + b * b)))
       }
       tintKeepingLight(colour, tint, skinLum, BLUSH_STRENGTH * amount * glow * strength)
     },
@@ -464,6 +641,17 @@ const SHADOW_STRENGTH = 0.7
 const SHADOW_WING = 0.3
 const SHADOW_RISE = 0.4
 
+/** How far past the eye's inner corner eyeshadow may reach (× the eye's width), fading in over this much either side of the corner. */
+const SHADOW_INNER = 0.2
+const SHADOW_INNER_FADE = 0.15
+
+/** Eyeshadow starts on the lash line: fading in from this far below it to this far above (shares of the way to the brow). */
+const SHADOW_LASH_FROM = -0.06
+const SHADOW_LASH_TO = 0.04
+
+/** Eyeshadow is full up to this share of its reach, fading out over the rest. */
+const SHADOW_FULL = 0.45
+
 function shadowLayer(face: Face, skinLum: number, tint: Rgb, amount: number): Layer {
   const eyes = UPPER_LIDS.map((lid, k) => {
     const outer = face.at(lid[0])
@@ -487,15 +675,15 @@ function shadowLayer(face: Face, skinLum: number, tint: Rgb, amount: number): La
     paint: (colour, x, y, strength) => {
       for (const { outer, inner, lid, brow, width } of eyes) {
         const s = (x - inner[0]) / width
-        if (s < -0.2 || s > 1 + SHADOW_WING) continue
+        if (s < -SHADOW_INNER || s > 1 + SHADOW_WING) continue
         const lidY = s <= 1 ? heightAt(lid, x) : outer[1] - (s - 1) * Math.abs(width) * SHADOW_RISE
         const span = lidY - heightAt(brow, x)
         if (!(span > 0)) continue
         const up = (lidY - y) / span
         const w =
-          smoothstep(-0.06, 0.04, up) *
-          (1 - smoothstep(SHADOW_REACH * 0.45, SHADOW_REACH, up)) *
-          smoothstep(-0.15, 0.15, s) *
+          smoothstep(SHADOW_LASH_FROM, SHADOW_LASH_TO, up) *
+          (1 - smoothstep(SHADOW_REACH * SHADOW_FULL, SHADOW_REACH, up)) *
+          smoothstep(-SHADOW_INNER_FADE, SHADOW_INNER_FADE, s) *
           (1 - smoothstep(1, 1 + SHADOW_WING, s))
         tintKeepingLight(colour, tint, skinLum, SHADOW_STRENGTH * amount * w * strength)
       }
@@ -513,6 +701,10 @@ const LINER_RISE = 0.45
 
 /** Eyeliner's colour: a soft black. */
 const LINER_COLOUR: Rgb = [26, 20, 22]
+
+/** Above its line eyeliner is solid out to this share of its width, fading to its edge; below, it fades over this share (onto the lashes' root). */
+const LINER_SOLID = 0.55
+const LINER_UNDER = 0.3
 
 function linerLayer(face: Face, amount: number): Layer {
   const lines = UPPER_LIDS.map((lid) => {
@@ -554,9 +746,9 @@ function linerLayer(face: Face, amount: number): Layer {
           const [bx, by] = line[i + 1]!
           const dx = bx - ax
           const dy = by - ay
-          const size = Math.hypot(dx, dy) || 1e-9
+          const size = Math.sqrt(dx * dx + dy * dy) || 1e-9
           const t = Math.min(1, Math.max(0, ((x - ax) * dx + (y - ay) * dy) / (size * size)))
-          const distance = Math.hypot(x - ax - t * dx, y - ay - t * dy)
+          const distance = Math.sqrt((x - ax - t * dx) ** 2 + (y - ay - t * dy) ** 2)
           if (distance >= nearest) continue
           nearest = distance
           along = lengths[i]! + t * size
@@ -572,8 +764,8 @@ function linerLayer(face: Face, amount: number): Layer {
         if (width <= 0) continue
         const w =
           above >= 0
-            ? 1 - smoothstep(width * 0.55, width, nearest)
-            : 1 - smoothstep(0, width * 0.3, nearest)
+            ? 1 - smoothstep(width * LINER_SOLID, width, nearest)
+            : 1 - smoothstep(0, width * LINER_UNDER, nearest)
         ink = Math.max(ink, w)
       }
       if (ink > 0) mixTowards(colour, LINER_COLOUR, amount * ink * strength)
@@ -585,19 +777,39 @@ function linerLayer(face: Face, amount: number): Layer {
 type BrowSpine = { stations: Point[]; halves: number[] }
 
 /** Where a point lies by a brow: see `browFrame`. */
-type BrowFrame = { across: number; half: number; past: number; nx: number; ny: number }
+type BrowFrame = {
+  across: number
+  half: number
+  past: number
+  nx: number
+  ny: number
+  segment: number
+  t: number
+}
+
+const newBrowFrame = (): BrowFrame => ({
+  across: 0,
+  half: 0,
+  past: 0,
+  nx: 0,
+  ny: 0,
+  segment: 0,
+  t: 0,
+})
 
 /**
  * Where a point lies by a brow: how far across it from its spine
- * (`across`, up the face positive, along `nx`, `ny`), the brow's
- * half-thickness there, and how far past its ends.
+ * (`across`, up the face positive, along the normal `nx`, `ny`), the
+ * brow's half-thickness there, how far past its ends, and the spine's
+ * segment it is nearest and how far along that (`t`, a share of it: below
+ * 0 or over 1 only past the brow's ends).
  */
 function browFrame({ stations, halves }: BrowSpine, x: number, y: number, frame: BrowFrame) {
   let nearest = Number.POSITIVE_INFINITY
   for (let i = 0; i + 1 < stations.length; i++) {
     const [ax, ay] = stations[i]!
     const [bx, by] = stations[i + 1]!
-    const length = Math.hypot(bx - ax, by - ay) || 1e-9
+    const length = Math.sqrt((bx - ax) ** 2 + (by - ay) ** 2) || 1e-9
     const tx = (bx - ax) / length
     const ty = (by - ay) / length
     const along = (x - ax) * tx + (y - ay) * ty
@@ -605,17 +817,17 @@ function browFrame({ stations, halves }: BrowSpine, x: number, y: number, frame:
     const distance = (x - ax - (bx - ax) * t) ** 2 + (y - ay - (by - ay) * t) ** 2
     if (distance >= nearest) continue
     nearest = distance
-    const up = ty > 0 ? 1 : -1
+    // Of the segment's two normals, the one up the view (y runs down it).
+    const up = tx >= 0 ? 1 : -1
     frame.nx = ty * up
     frame.ny = -tx * up
     frame.across = (x - ax) * frame.nx + (y - ay) * frame.ny
     frame.half = halves[i]! + (halves[i + 1]! - halves[i]!) * t
-    frame.past =
-      i === 0 && along < 0
-        ? -along
-        : i + 2 === stations.length && along > length
-          ? along - length
-          : 0
+    const first = i === 0 && along < 0
+    const last = i + 2 === stations.length && along > length
+    frame.past = first ? -along : last ? along - length : 0
+    frame.segment = i
+    frame.t = first || last ? along / length : t
   }
 }
 
@@ -647,13 +859,20 @@ const BROW_HAIR_TO = 0.7
 
 /**
  * A brow's own colours, measured on the front view: its hairs' as the
- * darker half's median of what lies this near its spine (× its
- * half-thickness), the skin's as the lighter side of what lies between
- * these two distances from it (clear of the brow, short of the eye).
+ * darker half's median (see BROW_HAIR_QUANTILE) of what lies this near its
+ * spine (× its half-thickness), the skin's as the lighter side (see
+ * BROW_SKIN_QUANTILE) of what lies between these two distances from it
+ * (clear of the brow, short of the eye).
  */
 const BROW_CORE = 0.5
 const BROW_SKIN_FROM = 1.6
 const BROW_SKIN_TO = 2.6
+
+/** Where among a brow's colours, darkest first, its hairs' is read: the darker half's median. */
+const BROW_HAIR_QUANTILE = 0.25
+
+/** Where among the colours round a brow, darkest first, the skin's is read: past the middle, clear of stray hairs and shadow. */
+const BROW_SKIN_QUANTILE = 0.6
 
 /** A brow's colour where the front view shows none. */
 const FALLBACK_BROW: Rgb = [60, 45, 35]
@@ -661,6 +880,29 @@ const FALLBACK_BROW: Rgb = [60, 45, 35]
 /** How much a brow's darkness at 1 darkens its hairs, and at −1 fades them into the skin. */
 const BROW_DARKEN = 0.6
 const BROW_FADE = 0.85
+
+/**
+ * How far up and down the face from where it is (× its brow's
+ * half-thickness) a fading hair reads the skin it fades to: clear of the
+ * brow on both sides, so it takes the skin's own grain and, between the
+ * two, the tone just there — not one colour for the whole brow, nor the
+ * lighter forehead's alone.
+ */
+const BROW_FADE_OUT = 2
+
+/**
+ * The most a recoloured brow's texel is lit past the new colour, for being
+ * lighter than the brow's hairs: a hair's edge, half skin, keeps to the
+ * new colour rather than glowing.
+ */
+const BROW_TINT_LIGHTEST = 1.15
+
+/**
+ * How much of the skin under them shows through hairs of a new colour as
+ * light as the skin (less for a darker one, none for one as dark as the
+ * brow was): fair brows are fine, and read as skin more than paint.
+ */
+const BROW_TINT_SHOW = 0.45
 
 /** Where across a brow (from its spine) a point `across` from it takes its colour from, the brow stretched `scale` times. */
 function browSource(across: number, half: number, scale: number) {
@@ -677,61 +919,78 @@ function browSource(across: number, half: number, scale: number) {
   return Math.sign(across) * source
 }
 
+/** A brow's spine, from its upper and lower edges' landmarks (see BROW_EDGES). */
+function browSpine(face: Face, [upper, lower]: (typeof BROW_EDGES)[number]): BrowSpine {
+  return {
+    stations: upper.map((landmark, i) => {
+      const [ux, uy] = face.at(landmark)
+      const [lx, ly] = face.at(lower[i]!)
+      return [(ux + lx) / 2, (uy + ly) / 2] as Point
+    }),
+    halves: upper.map((landmark, i) => {
+      const [ux, uy] = face.at(landmark)
+      const [lx, ly] = face.at(lower[i]!)
+      return Math.hypot(ux - lx, uy - ly) / 2
+    }),
+  }
+}
+
+/** A brow's hairs' colour and the skin's round it, on the front view (see `BROW_CORE`, `BROW_SKIN_*`). */
+function browColours(front: Pixels, spine: BrowSpine, frame: BrowFrame) {
+  const box = boxAround(spine.stations, Math.max(...spine.halves) * BROW_SKIN_TO)
+  const where = (test: (across: number) => boolean) => (x: number, y: number) => {
+    browFrame(spine, x, y, frame)
+    return frame.past === 0 && test(Math.abs(frame.across) / frame.half)
+  }
+  return {
+    hair: quantile(
+      frontColours(
+        front,
+        box,
+        where((across) => across < BROW_CORE),
+      ),
+      BROW_HAIR_QUANTILE,
+      FALLBACK_BROW,
+    ),
+    skin: quantile(
+      frontColours(
+        front,
+        box,
+        where((across) => across > BROW_SKIN_FROM && across < BROW_SKIN_TO),
+      ),
+      BROW_SKIN_QUANTILE,
+      FALLBACK_SKIN,
+    ),
+  }
+}
+
 function browLayers(face: Face, front: Pixels, paint: FacePaint): Layer[] {
   const scale = 1 + BROW_GROWTH * paint.browThickness
   const tint = paint.browColor ? hexToRgb(paint.browColor) : null
-  const frame: BrowFrame = { across: 0, half: 0, past: 0, nx: 0, ny: 0 }
-  return BROW_EDGES.map(([upper, lower]) => {
-    const spine: BrowSpine = {
-      stations: upper.map((landmark, i) => {
-        const [ux, uy] = face.at(landmark)
-        const [lx, ly] = face.at(lower[i]!)
-        return [(ux + lx) / 2, (uy + ly) / 2] as Point
-      }),
-      halves: upper.map((landmark, i) => {
-        const [ux, uy] = face.at(landmark)
-        const [lx, ly] = face.at(lower[i]!)
-        return Math.hypot(ux - lx, uy - ly) / 2
-      }),
-    }
+  const fade = BROW_FADE * Math.max(0, -paint.browDarkness)
+  const darken = BROW_DARKEN * Math.max(0, paint.browDarkness)
+  const frame = newBrowFrame()
+  const above = new Uint8ClampedArray(3)
+  const below = new Uint8ClampedArray(3)
+  const bare = new Float64Array(3)
+  return BROW_EDGES.map((edges) => {
+    const spine = browSpine(face, edges)
     const thickest = Math.max(...spine.halves)
     const box = boxAround(
       spine.stations,
       thickest * Math.max(BROW_END, Math.max(1, scale) * BROW_EDGE + BROW_EASE, BROW_REACH * scale),
     )
-    // The brow's hairs and the skin round it, as they are.
-    const where = (test: (frame: BrowFrame) => boolean) => (x: number, y: number) => {
-      browFrame(spine, x, y, frame)
-      return frame.past === 0 && test(frame)
-    }
-    const hair = quantile(
-      frontColours(
-        front,
-        box,
-        where(({ across, half }) => Math.abs(across) < half * BROW_CORE),
-      ),
-      0.25,
-      FALLBACK_BROW,
-    )
-    const skin = quantile(
-      frontColours(
-        front,
-        box,
-        where(
-          ({ across, half }) =>
-            Math.abs(across) > half * BROW_SKIN_FROM && Math.abs(across) < half * BROW_SKIN_TO,
-        ),
-      ),
-      0.6,
-      FALLBACK_SKIN,
-    )
+    const { hair, skin } = browColours(front, spine, frame)
+    const hairLum = Math.max(1, luminance(...hair))
     const skinLum = luminance(...skin)
-    const contrast = Math.max(BROW_CONTRAST, skinLum - luminance(...hair))
-    const fade = BROW_FADE * Math.max(0, -paint.browDarkness)
-    const darken = BROW_DARKEN * Math.max(0, paint.browDarkness)
+    const contrast = Math.max(BROW_CONTRAST, skinLum - hairLum)
+    const show = tint
+      ? BROW_TINT_SHOW * smoothstep(hairLum, Math.max(hairLum + 1, skinLum), luminance(...tint))
+      : 0
     return {
       box,
       underHair: 'locks',
+      looks: fade > 0 || show > 0,
       moves:
         scale === 1
           ? undefined
@@ -744,20 +1003,34 @@ function browLayers(face: Face, front: Pixels, paint: FacePaint): Layer[] {
               offset[1] = frame.ny * shift
               return shift !== 0
             },
-      paint: (colour, x, y, strength) => {
+      paint: (colour, x, y, strength, _texel, look) => {
         browFrame(spine, x, y, frame)
         const reach = frame.half * Math.max(1, scale)
         const region =
           (1 - smoothstep(reach * BROW_EDGE, reach * BROW_REACH, Math.abs(frame.across))) *
           (1 - smoothstep(0, BROW_END * frame.half, frame.past))
         if (region <= 0) return
-        const share = (skinLum - luminance(colour[0]!, colour[1]!, colour[2]!)) / contrast
+        const lightness = luminance(colour[0]!, colour[1]!, colour[2]!)
+        const share = (skinLum - lightness) / contrast
         const w = region * strength * smoothstep(BROW_HAIR_FROM, BROW_HAIR_TO, share)
         if (w <= 0) return
-        // A new colour shifts each hair by the brow's change of colour, so
+        if (fade > 0 || show > 0) {
+          // The skin clear of the brow either side of the texel.
+          const out = frame.half * BROW_FADE_OUT
+          look(frame.nx * out, frame.ny * out, above)
+          look(-frame.nx * out, -frame.ny * out, below)
+          for (let c = 0; c < 3; c++) bare[c] = (above[c]! + below[c]!) / 2
+        }
+        // A new colour keeps each hair's lightness against the brow's, so
         // the brow keeps its texture.
-        if (tint) for (let c = 0; c < 3; c++) colour[c] = colour[c]! + (tint[c]! - hair[c]!) * w
-        if (fade > 0) mixTowards(colour, skin, fade * w)
+        if (tint) {
+          const ratio = Math.min(BROW_TINT_LIGHTEST, lightness / hairLum)
+          for (let c = 0; c < 3; c++) {
+            const hairs = Math.min(255, tint[c]! * ratio)
+            colour[c] = colour[c]! + (hairs + (bare[c]! - hairs) * show - colour[c]!) * w
+          }
+        }
+        if (fade > 0) mixTowards(colour, bare, fade * w)
         for (let c = 0; c < 3; c++) colour[c]! *= 1 - darken * w
       },
     }
@@ -817,39 +1090,118 @@ const STUBS_DENSE = 0.5
 const STUB_COLOUR = 0.45
 const STUBBLE_SHADOW: readonly [number, number] = [0.08, 0.26]
 
-/** A beard where no hair colour is known: dark brown. */
-export const DEFAULT_BEARD: Rgb = [58, 42, 32]
+/** How much of a beard's strand pattern is its fine strands, the locks they lie in and each texel's own grain (together 1). */
+const STRAND_SHARE = 0.5
+const LOCK_SHARE = 0.3
+const BEARD_GRAIN_SHARE = 0.2
 
-/** The least lightness a beard's strands keep, so a black one still shows its strands. */
+/** How much of its area a beard grows over: this share at amount 0, all of it at 1. */
+const BEARD_GROWTH_LEAST = 0.5
+
+/** A strand's shade: this dark in the strand pattern's troughs, and this much lighter up to its peaks (strands catch the light). */
+const STRAND_SHADE_LEAST = 0.5
+const STRAND_SHADE_RANGE = 1.1
+
+/** How much of its colour a stub of stubble shows: this share at amount 0, all of it at 1. */
+const STUB_LEAST = 0.5
+
+/** How far the lips' edge fades, where a full beard or stubble stops at them (× a trimmed beard's feather). */
+const BEARD_LIP_FEATHER = 0.4
+
+/**
+ * How far a mustache hangs over the upper lip, a share of the way from the
+ * lip's edge to its inner edge (a real one hangs over it, where the
+ * landmarks' edge would leave a bare gap above it).
+ */
+const MUSTACHE_OVERHANG = 0.3
+
+/**
+ * A mustache thins out towards its tips: from this share of the way from
+ * its middle to a tip, down to this much of its growth at the tip, so its
+ * sides aren't a hard, square edge.
+ */
+const MUSTACHE_TAPER = 0.55
+const MUSTACHE_TIP = 0.35
+
+/** A beard where the character's brows show no colour apart from the skin's: a near-black brown. */
+const DEFAULT_BEARD: Rgb = [38, 27, 20]
+
+/** The character's own beard grows in its brows' colour when that is at least this unlike the skin (see colorDistance). */
+const BEARD_APART = 0.15
+
+/** The most of the skin's lightness a beard of the character's own colour has: it reads as hair on any skin, however dark. */
+const OWN_BEARD_LIGHTEST = 0.55
+
+/** The least lightness a beard's strands keep, so a black one still shows its strands; on dark skin at most this share of the skin's. */
 const BEARD_FLOOR = 34
+const BEARD_FLOOR_SHARE = 0.4
 
-function beardLayer(face: Face, skinLum: number, paint: FacePaint, tint: Rgb): Layer {
+/**
+ * The colour the character's own beard grows in: its brows' (as dark as
+ * OWN_BEARD_LIGHTEST has it), or DEFAULT_BEARD's where they hardly stand
+ * apart from the skin, or aren't a hair's colour (a cap's brim over them).
+ */
+function ownBeard(face: Face, front: Pixels, skin: Rgb): Rgb {
+  const frame = newBrowFrame()
+  const brows = BROW_EDGES.map((edges) => browColours(front, browSpine(face, edges), frame).hair)
+  const mean: Rgb = [0, 1, 2].map((c) => (brows[0]![c]! + brows[1]![c]!) / 2) as Rgb
+  const skinLum = luminance(...skin)
+  const hairs = hairHued(mean) && colorDistance(...mean, skin, skinLum) >= BEARD_APART
+  const colour = hairs ? mean : DEFAULT_BEARD
+  const most = OWN_BEARD_LIGHTEST * skinLum
+  const lightness = luminance(...colour)
+  return lightness > most ? (colour.map((c) => (c * most) / lightness) as Rgb) : colour
+}
+
+/** The mustache's outline (see MUSTACHE), its lower edge hanging over the lips' (`lips`, as FACE_PARTS.lips) by MUSTACHE_OVERHANG. */
+function mustacheOutline(face: Face, lips: readonly Point[]): Point[] {
+  const edge = new Map(FACE_PARTS.lips.map((i, k) => [i, lips[k]!]))
+  return MUSTACHE.map((landmark) => {
+    const k = (UPPER_LIP as readonly number[]).indexOf(landmark)
+    if (k < 0) return face.at(landmark)
+    const [ex, ey] = edge.get(facePointOf(landmark))!
+    const [ix, iy] = face.at(UPPER_LIP_INNER[k]!)
+    return [ex + (ix - ex) * MUSTACHE_OVERHANG, ey + (iy - ey) * MUSTACHE_OVERHANG] as Point
+  })
+}
+
+function beardLayer(
+  face: Face,
+  skinLum: number,
+  paint: FacePaint,
+  tint: Rgb,
+  lipLine: readonly Point[],
+): Layer {
   const { beard, beardAmount: amount } = paint
   const e = face.eyes
   const outline = (landmarks: readonly number[]) => landmarks.map(face.at)
   // A full beard and stubble cover the jaw and neck, but not the lips.
   const whole = beard === 'full' || beard === 'stubble'
   const feather = (whole ? BEARD_FEATHER : TRIMMED_FEATHER) * e
+  const mustache = areaOf(mustacheOutline(face, lipLine), feather)
   const areas =
     beard === 'mustache'
-      ? [areaOf(outline(MUSTACHE), feather)]
+      ? [mustache]
       : beard === 'goatee'
-        ? [areaOf(outline(MUSTACHE), feather), areaOf(outline(CHIN), feather)]
+        ? [mustache, areaOf(outline(CHIN), feather)]
         : [areaOf(outline(FULL_BEARD), feather)]
-  const lips = areaOf(
-    FACE_PARTS.lips.map((i) => face.points[i]!),
-    TRIMMED_FEATHER * e * 0.4,
-  )
+  const lips = areaOf([...lipLine], TRIMMED_FEATHER * e * BEARD_LIP_FEATHER)
   const jaw = byX(outline(JAW))
   const neck = BEARD_NECK * e
   const [jawLeft, jawRight] = [jaw[0]![0], jaw[jaw.length - 1]![0]]
+  const [tipLeft, tipRight] = [face.at(57)[0], face.at(287)[0]]
+  const middle = (tipLeft + tipRight) / 2
+  const halfWidth = Math.max(1e-6, Math.abs(tipRight - tipLeft) / 2)
+  const taper = (x: number) =>
+    1 - (1 - MUSTACHE_TIP) * smoothstep(MUSTACHE_TAPER, 1, Math.abs(x - middle) / halfWidth)
   const box = joinBoxes([
     ...areas.map((area) => area.box),
     ...(whole ? [boxAround(jaw, neck)] : []),
   ])
   const grown = fieldOf(box, feather, (x, y) => {
     let m = 0
-    for (const area of areas) m = Math.max(m, cover(area, x, y))
+    for (const area of areas)
+      m = Math.max(m, cover(area, x, y) * (area === mustache ? taper(x) : 1))
     if (!whole) return m
     // From within the outline's fading edge, so the beard doesn't thin along the jaw.
     const below = y - heightAt(jaw, x)
@@ -862,12 +1214,9 @@ function beardLayer(face: Face, skinLum: number, paint: FacePaint, tint: Rgb): L
   const onLips = fieldOf(lips.box, lips.feather, (x, y) => cover(lips, x, y))
   const region = whole ? (x: number, y: number) => grown(x, y) * (1 - onLips(x, y)) : grown
   const lightness = luminance(...tint)
-  const lift = lightness < BEARD_FLOOR ? BEARD_FLOOR / Math.max(1, lightness) : 1
-  const hairColour = (colour: Float64Array, shade: number): Rgb => {
-    // Lit as the skin under it is.
-    const lit = Math.sqrt(luminance(colour[0]!, colour[1]!, colour[2]!) / Math.max(1, skinLum))
-    return [0, 1, 2].map((c) => Math.min(255, tint[c]! * lift * lit * shade)) as Rgb
-  }
+  const floor = Math.min(BEARD_FLOOR, BEARD_FLOOR_SHARE * skinLum)
+  const lift = lightness < floor ? floor / Math.max(1, lightness) : 1
+  const strand = new Float64Array(3)
   return {
     box,
     underHair: 'strands',
@@ -880,19 +1229,24 @@ function beardLayer(face: Face, skinLum: number, paint: FacePaint, tint: Rgb): L
       if (beard === 'stubble') {
         const stub = grain < m * (STUBS_SPARSE + (STUBS_DENSE - STUBS_SPARSE) * amount)
         const shadow = m * (STUBBLE_SHADOW[0] + (STUBBLE_SHADOW[1] - STUBBLE_SHADOW[0]) * amount)
-        w = shadow + (1 - shadow) * (stub ? STUB_COLOUR * (0.5 + 0.5 * amount) : 0)
+        w =
+          shadow +
+          (1 - shadow) * (stub ? STUB_COLOUR * (STUB_LEAST + (1 - STUB_LEAST) * amount) : 0)
       } else {
         const strands =
-          0.5 * valueNoise(x / (STRAND_WIDTH * e), y / (STRAND_LENGTH * e), 2) +
-          0.3 * valueNoise(x / (LOCK_WIDTH * e), y / (LOCK_LENGTH * e), 3) +
-          0.2 * grain
-        const growth = m * (0.5 + 0.5 * amount)
+          STRAND_SHARE * valueNoise(x / (STRAND_WIDTH * e), y / (STRAND_LENGTH * e), 2) +
+          LOCK_SHARE * valueNoise(x / (LOCK_WIDTH * e), y / (LOCK_LENGTH * e), 3) +
+          BEARD_GRAIN_SHARE * grain
+        const growth = m * (BEARD_GROWTH_LEAST + (1 - BEARD_GROWTH_LEAST) * amount)
         const hair = smoothstep(1 - growth - STRAND_EDGE, 1 - growth + STRAND_EDGE, strands)
         const under = BEARD_UNDER * growth
         w = under + (1 - under) * hair * BEARD_HAIR
-        shade = 0.5 + 1.1 * strands
+        shade = STRAND_SHADE_LEAST + STRAND_SHADE_RANGE * strands
       }
-      mixTowards(colour, hairColour(colour, shade), w * strength)
+      // Lit as the skin under it is.
+      const lit = Math.sqrt(luminance(colour[0]!, colour[1]!, colour[2]!) / Math.max(1, skinLum))
+      for (let c = 0; c < 3; c++) strand[c] = Math.min(255, tint[c]! * lift * lit * shade)
+      mixTowards(colour, strand, w * strength)
     },
   }
 }
@@ -917,6 +1271,20 @@ const FRECKLE_LARGEST = 0.35
 /** What a freckle multiplies the skin's colour by at its darkest: browner and darker. */
 const FRECKLE_TINT: Rgb = [0.72, 0.56, 0.46]
 
+/** A freckle's centre lies at least this far in from its cell's sides (a share of the cell): neighbours seldom touch. */
+const FRECKLE_INSET = 0.15
+
+/** Where the patches' density is below this, no freckle is drawn. */
+const FRECKLE_SPARSEST = 0.05
+
+/** A freckle's depth: from the first to the first and second together, at random; and times this share at freckles 0, all of it at 1. */
+const FRECKLE_DEPTH = 0.45
+const FRECKLE_DEPTH_RANGE = 0.45
+const FRECKLE_FAINTEST = 0.55
+
+/** How much of a freckle's radius is solid before its edge fades. */
+const FRECKLE_CORE = 0.35
+
 function frecklesLayer(face: Face, amount: number): Layer {
   const patches = FRECKLE_PATCHES.map(({ landmarks, across, down }) => {
     const points = landmarks.map(face.at)
@@ -932,7 +1300,7 @@ function frecklesLayer(face: Face, amount: number): Layer {
     for (const patch of patches) {
       const a = (x - patch.x) / patch.across
       const b = (y - patch.y) / patch.down
-      most = Math.max(most, Math.exp(-2 * (a * a + b * b)))
+      most = Math.max(most, Math.exp(-PATCH_FALLOFF * (a * a + b * b)))
     }
     return most
   }
@@ -941,10 +1309,10 @@ function frecklesLayer(face: Face, amount: number): Layer {
     box: joinBoxes(
       patches.map(
         ({ x, y, across, down }): Box => [
-          x - across * 1.6,
-          y - down * 1.6,
-          x + across * 1.6,
-          y + down * 1.6,
+          x - across * PATCH_BOX,
+          y - down * PATCH_BOX,
+          x + across * PATCH_BOX,
+          y + down * PATCH_BOX,
         ],
       ),
     ),
@@ -956,16 +1324,18 @@ function frecklesLayer(face: Face, amount: number): Layer {
       for (let j = cy - 1; j <= cy + 1; j++) {
         for (let i = cx - 1; i <= cx + 1; i++) {
           if (hash(i, j, 3) >= FRECKLE_DENSITY * amount) continue
-          const fx = (i + 0.15 + 0.7 * hash(i, j, 4)) * cell
-          const fy = (j + 0.15 + 0.7 * hash(i, j, 5)) * cell
+          const fx = (i + FRECKLE_INSET + (1 - 2 * FRECKLE_INSET) * hash(i, j, 4)) * cell
+          const fy = (j + FRECKLE_INSET + (1 - 2 * FRECKLE_INSET) * hash(i, j, 5)) * cell
           const here = density(fx, fy)
-          if (here < 0.05) continue
+          if (here < FRECKLE_SPARSEST) continue
           const radius =
             cell * (FRECKLE_SMALLEST + (FRECKLE_LARGEST - FRECKLE_SMALLEST) * hash(i, j, 6))
-          const d = Math.hypot(x - fx, y - fy)
+          const d = Math.sqrt((x - fx) ** 2 + (y - fy) ** 2)
           if (d >= radius) continue
-          const depth = (0.45 + 0.45 * hash(i, j, 7)) * (0.55 + 0.45 * amount)
-          dark = Math.max(dark, (1 - smoothstep(radius * 0.35, radius, d)) * here * depth)
+          const depth =
+            (FRECKLE_DEPTH + FRECKLE_DEPTH_RANGE * hash(i, j, 7)) *
+            (FRECKLE_FAINTEST + (1 - FRECKLE_FAINTEST) * amount)
+          dark = Math.max(dark, (1 - smoothstep(radius * FRECKLE_CORE, radius, d)) * here * depth)
         }
       }
       const w = dark * strength
@@ -976,8 +1346,8 @@ function frecklesLayer(face: Face, amount: number): Layer {
 
 /** What painting a face needs besides the face. */
 export type PaintContext = {
-  /** The colour a beard grows in: the hair's dye, or the character's own hair, or DEFAULT_BEARD. */
-  beard: Rgb
+  /** The colour a beard grows in: the hair's dye, or null for the character's own (see `ownBeard`). */
+  beard: Rgb | null
   /** Where the head's texture shows the character's hair (0–1 per texel): it lies over the paint. Null when there is none. */
   hair: Float32Array | null
 }
@@ -1034,7 +1404,20 @@ export function paintFace(
     measured ??= renderFront(head, geometry.all, MEASURE_VIEW).image
     return measured
   }
-  const skinLum = () => luminance(...skinColour(face, front()))
+  let skin: Rgb | null = null
+  const skinTone = () => {
+    skin ??= skinColour(face, front())
+    return skin
+  }
+  const skinLum = () => luminance(...skinTone())
+  let lips: { own: Rgb; outline: Point[] } | null = null
+  const lipLine = () => {
+    if (!lips) {
+      const own = lipColour(face, front())
+      lips = { own, outline: lipOutline(face, head, geometry, own) }
+    }
+    return lips
+  }
   const layers: Layer[] = []
   if (paint.browColor || paint.browDarkness !== 0 || paint.browThickness !== 0) {
     layers.push(...browLayers(face, front(), paint))
@@ -1047,18 +1430,27 @@ export function paintFace(
     layers.push(shadowLayer(face, skinLum(), hexToRgb(paint.shadow), paint.shadowAmount))
   }
   if (paint.lips && paint.lipAmount > 0) {
-    layers.push(lipsLayer(face, front(), hexToRgb(paint.lips), paint.lipAmount))
+    const { own, outline } = lipLine()
+    layers.push(lipsLayer(face, outline, own, hexToRgb(paint.lips), paint.lipAmount))
   }
   if (paint.liner > 0) layers.push(linerLayer(face, paint.liner))
   if (paint.beard !== 'none' && paint.beardAmount > 0) {
-    layers.push(beardLayer(face, skinLum(), paint, context.beard))
+    const tint = context.beard ?? ownBeard(face, front(), skinTone())
+    layers.push(beardLayer(face, skinLum(), paint, tint, lipLine().outline))
   }
   if (layers.length === 0) return
 
   const bounds = joinBoxes(layers.map((layer) => layer.box))
   const { width, height } = head
-  // Reshaped brows read the texture as it was, around them.
-  const source: Pixels = layers.some((layer) => layer.moves)
+  const { hair } = context
+  const fringe =
+    hair && layers.some((layer) => layer.underHair === 'locks')
+      ? fringeDensity(hair, width, height)
+      : null
+  const fringeWidth = Math.ceil(width / FRINGE_CELL)
+  const fringeHeight = Math.ceil(height / FRINGE_CELL)
+  // Reshaped and faded brows read the texture as it was, around them.
+  const source: Pixels = layers.some((layer) => layer.moves || layer.looks)
     ? { data: new Uint8ClampedArray(head.data), width, height }
     : head
   const colour = new Float64Array(3)
@@ -1066,6 +1458,24 @@ export function paintFace(
   const step = new Float64Array(4)
   const sample = new Uint8ClampedArray(3)
   let stepOf: HeadTriangle | null = null
+  // The texel being painted: its triangle and where it lies on the texture.
+  let current: HeadTriangle | null = null
+  let u = 0
+  let v = 0
+  const read = (dx: number, dy: number, out: Uint8ClampedArray) => {
+    if (current !== stepOf) {
+      stepOf = current
+      textureStep(current!, step)
+    }
+    const su = u + step[0]! * dx + step[1]! * dy
+    const sv = v + step[2]! * dx + step[3]! * dy
+    sampleColor(source, su * width - 0.5, sv * height - 0.5, out, 0)
+  }
+  const underHair = (layer: Layer, texel: number) => {
+    if (!hair || !layer.underHair) return 1
+    if (layer.underHair === 'strands') return 1 - hair[texel]!
+    return 1 - lockOver(hair, fringe!, fringeWidth, fringeHeight, width, height, texel)
+  }
   const overBounds = (tri: HeadTriangle) =>
     Math.max(tri.n[0]!, tri.n[1]!, tri.n[2]!) > FACING_FROM &&
     Math.max(tri.x[0]!, tri.x[1]!, tri.x[2]!) >= bounds[0] &&
@@ -1082,32 +1492,20 @@ export function paintFace(
     const x = tri.x[0]! * w0 + tri.x[1]! * w1 + tri.x[2]! * w2
     const y = tri.y[0]! * w0 + tri.y[1]! * w1 + tri.y[2]! * w2
     if (!inBox(bounds, x, y)) return
+    current = tri
+    u = tri.u[0]! * w0 + tri.u[1]! * w1 + tri.u[2]! * w2
+    v = tri.v[0]! * w0 + tri.v[1]! * w1 + tri.v[2]! * w2
     const p = texel * 4
     for (let c = 0; c < 3; c++) colour[c] = source.data[p + c]!
-    const { hair } = context
     for (const layer of layers) {
       if (!inBox(layer.box, x, y)) continue
-      const strength =
-        facing *
-        (!hair || !layer.underHair
-          ? 1
-          : layer.underHair === 'strands'
-            ? 1 - hair[texel]!
-            : 1 - smoothstep(LOCK_FROM, LOCK_TO, hairAround(hair, width, height, texel)))
+      const strength = facing * underHair(layer, texel)
       if (strength <= 0) continue
       if (layer.moves?.(x, y, offset)) {
-        if (tri !== stepOf) {
-          stepOf = tri
-          textureStep(tri, step)
-        }
-        const dx = offset[0]! * strength
-        const dy = offset[1]! * strength
-        const u = tri.u[0]! * w0 + tri.u[1]! * w1 + tri.u[2]! * w2 + step[0]! * dx + step[1]! * dy
-        const v = tri.v[0]! * w0 + tri.v[1]! * w1 + tri.v[2]! * w2 + step[2]! * dx + step[3]! * dy
-        sampleColor(source, u * width - 0.5, v * height - 0.5, sample, 0)
+        read(offset[0]! * strength, offset[1]! * strength, sample)
         for (let c = 0; c < 3; c++) colour[c] = sample[c]!
       }
-      layer.paint(colour, x, y, strength, texel)
+      layer.paint(colour, x, y, strength, texel, read)
     }
     for (let c = 0; c < 3; c++) head.data[p + c] = colour[c]!
   })
@@ -1116,14 +1514,338 @@ export function paintFace(
 /** How much smaller than the head's texture a shaved scalp is worked out on first: its skin is filled in smooth, so coarse will do. */
 const SHAVE_SCALE = 4
 
-/** Where a texel counts as hair to shave (its share of hair, fully from the second): low, so no strand is left. */
+/**
+ * Beside the face, the band the hair's colour is read in: from this far
+ * above the eyes to this far below them, and out from the face's outline
+ * this far (all × the distance between the eyes) — temples, sideburns and
+ * hair down the sides, where caps and goggles seldom reach.
+ */
+const SIDE_ABOVE = 0.3
+const SIDE_BELOW = 0.5
+const SIDE_OUT = 0.3
+
+/** How unlike the skin (see colorDistance) a colour in that band must be to be hair, or something over it. */
+const SIDE_APART = 0.35
+
+/** The share of the band hair must take to be read there; as much of anything else there is gear over the sides (a cap, a hijab). */
+const SIDE_SHARE = 0.15
+
+/** Where among the hair's colours in the band, darkest first, its colour is read: on the dark side, clear of strands blended with the skin between them. */
+const SIDE_HAIR_QUANTILE = 0.35
+
+/**
+ * Hair's hues: red over blue by at least this, and this much more per
+ * level of lightness (warmer than grey); green over blue by at least this
+ * share of red's lead, less a little slack (no redder than red hair); no
+ * greener than red; red over blue by at most this share of red (no more
+ * saturated than hair); and no lighter than this. Not a blue or
+ * camouflage cap, a beret's or hijab's crimson, braid's gold or a chef's
+ * white.
+ */
+const HAIR_WARMTH = 2
+const HAIR_WARMTH_LIGHT = 0.06
+const HAIR_REDDEST = 0.2
+const HAIR_HUE_SLACK = 3
+const HAIR_SATURATED = 0.8
+const HAIR_LIGHTEST = 185
+
+/** Whether a colour is one hair comes in (see `HAIR_*`). */
+export function hairHued([r, g, b]: Rgb) {
+  return (
+    r - b >= HAIR_WARMTH + HAIR_WARMTH_LIGHT * luminance(r, g, b) &&
+    g - b >= HAIR_REDDEST * (r - b) - HAIR_HUE_SLACK &&
+    r >= g &&
+    r - b <= HAIR_SATURATED * r &&
+    luminance(r, g, b) <= HAIR_LIGHTEST
+  )
+}
+
+/** The crown is read on the front view above the face's top (landmark 10) from this far above it, and this far either side of it (× the distance between the eyes). */
+const CROWN_ABOVE = 0.15
+const CROWN_ACROSS = 0.5
+
+/**
+ * The crown is hair, not a bald scalp, when its colour is at least this
+ * unlike the skin's (see colorDistance), or its hue this unlike (its
+ * colour brought to the skin's lightness): fair hair is hardly darker.
+ */
+const CROWN_APART = 0.2
+const CROWN_HUE_APART = 0.125
+
+/** How unlike the skin's a colour's hue is: its distance (see colorDistance) brought to the skin's lightness. */
+function hueDistance(colour: Rgb, skin: Rgb) {
+  const skinLum = luminance(...skin)
+  const scale = skinLum / Math.max(1, luminance(...colour))
+  const [r, g, b] = colour.map((c) => Math.min(255, c * scale)) as Rgb
+  return colorDistance(r, g, b, skin, skinLum)
+}
+
+/** The crown's colour on the front view (see `CROWN_*`) if it is hair's: a hair's hue, standing apart from the skin. */
+function crownHair(face: Face, front: Pixels, skin: Rgb): Rgb | null {
+  const [cx, cy] = face.at(10)
+  const e = face.eyes
+  const crown = quantile(
+    frontColours(
+      front,
+      [cx - CROWN_ACROSS * e, 0, cx + CROWN_ACROSS * e, cy - CROWN_ABOVE * e],
+      () => true,
+    ),
+    0.5,
+    skin,
+  )
+  return standsApart(crown, skin) && hairHued(crown) ? crown : null
+}
+
+/** Whether a colour stands apart from the skin enough to be hair's, not a bald scalp's (see `CROWN_*APART`). */
+const standsApart = (colour: Rgb, skin: Rgb) =>
+  colorDistance(...colour, skin, luminance(...skin)) > CROWN_APART ||
+  hueDistance(colour, skin) > CROWN_HUE_APART
+
+/**
+ * The colour of the hair a shave takes off: what lies beside the face (see
+ * `SIDE_*`) where enough of it is hair; else, the sides being bare, the
+ * crown's (see `crownHair`, or `crown`, the analysis's: see analyseBody)
+ * if that is a hair's hue. Null when there is no hair to take, or the
+ * sides are under something that isn't hair (a hijab, a cap down to the
+ * ears): gear stays, and the hair under it.
+ */
+function hairToShave(face: Face, front: Pixels, skin: Rgb, crown: Rgb | null): Rgb | null {
+  const oval = FACE_PARTS.oval.map((i) => face.points[i]!)
+  const e = face.eyes
+  const reach = SIDE_OUT * e
+  const centre = face.eyeLine(0.5)
+  const band = frontColours(
+    front,
+    [0, centre - SIDE_ABOVE * e, 1, centre + SIDE_BELOW * e],
+    (x, y) => {
+      const out = outlineDistance(oval, x, y)
+      return out > 0 && out < reach
+    },
+  )
+  const skinLum = luminance(...skin)
+  const apart = band.filter((c) => colorDistance(...c, skin, skinLum) > SIDE_APART)
+  const hair = apart.filter(hairHued)
+  const side = quantile(hair, SIDE_HAIR_QUANTILE, skin)
+  if (hair.length > 0 && hair.length >= SIDE_SHARE * band.length && standsApart(side, skin)) {
+    return side
+  }
+  if (apart.length > 0 && apart.length >= SIDE_SHARE * band.length) return null
+  return crownHair(face, front, skin) ?? (crown && hairHued(crown) ? crown : null)
+}
+
+/**
+ * A texel is hair by how much nearer the hair's colour it lies than the
+ * skin's (see colorDistance): not at all from the first, fully from the
+ * second (as hairMask has it) —
+ */
+const HAIR_NEARER_FROM = -0.04
+const HAIR_NEARER_TO = 0.08
+
+/** — and only so far from the hair's colour, fully up to the first distance and not at all from the second: a cap of another colour stays. */
+const HAIR_NEAR = 0.25
+const HAIR_FAR = 0.45
+
+/** Below this lightness a pixel's hue is noise: darker than the hair, it is the hair's deepest shadow. */
+const NEAR_BLACK = 8
+
+/**
+ * How like `hair` each pixel is (0–1; see `HAIR_NEARER_*`, `HAIR_NEAR`),
+ * `skin` being the skin's colour: none where nothing is drawn. A pixel
+ * darker than the hair is only as far from it as its hue (brought up to
+ * the hair's lightness): the hair's shadows are hair.
+ */
+function hairLikeness(head: Pixels, hair: Rgb, skin: Rgb): Float32Array {
+  const { data } = head
+  const like = new Float32Array(data.length / 4)
+  const hairLum = luminance(...hair)
+  const skinLum = luminance(...skin)
+  for (let i = 0, p = 0; i < like.length; i++, p += 4) {
+    const r = data[p]!
+    const g = data[p + 1]!
+    const b = data[p + 2]!
+    if (data[p + 3] === 0) continue
+    const lightness = luminance(r, g, b)
+    const lift = hairLum / Math.max(1, lightness)
+    const darker = lift > 1
+    const toHair = !darker
+      ? colorDistance(r, g, b, hair, hairLum)
+      : lightness < NEAR_BLACK
+        ? 0
+        : colorDistance(r * lift, g * lift, b * lift, hair, hairLum)
+    if (toHair >= HAIR_FAR) continue
+    const toSkin = colorDistance(r, g, b, skin, skinLum)
+    const nearer = darker ? colorDistance(r, g, b, hair, hairLum) : toHair
+    like[i] =
+      smoothstep(HAIR_NEARER_FROM, HAIR_NEARER_TO, toSkin - nearer) *
+      (1 - smoothstep(HAIR_NEAR, HAIR_FAR, toHair))
+  }
+  return like
+}
+
+/**
+ * Below the eyes a shave leaves the face be — beard, stubble and shading —
+ * out to its outline, or on a bearded face this far past it (the jaw's
+ * sides, a beard's reach towards the ears; hair falling beside a beardless
+ * face goes), and down the neck under the jaw, giving way over this much
+ * (all × the distance between the eyes).
+ */
+const GUARD_OUT = 0.02
+const GUARD_BEARD = 0.2
+const GUARD_EDGE = 0.08
+
+/** A face is bearded when this share of its chin (the lower lip to the chin's tip, inside its outline) is nearer the hair's colour than the skin's. */
+const BEARDED = 0.3
+
+/** Whether a face has a beard of the hair's colour (see BEARDED). */
+function bearded(face: Face, front: Pixels, hair: Rgb, skin: Rgb) {
+  const oval = FACE_PARTS.oval.map((i) => face.points[i]!)
+  const [left, , right] = boxAround(oval, 0)
+  const chin = frontColours(
+    front,
+    [left, face.at(17)[1], right, face.at(152)[1]],
+    (x, y) => outlineDistance(oval, x, y) < 0,
+  )
+  const hairLum = luminance(...hair)
+  const skinLum = luminance(...skin)
+  const hairy = chin.filter(
+    (c) => colorDistance(...c, hair, hairLum) < colorDistance(...c, skin, skinLum),
+  )
+  return hairy.length >= BEARDED * chin.length
+}
+
+/** How squarely a texel must face the front (the normal's forward part) to be guarded, fully from the second: the nape's hair is shaved. */
+const GUARD_FACING_FROM = -0.35
+const GUARD_FACING_TO = -0.1
+
+/**
+ * How much of a texel a shave must leave be (0–1; see `GUARD_*`), by where
+ * it shows on the front view (`x`, `y`) and how squarely it faces it (`n`).
+ * `falling`, only for a beardless face, is the scalp's hair on the front
+ * view (see `joinedHair`): what falls over the face's sides goes.
+ */
+function faceGuard(face: Face, falling: ((x: number, y: number) => number) | null) {
+  const e = face.eyes
+  const edge = GUARD_EDGE * e
+  const reach = (falling ? GUARD_OUT : GUARD_BEARD) * e
+  const oval = FACE_PARTS.oval.map((i) => face.points[i]!)
+  const jaw = byX(JAW.map(face.at))
+  const jawLeft = jaw[0]![0]
+  const jawRight = jaw[jaw.length - 1]![0]
+  const [left, , right] = boxAround(oval, reach + edge)
+  const top = Math.min(face.eyeLine(left), face.eyeLine(right)) - edge
+  const guarded = fieldOf([left, top, right, 1], edge, (x, y) => {
+    const below = smoothstep(-edge, edge, y - face.eyeLine(x))
+    if (below <= 0) return 0
+    const near = 1 - smoothstep(reach - edge, reach + edge, outlineDistance(oval, x, y))
+    const neck =
+      smoothstep(-edge, edge, y - heightAt(jaw, x)) *
+      smoothstep(-edge, edge, Math.min(x - jawLeft, jawRight - x))
+    return below * Math.max(near, neck)
+  })
+  const inside = FALLING_HAIR_IN * e
+  const sides =
+    falling &&
+    fieldOf([left, top, right, 1], edge, (x, y) =>
+      smoothstep(-inside - edge, -inside + edge, outlineDistance(oval, x, y)),
+    )
+  return (x: number, y: number, n: number) =>
+    guarded(x, y) *
+    smoothstep(GUARD_FACING_FROM, GUARD_FACING_TO, n) *
+    (sides ? 1 - falling!(x, y) * sides(x, y) : 1)
+}
+
+/**
+ * On a beardless face, hair falling over its sides below the eyes goes
+ * too (see `joinedHair`), out from this far inside the face's outline (×
+ * the distance between the eyes; the eyes, nose and mouth lie well inside
+ * it).
+ */
+const FALLING_HAIR_IN = 0.45
+
+/**
+ * How like hair (see hairLikeness) the front view must be for the scalp's
+ * hair to be followed from where it surely is: this far above the brows'
+ * tops (× the distance between the eyes), clear of the brows themselves.
+ */
+const JOINED_HAIR_LIKE = 0.5
+const JOINED_HAIR_ABOVE = 0.1
+
+/**
+ * How much of each point of the front view is the scalp's hair: hair
+ * joined to the hair above the brows (see `JOINED_HAIR_*`) — a fringe, or
+ * hair falling beside the face; not brows, a beard or shadows of the
+ * hair's colour on their own.
+ */
+function joinedHair(face: Face, front: Pixels, hair: Rgb, skin: Rgb) {
+  const size = front.width
+  const like = hairLikeness(front, hair, skin)
+  const browTop = Math.min(...FACE_PARTS.brows.map((i) => face.points[i]![1]))
+  const above = browTop - JOINED_HAIR_ABOVE * face.eyes
+  const seeds = new Float32Array(like.length)
+  for (let i = 0; i < like.length; i++) {
+    if ((Math.floor(i / size) + 0.5) / size < above) seeds[i] = 1
+  }
+  // Grown a pixel, to take in the strands' soft edges.
+  const joined = dilate(connectedFrom(like, seeds, size, size, JOINED_HAIR_LIKE), size, size, 1)
+  return (x: number, y: number) => sampleField(joined, size, size, x * size - 0.5, y * size - 0.5)
+}
+
+/** The eyes' lower lids, outer corner to inner (MediaPipe landmarks), in the same order as UPPER_LIDS. */
+const LOWER_LIDS = [
+  [33, 7, 163, 144, 145, 153, 154, 155, 133],
+  [263, 249, 390, 373, 374, 380, 381, 382, 362],
+] as const
+
+/**
+ * How far round a brow, and round an eye (its lashes and lid crease), a
+ * shave keeps the character's own texels whatever the hair's colour took
+ * of them (× the distance between the eyes), fading out over the last:
+ * only a lock of hair over them (a fringe) goes.
+ */
+const KEEP_BROW = 0.04
+const KEEP_EYE = 0.07
+const KEEP_EDGE = 0.02
+
+/**
+ * How much of each point of the front view (0–1) a shave keeps as each
+ * brow, and as the eyes (see `KEEP_*`), with the box each brow's keeps to.
+ */
+function featureKeep(face: Face) {
+  const e = face.eyes
+  const edge = KEEP_EDGE * e
+  const near = (outlines: Point[][], reach: number) => {
+    const box = joinBoxes(outlines.map((outline) => boxAround(outline, reach + edge)))
+    const there = fieldOf(box, edge, (x, y) => {
+      let most = 0
+      for (const outline of outlines) {
+        most = Math.max(
+          most,
+          1 - smoothstep(reach - edge, reach + edge, outlineDistance(outline, x, y)),
+        )
+      }
+      return most
+    })
+    return { box, there }
+  }
+  return {
+    brows: BROW_EDGES.map(([upper, lower]) =>
+      near([[...upper, ...[...lower].reverse()].map(face.at)], KEEP_BROW * e),
+    ),
+    eyes: near(
+      UPPER_LIDS.map((upper, k) => [...upper, ...[...LOWER_LIDS[k]!].reverse()].map(face.at)),
+      KEEP_EYE * e,
+    ).there,
+  }
+}
+
+/** Where a texel counts as hair to shave (its likeness to hair, fully from the second): low, so no strand is left. */
 const SHAVE_FROM = 0.05
 const SHAVE_TO = 0.4
 
 /**
  * Where, on the coarse grid, the hair is dense enough to shave all of it
  * (fully from the second): its darkest strands, too dark for the hair's
- * mask, and its gaps go too, and the fine hairs past its edge, fading out
+ * colour, and its gaps go too, and the fine hairs past its edge, fading out
  * over this many cells beyond it.
  */
 const SHAVE_DENSE_FROM = 0.25
@@ -1131,23 +1853,43 @@ const SHAVE_DENSE_TO = 0.5
 const SHAVE_CLOSE = 4
 
 /**
- * How sure a texel must be of being skin (fully from the second) to fill a
- * shaved scalp from, and the ring round the hair it must lie in (coarse
- * cells from the hair): clear of the hair's shadow, and near enough to be
- * the skin the scalp runs into (not the throat's, say).
+ * How sure a texel the shave leaves be must be of being skin (fully from
+ * the second) to fill a shaved scalp from, and the ring round the hair it
+ * must lie in (coarse cells from the hair): near enough to be the skin the
+ * scalp runs into (not the throat's, say).
  */
 const FILL_FROM = 0.5
 const FILL_TO = 0.9
-const FILL_CLEAR = 4
 const FILL_RING = 8
 
 /**
  * How far from the skin it is filled from (coarse cells) a shaved scalp
- * gives way to the skin's own tone: the fill, averaging whatever skin is
+ * gives way to one tone (see `scalpTone`): the fill, averaging whatever skin is
  * far off (a shadowed nape, an ear), would leave the scalp's halves (apart
  * on the texture) in different tones where they meet.
  */
 const SCALP_BLEND = 6
+
+/**
+ * The scalp's tone is the forehead's, read this far up from the brows'
+ * tops (× the distance between the eyes) where it is skin (see analyseBody)
+ * — when that is this share of it, not all under a fringe. The nose's
+ * bridge stands in for it where its colour is at least this like the
+ * cheeks' skin (see colorDistance; blush can make them redder).
+ */
+const FOREHEAD_REACH = 0.3
+const FOREHEAD_SHARE = 0.1
+const FOREHEAD_LIKE = 0.3
+
+/**
+ * Under a fringe, the tone is read round the bridge of the nose (these
+ * landmarks, this far round × the distance between the eyes: below any
+ * fringe, clear of blush), on its lit side (this far up its colours,
+ * darkest first) as the forehead is lit.
+ */
+const NOSE_BRIDGE = [6, 197] as const
+const NOSE_BRIDGE_REACH = 0.08
+const NOSE_BRIDGE_LIT = 0.7
 
 /** How much darker than the skin around it a shaved scalp is. */
 const SCALP_SHADOW = 0.04
@@ -1156,8 +1898,19 @@ const SCALP_SHADOW = 0.04
 const STUBBLE_ROOTS = 0.3
 const ROOT_COLOUR = 0.15
 
-/** How far past the face's features (× the distance between the eyes) a shave takes only locks of hair (see `UnderHair`). */
-const SHAVE_KEEP_OFF = 0.03
+/**
+ * A shaved scalp's grain: the bare skin's own spread of lightness from
+ * texel to texel (at most this much), laid on as noise this many texels
+ * across over texel-fine noise, so it has pores like the rest of the skin
+ * rather than a flat, painted look.
+ */
+const GRAIN_MOST = 0.08
+const GRAIN_CELL = 3
+
+/** How much of the grain is the coarser noise and how much the texel-fine, and their sum's spread (for noise each −1–1). */
+const GRAIN_COARSE = 0.7
+const GRAIN_FINE = 0.5
+const GRAIN_SPREAD = 0.38
 
 /** A grid of values each averaged over the square `radius` cells round it (a box blur, in two passes). */
 function blurField(grid: Float32Array, width: number, height: number, radius: number) {
@@ -1191,99 +1944,250 @@ function blurField(grid: Float32Array, width: number, height: number, radius: nu
 }
 
 /**
- * Shaves a head's painted hair (in place): the hair (`hair`, 0–1 per texel)
- * is filled with the skin around it (`skin`, 0–1 per texel), and further
- * from that skin with its tone (the cheeks', or the skin's median without
- * landmarks), a little darker and dotted with stubs of the hair it was.
- * Only the skin's own texels are shaved (the mouth's and eyes' textures can
- * look like hair); with the character's face landmarks (`target`), its
- * features — brows and lashes, nostrils, the line between the lips — are
- * kept, whatever the hair's mask took of them, and only a lock over them
- * (a fringe) goes.
+ * The tone a shaved scalp takes far from other skin when the forehead's is
+ * under a fringe (see `shaveable`): the bridge of the nose's, where it is
+ * skin (nearer the cheeks' `skin` than the hair's colour, and not far off
+ * it); else the cheeks'.
  */
-export function shaveHead(
+function scalpTone(face: Face, front: Pixels, skin: Rgb, hair: Rgb): Rgb {
+  const skinLum = luminance(...skin)
+  const hairLum = luminance(...hair)
+  const bare = (c: Rgb) => {
+    const toSkin = colorDistance(...c, skin, skinLum)
+    return toSkin < FOREHEAD_LIKE && toSkin < colorDistance(...c, hair, hairLum)
+  }
+  const bridge = NOSE_BRIDGE.map(face.at)
+  const reach = NOSE_BRIDGE_REACH * face.eyes
+  const nose = frontColours(front, boxAround(bridge, reach), (x, y) =>
+    bridge.some(([bx, by]) => (x - bx) ** 2 + (y - by) ** 2 <= reach * reach),
+  ).filter(bare)
+  return quantile(nose, NOSE_BRIDGE_LIT, skin)
+}
+
+/** A brow is under a fringe (and restored whole after a shave: see `restoreBrows`) when locks of hair cover this share of its core. */
+const BROW_HIDDEN = 0.35
+
+/**
+ * What a shave leaves be and what it may take: per texel of the face's
+ * skin, how free it is to shave (0–1: not the face below the eyes, see
+ * `faceGuard`, nor the brows and eyes but for a lock of the scalp's hair
+ * over them, see `featureKeep`, `lockOver` and `joined`; a brow the
+ * fringe hides goes whole, to be restored); how much of each brow a fringe
+ * covers; and which texels show the forehead (see `FOREHEAD_*`).
+ */
+function shaveable(
   head: Pixels,
   geometry: HeadGeometry,
-  hair: Float32Array,
-  skin: Float32Array,
-  target: readonly number[] | null,
+  face: Face,
+  like: Float32Array,
+  beard: boolean,
+  joined: (x: number, y: number) => number,
 ) {
-  const { data, width, height } = head
-  const face = target && faceOf(target)
-  const kept = face
-    ? featureRegions(face.points).map((outline) => areaOf(outline, SHAVE_KEEP_OFF * face.eyes))
-    : []
-  const keptBox = kept.length > 0 ? joinBoxes(kept.map((area) => area.box)) : null
-  const features =
-    keptBox &&
-    fieldOf(keptBox, kept[0]!.feather, (x, y) => {
-      let there = 0
-      for (const area of kept) there = Math.max(there, cover(area, x, y))
-      return there
-    })
+  const { width, height } = head
+  const brows = FACE_PARTS.brows.map((i) => face.points[i]!)
+  const [browLeft, browTop, browRight] = boxAround(brows, 0)
+  const band: Box = [browLeft, browTop - FOREHEAD_REACH * face.eyes, browRight, browTop]
+  const forehead = new Uint8Array(width * height)
+  const guard = faceGuard(face, beard ? null : joined)
+  const keep = featureKeep(face)
+  const fringe = fringeDensity(like, width, height)
+  const fringeWidth = Math.ceil(width / FRINGE_CELL)
+  const fringeHeight = Math.ceil(height / FRINGE_CELL)
+  const spines = BROW_EDGES.map((edges) => browSpine(face, edges))
+  const covered = spines.map(() => ({ locks: 0, texels: 0 }))
+  // What each brow keeps: freed, texel by texel, if a fringe hides it.
+  const browKept = spines.map(() => ({ texels: [] as number[], free: [] as number[] }))
+  const browKeeps = new Float64Array(spines.length)
+  const frame = newBrowFrame()
   const onSkin = new Uint8Array(width * height)
-  const keep = new Float32Array(width * height)
+  const free = new Float32Array(width * height)
   forEachTexel(
     head,
     geometry.skin,
     () => true,
     (texel, tri, w0, w1, w2) => {
       onSkin[texel] = 1
-      if (!features || tri.n[0]! * w0 + tri.n[1]! * w1 + tri.n[2]! * w2 <= 0) return
-      const there = features(
-        tri.x[0]! * w0 + tri.x[1]! * w1 + tri.x[2]! * w2,
-        tri.y[0]! * w0 + tri.y[1]! * w1 + tri.y[2]! * w2,
-      )
-      if (there <= 0) return
-      keep[texel] =
-        there * (1 - smoothstep(LOCK_FROM, LOCK_TO, hairAround(hair, width, height, texel)))
+      const n = tri.n[0]! * w0 + tri.n[1]! * w1 + tri.n[2]! * w2
+      const x = tri.x[0]! * w0 + tri.x[1]! * w1 + tri.x[2]! * w2
+      const y = tri.y[0]! * w0 + tri.y[1]! * w1 + tri.y[2]! * w2
+      let kept = 0
+      if (n > 0 && inBox(band, x, y)) forehead[texel] = 1
+      const guarded = guard(x, y, n)
+      if (n > 0) {
+        const eye = keep.eyes(x, y)
+        let there = eye
+        for (let k = 0; k < spines.length; k++) {
+          const brow = keep.brows[k]!
+          browKeeps[k] = inBox(brow.box, x, y) ? brow.there(x, y) : 0
+          there = Math.max(there, browKeeps[k]!)
+        }
+        if (there > 0) {
+          const lock =
+            lockOver(like, fringe, fringeWidth, fringeHeight, width, height, texel) * joined(x, y)
+          kept = there * (1 - lock)
+          for (let k = 0; k < spines.length; k++) {
+            if (!(browKeeps[k]! > 0)) continue
+            browKept[k]!.texels.push(texel)
+            browKept[k]!.free.push((1 - guarded) * (1 - eye * (1 - lock)))
+            browFrame(spines[k]!, x, y, frame)
+            if (frame.past > 0 || Math.abs(frame.across) > frame.half) continue
+            covered[k]!.locks += lock
+            covered[k]!.texels++
+          }
+        }
+      }
+      free[texel] = (1 - guarded) * (1 - kept)
     },
   )
+  const cover = covered.map(({ locks, texels }) => (texels > 0 ? locks / texels : 0))
+  cover.forEach((share, k) => {
+    if (share <= BROW_HIDDEN) return
+    const { texels, free: freed } = browKept[k]!
+    texels.forEach((texel, i) => {
+      free[texel] = Math.max(free[texel]!, freed[i]!)
+    })
+  })
+  return { onSkin, free, cover, forehead }
+}
 
-  // A coarse grid of the skin: how much hair each cell has, and the colour
-  // of its bare skin clear of the hair, to fill the shaved scalp from.
+/** Lightness levels the forehead's colours are counted in, for their median (see `medianTone`). */
+const TONE_BINS = 256
+
+/** Counts a texel's colour (`texel` of `data`) by its lightness (see `medianTone`). */
+function countTone(tones: Float64Array, data: Uint8ClampedArray, texel: number) {
+  const p = texel * 4
+  const bin = Math.min(TONE_BINS - 1, Math.floor(luminance(data[p]!, data[p + 1]!, data[p + 2]!)))
+  tones[bin * 4]!++
+  for (let c = 0; c < 3; c++) tones[bin * 4 + 1 + c]! += data[p + c]!
+}
+
+/**
+ * The median colour of some counted by lightness (`tones`: per level, the
+ * count and the summed colour), the colours at that level averaged; null
+ * when fewer than `least` were counted.
+ */
+function medianTone(tones: Float64Array, least: number): Rgb | null {
+  let total = 0
+  for (let bin = 0; bin < TONE_BINS; bin++) total += tones[bin * 4]!
+  if (total <= 0 || total < least) return null
+  let below = 0
+  for (let bin = 0; bin < TONE_BINS; bin++) {
+    const count = tones[bin * 4]!
+    below += count
+    if (count > 0 && below >= total / 2) {
+      return [0, 1, 2].map((c) => tones[bin * 4 + 1 + c]! / count) as Rgb
+    }
+  }
+  return null
+}
+
+/**
+ * Shaves a head's hair (in place), laid out by the character's face
+ * landmarks (`target`): the hair (by its colour, see `hairToShave`: gear
+ * of other colours stays) is filled with the skin around it (`skin`, 0–1
+ * per texel, how surely each texel is skin), and further from that skin
+ * with the forehead's tone (see `scalpTone`), a little darker and grained
+ * like skin, dotted with stubs of the hair it was; the hair's shadow on
+ * the skin by it is lifted (see `shadowLift`). Below the eyes the face is
+ * left be (see `faceGuard`: beards, stubble, shading), and above them the
+ * brows and lashes but for a lock of hair over them (a fringe); a brow the
+ * fringe hid is put back (see `restoreBrows`). `crown` is the crown's hair
+ * colour, if any (see analyseBody).
+ */
+export function shaveHead(
+  head: Pixels,
+  geometry: HeadGeometry,
+  skin: Float32Array,
+  target: readonly number[],
+  crown: Rgb | null,
+) {
+  const { data, width, height } = head
+  const face = faceOf(target)
+  const front = renderFront(head, geometry.all, MEASURE_VIEW).image
+  const skinTone = skinColour(face, front)
+  const hair = hairToShave(face, front, skinTone, crown)
+  if (!hair) return
+  const like = hairLikeness(head, hair, skinTone)
+  const beard = bearded(face, front, hair, skinTone)
+  const joined = joinedHair(face, front, hair, skinTone)
+  const { onSkin, free, cover, forehead } = shaveable(head, geometry, face, like, beard, joined)
+
+  // A coarse grid of the skin: how much hair each cell has.
   const cw = Math.ceil(width / SHAVE_SCALE)
   const ch = Math.ceil(height / SHAVE_SCALE)
   const density = new Float32Array(cw * ch)
   const texels = new Float32Array(cw * ch)
-  const known = new Float32Array(cw * ch)
-  const colours = new Float64Array(cw * ch * 3)
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = y * width + x
-      if (!onSkin[i]) continue
-      const j = Math.floor(y / SHAVE_SCALE) * cw + Math.floor(x / SHAVE_SCALE)
-      texels[j]! += 1
-      density[j]! += smoothstep(SHAVE_FROM, SHAVE_TO, hair[i]!)
-      const k = smoothstep(FILL_FROM, FILL_TO, skin[i]!)
-      known[j]! += k
-      for (let c = 0; c < 3; c++) colours[j * 3 + c]! += data[i * 4 + c]! * k
-    }
+  const cellOf = (i: number) =>
+    Math.floor(Math.floor(i / width) / SHAVE_SCALE) * cw + Math.floor((i % width) / SHAVE_SCALE)
+  for (let i = 0; i < onSkin.length; i++) {
+    if (!onSkin[i]) continue
+    const j = cellOf(i)
+    texels[j]! += 1
+    density[j]! += smoothstep(SHAVE_FROM, SHAVE_TO, like[i]!) * free[i]!
   }
-  const small: Pixels = { data: new Uint8ClampedArray(cw * ch * 4), width: cw, height: ch }
   const dense = new Float32Array(cw * ch)
-  const skins: Rgb[] = []
-  for (let j = 0; j < known.length; j++) {
+  for (let j = 0; j < dense.length; j++) {
     if (texels[j]! > 0) {
       dense[j] = smoothstep(SHAVE_DENSE_FROM, SHAVE_DENSE_TO, density[j]! / texels[j]!)
     }
-    if (known[j]! <= 0) continue
-    for (let c = 0; c < 3; c++) small.data[j * 4 + c] = colours[j * 3 + c]! / known[j]!
-    known[j] = Math.min(1, known[j]! / (SHAVE_SCALE * SHAVE_SCALE))
-    if (!face && known[j]! >= 0.5) {
-      skins.push([small.data[j * 4]!, small.data[j * 4 + 1]!, small.data[j * 4 + 2]!])
-    }
   }
-  const tone = face
-    ? skinColour(face, renderFront(head, geometry.all, MEASURE_VIEW).image)
-    : quantile(
-        skins.sort((a, b) => luminance(...a) - luminance(...b)),
-        0.5,
-        FALLBACK_SKIN,
-      )
-  const near = dilate(dense, cw, ch, FILL_CLEAR)
+  const closed = blurField(dilate(dense, cw, ch, SHAVE_CLOSE), cw, ch, SHAVE_CLOSE)
+
+  // How much of each texel goes: the hair's own texels, with their shadow;
+  // the gaps closed round them, and out past them, fading, so the shadow
+  // ends where the hair did.
+  const shaved = new Float32Array(onSkin.length)
+  for (let i = 0; i < onSkin.length; i++) {
+    if (!onSkin[i] || free[i]! <= 0) continue
+    const cx = ((i % width) + 0.5) / SHAVE_SCALE - 0.5
+    const cy = (Math.floor(i / width) + 0.5) / SHAVE_SCALE - 0.5
+    shaved[i] =
+      free[i]! *
+      Math.max(smoothstep(SHAVE_FROM, SHAVE_TO, like[i]!), sampleField(closed, cw, ch, cx, cy))
+  }
+
+  // The skin the shave leaves be, by the hair, to fill it from: the fill
+  // meets it where the shave fades out, without a seam.
+  // The shadow lift reads the skin's colour where the shave fades out too.
+  const known = new Float32Array(cw * ch)
+  const colours = new Float64Array(cw * ch * 3)
+  const bare = new Float32Array(cw * ch)
+  const bareColours = new Float64Array(cw * ch * 3)
+  const tones = new Float64Array(TONE_BINS * 4)
+  let foreheadTexels = 0
+  for (let i = 0; i < onSkin.length; i++) {
+    if (!onSkin[i]) continue
+    // The forehead's own skin, clear of any fringe (the shave takes that).
+    if (forehead[i]) {
+      foreheadTexels++
+      if (skin[i]! >= FILL_TO && shaved[i]! <= 0) countTone(tones, data, i)
+    }
+    const k = smoothstep(FILL_FROM, FILL_TO, skin[i]!)
+    if (k <= 0) continue
+    const j = cellOf(i)
+    const hairless = k * (1 - smoothstep(SHAVE_FROM, SHAVE_TO, like[i]!))
+    bare[j]! += hairless
+    for (let c = 0; c < 3; c++) bareColours[j * 3 + c]! += data[i * 4 + c]! * hairless
+    if (shaved[i]! > 0) continue
+    known[j]! += k
+    for (let c = 0; c < 3; c++) colours[j * 3 + c]! += data[i * 4 + c]! * k
+  }
+  const tone =
+    medianTone(tones, FOREHEAD_SHARE * foreheadTexels) ?? scalpTone(face, front, skinTone, hair)
+  const lift = shadowLift(dense, bareColours, bare, cw, ch, tone)
+  const small: Pixels = { data: new Uint8ClampedArray(cw * ch * 4), width: cw, height: ch }
+  for (let j = 0; j < known.length; j++) {
+    if (known[j]! <= 0) continue
+    for (let c = 0; c < 3; c++) {
+      // Lifted no further than the tone: the fill takes no light patch from a light cell.
+      const own = colours[j * 3 + c]! / known[j]!
+      small.data[j * 4 + c] = Math.min(own * lift[c]![j]!, Math.max(own, tone[c]!))
+    }
+    known[j] = Math.min(1, known[j]! / (SHAVE_SCALE * SHAVE_SCALE))
+  }
+  const grain = Math.min(GRAIN_MOST, skinGrain(head, onSkin, free, shaved, skin, small, known, cw))
   const ring = dilate(dense, cw, ch, FILL_RING)
-  for (let j = 0; j < known.length; j++) known[j]! *= (1 - near[j]!) * ring[j]!
+  for (let j = 0; j < known.length; j++) known[j]! *= ring[j]!
   const filled = fillFrom(small, known)
   const nearSkin = blurField(
     dilate(
@@ -1301,28 +2205,290 @@ export function shaveHead(
       filled.data[j * 4 + c] = tone[c]! + (filled.data[j * 4 + c]! - tone[c]!) * nearSkin[j]!
     }
   }
-  const closed = blurField(dilate(dense, cw, ch, SHAVE_CLOSE), cw, ch, SHAVE_CLOSE)
 
+  // The cells a lift reaches, and their neighbours (a texel's lift is read between cells).
+  const lifted = dilate(
+    lift[0]!.map((_, j) => (lift[0]![j]! > 1 || lift[1]![j]! > 1 || lift[2]![j]! > 1 ? 1 : 0)),
+    cw,
+    ch,
+    1,
+  )
   const scalp = new Uint8ClampedArray(3)
+  for (let i = 0; i < onSkin.length; i++) {
+    if (!onSkin[i] || free[i]! <= 0) continue
+    const x = i % width
+    const y = (i - x) / width
+    const cx = (x + 0.5) / SHAVE_SCALE - 0.5
+    const cy = (y + 0.5) / SHAVE_SCALE - 0.5
+    const p = i * 4
+    if (lifted[cellOf(i)]! > 0) {
+      for (let c = 0; c < 3; c++) {
+        data[p + c] = data[p + c]! * (1 + (sampleField(lift[c]!, cw, ch, cx, cy) - 1) * free[i]!)
+      }
+    }
+    const w = shaved[i]!
+    if (w <= 0) continue
+    sampleColor(filled, cx, cy, scalp, 0)
+    const noise =
+      GRAIN_COARSE * (2 * valueNoise(x / GRAIN_CELL, y / GRAIN_CELL, 9) - 1) +
+      GRAIN_FINE * (2 * hash(x, y, 10) - 1)
+    const pores = 1 + (grain * noise) / GRAIN_SPREAD
+    const hairy = smoothstep(SHAVE_FROM, SHAVE_TO, like[i]!) * free[i]!
+    const root = hash(x, y, 8) < STUBBLE_ROOTS ? ROOT_COLOUR * hairy : 0
+    for (let c = 0; c < 3; c++) {
+      const bare = scalp[c]! * (1 - SCALP_SHADOW * hairy) * pores
+      const stubbed = bare + (data[p + c]! - bare) * root
+      data[p + c] = data[p + c]! + (stubbed - data[p + c]!) * w
+    }
+  }
+  restoreBrows(head, geometry, face, cover, shaved, hair)
+}
+
+/**
+ * The hair's shadow on the skin by it — a forehead painted darker under
+ * the hairline — is lifted towards the scalp's tone over this many coarse
+ * cells out from the hair, fading, by at most this much (its own detail
+ * kept): without the hair over it, it would be a dark band.
+ */
+const SHADOW_LIFT_REACH = 6
+const SHADOW_LIFT_MOST = 1.35
+
+/** The share of the cells round it that must be skin for a cell's lift to be sure (fully from this): fading out where little skin was seen. */
+const SHADOW_LIFT_SURE = 0.25
+
+/**
+ * How much each colour channel of the skin by the hair is lifted (see
+ * `SHADOW_LIFT_*`), per cell of the coarse grid: the scalp's `tone` over
+ * the skin's own colour round the cell (from `colours`, the skin's summed
+ * by how much of each cell is skin, `weights`), never darkened. `dense` is
+ * where the hair is.
+ */
+function shadowLift(
+  dense: Float32Array,
+  colours: Float64Array,
+  weights: Float32Array,
+  cw: number,
+  ch: number,
+  tone: Rgb,
+): Float32Array[] {
+  // Blurred twice, a tent rather than a box: no square edges to the lift.
+  const soften = (grid: Float32Array) =>
+    blurField(blurField(grid, cw, ch, SHADOW_LIFT_REACH / 2), cw, ch, SHADOW_LIFT_REACH / 2)
+  const reach = soften(dilate(dense, cw, ch, SHADOW_LIFT_REACH))
+  const around = soften(weights)
+  return [0, 1, 2].map((c) => {
+    const channel = new Float32Array(cw * ch)
+    for (let j = 0; j < channel.length; j++) channel[j] = colours[j * 3 + c]!
+    const mean = soften(channel)
+    const lift = new Float32Array(cw * ch).fill(1)
+    for (let j = 0; j < lift.length; j++) {
+      if (!(around[j]! > 0 && mean[j]! > 0)) continue
+      const wanted = (tone[c]! * around[j]!) / mean[j]!
+      const sure = smoothstep(0, SHADOW_LIFT_SURE, around[j]!)
+      lift[j] = 1 + (Math.min(SHADOW_LIFT_MOST, Math.max(1, wanted)) - 1) * reach[j]! * sure
+    }
+    return lift
+  })
+}
+
+/**
+ * The bare skin's spread of lightness from texel to texel, as a share of
+ * its lightness: over the skin a shave may take (see `shaveable`) but
+ * leaves (`shaved` 0), each texel against its coarse cell's colour
+ * (`small`, where `known`, the share of the cell that is skin, holds for
+ * most of it).
+ */
+function skinGrain(
+  head: Pixels,
+  onSkin: Uint8Array,
+  free: Float32Array,
+  shaved: Float32Array,
+  skin: Float32Array,
+  small: Pixels,
+  known: Float32Array,
+  cw: number,
+) {
+  const { data, width, height } = head
+  let sum = 0
+  let count = 0
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = y * width + x
-      if (!onSkin[i]) continue
-      const cx = (x + 0.5) / SHAVE_SCALE - 0.5
-      const cy = (y + 0.5) / SHAVE_SCALE - 0.5
-      // The hair's own texels shaved, with their shadow; the gaps closed
-      // round them just filled, so the shadow ends where the hair did.
-      const shaven = smoothstep(SHAVE_FROM, SHAVE_TO, hair[i]!) * (1 - keep[i]!)
-      const w = Math.max(shaven, sampleField(closed, cw, ch, cx, cy) * (1 - keep[i]!))
-      if (w <= 0) continue
-      sampleColor(filled, cx, cy, scalp, 0)
-      const root = hash(x, y, 8) < STUBBLE_ROOTS ? ROOT_COLOUR * shaven : 0
-      const p = i * 4
-      for (let c = 0; c < 3; c++) {
-        const bare = scalp[c]! * (1 - SCALP_SHADOW * shaven)
-        const shaved = bare + (data[p + c]! - bare) * root
-        data[p + c] = data[p + c]! + (shaved - data[p + c]!) * w
-      }
+      if (!onSkin[i] || free[i]! < 1 || shaved[i]! > 0 || skin[i]! < FILL_FROM) continue
+      const j = Math.floor(y / SHAVE_SCALE) * cw + Math.floor(x / SHAVE_SCALE)
+      if (known[j]! < FILL_FROM) continue
+      const cell = luminance(small.data[j * 4]!, small.data[j * 4 + 1]!, small.data[j * 4 + 2]!)
+      if (cell <= 0) continue
+      const own = luminance(data[i * 4]!, data[i * 4 + 1]!, data[i * 4 + 2]!)
+      sum += (own / cell - 1) ** 2
+      count++
     }
   }
+  return count > 0 ? Math.sqrt(sum / count) : 0
+}
+
+/** How far out from a restored brow's spine (× its half-thickness) it is drawn, fading from the first to the second. */
+const RESTORED_FROM = 1.1
+const RESTORED_TO = 1.8
+
+/** How far above and below a brow's spine (× its half-thickness) the skin round it is read, to tell its hairs by. */
+const BROW_SKIN_AT = 2.1
+
+/** The side (px) of the close front view a mirrored brow is read from: finer than the texture's own. */
+const BROW_VIEW = 256
+
+/**
+ * A brow drawn where neither shows: strands this long along it and this
+ * fine across (× the distance between the eyes), in noise that is hair
+ * from the first level to the second, over a solid share of colour
+ * between them; how thick the brow is (thinning from the first share of
+ * its half-thickness out to the second), how much of the hair's colour it
+ * takes at its heart, and how much darker it is than the hair.
+ */
+const DRAWN_STRAND_LENGTH = 0.02
+const DRAWN_STRAND_WIDTH = 0.003
+const DRAWN_HAIR_FROM = 0.3
+const DRAWN_HAIR_TO = 0.7
+const DRAWN_SOLID = 0.55
+const DRAWN_BODY_FROM = 0.2
+const DRAWN_BODY_TO = 1.1
+const DRAWN_DENSITY = 0.8
+const DRAWN_SHADE = 0.9
+
+/**
+ * A front view of part of the head (`box`, fractions of the whole front
+ * view), `size` px a side: finer than a whole view drawn at once. Returns
+ * a bilinear sampler of it at points of the whole view.
+ */
+function closeView(head: Pixels, triangles: readonly HeadTriangle[], box: Box, size: number) {
+  const [left, top] = box
+  const side = Math.max(box[2] - left, box[3] - top)
+  const moved = triangles
+    .filter(
+      (tri) =>
+        Math.max(tri.x[0]!, tri.x[1]!, tri.x[2]!) >= left &&
+        Math.min(tri.x[0]!, tri.x[1]!, tri.x[2]!) <= left + side &&
+        Math.max(tri.y[0]!, tri.y[1]!, tri.y[2]!) >= top &&
+        Math.min(tri.y[0]!, tri.y[1]!, tri.y[2]!) <= top + side,
+    )
+    .map((tri) => ({
+      ...tri,
+      x: tri.x.map((x) => (x - left) / side),
+      y: tri.y.map((y) => (y - top) / side),
+    }))
+  const image = renderFront(head, moved, size).image
+  return (x: number, y: number, out: Uint8ClampedArray) =>
+    sampleColor(image, ((x - left) / side) * size - 0.5, ((y - top) / side) * size - 0.5, out, 0)
+}
+
+/**
+ * Puts back what a shaved fringe hid of the brows (in place; `cover`, as
+ * BROW_EDGES, is how much of each locks of hair covered): a brow under the
+ * fringe (see BROW_HIDDEN) whole, else just what was shaved of it
+ * (`shaved`, per texel). The other brow is mirrored across the face, its
+ * hairs darkening the shaved skin as they darken the skin round them; or,
+ * that one hidden too, a brow is drawn in strands of the hair's colour
+ * (`hair`).
+ */
+function restoreBrows(
+  head: Pixels,
+  geometry: HeadGeometry,
+  face: Face,
+  cover: readonly number[],
+  shaved: Float32Array,
+  hair: Rgb,
+) {
+  const { data } = head
+  const spines = BROW_EDGES.map((edges) => browSpine(face, edges))
+  const hidden = cover.map((share) => share > BROW_HIDDEN)
+  const frame = newBrowFrame()
+  const sample = new Uint8ClampedArray(3)
+  const above = new Uint8ClampedArray(3)
+  const below = new Uint8ClampedArray(3)
+  const tint = hair.map((c) => c * DRAWN_SHADE) as Rgb
+  const e = face.eyes
+  spines.forEach((spine, k) => {
+    if (!(cover[k]! > 0)) return
+    const other = spines.length - 1 - k
+    const source = hidden[other] ? null : spines[other]!
+    const view =
+      source &&
+      closeView(
+        head,
+        geometry.all,
+        boxAround(source.stations, Math.max(...source.halves) * (BROW_SKIN_AT + 1)),
+        BROW_VIEW,
+      )
+    const lengths = [0]
+    for (let i = 1; i < spine.stations.length; i++) {
+      const [ax, ay] = spine.stations[i - 1]!
+      const [bx, by] = spine.stations[i]!
+      lengths.push(lengths[i - 1]! + Math.hypot(bx - ax, by - ay))
+    }
+    const box = boxAround(spine.stations, Math.max(...spine.halves) * (RESTORED_TO + BROW_END))
+    const overBox = (tri: HeadTriangle) =>
+      Math.max(tri.n[0]!, tri.n[1]!, tri.n[2]!) > 0 &&
+      Math.max(tri.x[0]!, tri.x[1]!, tri.x[2]!) >= box[0] &&
+      Math.max(tri.y[0]!, tri.y[1]!, tri.y[2]!) >= box[1] &&
+      Math.min(tri.x[0]!, tri.x[1]!, tri.x[2]!) <= box[2] &&
+      Math.min(tri.y[0]!, tri.y[1]!, tri.y[2]!) <= box[3]
+    forEachTexel(head, geometry.skin, overBox, (texel, tri, w0, w1, w2) => {
+      const facing = smoothstep(0, FACING_TO, tri.n[0]! * w0 + tri.n[1]! * w1 + tri.n[2]! * w2)
+      const x = tri.x[0]! * w0 + tri.x[1]! * w1 + tri.x[2]! * w2
+      const y = tri.y[0]! * w0 + tri.y[1]! * w1 + tri.y[2]! * w2
+      // A brow partly under the fringe gets back only what was shaved of it.
+      const put = facing * (hidden[k] ? 1 : shaved[texel]!)
+      if (put <= 0 || !inBox(box, x, y)) return
+      browFrame(spine, x, y, frame)
+      const ends = 1 - smoothstep(0, BROW_END * frame.half, frame.past)
+      const p = texel * 4
+      if (view && source) {
+        const w =
+          (1 -
+            smoothstep(
+              RESTORED_FROM * frame.half,
+              RESTORED_TO * frame.half,
+              Math.abs(frame.across),
+            )) *
+          ends *
+          put
+        if (w <= 0) return
+        // The same place by the other brow: as far along it, and as far
+        // across for its thickness.
+        const i = frame.segment
+        const [ax, ay] = source.stations[i]!
+        const [bx, by] = source.stations[i + 1]!
+        const length = Math.hypot(bx - ax, by - ay) || 1e-9
+        const up = bx >= ax ? 1 : -1
+        const nx = ((by - ay) / length) * up
+        const ny = (-(bx - ax) / length) * up
+        const t = Math.min(1, Math.max(0, frame.t))
+        const half = source.halves[i]! + (source.halves[i + 1]! - source.halves[i]!) * t
+        const across = (frame.across * half) / Math.max(1e-9, frame.half)
+        const px = ax + (bx - ax) * frame.t
+        const py = ay + (by - ay) * frame.t
+        view(px + nx * across, py + ny * across, sample)
+        view(px + nx * half * BROW_SKIN_AT, py + ny * half * BROW_SKIN_AT, above)
+        view(px - nx * half * BROW_SKIN_AT, py - ny * half * BROW_SKIN_AT, below)
+        for (let c = 0; c < 3; c++) {
+          const around = Math.max(1, (above[c]! + below[c]!) / 2)
+          const darker = Math.min(1, sample[c]! / around)
+          data[p + c] = data[p + c]! * (1 + (darker - 1) * w)
+        }
+        return
+      }
+      const along =
+        lengths[frame.segment]! + frame.t * (lengths[frame.segment + 1]! - lengths[frame.segment]!)
+      const body =
+        (1 - smoothstep(DRAWN_BODY_FROM, DRAWN_BODY_TO, Math.abs(frame.across) / frame.half)) * ends
+      if (body <= 0) return
+      const strands = smoothstep(
+        DRAWN_HAIR_FROM,
+        DRAWN_HAIR_TO,
+        valueNoise(along / (DRAWN_STRAND_LENGTH * e), frame.across / (DRAWN_STRAND_WIDTH * e), 11),
+      )
+      const w = DRAWN_DENSITY * body * (DRAWN_SOLID + (1 - DRAWN_SOLID) * strands) * put
+      for (let c = 0; c < 3; c++) data[p + c] = data[p + c]! + (tint[c]! - data[p + c]!) * w
+    })
+  })
 }

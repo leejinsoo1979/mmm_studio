@@ -198,8 +198,8 @@ async function applyLook(
   const gathering = lookBody(parts)
   if (!gathering) return { undo: () => {}, retry: false }
   let retry = false
-  // The face, the paint and a shave's care for the brows and lashes all go
-  // by the character's face landmarks.
+  // The face, the paint and a shave all go by the character's face
+  // landmarks.
   const placed = look.face || look.bald || hasFacePaint(look.paint)
   const [body, target] = await Promise.all([
     gathering,
@@ -224,9 +224,10 @@ async function applyLook(
     bald: look.bald,
     target,
   }
-  // Without landmarks only the irises of the paint go on.
-  const painted = target ? hasFacePaint(job.paint) : job.paint.eyes
-  if (!(job.hair || job.skin || job.face || job.bald || painted)) return { undo: () => {}, retry }
+  // Without landmarks only the irises of the paint go on, and no shave:
+  // it would take the brows and lashes with the hair (a retry puts it on).
+  const painted = target ? hasFacePaint(job.paint) || job.bald : job.paint.eyes
+  if (!(job.hair || job.skin || job.face || painted)) return { undo: () => {}, retry }
   const result = await makeLook(model, job, signal)
   if (!result || signal.aborted) {
     for (const bitmap of Object.values(result?.parts ?? {})) bitmap.close()

@@ -1,6 +1,6 @@
 import { connectedFrom } from './face-fill'
 import { runFaceJob } from './face-job'
-import { DEFAULT_BEARD, type FacePaint, hasFacePaint, paintFace, shaveHead } from './face-paint'
+import { type FacePaint, hairHued, hasFacePaint, paintFace, shaveHead } from './face-paint'
 import { maskImage } from './face-swap'
 import { forEachTexel, renderFront, tintIris } from './front-render'
 import type { HeadGeometry } from './head-geometry'
@@ -76,7 +76,7 @@ export type Analysis = {
   opacity: Pixels | null
   geometry: HeadGeometry
   hairMask: Float32Array
-  /** The hair's colour (its cards', or what is painted on the head), null for a bare head. */
+  /** The hair's colour (its cards', or what is painted on the crown where the cards' is gear's), null for a bare head. */
   hairColor: Rgb | null
   headSkinMask: Float32Array
   bodySkinMask: Float32Array
@@ -142,10 +142,11 @@ const BARE_CROWN = 0.2
 
 /**
  * Clears a head's hair mask where no hair is: the eyeballs, whatever their
- * colour, and — when the mask comes from a guess at painted hair's colour —
- * the face and jaw below the eyes (the lowest brows sit above 0.45 of the
- * front view on every character), where a shadowed cheek or a dark skin can
- * match that colour. The back of the head keeps its hair.
+ * colour, and — when the mask comes from a guess at the hair's colour from
+ * the crown, or the hair is too fair to tell from the face's own light and
+ * shade — the face and jaw below the eyes (the lowest brows sit above 0.45
+ * of the front view on every character), where a shadowed cheek or a dark
+ * skin can match that colour. The back of the head keeps its hair.
  */
 function clearHairlessTexels(
   mask: Float32Array,
@@ -169,6 +170,9 @@ function clearHairlessTexels(
     clear,
   )
 }
+
+/** Hair at least this light (a share of the skin's lightness) is fair: on the face it can't be told from the skin's light and shade. */
+const FAIR_HAIR = 0.7
 
 /** The front view's side (px) hair is followed on: fine enough for strands, cheap to walk. */
 const HAIR_VIEW = 512
@@ -217,14 +221,21 @@ export function analyseBody(
 ): Analysis {
   const skin = skinColor(head, geometry)
   const skinLum = luminance(...skin)
-  const crown = opacity ? null : crownColor(head, geometry)
-  const painted = crown && colorDistance(...crown, skin, skinLum) > BARE_CROWN ? crown : null
-  const hairColour = opacity ? meanColor(opacity) : painted
+  // A crown of a colour hair never is (a blue cap, camouflage, a hijab) is
+  // gear, not hair to dye or shave; so is a card's colour that isn't a
+  // hair's (the opacity texture's gear, a helmet's visor or reflective
+  // strip, outweighing the hair): the crown under the cards is the hair's.
+  const crown = crownColor(head, geometry)
+  const painted =
+    hairHued(crown) && colorDistance(...crown, skin, skinLum) > BARE_CROWN ? crown : null
+  const cards = opacity && meanColor(opacity)
+  const hairColour = cards && hairHued(cards) ? cards : painted
   const hairOnHead = hairColour
     ? hairMask(head, hairColour, skin)
     : new Float32Array(head.width * head.height)
   if (hairColour) {
-    clearHairlessTexels(hairOnHead, head, geometry, !opacity)
+    const guessed = hairColour !== cards || luminance(...hairColour) >= FAIR_HAIR * skinLum
+    clearHairlessTexels(hairOnHead, head, geometry, guessed)
     keepConnectedHair(hairOnHead, head, geometry)
   }
   const headSkinMask = similarityMask(head, skin)
@@ -239,7 +250,7 @@ export function analyseBody(
     hairColor: hairColour,
     headSkinMask,
     bodySkinMask,
-    hairLum: opacity ? luminance(...meanColor(opacity)) : 0,
+    hairLum: cards ? luminance(...cards) : 0,
     headHairLum: maskedLuminance(head, hairOnHead),
     skinLum,
     bodySkinLum: maskedLuminance(body, bodySkinMask),
@@ -272,7 +283,9 @@ function baseHead(
     base = copyPixels(analysis.head)
     if (skin) dye(base, hexToRgb(skin), analysis.skinLum, analysis.headSkinMask)
     if (hair) dye(base, hexToRgb(hair), analysis.headHairLum, analysis.hairMask)
-    if (bald) shaveHead(base, analysis.geometry, analysis.hairMask, analysis.headSkinMask, target)
+    if (bald && target) {
+      shaveHead(base, analysis.geometry, analysis.headSkinMask, target, analysis.hairColor)
+    }
   }
   bases.set(name, base)
   if (bases.size > BASES_KEPT) bases.delete(bases.keys().next().value!)
@@ -292,14 +305,16 @@ export function dressBody(
   job: Omit<LookJob, 'body'> & { key: string },
   photo: Pixels | null,
 ): Partial<Record<Part, Pixels>> {
-  const { face, hair, skin, paint, bald, target } = job
+  const { face, hair, skin, paint, target } = job
+  // The shave, like the rest of the paint, goes by the landmarks: it keeps
+  // the face below the eyes and the brows.
+  const bald = job.bald && target !== null
   const swap = face && photo && target
   const eyes = paint.eyes ?? face?.eyes ?? null
   const changed: Partial<Record<Part, Pixels>> = {}
   if (swap || hair || skin || bald || eyes || (target && hasFacePaint(paint))) {
-    // The shave keeps the face's features where the landmarks are known.
-    const base = `${job.key}|${hair}|${skin}|${bald && (target ? 'face' : 'head')}`
-    let head = baseHead(analysis, base, job)
+    const base = `${job.key}|${hair}|${skin}|${bald}`
+    let head = baseHead(analysis, base, { hair, skin, bald, target })
     // A shaved head has no hair left over its face.
     const hairMask = bald ? null : analysis.hairMask
     if (swap) {
@@ -309,7 +324,7 @@ export function dressBody(
           avatar: bald ? `${job.key}|bald` : job.key,
           front: base,
           geometry: analysis.geometry,
-          hair: hairMask ?? new Float32Array(head.width * head.height),
+          hair: hairMask,
           photo,
           photoKey: face.photo,
           points: face.points,
@@ -324,7 +339,7 @@ export function dressBody(
     }
     if (target) {
       paintFace(head, analysis.geometry, target, paint, {
-        beard: hair ? hexToRgb(hair) : (analysis.hairColor ?? DEFAULT_BEARD),
+        beard: hair ? hexToRgb(hair) : null,
         hair: hairMask,
       })
     }

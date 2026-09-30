@@ -4,7 +4,6 @@ import type { HeadGeometry } from './head-geometry'
 import { analyseBody, dressBody, type LookJob } from './look-job'
 import {
   type HeadTriangle,
-  luminance,
   type Pixels,
   packTriangles,
   type Rgb,
@@ -137,27 +136,15 @@ describe('a body’s analysis', () => {
 })
 
 describe('a body dressed in a look', () => {
-  test('a shaved head: the crown’s hair goes to the skin’s colour, the face stays', () => {
+  // A shave with the landmarks, and the paint, are face-paint.test.ts's.
+  test('a shave waits for the landmarks it is placed by', () => {
     const { pixels, geometry } = head(HAIR)
     const analysis = analyseBody(pixels, body(), null, geometry)
-    const shaved = dressBody(analysis, look('shaved', { bald: true }), null).head!
-    const crown = rows(shaved, 0.02, 0.2)
-    expect(Math.abs(luminance(...crown) - luminance(...SKIN))).toBeLessThan(25)
-    for (let c = 0; c < 3; c++) expect(Math.abs(crown[c]! - SKIN[c]!)).toBeLessThan(30)
-    // The cheek keeps its colour, and the eyeball (no skin, whatever its colour) is left alone.
-    expect(rows(shaved, 0.33, 0.48)).toEqual(rows(pixels, 0.33, 0.48))
-    expect(rows(shaved, 0.77, 0.98)).toEqual(rows(pixels, 0.77, 0.98))
-  })
-
-  test('the same body shaved and then not: its own hair again', () => {
-    const { pixels, geometry } = head(HAIR)
-    const analysis = analyseBody(pixels, body(), null, geometry)
-    dressBody(analysis, look('again', { bald: true, hair: '#c03020' }), null)
-    const dyed = dressBody(analysis, look('again', { hair: '#c03020' }), null).head!
+    expect(dressBody(analysis, look('unplaced', { bald: true }), null)).toEqual({})
+    // The dyes don't wait.
+    const dyed = dressBody(analysis, look('unplaced', { bald: true, hair: '#c03020' }), null).head!
     const [r, g] = rows(dyed, 0.02, 0.2)
-    // Dyed red, not shaved to the skin.
     expect(r).toBeGreaterThan(g * 2)
-    expect(luminance(...rows(dyed, 0.02, 0.2))).toBeLessThan(luminance(...SKIN) / 2)
   })
 
   test('an iris colour goes on without a face photo or landmarks', () => {
@@ -173,6 +160,21 @@ describe('a body dressed in a look', () => {
     expect(b!).toBeGreaterThan(r! * 1.5)
     // The rest of the head is as it was.
     expect(rows(blue.head!, 0.02, 0.73)).toEqual(rows(pixels, 0.02, 0.73))
+  })
+
+  test('the paint’s iris colour wins over the face photo’s', () => {
+    const { pixels, geometry } = head(HAIR)
+    const analysis = analyseBody(pixels, body(), null, geometry)
+    const face = { photo: 'photo', points: [], blend: 1, light: 0, eyes: '#20c040' }
+    const p = (PUPIL.y * SIZE + PUPIL.x + PUPIL.reach + 3) * 4
+    const iris = (paint: typeof NO_PAINT) => {
+      const dressed = dressBody(analysis, look('irises', { face, paint }), null).head!
+      return [...dressed.data.slice(p, p + 3)] as Rgb
+    }
+    const [r, g, b] = iris({ ...NO_PAINT, eyes: '#3070e0' })
+    expect(b).toBeGreaterThan(Math.max(r, g) * 1.3)
+    const [pr, pg, pb] = iris(NO_PAINT)
+    expect(pg).toBeGreaterThan(Math.max(pr, pb) * 1.3)
   })
 
   test('the rest of the paint waits for the landmarks it is placed by', () => {
