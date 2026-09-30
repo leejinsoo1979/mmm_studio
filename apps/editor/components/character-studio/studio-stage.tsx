@@ -4,10 +4,7 @@ import {
   type AvatarLook,
   type EmoteCue,
   EmoteLayer,
-  type FaceLandmarks,
   findAvatar,
-  headLandmarks,
-  renderHeadFront,
   useAvatarBody,
   useAvatarLook,
   useEmoteClips,
@@ -18,9 +15,6 @@ import { Suspense, useEffect, useMemo, useRef } from 'react'
 import { AnimationMixer, type Group, NeutralToneMapping, Vector3 } from 'three'
 
 export type CameraFocus = 'full' | 'upper' | 'face'
-
-/** The body's own face, front on, and where its eyes and mouth are on it. */
-export type HeadFront = { image: string; landmarks: FaceLandmarks | null }
 
 /**
  * Framing per focus, as fractions of the body's height: where the camera
@@ -64,17 +58,15 @@ function StudioAvatar({
   cue,
   yaw,
   onCueEnd,
-  onHeadFront,
 }: {
   avatarId: string
   look: AvatarLook
   cue: EmoteCue | null
   yaw: { current: number }
   onCueEnd: () => void
-  onHeadFront: (front: HeadFront | null) => void
 }) {
   const { avatar, model, clips } = useAvatarBody(avatarId)
-  useAvatarLook(model, look)
+  useAvatarLook(model, look, avatar.id)
   const emoteClips = useEmoteClips(avatar, true)
   const groupRef = useRef<Group>(null)
   const cueRef = useRef(cue)
@@ -93,14 +85,6 @@ function StudioAvatar({
       mixer.stopAllAction()
     }
   }, [clips, mixer])
-
-  // The front view the face photo is placed on (the body's own face).
-  useEffect(() => {
-    const canvas = renderHeadFront(model, 512)
-    onHeadFront(
-      canvas ? { image: canvas.toDataURL('image/png'), landmarks: headLandmarks(model) } : null,
-    )
-  }, [model, onHeadFront])
 
   useFrame((_, delta) => {
     const weight = layer.update(cueRef.current, false, delta)
@@ -153,7 +137,6 @@ export function StudioStage({
   zoom,
   yaw,
   onCueEnd,
-  onHeadFront,
 }: {
   avatarId: string
   look: AvatarLook
@@ -162,7 +145,6 @@ export function StudioStage({
   zoom: number
   yaw: { current: number }
   onCueEnd: () => void
-  onHeadFront: (front: HeadFront | null) => void
 }) {
   const hip = findAvatar(avatarId).hip
   return (
@@ -191,14 +173,7 @@ export function StudioStage({
       <Platform />
       <ContactShadows blur={2.6} far={2} opacity={0.35} position={[0, 0.002, 0]} scale={3} />
       <Suspense fallback={null}>
-        <StudioAvatar
-          avatarId={avatarId}
-          cue={cue}
-          look={look}
-          onCueEnd={onCueEnd}
-          onHeadFront={onHeadFront}
-          yaw={yaw}
-        />
+        <StudioAvatar avatarId={avatarId} cue={cue} look={look} onCueEnd={onCueEnd} yaw={yaw} />
       </Suspense>
       <CameraRig focus={focus} hip={hip} zoom={zoom} />
     </Canvas>

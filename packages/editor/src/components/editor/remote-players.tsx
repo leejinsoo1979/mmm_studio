@@ -132,7 +132,7 @@ function RemotePlayer({
   bubble?: string
 }) {
   const { avatar, model, clips, gaitSet } = useAvatarBody(player.avatar)
-  useAvatarLook(model, player.look)
+  useAvatarLook(model, player.look, avatar.id)
   const [emoted, setEmoted] = useState(false)
   const emoteClips = useEmoteClips(avatar, emoted)
   const rootRef = useRef<Group>(null)

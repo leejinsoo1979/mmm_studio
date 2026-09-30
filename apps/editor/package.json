@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@iconify/react": "^6.0.2",
+    "@mediapipe/tasks-vision": "1.0.1",
     "@number-flow/react": "^0.6.0",
     "@pascal-app/core": "*",
     "@pascal-app/editor": "*",

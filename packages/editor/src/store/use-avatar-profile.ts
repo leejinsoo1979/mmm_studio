@@ -6,22 +6,51 @@ import {
   type EmoteId,
   isEmoteId,
 } from '../components/editor/first-person/emotes'
+import { isFacePoints } from '../components/editor/first-person/face-points'
 
 /**
- * A photo of the player's face laid over their character's face: the photo
- * (a JPEG data URL), where it sits on the character's front view — its
- * centre (`x`, `y`) and width (`scale`) as fractions of that view, turned by
- * `rotation` (rad) — and how far (0–1) its colours move to the character's
- * skin so the edges blend.
+ * The player's face, swapped onto their character's: the face cropped from
+ * their photo (a JPEG data URL) with its landmarks (FACE_POINT_INDICES, x/y
+ * fractions of the crop, flattened). Any character's face is then warped
+ * onto from them. `blend` (0–1) is how seamlessly its colours flow into the
+ * skin around it, `light` (0–1) how much of the photo's own shading is
+ * evened out, and `eyes` the iris colour taken from the photo (null keeps
+ * the character's).
  */
 export type AvatarFace = {
   photo: string
-  x: number
-  y: number
-  scale: number
-  rotation: number
-  tone: number
+  points: number[]
+  blend: number
+  light: number
+  eyes: string | null
 }
+
+const HEX = /^#[0-9a-f]{6}$/i
+const unit = (value: unknown, fallback: number) =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : fallback
+
+/** A face as saved or received, or null when it isn't one (an older or broken save). */
+export function readAvatarFace(value: unknown): AvatarFace | null {
+  const face = value as Partial<AvatarFace> | null
+  if (
+    !face ||
+    typeof face.photo !== 'string' ||
+    !face.photo.startsWith('data:image/') ||
+    !isFacePoints(face.points)
+  ) {
+    return null
+  }
+  return {
+    photo: face.photo,
+    points: face.points,
+    blend: unit(face.blend, DEFAULT_FACE_BLEND),
+    light: unit(face.light, DEFAULT_FACE_LIGHT),
+    eyes: typeof face.eyes === 'string' && HEX.test(face.eyes) ? face.eyes : null,
+  }
+}
+
+export const DEFAULT_FACE_BLEND = 1
+export const DEFAULT_FACE_LIGHT = 0.5
 
 /** The player's changes to their character: hair and skin dyes (hex) and a face photo. */
 export type AvatarLook = {
@@ -61,7 +90,8 @@ const useAvatarProfile = create<AvatarProfileState>()(
         const keys = Object.fromEntries(
           Object.entries(saved.keys ?? current.keys).filter(([, emote]) => isEmoteId(emote)),
         ) as Record<string, EmoteId>
-        return { ...current, look: { ...NO_LOOK, ...saved.look }, keys }
+        const look = { ...NO_LOOK, ...saved.look }
+        return { ...current, look: { ...look, face: readAvatarFace(look.face) }, keys }
       },
     },
   ),

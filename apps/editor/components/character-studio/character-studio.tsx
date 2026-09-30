@@ -45,7 +45,7 @@ import { cn } from '@/lib/utils'
 import { ColorPicker } from '../color-picker'
 import { FaceEditor } from './face-editor'
 import { EMOTE_ICONS, HAIR_SWATCHES, SKIN_SWATCHES, type Swatch } from './studio-data'
-import { type CameraFocus, type HeadFront, StudioStage } from './studio-stage'
+import { type CameraFocus, StudioStage } from './studio-stage'
 import { useCharacterStudio } from './use-character-studio'
 
 type Draft = { avatar: string; look: AvatarLook; keys: Record<string, EmoteId> }
@@ -543,7 +543,6 @@ function Studio() {
   const [focus, setFocus] = useState<CameraFocus>('full')
   const [zoom, setZoom] = useState(1)
   const [cue, setCue] = useState<EmoteCue | null>(null)
-  const [headFront, setHeadFront] = useState<HeadFront | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [listening, setListening] = useState<Listening>(null)
   const [keyMessage, setKeyMessage] = useState<string | null>(null)
@@ -683,7 +682,6 @@ function Studio() {
           focus={focus}
           look={stageLook}
           onCueEnd={() => setCue(null)}
-          onHeadFront={setHeadFront}
           yaw={yaw}
           zoom={zoom}
         />
@@ -808,10 +806,9 @@ function Studio() {
             )}
             {tab === 'face' && (
               <FaceEditor
-                face={shown.look.face}
-                headFront={headFront}
-                onCommit={(face) => lookPatch({ face }, true)}
-                onPreview={(face) => lookPatch({ face }, false)}
+                avatar={shown.avatar}
+                look={shown.look}
+                onCommit={(patch) => lookPatch(patch, true)}
               />
             )}
             {tab === 'hair' && (

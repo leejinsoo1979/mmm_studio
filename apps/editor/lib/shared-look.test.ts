@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test'
+import { FACE_POINT_COUNT } from '@pascal-app/editor'
 import { fromSharedLook, photoId, toSharedLook, wantedPhotoId } from './shared-look'
 
 const photo = 'data:image/jpeg;base64,AAAA'
+const points = Array.from({ length: FACE_POINT_COUNT * 2 }, (_, i) => (i % 97) / 100)
 const look = {
   hair: '#A0522D',
   skin: null,
-  face: { photo, x: 0.5, y: 0.55, scale: 0.6, rotation: 0.1, tone: 0.4 },
+  face: { photo, points, blend: 0.9, light: 0.4, eyes: '#5A3B22' },
 }
 
 describe('a look shared through the participant document', () => {

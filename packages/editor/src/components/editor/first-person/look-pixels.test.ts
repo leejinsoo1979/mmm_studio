@@ -1,14 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  bakeFace,
-  dye,
-  FACE_OVAL,
-  type HeadTriangle,
-  hairMask,
-  luminance,
-  type Pixels,
-  similarityMask,
-} from './look-pixels'
+import { dye, hairMask, luminance, type Pixels, similarityMask } from './look-pixels'
 
 function image(width: number, height: number, fill: (x: number, y: number) => number[]): Pixels {
   const data = new Uint8ClampedArray(width * height * 4)
@@ -42,6 +33,22 @@ describe('dyeing', () => {
     expect(ratio).toBeCloseTo(before[1]! / before[0]!, 0)
   })
 
+  test('evens out a dark texture’s contrast the more a dye lightens it', () => {
+    // Dark skin with pores at half its lightness.
+    const skin = () => image(2, 1, (x) => (x === 0 ? [80, 55, 42] : [40, 28, 21]))
+    const ref = luminance(80, 55, 42)
+    const contrast = (pixels: Pixels) =>
+      luminance(...(at(pixels, 0, 0) as [number, number, number])) /
+      luminance(...(at(pixels, 1, 0) as [number, number, number]))
+    const slightly = skin()
+    dye(slightly, [100, 70, 55], ref)
+    const much = skin()
+    dye(much, [210, 160, 135], ref)
+    expect(contrast(slightly)).toBeGreaterThan(1.7)
+    expect(contrast(much)).toBeLessThan(contrast(slightly))
+    expect(contrast(much)).toBeGreaterThan(1.2)
+  })
+
   test('leaves what the mask leaves out, and see-through pixels', () => {
     const pixels = image(2, 1, (x) => (x === 0 ? [200, 150, 120] : [200, 150, 120, 0]))
     dye(pixels, [50, 50, 200], 150, new Float32Array([0, 1]))
@@ -68,43 +75,5 @@ describe('masks', () => {
     expect(mask[1]).toBeCloseTo(0, 2)
     // UV padding.
     expect(mask[2]).toBe(0)
-  })
-})
-
-describe('laying a face photo over the head', () => {
-  // One square of face, head-on, filling the texture and the front view.
-  const square: HeadTriangle[] = [
-    { u: [0, 1, 0], v: [0, 0, 1], x: [0, 1, 0], y: [0, 0, 1], z: [0, 0, 0], n: [1, 1, 1] },
-    { u: [1, 1, 0], v: [0, 1, 1], x: [1, 1, 0], y: [0, 1, 1], z: [0, 0, 0], n: [1, 1, 1] },
-  ]
-
-  test('the photo lands where it was placed, inside the face', () => {
-    const texture = image(64, 64, () => [200, 160, 130])
-    // A photo whose left half is blue and right half red.
-    const photo = image(32, 32, (x) => (x < 16 ? [0, 0, 255] : [255, 0, 0]))
-    bakeFace(texture, square, photo, { x: 0.5, y: FACE_OVAL.y, scale: 0.8, rotation: 0 }, 0)
-    const y = Math.round(FACE_OVAL.y * 64)
-    const left = at(texture, Math.round((FACE_OVAL.x - 0.1) * 64), y)
-    const right = at(texture, Math.round((FACE_OVAL.x + 0.1) * 64), y)
-    expect(left[2]!).toBeGreaterThan(200)
-    expect(right[0]!).toBeGreaterThan(200)
-    // Outside the face oval the skin is untouched.
-    expect(at(texture, 2, 2)).toEqual([200, 160, 130])
-  })
-
-  test('turned sideways, the head keeps its own skin', () => {
-    const texture = image(16, 16, () => [200, 160, 130])
-    const photo = image(8, 8, () => [0, 0, 255])
-    const sideways = square.map((tri) => ({ ...tri, n: [0.1, 0.1, 0.1] }))
-    bakeFace(texture, sideways, photo, { x: 0.5, y: 0.5, scale: 1, rotation: 0 }, 0)
-    expect(at(texture, 8, 8)).toEqual([200, 160, 130])
-  })
-
-  test('full skin matching moves the photo’s colours to the skin’s', () => {
-    const texture = image(64, 64, () => [200, 160, 130])
-    const photo = image(32, 32, (x, y) => [100 + ((x + y) % 2) * 20, 60, 50])
-    bakeFace(texture, square, photo, { x: 0.5, y: FACE_OVAL.y, scale: 1, rotation: 0 }, 1)
-    const centre = at(texture, Math.round(FACE_OVAL.x * 64), Math.round(FACE_OVAL.y * 64))
-    expect(Math.abs(centre[1]! - 160)).toBeLessThan(12)
   })
 })

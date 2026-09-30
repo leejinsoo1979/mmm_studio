@@ -112,6 +112,7 @@ export function WalkthroughCharacter({
   useAvatarLook(
     model,
     useAvatarProfile((state) => state.look),
+    avatar.id,
   )
   const emoteClips = useEmoteClips(avatar, true)
   const rootRef = useRef<Group>(null)

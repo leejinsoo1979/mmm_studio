@@ -1,62 +1,92 @@
 'use client'
 
-import { type AvatarFace, FACE_OVAL, Slider } from '@pascal-app/editor'
-import { Camera, Crosshair, ImagePlus, RotateCcw, Trash2, X } from 'lucide-react'
+import {
+  type AvatarFace,
+  type AvatarLook,
+  DEFAULT_FACE_BLEND,
+  DEFAULT_FACE_LIGHT,
+  FACE_POINT_INDICES,
+  type FacePoint,
+  loadFaceTargets,
+  Slider,
+  unpackPoints,
+} from '@pascal-app/editor'
+import {
+  Camera,
+  Check,
+  ImagePlus,
+  Loader2,
+  RotateCcw,
+  ScanFace,
+  Trash2,
+  TriangleAlert,
+  Undo2,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { fitFace, type Point } from '@/lib/face-fit'
+import { cropFacePhoto, detectFace, poseMessage, sampleFaceColors } from '@/lib/face-detect'
+import { pointsFromMarks } from '@/lib/face-fit'
 import { cn } from '@/lib/utils'
-import type { HeadFront } from './studio-stage'
 
-/** Photos are kept small: a face needs no more, and it travels to the other players. */
-const PHOTO_LONGEST = 512
+/** A photo is kept this small: a face needs no more, and it travels to the other players. */
+const PHOTO_LONGEST = 768
 const VIEW = 288
 
-/** Where a new photo starts: centred on the face oval, its face about the oval's width. */
-const START: Omit<AvatarFace, 'photo'> = {
-  x: FACE_OVAL.x,
-  y: FACE_OVAL.y,
-  scale: 1.15,
-  rotation: 0,
-  tone: 0.5,
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('사진을 열 수 없어요'))
+    image.src = src
+  })
 }
 
-/** A picture scaled down to PHOTO_LONGEST, as a JPEG data URL (mirrored for a selfie camera). */
-function shrink(source: CanvasImageSource, width: number, height: number, mirror = false) {
+function pixelsOf(image: HTMLImageElement) {
+  const canvas = document.createElement('canvas')
+  canvas.width = image.naturalWidth
+  canvas.height = image.naturalHeight
+  const context = canvas.getContext('2d', { willReadFrequently: true })!
+  context.drawImage(image, 0, 0)
+  return context.getImageData(0, 0, canvas.width, canvas.height)
+}
+
+/** A picture no larger than PHOTO_LONGEST, as a JPEG data URL. */
+function shrink(source: CanvasImageSource, width: number, height: number) {
   const ratio = Math.min(1, PHOTO_LONGEST / Math.max(width, height))
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(width * ratio)
   canvas.height = Math.round(height * ratio)
-  const context = canvas.getContext('2d')!
-  if (mirror) {
-    context.translate(canvas.width, 0)
-    context.scale(-1, 1)
-  }
-  context.drawImage(source, 0, 0, canvas.width, canvas.height)
-  return canvas.toDataURL('image/jpeg', 0.88)
+  canvas.getContext('2d')!.drawImage(source, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', 0.9)
 }
 
-function readPhoto(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file)
-    const image = new Image()
-    image.onload = () => {
-      resolve(shrink(image, image.naturalWidth, image.naturalHeight))
-      URL.revokeObjectURL(url)
-    }
-    image.onerror = () => {
-      URL.revokeObjectURL(url)
-      reject(new Error('사진을 열 수 없어요'))
-    }
-    image.src = url
+/**
+ * The stored face's points as MediaPipe's full list (the ones not kept left
+ * empty), in pixels of the stored photo: what the colour samplers read.
+ */
+function fullPoints(face: Pick<AvatarFace, 'points'>, width: number, height: number): FacePoint[] {
+  const points: FacePoint[] = Array.from({ length: 478 }, () => [Number.NaN, Number.NaN])
+  unpackPoints(face.points).forEach(([x, y], i) => {
+    points[FACE_POINT_INDICES[i]!] = [x * width, y * height]
   })
+  return points
 }
 
-/** The selfie camera, mirrored like a mirror; "찍기" takes the frame. */
+/**
+ * The skin and iris colours of a stored face's photo (the one place they're
+ * read from, so a look's skin can be told to be the photo's).
+ */
+async function faceColors(face: Pick<AvatarFace, 'photo' | 'points'>) {
+  const image = await loadImage(face.photo)
+  const points = fullPoints(face, image.naturalWidth, image.naturalHeight)
+  return sampleFaceColors(pixelsOf(image), points)
+}
+
+/** The selfie camera, shown like a mirror; "찍기" takes the frame as others see it. */
 function CameraCapture({
   onTake,
   onClose,
 }: {
-  onTake: (photo: string) => void
+  onTake: (image: HTMLCanvasElement) => void
   onClose: () => void
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -65,7 +95,7 @@ function CameraCapture({
     let stream: MediaStream | null = null
     let stopped = false
     navigator.mediaDevices
-      ?.getUserMedia({ video: { facingMode: 'user', width: 960, height: 720 } })
+      ?.getUserMedia({ video: { facingMode: 'user', width: 1280, height: 960 } })
       .then((media) => {
         if (stopped) {
           for (const track of media.getTracks()) track.stop()
@@ -87,7 +117,11 @@ function CameraCapture({
   const take = () => {
     const video = videoRef.current
     if (!video?.videoWidth) return
-    onTake(shrink(video, video.videoWidth, video.videoHeight, true))
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    canvas.getContext('2d')!.drawImage(video, 0, 0)
+    onTake(canvas)
   }
 
   return (
@@ -119,7 +153,7 @@ function CameraCapture({
         )}
       </div>
       <p className="text-center text-[11px] text-neutral-500">
-        얼굴을 점선 안에 맞추고, 정면을 바라봐 주세요
+        얼굴을 점선 안에 맞추고, 밝은 곳에서 정면을 바라봐 주세요
       </p>
       <div className="flex gap-2">
         <button
@@ -136,6 +170,94 @@ function CameraCapture({
           type="button"
         >
           <Camera className="size-4" /> 찍기
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const MARK_STEPS = ['화면 왼쪽 눈을', '화면 오른쪽 눈을', '입 가운데를'] as const
+
+/**
+ * When no face is found in a photo: the player marks its eyes and mouth,
+ * and the character's face points are carried onto it by them.
+ */
+function MarkFeatures({
+  photo,
+  aspect,
+  onDone,
+  onCancel,
+}: {
+  photo: string
+  aspect: number
+  onDone: (marks: [FacePoint, FacePoint, FacePoint]) => void
+  onCancel: () => void
+}) {
+  const [marks, setMarks] = useState<FacePoint[]>([])
+  const width = aspect > 1 ? VIEW / aspect : VIEW
+  const height = aspect > 1 ? VIEW : VIEW * aspect
+  const left = (VIEW - width) / 2
+  const top = (VIEW - height) / 2
+  const step = marks.length
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="rounded-xl bg-amber-50 px-3 py-2 text-[12px] text-amber-800 leading-5">
+        사진에서 얼굴을 찾지 못했어요. 눈과 입을 직접 알려 주세요.
+      </div>
+      <div className="flex items-center gap-2 rounded-xl bg-sky-500 px-3 py-2 text-[12px] text-white shadow-[0_4px_12px_rgba(14,165,233,0.35)]">
+        <span className="grid size-5 shrink-0 place-items-center rounded-full bg-white font-bold text-[11px] text-sky-600">
+          {Math.min(3, step + 1)}
+        </span>
+        <span className="flex-1">
+          사진에서 <b>{MARK_STEPS[Math.min(2, step)]}</b> 눌러 주세요
+        </span>
+      </div>
+      <div
+        className="relative mx-auto cursor-crosshair overflow-hidden rounded-2xl bg-neutral-900"
+        onClick={(event) => {
+          const box = event.currentTarget.getBoundingClientRect()
+          const x = (event.clientX - box.left - left) / width
+          const y = (event.clientY - box.top - top) / height
+          if (x < 0 || y < 0 || x > 1 || y > 1) return
+          const next = [...marks, [x, y] as FacePoint]
+          if (next.length === 3) onDone(next as [FacePoint, FacePoint, FacePoint])
+          else setMarks(next)
+        }}
+        style={{ width: VIEW, height: VIEW }}
+      >
+        <img
+          alt=""
+          className="pointer-events-none absolute select-none"
+          draggable={false}
+          src={photo}
+          style={{ left, top, width, height }}
+        />
+        {marks.map(([x, y], i) => (
+          <span
+            className="-translate-x-1/2 -translate-y-1/2 pointer-events-none absolute grid size-5 place-items-center rounded-full border-2 border-white bg-sky-500 font-bold text-[10px] text-white shadow"
+            key={`${x}-${y}`}
+            style={{ left: left + x * width, top: top + y * height }}
+          >
+            {i + 1}
+          </span>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <button
+          className="flex flex-1 items-center justify-center gap-1 rounded-xl border border-neutral-200 bg-white py-2 text-[12px] text-neutral-600 hover:bg-neutral-50 disabled:opacity-40"
+          disabled={marks.length === 0}
+          onClick={() => setMarks([])}
+          type="button"
+        >
+          <RotateCcw className="size-3.5" /> 다시 누르기
+        </button>
+        <button
+          className="flex-1 rounded-xl border border-neutral-200 bg-white py-2 text-[12px] text-neutral-600 hover:bg-neutral-50"
+          onClick={onCancel}
+          type="button"
+        >
+          취소
         </button>
       </div>
     </div>
@@ -162,147 +284,135 @@ function Labeled({
   )
 }
 
-const MARK_STEPS = ['화면 왼쪽 눈을', '화면 오른쪽 눈을', '입 가운데를'] as const
-
-/**
- * The first step with a new photo: the player marks its eyes and mouth, and
- * the photo is fitted so they land on the character's.
- */
-function MarkFeatures({
-  photo,
-  aspect,
-  onDone,
-  onSkip,
+/** A 0–1 setting that previews while dragged and commits (one undo step) on release. */
+function UnitSlider({
+  label,
+  value,
+  onCommit,
 }: {
-  photo: string
-  aspect: number
-  onDone: (marks: [Point, Point, Point]) => void
-  onSkip: () => void
+  label: string
+  value: number
+  onCommit: (value: number) => void
 }) {
-  const [marks, setMarks] = useState<Point[]>([])
-  // The photo contained in the square.
-  const width = aspect > 1 ? VIEW / aspect : VIEW
-  const height = aspect > 1 ? VIEW : VIEW * aspect
-  const left = (VIEW - width) / 2
-  const top = (VIEW - height) / 2
-  const step = marks.length
-
+  const [shown, setShown] = useState(value)
+  useEffect(() => setShown(value), [value])
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2 rounded-xl bg-sky-500 px-3 py-2 text-[12px] text-white shadow-[0_4px_12px_rgba(14,165,233,0.35)]">
-        <span className="grid size-5 shrink-0 place-items-center rounded-full bg-white font-bold text-[11px] text-sky-600">
-          {Math.min(3, step + 1)}
-        </span>
-        <span className="flex-1">
-          사진에서 <b>{MARK_STEPS[Math.min(2, step)]}</b> 눌러 주세요
-        </span>
-      </div>
-      <div
-        className="relative mx-auto cursor-crosshair overflow-hidden rounded-2xl bg-neutral-900"
-        onClick={(event) => {
-          const box = event.currentTarget.getBoundingClientRect()
-          const x = (event.clientX - box.left - left) / width
-          const y = (event.clientY - box.top - top) / height
-          if (x < 0 || y < 0 || x > 1 || y > 1) return
-          const next = [...marks, [x, y] as Point]
-          if (next.length === 3) onDone(next as [Point, Point, Point])
-          else setMarks(next)
-        }}
-        style={{ width: VIEW, height: VIEW }}
-      >
-        <img
-          alt=""
-          className="pointer-events-none absolute select-none"
-          draggable={false}
-          src={photo}
-          style={{ left, top, width, height }}
-        />
-        {marks.map(([x, y], i) => (
-          <span
-            className="-translate-x-1/2 -translate-y-1/2 pointer-events-none absolute grid size-5 place-items-center rounded-full border-2 border-white bg-sky-500 font-bold text-[10px] text-white shadow"
-            key={`${x}-${y}`}
-            style={{ left: left + x * width, top: top + y * height }}
-          >
-            {i + 1}
-          </span>
-        ))}
-      </div>
-      <p className="text-center text-[11px] text-neutral-500 leading-4">
-        눈동자 가운데와 입 가운데를 차례로 누르면 캐릭터 얼굴에 맞춰져요
-      </p>
-      <div className="flex gap-2">
-        <button
-          className="flex flex-1 items-center justify-center gap-1 rounded-xl border border-neutral-200 bg-white py-2 text-[12px] text-neutral-600 hover:bg-neutral-50 disabled:opacity-40"
-          disabled={marks.length === 0}
-          onClick={() => setMarks([])}
-          type="button"
-        >
-          <RotateCcw className="size-3.5" /> 다시 누르기
-        </button>
-        <button
-          className="flex-1 rounded-xl border border-neutral-200 bg-white py-2 text-[12px] text-neutral-600 hover:bg-neutral-50"
-          onClick={onSkip}
-          type="button"
-        >
-          직접 맞추기
-        </button>
-      </div>
-    </div>
+    <Labeled label={label} value={`${Math.round(shown * 100)}%`}>
+      <Slider
+        max={100}
+        min={0}
+        onValueChange={([next]) => next !== undefined && setShown(next / 100)}
+        onValueCommit={([next]) => next !== undefined && onCommit(next / 100)}
+        step={1}
+        value={[shown * 100]}
+      />
+    </Labeled>
   )
 }
 
+type Status =
+  | { kind: 'idle' }
+  | { kind: 'camera' }
+  | { kind: 'reading'; step: string }
+  | { kind: 'marking'; photo: string; aspect: number }
+
 /**
- * The face tab: a photo of the player's face (a file or the camera), laid
- * over their character's face. The player marks the photo's eyes and mouth
- * and it is fitted onto the character's; then, on the character's own front
- * view shown faintly over it, they can drag it, size it (wheel or slider)
- * and turn it. "피부톤 맞춤" blends its colours into the skin around it.
+ * The face tab: a photo of the player's face (a file or the camera). Its
+ * face is found (MediaPipe's landmarks, in this browser), cropped, and swapped
+ * onto the character's — every landmark onto the character's own, blended
+ * into the skin around it. The skin and iris colours come from the photo too.
+ * With no face found, the player marks the eyes and mouth instead.
  */
 export function FaceEditor({
-  face,
-  headFront,
-  onPreview,
+  avatar,
+  look,
   onCommit,
 }: {
-  face: AvatarFace | null
-  headFront: HeadFront | null
-  onPreview: (face: AvatarFace | null) => void
-  onCommit: (face: AvatarFace | null) => void
+  avatar: string
+  look: AvatarLook
+  onCommit: (patch: Partial<AvatarLook>) => void
 }) {
-  const [capturing, setCapturing] = useState(false)
-  const [guide, setGuide] = useState(0.55)
+  const face = look.face
+  const [status, setStatus] = useState<Status>({ kind: 'idle' })
   const [error, setError] = useState<string | null>(null)
+  const [pose, setPose] = useState<string | null>(null)
+  const [colors, setColors] = useState<{ skin: string; eyes: string | null } | null>(null)
+  const [skinBefore, setSkinBefore] = useState<string | null | undefined>(undefined)
+  const [covered, setCovered] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-  const dragRef = useRef<{ x: number; y: number; face: AvatarFace } | null>(null)
-  const [photoSize, setPhotoSize] = useState<{ width: number; height: number } | null>(null)
-  const [marking, setMarking] = useState(false)
-  const landmarks = headFront?.landmarks ?? null
 
+  // A face hidden by a mask or veil has no landmarks to swap onto.
   useEffect(() => {
-    if (!face) return
-    const image = new Image()
-    image.onload = () => setPhotoSize({ width: image.naturalWidth, height: image.naturalHeight })
-    image.src = face.photo
-  }, [face?.photo, face])
+    let current = true
+    loadFaceTargets()
+      .then((targets) => current && setCovered(!targets[avatar]))
+      .catch(() => current && setCovered(false))
+    return () => {
+      current = false
+    }
+  }, [avatar])
 
-  const takePhoto = (photo: string) => {
-    setCapturing(false)
+  // The photo's own colours, for the skin and eye choices below.
+  useEffect(() => {
+    if (!face) {
+      setColors(null)
+      return
+    }
+    let current = true
+    faceColors(face)
+      .then((found) => current && setColors(found))
+      .catch(() => current && setColors(null))
+    return () => {
+      current = false
+    }
+  }, [face])
+
+  const takeImage = async (image: HTMLImageElement | HTMLCanvasElement) => {
     setError(null)
-    setPhotoSize(null)
-    setMarking(Boolean(landmarks))
-    onCommit({ ...START, ...(face ? { tone: face.tone } : {}), photo })
+    setPose(null)
+    setStatus({ kind: 'reading', step: '얼굴을 찾고 있어요…' })
+    try {
+      const found = await detectFace(image)
+      const width = image instanceof HTMLImageElement ? image.naturalWidth : image.width
+      const height = image instanceof HTMLImageElement ? image.naturalHeight : image.height
+      if (!found) {
+        setStatus({ kind: 'marking', photo: shrink(image, width, height), aspect: height / width })
+        return
+      }
+      setStatus({ kind: 'reading', step: '얼굴을 입히고 있어요…' })
+      const crop = cropFacePhoto(image, found, PHOTO_LONGEST)
+      const { skin, eyes } = await faceColors(crop)
+      setPose(poseMessage(found))
+      setSkinBefore(look.skin)
+      onCommit({
+        face: {
+          photo: crop.photo,
+          points: crop.points,
+          blend: face?.blend ?? DEFAULT_FACE_BLEND,
+          light: face?.light ?? DEFAULT_FACE_LIGHT,
+          eyes,
+        },
+        skin,
+      })
+      setStatus({ kind: 'idle' })
+    } catch {
+      setError('얼굴 인식을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.')
+      setStatus({ kind: 'idle' })
+    }
   }
 
   const openFile = async (file: File | undefined) => {
     if (!file) return
+    const url = URL.createObjectURL(file)
     try {
-      takePhoto(await readPhoto(file))
+      await takeImage(await loadImage(url))
     } catch {
       setError('사진을 열 수 없어요. JPG나 PNG 사진을 골라 주세요.')
+      setStatus({ kind: 'idle' })
+    } finally {
+      URL.revokeObjectURL(url)
     }
   }
-
-  if (capturing) return <CameraCapture onClose={() => setCapturing(false)} onTake={takePhoto} />
 
   const picker = (
     <input
@@ -316,6 +426,63 @@ export function FaceEditor({
       type="file"
     />
   )
+
+  if (covered) {
+    return (
+      <p className="flex items-start gap-2 rounded-2xl bg-amber-50 p-4 text-[12px] text-amber-800 leading-5">
+        <TriangleAlert className="mt-0.5 size-4 shrink-0" />이 캐릭터는 얼굴이 가려져 있어서 얼굴을
+        입힐 수 없어요. 캐릭터 단계에서 다른 캐릭터를 골라 주세요.
+      </p>
+    )
+  }
+
+  if (status.kind === 'camera') {
+    return (
+      <CameraCapture
+        onClose={() => setStatus({ kind: 'idle' })}
+        onTake={(canvas) => void takeImage(canvas)}
+      />
+    )
+  }
+
+  if (status.kind === 'reading') {
+    return (
+      <div className="flex flex-col items-center gap-3 rounded-2xl bg-sky-50/70 px-4 py-10 text-center">
+        <Loader2 className="size-7 animate-spin text-sky-500" />
+        <p className="font-medium text-[13px] text-neutral-700">{status.step}</p>
+        <p className="text-[11px] text-neutral-400">처음에는 인식 도구를 불러오느라 조금 걸려요</p>
+      </div>
+    )
+  }
+
+  if (status.kind === 'marking') {
+    return (
+      <MarkFeatures
+        aspect={status.aspect}
+        onCancel={() => setStatus({ kind: 'idle' })}
+        onDone={async (marks) => {
+          const targets = await loadFaceTargets().catch(() => null)
+          const target = targets?.[avatar]
+          if (!target) {
+            setError('이 캐릭터의 얼굴 정보를 불러오지 못했어요.')
+            setStatus({ kind: 'idle' })
+            return
+          }
+          onCommit({
+            face: {
+              photo: status.photo,
+              points: pointsFromMarks(marks, status.aspect, target),
+              blend: face?.blend ?? DEFAULT_FACE_BLEND,
+              light: face?.light ?? DEFAULT_FACE_LIGHT,
+              eyes: null,
+            },
+          })
+          setStatus({ kind: 'idle' })
+        }}
+        photo={status.photo}
+      />
+    )
+  }
 
   if (!face) {
     return (
@@ -341,198 +508,117 @@ export function FaceEditor({
         </button>
         <button
           className="flex items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white py-2.5 text-[13px] text-neutral-700 transition hover:bg-neutral-50"
-          onClick={() => setCapturing(true)}
+          onClick={() => setStatus({ kind: 'camera' })}
           type="button"
         >
           <Camera className="size-4" /> 카메라로 찍기
         </button>
         {error && <p className="text-[12px] text-rose-500">{error}</p>}
         <ul className="space-y-1 rounded-xl bg-neutral-50 p-3 text-[12px] text-neutral-500 leading-5">
-          <li>· 정면을 보고 찍은, 밝고 고른 빛의 사진이 잘 어울려요</li>
-          <li>· 앞머리나 안경이 눈썹과 눈을 가리지 않게 해 주세요</li>
-          <li>· 사진은 이 브라우저에서만 처리되고, 입힌 얼굴만 저장돼요</li>
+          <li>· 정면을 보고 찍은, 밝고 고른 빛의 사진이 가장 자연스러워요</li>
+          <li>· 얼굴의 눈·코·입·턱선을 찾아 캐릭터 얼굴에 하나하나 맞춰 입혀요</li>
+          <li>· 사진은 이 브라우저에서만 처리되고, 얼굴 부분만 저장돼요</li>
         </ul>
       </div>
     )
   }
 
-  const photoAspect = photoSize ? photoSize.height / photoSize.width : 1
-
-  if (marking && landmarks && photoSize) {
-    return (
-      <MarkFeatures
-        aspect={photoAspect}
-        onDone={(marks) => {
-          setMarking(false)
-          onCommit({ ...face, ...fitFace(marks, photoAspect, landmarks) })
-        }}
-        onSkip={() => setMarking(false)}
-        photo={face.photo}
-      />
-    )
-  }
-
-  const width = face.scale * VIEW
-  const height = width * photoAspect
-  const set = (patch: Partial<AvatarFace>, commit = false) => {
-    const next = { ...face, ...patch }
-    ;(commit ? onCommit : onPreview)(next)
-  }
+  const set = (patch: Partial<AvatarFace>) => onCommit({ face: { ...face, ...patch } })
+  const skinFromPhoto = colors && look.skin?.toLowerCase() === colors.skin.toLowerCase()
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       {picker}
-      <div
-        className="relative mx-auto cursor-grab touch-none overflow-hidden rounded-2xl bg-neutral-100 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] active:cursor-grabbing"
-        onPointerDown={(event) => {
-          event.currentTarget.setPointerCapture(event.pointerId)
-          dragRef.current = { x: event.clientX, y: event.clientY, face }
-        }}
-        onPointerMove={(event) => {
-          const drag = dragRef.current
-          if (!drag) return
-          set({
-            x: drag.face.x + (event.clientX - drag.x) / VIEW,
-            y: drag.face.y + (event.clientY - drag.y) / VIEW,
-          })
-        }}
-        onPointerUp={() => {
-          if (!dragRef.current) return
-          dragRef.current = null
-          onCommit(face)
-        }}
-        onWheel={(event) => {
-          set({ scale: Math.min(3, Math.max(0.3, face.scale * Math.exp(-event.deltaY * 0.001))) })
-        }}
-        style={{ width: VIEW, height: VIEW }}
-      >
-        <img
-          alt=""
-          className="pointer-events-none absolute max-w-none select-none"
-          draggable={false}
-          src={face.photo}
-          style={{
-            left: face.x * VIEW - width / 2,
-            top: face.y * VIEW - height / 2,
-            width,
-            height,
-            transform: `rotate(${face.rotation}rad)`,
-          }}
-        />
-        {headFront && (
-          <img
-            alt=""
-            className="pointer-events-none absolute inset-0 h-full w-full select-none"
-            draggable={false}
-            src={headFront.image}
-            style={{ opacity: guide }}
-          />
-        )}
-        <svg
-          className="pointer-events-none absolute inset-0 h-full w-full"
-          viewBox="0 0 1 1"
-          preserveAspectRatio="none"
-        >
-          <ellipse
-            cx={FACE_OVAL.x}
-            cy={FACE_OVAL.y}
-            fill="none"
-            rx={FACE_OVAL.rx}
-            ry={FACE_OVAL.ry}
-            stroke="#0ea5e9"
-            strokeDasharray="0.015 0.012"
-            strokeWidth="0.006"
-          />
-          {landmarks &&
-            [landmarks.leftEye, landmarks.rightEye].map(([x, y]) => (
-              <circle
-                cx={x}
-                cy={y}
-                fill="none"
-                key={`${x}`}
-                r="0.022"
-                stroke="#0ea5e9"
-                strokeWidth="0.006"
-              />
-            ))}
-          {landmarks && (
-            <line
-              stroke="#0ea5e9"
-              strokeLinecap="round"
-              strokeWidth="0.006"
-              x1={landmarks.mouth[0] - 0.05}
-              x2={landmarks.mouth[0] + 0.05}
-              y1={landmarks.mouth[1]}
-              y2={landmarks.mouth[1]}
-            />
-          )}
-        </svg>
-        <span className="pointer-events-none absolute top-2 left-2 rounded-full bg-black/45 px-2 py-0.5 text-[10px] text-white">
-          드래그로 이동 · 휠로 크기
-        </span>
+      <div className="flex gap-3">
+        <div className="relative size-24 shrink-0 overflow-hidden rounded-2xl bg-neutral-100 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
+          <img alt="" className="h-full w-full object-cover" src={face.photo} />
+          <span className="absolute right-1.5 bottom-1.5 grid size-5 place-items-center rounded-full bg-sky-500 text-white shadow">
+            <ScanFace className="size-3" />
+          </span>
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
+          <p className="flex items-center gap-1 font-semibold text-[13px] text-neutral-800">
+            <Check className="size-4 text-sky-500" strokeWidth={3} /> 내 얼굴을 입혔어요
+          </p>
+          <p className="text-[11px] text-neutral-500 leading-4">
+            눈·코·입·턱선을 캐릭터 얼굴에 하나하나 맞추고 피부와 이어지게 섞었어요
+          </p>
+        </div>
       </div>
-      <p className="text-center text-[11px] text-neutral-500 leading-4">
-        파란 표시(캐릭터의 눈과 입)에 사진의 눈과 입이 오도록 맞춰 주세요
-      </p>
-      {landmarks && (
-        <button
-          className="flex items-center justify-center gap-1.5 rounded-xl bg-sky-50 py-2 font-medium text-[12px] text-sky-600 transition hover:bg-sky-100"
-          onClick={() => setMarking(true)}
-          type="button"
-        >
-          <Crosshair className="size-4" /> 눈·입 눌러서 자동으로 맞추기
-        </button>
+
+      {pose && (
+        <p className="flex items-start gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-[11px] text-amber-800 leading-4">
+          <TriangleAlert className="mt-px size-3.5 shrink-0" /> {pose}
+        </p>
       )}
 
-      <Labeled label="사진 크기" value={`${Math.round(face.scale * 100)}%`}>
-        <Slider
-          max={300}
-          min={30}
-          onValueChange={([value]) => value !== undefined && set({ scale: value / 100 })}
-          onValueCommit={([value]) => value !== undefined && set({ scale: value / 100 }, true)}
-          step={1}
-          value={[face.scale * 100]}
-        />
-      </Labeled>
-      <Labeled label="기울기" value={`${Math.round((face.rotation * 180) / Math.PI)}°`}>
-        <Slider
-          max={30}
-          min={-30}
-          onValueChange={([value]) =>
-            value !== undefined && set({ rotation: (value * Math.PI) / 180 })
-          }
-          onValueCommit={([value]) =>
-            value !== undefined && set({ rotation: (value * Math.PI) / 180 }, true)
-          }
-          step={0.5}
-          value={[(face.rotation * 180) / Math.PI]}
-        />
-      </Labeled>
-      <Labeled label="피부톤 맞춤" value={`${Math.round(face.tone * 100)}%`}>
-        <Slider
-          max={100}
-          min={0}
-          onValueChange={([value]) => value !== undefined && set({ tone: value / 100 })}
-          onValueCommit={([value]) => value !== undefined && set({ tone: value / 100 }, true)}
-          step={1}
-          value={[face.tone * 100]}
-        />
-      </Labeled>
-      <Labeled label="캐릭터 얼굴 비춰 보기" value={`${Math.round(guide * 100)}%`}>
-        <Slider
-          max={100}
-          min={0}
-          onValueChange={([value]) => value !== undefined && setGuide(value / 100)}
-          step={1}
-          value={[guide * 100]}
-        />
-      </Labeled>
+      <UnitSlider label="경계 자연스럽게" onCommit={(blend) => set({ blend })} value={face.blend} />
+      <UnitSlider
+        label="사진 그림자 줄이기"
+        onCommit={(light) => set({ light })}
+        value={face.light}
+      />
 
-      <div className="grid grid-cols-3 gap-2 pt-1">
-        <button
-          className={cn(
-            'flex flex-col items-center gap-1 rounded-xl border border-neutral-200 bg-white py-2 text-[11px] text-neutral-600 transition hover:bg-neutral-50',
+      {colors && (
+        <div className="flex flex-col gap-2 rounded-2xl bg-neutral-50 p-3">
+          <div className="flex items-center gap-2">
+            <span
+              className="size-6 shrink-0 rounded-full ring-1 ring-black/10"
+              style={{ background: colors.skin }}
+            />
+            <span className="flex-1 text-[12px] text-neutral-700">피부색</span>
+            {skinFromPhoto ? (
+              <button
+                className="flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[11px] text-neutral-600 shadow-sm hover:text-neutral-900"
+                onClick={() => onCommit({ skin: skinBefore ?? null })}
+                type="button"
+              >
+                <Undo2 className="size-3" /> 원래 피부
+              </button>
+            ) : (
+              <button
+                className="rounded-full bg-sky-500 px-2.5 py-1 font-medium text-[11px] text-white hover:bg-sky-600"
+                onClick={() => {
+                  setSkinBefore(look.skin)
+                  onCommit({ skin: colors.skin })
+                }}
+                type="button"
+              >
+                사진 피부색 쓰기
+              </button>
+            )}
+          </div>
+          {colors.eyes && (
+            <div className="flex items-center gap-2">
+              <span
+                className="size-6 shrink-0 rounded-full ring-1 ring-black/10"
+                style={{
+                  background: `radial-gradient(circle, #111 0 28%, ${colors.eyes} 30% 100%)`,
+                }}
+              />
+              <span className="flex-1 text-[12px] text-neutral-700">눈동자 색</span>
+              <button
+                className={cn(
+                  'rounded-full px-2.5 py-1 font-medium text-[11px]',
+                  face.eyes
+                    ? 'bg-white text-neutral-600 shadow-sm hover:text-neutral-900'
+                    : 'bg-sky-500 text-white hover:bg-sky-600',
+                )}
+                onClick={() => set({ eyes: face.eyes ? null : colors.eyes })}
+                type="button"
+              >
+                {face.eyes ? '캐릭터 눈동자' : '사진 눈동자 쓰기'}
+              </button>
+            </div>
           )}
+        </div>
+      )}
+
+      {error && <p className="text-[12px] text-rose-500">{error}</p>}
+
+      <div className="grid grid-cols-3 gap-2">
+        <button
+          className="flex flex-col items-center gap-1 rounded-xl border border-neutral-200 bg-white py-2 text-[11px] text-neutral-600 transition hover:bg-neutral-50"
           onClick={() => fileRef.current?.click()}
           type="button"
         >
@@ -540,26 +626,19 @@ export function FaceEditor({
         </button>
         <button
           className="flex flex-col items-center gap-1 rounded-xl border border-neutral-200 bg-white py-2 text-[11px] text-neutral-600 transition hover:bg-neutral-50"
-          onClick={() => setCapturing(true)}
+          onClick={() => setStatus({ kind: 'camera' })}
           type="button"
         >
           <Camera className="size-4" /> 다시 찍기
         </button>
         <button
           className="flex flex-col items-center gap-1 rounded-xl border border-neutral-200 bg-white py-2 text-[11px] text-rose-500 transition hover:bg-rose-50"
-          onClick={() => onCommit(null)}
+          onClick={() => onCommit({ face: null })}
           type="button"
         >
           <Trash2 className="size-4" /> 얼굴 지우기
         </button>
       </div>
-      <button
-        className="flex items-center justify-center gap-1 text-[11px] text-neutral-400 hover:text-neutral-600"
-        onClick={() => set({ ...START, tone: face.tone }, true)}
-        type="button"
-      >
-        <X className="size-3" /> 위치 처음으로
-      </button>
     </div>
   )
 }

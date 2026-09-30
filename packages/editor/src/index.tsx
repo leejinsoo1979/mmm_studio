@@ -22,12 +22,7 @@ export {
   avatarThumbnailUrl,
   findAvatar,
 } from './components/editor/first-person/avatar-catalog'
-export {
-  type FaceLandmarks,
-  headLandmarks,
-  renderHeadFront,
-  useAvatarLook,
-} from './components/editor/first-person/avatar-look'
+export { useAvatarLook } from './components/editor/first-person/avatar-look'
 export { useAvatarBody } from './components/editor/first-person/avatar-rig'
 export { CharacterGallery } from './components/editor/first-person/character-picker'
 export { EmoteLayer, useEmoteClips } from './components/editor/first-person/emote-player'
@@ -44,7 +39,15 @@ export {
   isEmoteId,
   keyLabel,
 } from './components/editor/first-person/emotes'
-export { FACE_OVAL } from './components/editor/first-person/look-pixels'
+export {
+  FACE_PARTS,
+  FACE_POINT_COUNT,
+  FACE_POINT_INDICES,
+  type Point as FacePoint,
+  packPoints,
+  unpackPoints,
+} from './components/editor/first-person/face-points'
+export { loadFaceTargets } from './components/editor/first-person/face-targets'
 export type {
   LocalPresence,
   RemotePresence,
@@ -459,9 +462,12 @@ export { default as useAudio } from './store/use-audio'
 export {
   type AvatarFace,
   type AvatarLook,
+  DEFAULT_FACE_BLEND,
+  DEFAULT_FACE_LIGHT,
   default as useAvatarProfile,
   hasLook,
   NO_LOOK,
+  readAvatarFace,
   useAvatarEmote,
 } from './store/use-avatar-profile'
 export { type CommandAction, useCommandRegistry } from './store/use-command-registry'
