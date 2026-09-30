@@ -6,9 +6,10 @@
 //
 // It bundles face-points-harness.ts, serves it with the editor's public files
 // (the characters and the vendored MediaPipe), and runs it in headless
-// Chromium through Playwright (`bunx playwright install chromium` once, or
-// CHROMIUM_PATH for a Chromium already installed). With previews_dir it also saves each front view
-// with its landmarks drawn, to check them by eye.
+// Chromium through Playwright (a dev dependency; `bunx playwright install
+// chromium` once for its browser, or CHROMIUM_PATH for a Chromium already
+// installed). With previews_dir it also saves each front view with its
+// landmarks drawn, to check them by eye.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { FACE_POINT_COUNT } from '../../packages/editor/src/components/editor/first-person/face-points'

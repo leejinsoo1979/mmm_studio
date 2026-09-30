@@ -121,10 +121,16 @@ export function faceRegion(points: readonly Point[]): Point[] {
  * centre), so a warp reaches a little past the face and the blend has the
  * character's own skin to meet there. Add them to both sides of a warp.
  */
-export function marginRing(points: readonly Point[], spread = 0.22): Point[] {
+/** How far past the face's outline the margin ring lies, as a share of the way from its centre. */
+const MARGIN_SPREAD = 0.22
+
+export function marginRing(points: readonly Point[]): Point[] {
   const outline = FACE_PARTS.oval.map((i) => points[i]!)
   const [cx, cy] = centroid(outline)
-  return outline.map(([x, y]) => [cx + (x - cx) * (1 + spread), cy + (y - cy) * (1 + spread)])
+  return outline.map(([x, y]) => [
+    cx + (x - cx) * (1 + MARGIN_SPREAD),
+    cy + (y - cy) * (1 + MARGIN_SPREAD),
+  ])
 }
 
 const cross = (o: Point, a: Point, b: Point) =>

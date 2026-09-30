@@ -10,30 +10,10 @@ import {
   type Texture,
 } from 'three'
 import { type AvatarLook, hasLook } from '../../../store/use-avatar-profile'
-import { type FaceJob, runFaceJob } from './face-job'
 import { loadFaceTargets } from './face-targets'
-import { forEachTexel } from './front-render'
-import { type HeadGeometry, headGeometry } from './head-geometry'
-import {
-  colorDistance,
-  dye,
-  type HeadTriangle,
-  hairMask,
-  hexToRgb,
-  luminance,
-  maskedLuminance,
-  meanColor,
-  type Pixels,
-  type Rgb,
-  similarityMask,
-} from './look-pixels'
-
-/**
- * A Rocketbox body's materials: `<code>_head`, `<code>_body` and, on about
- * half of them, `<code>_opacity` (hair cards and lashes); the rest have
- * their hair, if any, painted on the head.
- */
-type Part = 'head' | 'body' | 'opacity'
+import { headGeometry } from './head-geometry'
+import { type LookBody, type LookJob, type LookResult, type Part, runLookJob } from './look-job'
+import { packTriangles } from './look-pixels'
 
 type PartMesh = { mesh: Mesh; material: MeshStandardMaterial }
 
@@ -54,220 +34,59 @@ function partMeshes(model: Object3D) {
   return parts
 }
 
-function readPixels(texture: Texture): Pixels {
-  const image = texture.image as CanvasImageSource & { width: number; height: number }
-  const canvas = document.createElement('canvas')
-  canvas.width = image.width
-  canvas.height = image.height
-  const context = canvas.getContext('2d', { willReadFrequently: true })!
-  context.drawImage(image, 0, 0)
-  return context.getImageData(0, 0, canvas.width, canvas.height)
+/** A texture's picture as a bitmap, which a worker can take (the loader's own, mostly). */
+function bitmapOf(texture: Texture): Promise<ImageBitmap> {
+  const image = texture.image as ImageBitmapSource
+  return typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap
+    ? Promise.resolve(image)
+    : createImageBitmap(image)
 }
 
-const copyPixels = (pixels: Pixels): Pixels => ({
-  data: new Uint8ClampedArray(pixels.data),
-  width: pixels.width,
-  height: pixels.height,
-})
+const bodies = new WeakMap<Texture, Promise<LookBody>>()
 
-/** Everything about a body's textures a look needs, worked out once per body. */
-type Analysis = {
-  head: Pixels
-  body: Pixels
-  opacity: Pixels | null
-  geometry: HeadGeometry
-  hairMask: Float32Array
-  headSkinMask: Float32Array
-  bodySkinMask: Float32Array
-  hairLum: number
-  headHairLum: number
-  skinLum: number
-  bodySkinLum: number
-}
-
-const analyses = new WeakMap<Texture, Analysis>()
-
-/**
- * The median colour (by lightness, so brows and nostrils don't pull it off)
- * of the head's texture under the triangles centred in part of its front
- * view.
- */
-function colorWhere(
-  head: Pixels,
-  triangles: readonly HeadTriangle[],
-  within: (x: number, y: number, n: number) => boolean,
-  fallback: Rgb,
-): Rgb {
-  const samples: Rgb[] = []
-  for (const tri of triangles) {
-    const x = (tri.x[0]! + tri.x[1]! + tri.x[2]!) / 3
-    const y = (tri.y[0]! + tri.y[1]! + tri.y[2]!) / 3
-    const n = (tri.n[0]! + tri.n[1]! + tri.n[2]!) / 3
-    if (!within(x, y, n)) continue
-    const u = (tri.u[0]! + tri.u[1]! + tri.u[2]!) / 3
-    const v = (tri.v[0]! + tri.v[1]! + tri.v[2]!) / 3
-    const p =
-      (Math.min(head.height - 1, Math.floor(v * head.height)) * head.width +
-        Math.min(head.width - 1, Math.floor(u * head.width))) *
-      4
-    samples.push([head.data[p]!, head.data[p + 1]!, head.data[p + 2]!])
-  }
-  if (samples.length === 0) return fallback
-  samples.sort((a, b) => luminance(...a) - luminance(...b))
-  return samples[Math.floor(samples.length / 2)]!
-}
-
-/** The skin's colour: the cheeks and nose, facing the front. */
-const skinColor = (head: Pixels, geometry: HeadGeometry) =>
-  colorWhere(
-    head,
-    geometry.skin,
-    (x, y, n) => n >= 0.6 && Math.abs(x - 0.5) <= 0.14 && y >= 0.55 && y <= 0.72,
-    [200, 160, 140],
-  )
-
-/** The crown's colour: a head without hair cards has its hair, if any, painted there. */
-const crownColor = (head: Pixels, geometry: HeadGeometry) =>
-  colorWhere(
-    head,
-    geometry.all,
-    (x, y) => Math.abs(x - 0.5) <= 0.12 && y >= 0.03 && y <= 0.12,
-    [60, 45, 35],
-  )
-
-/**
- * A crown nearer the skin's colour than this is bare (a bald or shaved head)
- * or cut off under a covering: the head has no painted hair to find.
- */
-const BARE_CROWN = 0.2
-
-/**
- * Clears a head's hair mask where no hair is: the eyeballs, whatever their
- * colour, and — when the mask comes from a guess at painted hair's colour —
- * the face and jaw below the eyes (the lowest brows sit above 0.45 of the
- * front view on every character), where a shadowed cheek or a dark skin can
- * match that colour. The back of the head keeps its hair.
- */
-function clearHairlessTexels(
-  mask: Float32Array,
-  head: Pixels,
-  geometry: HeadGeometry,
-  painted: boolean,
-) {
-  const clear = (texel: number) => {
-    mask[texel] = 0
-  }
-  forEachTexel(head, geometry.eyes.flat(), () => true, clear)
-  if (!painted) return
-  forEachTexel(
-    head,
-    geometry.skin,
-    (tri) => {
-      const x = (tri.x[0]! + tri.x[1]! + tri.x[2]!) / 3
-      const y = (tri.y[0]! + tri.y[1]! + tri.y[2]!) / 3
-      return Math.abs(x - 0.5) < 0.28 && y > 0.45 && tri.n[0]! + tri.n[1]! + tri.n[2]! > -0.6
-    },
-    clear,
-  )
-}
-
-function analyse(parts: Record<Part, PartMesh[]>): Analysis | null {
+/** A body's textures and head geometry for a look, gathered once per body (its head texture names it). */
+function lookBody(parts: Record<Part, PartMesh[]>): Promise<LookBody> | null {
   const headMap = parts.head[0]?.material.map
   const bodyMap = parts.body[0]?.material.map
   const opacityMap = parts.opacity[0]?.material.map
   if (!(headMap && bodyMap)) return null
-  const cached = analyses.get(headMap)
-  if (cached) return cached
-  const head = readPixels(headMap)
-  const body = readPixels(bodyMap)
-  const opacity = opacityMap ? readPixels(opacityMap) : null
-  const geometry = headGeometry(parts.head[0]!.mesh)
-  const skin = skinColor(head, geometry)
-  const skinLum = luminance(...skin)
-  const crown = opacity ? null : crownColor(head, geometry)
-  const painted = crown && colorDistance(...crown, skin, skinLum) > BARE_CROWN ? crown : null
-  const hairColour = opacity ? meanColor(opacity) : painted
-  const hairOnHead = hairColour
-    ? hairMask(head, hairColour, skin)
-    : new Float32Array(head.width * head.height)
-  if (hairColour) clearHairlessTexels(hairOnHead, head, geometry, !opacity)
-  const headSkinMask = similarityMask(head, skin)
-  for (let i = 0; i < headSkinMask.length; i++) headSkinMask[i]! *= 1 - hairOnHead[i]!
-  const bodySkinMask = similarityMask(body, skin, 0.08, 0.2)
-  const analysis: Analysis = {
-    head,
-    body,
-    opacity,
-    geometry,
-    hairMask: hairOnHead,
-    headSkinMask,
-    bodySkinMask,
-    hairLum: opacity ? luminance(...meanColor(opacity)) : 0,
-    headHairLum: maskedLuminance(head, hairOnHead),
-    skinLum,
-    bodySkinLum: maskedLuminance(body, bodySkinMask),
-  }
-  analyses.set(headMap, analysis)
-  return analysis
-}
-
-const photos = new Map<string, Promise<Pixels>>()
-
-/** Larger than this a side, a face photo is none the studio made: it isn't read. */
-const PHOTO_MAX = 2048
-
-/** A face photo's pixels (a few recent ones kept). */
-function photoPixels(photo: string): Promise<Pixels> {
-  let found = photos.get(photo)
+  let found = bodies.get(headMap)
   if (!found) {
-    found = new Promise<Pixels>((resolve, reject) => {
-      const image = new Image()
-      image.onload = () => {
-        try {
-          const { naturalWidth: width, naturalHeight: height } = image
-          if (!(width > 0 && height > 0 && width <= PHOTO_MAX && height <= PHOTO_MAX)) {
-            throw new Error(`face photo ${width}×${height}`)
-          }
-          const canvas = document.createElement('canvas')
-          canvas.width = width
-          canvas.height = height
-          const context = canvas.getContext('2d', { willReadFrequently: true })!
-          context.drawImage(image, 0, 0)
-          resolve(context.getImageData(0, 0, width, height))
-        } catch (error) {
-          reject(error)
-        }
-      }
-      image.onerror = () => reject(new Error('얼굴 사진을 읽지 못했습니다'))
-      image.src = photo
-    })
-    // A photo that didn't load can be tried again.
-    found.catch(() => photos.delete(photo))
-    photos.set(photo, found)
-    if (photos.size > 4) photos.delete(photos.keys().next().value!)
+    const geometry = headGeometry(parts.head[0]!.mesh)
+    found = Promise.all([
+      bitmapOf(headMap),
+      bitmapOf(bodyMap),
+      opacityMap ? bitmapOf(opacityMap) : null,
+    ]).then(([head, body, opacity]) => ({
+      key: headMap.uuid,
+      head,
+      body,
+      opacity,
+      geometry: {
+        all: packTriangles(geometry.all),
+        skin: packTriangles(geometry.skin),
+        eyes: geometry.eyes.map(packTriangles),
+      },
+    }))
+    found.catch(() => bodies.delete(headMap))
+    bodies.set(headMap, found)
   }
   return found
 }
 
-function textureFrom(pixels: Pixels, original: Texture): Texture {
-  const canvas = document.createElement('canvas')
-  canvas.width = pixels.width
-  canvas.height = pixels.height
-  canvas
-    .getContext('2d')!
-    .putImageData(new ImageData(pixels.data, pixels.width, pixels.height), 0, 0)
+function textureFrom(bitmap: ImageBitmap, original: Texture): Texture {
   const texture = original.clone()
   // A clone shares its source: give this one its own picture.
-  texture.source = new Source(canvas)
+  texture.source = new Source(bitmap)
   texture.needsUpdate = true
   return texture
 }
 
-/** A face swap waiting or running: settles with the head, or null when a newer one for the same body replaced it. */
+/** A look being put together: settles with its textures, or null when a newer look for the same body replaced it. */
 type Task = {
-  job: FaceJob
+  job: LookJob
   signal: AbortSignal
-  resolve: (head: Pixels | null) => void
+  resolve: (result: LookResult | null) => void
   reject: (error: unknown) => void
 }
 
@@ -278,12 +97,8 @@ let running: Task | null = null
 const waiting = new Map<object, Task>()
 
 /** Runs a task here, settling it. */
-function runHere(task: Task) {
-  try {
-    task.resolve(runFaceJob(task.job))
-  } catch (error) {
-    task.reject(error)
-  }
+function runHere(task: Task): Promise<void> {
+  return runLookJob(task.job).then(task.resolve, task.reject)
 }
 
 /** Starts the next waiting task (skipping those no longer wanted), if the worker is free. */
@@ -296,36 +111,42 @@ function next() {
       continue
     }
     running = task
-    // Copied, not transferred: the job must still be runnable here if the worker fails.
     worker.postMessage({ job: task.job })
     return
   }
 }
 
-/** The face swap worker, started on first use; null where there are no workers, or it failed to start. */
-function faceWorker(): Worker | null {
+/** The look worker, started on first use; null where there are no workers, or it failed to start. */
+function lookWorker(): Worker | null {
   if (worker !== undefined) return worker
   worker = null
   if (typeof Worker === 'undefined') return null
   try {
-    const started = new Worker(new URL('./face-worker.ts', import.meta.url), { type: 'module' })
-    started.onmessage = (event: MessageEvent<{ head?: Pixels; error?: string }>) => {
+    const started = new Worker(new URL('./look-worker.ts', import.meta.url), { type: 'module' })
+    started.onmessage = (event: MessageEvent<{ result?: LookResult; error?: string }>) => {
       const task = running
       running = null
-      const { head, error } = event.data
-      if (head) task?.resolve(head)
+      const { result, error } = event.data
+      if (result) task?.resolve(result)
       else task?.reject(new Error(error))
       next()
     }
-    // It didn't load: the tasks for it, and all later ones, run here.
+    // It didn't load: the tasks still wanted, and all later ones, are made
+    // here, one at a time so the page keeps breathing between them.
     started.onerror = (event) => {
       event.preventDefault()
       started.terminate()
       worker = null
+      console.warn('[look] the look worker did not start; looks are made on the main thread')
       const left = [...(running ? [running] : []), ...waiting.values()]
       running = null
       waiting.clear()
-      for (const task of left) runHere(task)
+      let chain = Promise.resolve()
+      for (const task of left) {
+        chain = chain
+          .then(() => new Promise((resolve) => setTimeout(resolve)))
+          .then(() => (task.signal.aborted ? task.resolve(null) : runHere(task)))
+      }
     }
     worker = started
   } catch {
@@ -335,17 +156,17 @@ function faceWorker(): Worker | null {
 }
 
 /**
- * Swaps a face onto a head (see face-job.ts) in the worker, so the game
- * doesn't stall for the second or more it takes; here if there is no worker.
- * Only the latest swap for each body waits its turn: settles with null for
- * one a newer swap for that body replaced, or `signal` aborted, before it
+ * Puts a look together (see look-job.ts) in the worker, so the game doesn't
+ * stall for the second or more it takes; here if there is no worker. Only
+ * the latest look for each body waits its turn: settles with null for one
+ * a newer look for that body replaced, or `signal` aborted, before it
  * started.
  */
-function swapFaceAside(body: object, job: FaceJob, signal: AbortSignal): Promise<Pixels | null> {
+function makeLook(body: object, job: LookJob, signal: AbortSignal): Promise<LookResult | null> {
   return new Promise((resolve, reject) => {
     const task = { job, signal, resolve, reject }
-    if (!faceWorker()) {
-      runHere(task)
+    if (!lookWorker()) {
+      void runHere(task)
       return
     }
     waiting.get(body)?.resolve(null)
@@ -368,81 +189,48 @@ async function applyLook(
   signal: AbortSignal,
 ): Promise<{ undo: () => void; retry: boolean } | null> {
   const parts = partMeshes(model)
-  const analysis = analyse(parts)
-  if (!analysis) return { undo: () => {}, retry: false }
-  const face = look.face
+  const gathering = lookBody(parts)
+  if (!gathering) return { undo: () => {}, retry: false }
   let retry = false
-  const [photo, target] = face
-    ? await Promise.all([
-        photoPixels(face.photo).catch(() => {
-          retry = true
-          return null
-        }),
-        loadFaceTargets().then(
+  const face = look.face
+  const [body, target] = await Promise.all([
+    gathering,
+    face
+      ? loadFaceTargets().then(
           (targets) => targets[avatarId] ?? null,
           () => {
             retry = true
             return null
           },
-        ),
-      ])
-    : [null, null]
-  if (signal.aborted) return null
-
-  const changed: Partial<Record<Part, Pixels>> = {}
-  if ((face && photo && target) || look.hair || look.skin) {
-    const dyed = copyPixels(analysis.head)
-    if (look.hair) dye(dyed, hexToRgb(look.hair), analysis.headHairLum, analysis.hairMask)
-    if (look.skin) dye(dyed, hexToRgb(look.skin), analysis.skinLum, analysis.headSkinMask)
-    let head = dyed
-    // The face goes on last: the dyes' masks are the character's own face,
-    // not the photo's, and the face's colours meet the skin as dyed.
-    if (face && photo && target) {
-      try {
-        const swapped = await swapFaceAside(
-          model,
-          {
-            head: dyed,
-            avatar: avatarId,
-            front: `${avatarId}|${look.hair}|${look.skin}`,
-            geometry: analysis.geometry,
-            hair: analysis.hairMask,
-            photo,
-            photoKey: face.photo,
-            points: face.points,
-            target,
-            blend: face.blend,
-            light: face.light,
-            eyes: face.eyes,
-          },
-          signal,
         )
-        if (!swapped) return null
-        head = swapped
-      } catch (error) {
-        // The dyes still go on; the face is left out.
-        console.warn('[look] face swap failed', error)
-      }
-      if (signal.aborted) return null
-    }
-    changed.head = head
+      : null,
+  ])
+  if (signal.aborted) return null
+  const job: LookJob = {
+    body,
+    avatar: avatarId,
+    hair: look.hair,
+    skin: look.skin,
+    face: face && target ? { ...face, target } : null,
   }
-  if (look.hair && analysis.opacity) {
-    const opacity = copyPixels(analysis.opacity)
-    dye(opacity, hexToRgb(look.hair), analysis.hairLum)
-    changed.opacity = opacity
+  if (!(job.hair || job.skin || job.face)) return { undo: () => {}, retry }
+  const result = await makeLook(model, job, signal)
+  if (!result || signal.aborted) {
+    for (const bitmap of Object.values(result?.parts ?? {})) bitmap.close()
+    return null
   }
-  if (look.skin) {
-    const body = copyPixels(analysis.body)
-    dye(body, hexToRgb(look.skin), analysis.bodySkinLum, analysis.bodySkinMask)
-    changed.body = body
-  }
+  if (result.faceFailed) retry = true
 
   const undo: (() => void)[] = []
-  for (const part of Object.keys(changed) as Part[]) {
-    const pixels = changed[part]!
-    for (const { mesh, material } of parts[part]) {
-      const texture = textureFrom(pixels, material.map!)
+  for (const part of Object.keys(result.parts) as Part[]) {
+    const bitmap = result.parts[part]!
+    const meshes = parts[part]
+    if (meshes.length === 0) {
+      bitmap.close()
+      continue
+    }
+    const texture = textureFrom(bitmap, meshes[0]!.material.map!)
+    for (const { mesh, material } of meshes) {
       const dressed = material.clone()
       dressed.map = texture
       mesh.userData.lookOriginal = material
@@ -454,9 +242,12 @@ async function applyLook(
           delete mesh.userData.lookOriginal
         }
         dressed.dispose()
-        texture.dispose()
       })
     }
+    undo.push(() => {
+      texture.dispose()
+      bitmap.close()
+    })
   }
   return {
     undo: () => {

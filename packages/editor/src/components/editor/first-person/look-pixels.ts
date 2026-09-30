@@ -132,3 +132,31 @@ export type HeadTriangle = {
   z: number[]
   n: number[]
 }
+
+/** Numbers per triangle when packed: u, v, x, y, z and n for each of its three corners. */
+const PACKED = 18
+
+/** Triangles as one flat array, cheap to send to a worker (unpacked there by `unpackTriangles`). */
+export function packTriangles(triangles: readonly HeadTriangle[]): Float32Array {
+  const packed = new Float32Array(triangles.length * PACKED)
+  triangles.forEach((tri, t) => {
+    const fields = [tri.u, tri.v, tri.x, tri.y, tri.z, tri.n]
+    fields.forEach((values, f) => {
+      for (let c = 0; c < 3; c++) packed[t * PACKED + f * 3 + c] = values[c]!
+    })
+  })
+  return packed
+}
+
+export function unpackTriangles(packed: Float32Array): HeadTriangle[] {
+  const triangles: HeadTriangle[] = []
+  for (let t = 0; t + PACKED <= packed.length; t += PACKED) {
+    const field = (f: number) => [
+      packed[t + f * 3]!,
+      packed[t + f * 3 + 1]!,
+      packed[t + f * 3 + 2]!,
+    ]
+    triangles.push({ u: field(0), v: field(1), x: field(2), y: field(3), z: field(4), n: field(5) })
+  }
+  return triangles
+}

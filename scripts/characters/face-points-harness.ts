@@ -6,12 +6,10 @@ import type { Mesh, MeshStandardMaterial, Texture } from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { FACE_POINT_INDICES, packPoints } from '../../packages/editor/src/components/editor/first-person/face-points'
+import { FRONT } from '../../packages/editor/src/components/editor/first-person/face-swap'
 import { renderFront } from '../../packages/editor/src/components/editor/first-person/front-render'
 import { headGeometry } from '../../packages/editor/src/components/editor/first-person/head-geometry'
 import type { Pixels } from '../../packages/editor/src/components/editor/first-person/look-pixels'
-
-/** The front view's side in pixels (as avatar-look.ts renders it). */
-const SIZE = 1024
 
 function pixelsOf(texture: Texture): Pixels {
   const image = texture.image as CanvasImageSource & { width: number; height: number }
@@ -70,7 +68,7 @@ async function run(ids: string[]): Promise<Found[]> {
     const mesh = head as Mesh
     const geometry = headGeometry(mesh)
     const texture = pixelsOf((mesh.material as MeshStandardMaterial).map!)
-    const front = renderFront(texture, geometry.all, SIZE)
+    const front = renderFront(texture, geometry.all, FRONT)
     const canvas = canvasOf(front.image)
     const result = landmarker.detect(canvas)
     const landmarks = result.faceLandmarks[0]
@@ -81,7 +79,7 @@ async function run(ids: string[]): Promise<Found[]> {
     if (landmarks) {
       for (const index of FACE_POINT_INDICES) {
         const point = landmarks[index]!
-        context.fillRect(point.x * SIZE - 2, point.y * SIZE - 2, 4, 4)
+        context.fillRect(point.x * FRONT - 2, point.y * FRONT - 2, 4, 4)
       }
     }
     found.push({

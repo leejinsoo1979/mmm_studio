@@ -546,11 +546,6 @@ export function sampleIrisColor(
   pixels: RgbaPixels,
   points478: readonly FacePoint[],
 ): string | null {
-  const iris = irisMedian(pixels, points478)
-  return iris && hex(...iris)
-}
-
-function irisMedian(pixels: RgbaPixels, points478: readonly FacePoint[]): Rgb | null {
   const { data } = pixels
   const lightnessAt = (p: number) => luminance(data[p]!, data[p + 1]!, data[p + 2]!)
   const reds = new Uint32Array(256)
@@ -588,8 +583,11 @@ function irisMedian(pixels: RgbaPixels, points478: readonly FacePoint[]): Rgb | 
     }
     return 255
   }
-  return [median(reds), median(greens), median(blues)]
+  return hex(median(reds), median(greens), median(blues))
 }
+
+const rgbOf = (hex: string): Rgb =>
+  [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)) as Rgb
 
 /**
  * The skin's and irises' colours (hex) as a character's textures would
@@ -600,10 +598,10 @@ export function sampleFaceColors(
   pixels: RgbaPixels,
   points478: readonly FacePoint[],
 ): { skin: string; eyes: string | null } {
-  const iris = irisMedian(pixels, points478)
+  const iris = sampleIrisColor(pixels, points478)
   return {
     skin: sampleSkinColor(pixels, points478),
-    eyes: iris && hex(...irisAlbedo(iris, scleraColor(pixels, points478))),
+    eyes: iris && hex(...irisAlbedo(rgbOf(iris), scleraColor(pixels, points478))),
   }
 }
 

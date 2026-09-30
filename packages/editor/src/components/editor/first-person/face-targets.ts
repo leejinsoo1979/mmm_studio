@@ -7,7 +7,7 @@ import { FACE_POINT_COUNT } from './face-points'
  * scripts/characters/gen-face-points.ts; regenerate it whenever the front
  * view's framing (head-geometry.ts) changes.
  */
-export const FACE_TARGETS_URL = '/characters/rocketbox/face-points.json'
+const FACE_TARGETS_URL = '/characters/rocketbox/face-points.json'
 
 type FaceTargets = Record<string, number[]>
 
