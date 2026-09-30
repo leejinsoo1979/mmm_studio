@@ -1,5 +1,7 @@
+import { connectedFrom } from './face-fill'
 import { runFaceJob } from './face-job'
-import { forEachTexel } from './front-render'
+import { maskImage } from './face-swap'
+import { forEachTexel, renderFront } from './front-render'
 import type { HeadGeometry } from './head-geometry'
 import {
   colorDistance,
@@ -158,6 +160,44 @@ function clearHairlessTexels(
   )
 }
 
+/** The front view's side (px) hair is followed on: fine enough for strands, cheap to walk. */
+const HAIR_VIEW = 512
+
+/**
+ * Clears a head's hair mask of what only looks like hair: patches on the
+ * face — a forehead, the shadow under an eye — the colour of light hair,
+ * but apart from the hair. Hair is what, on the front view, reaches the
+ * crown or the head's sides (a fringe over the face does).
+ */
+function keepConnectedHair(mask: Float32Array, head: Pixels, geometry: HeadGeometry) {
+  const drawn = renderFront(maskImage(mask, head.width, head.height), geometry.all, HAIR_VIEW).image
+  const front = new Float32Array(HAIR_VIEW * HAIR_VIEW)
+  const seeds = new Float32Array(HAIR_VIEW * HAIR_VIEW)
+  for (let i = 0; i < front.length; i++) {
+    if (drawn.data[i * 4 + 3] === 0) continue
+    front[i] = drawn.data[i * 4]! / 255
+    const x = ((i % HAIR_VIEW) + 0.5) / HAIR_VIEW
+    const y = (Math.floor(i / HAIR_VIEW) + 0.5) / HAIR_VIEW
+    seeds[i] = y < 0.2 || Math.abs(x - 0.5) > 0.3 ? 1 : 0
+  }
+  const hair = connectedFrom(front, seeds, HAIR_VIEW, HAIR_VIEW, 0.5)
+  forEachTexel(
+    head,
+    geometry.all,
+    (tri) => tri.n[0]! + tri.n[1]! + tri.n[2]! > 0,
+    (texel, tri, w0, w1, w2) => {
+      if (mask[texel]! <= 0) return
+      const x = tri.x[0]! * w0 + tri.x[1]! * w1 + tri.x[2]! * w2
+      const y = tri.y[0]! * w0 + tri.y[1]! * w1 + tri.y[2]! * w2
+      const px = Math.min(HAIR_VIEW - 1, Math.max(0, Math.floor(x * HAIR_VIEW)))
+      const py = Math.min(HAIR_VIEW - 1, Math.max(0, Math.floor(y * HAIR_VIEW)))
+      const p = py * HAIR_VIEW + px
+      // Where the front view shows hair that reaches no other hair.
+      if (front[p]! >= 0.5 && hair[p]! < 0.5) mask[texel] = 0
+    },
+  )
+}
+
 /** What a look needs to know of a body's textures (see `Analysis`). */
 export function analyseBody(
   head: Pixels,
@@ -173,7 +213,10 @@ export function analyseBody(
   const hairOnHead = hairColour
     ? hairMask(head, hairColour, skin)
     : new Float32Array(head.width * head.height)
-  if (hairColour) clearHairlessTexels(hairOnHead, head, geometry, !opacity)
+  if (hairColour) {
+    clearHairlessTexels(hairOnHead, head, geometry, !opacity)
+    keepConnectedHair(hairOnHead, head, geometry)
+  }
   const headSkinMask = similarityMask(head, skin)
   for (let i = 0; i < headSkinMask.length; i++) headSkinMask[i]! *= 1 - hairOnHead[i]!
   const bodySkinMask = similarityMask(body, skin, 0.08, 0.2)
