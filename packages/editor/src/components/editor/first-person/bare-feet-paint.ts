@@ -193,7 +193,7 @@ export function byAngle(pixels: Pixels, texels: readonly Texel[]): Rgb[] | null 
 }
 
 /** A colour by angle (see byAngle) at an angle, between its stretches' middles. */
-function angleColour(bins: readonly Rgb[], theta: number): Rgb {
+export function angleColour(bins: readonly Rgb[], theta: number): Rgb {
   const x = ((theta + Math.PI) / (2 * Math.PI)) * BINS - 0.5
   const k = Math.floor(x)
   const t = x - k

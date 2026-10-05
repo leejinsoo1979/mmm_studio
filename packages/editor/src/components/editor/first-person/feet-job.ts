@@ -25,6 +25,7 @@ import {
   toFoot,
 } from './bare-feet'
 import {
+  angleColour,
   byAngle,
   DEFAULT_SOCK,
   handsColour,
@@ -142,6 +143,13 @@ function legSurface(
   return { positions: bind.positions, uvs: bind.uvs, index }
 }
 
+/**
+ * The leg's edge at a weld (in the foot's lengths above its ring): wholly
+ * recoloured up to the first, fading out by the second, from its colour
+ * between the second and the third.
+ */
+const EDGE: readonly [number, number, number] = [0.05, 0.1, 0.25]
+
 /** Texels of the leg this near its ring (in the foot's lengths, above it) give its colour there. */
 const NEAR_RING: readonly [number, number] = [-0.02, 0.15]
 /** Fewer texels than this by the ring, and it tells nothing of the leg's colour. */
@@ -201,6 +209,28 @@ function legOf(
     const shadow = skinHued(was) ? 1 - smoothstep(ring.high + 0.4, ring.high + 0.7, texel.u) : 0
     const weight = Math.max(alike, shadow)
     if (weight > 0) whole.set(texel.texel, Math.max(whole.get(texel.texel) ?? 0, weight))
+  }
+  // The leg's very edge, where a shoe's collar or a sock's top was drawn,
+  // takes the colour just above it (as fixed), angle by angle: no line
+  // runs round the weld.
+  const fixed: Pixels = { ...texture, data: texture.data.slice() }
+  for (const [texel, rgb] of fixes) fixed.data.set(rgb, texel * 4)
+  const above = byAngle(
+    fixed,
+    texels.filter((texel) => texel.rise > EDGE[1] && texel.rise < EDGE[2]),
+  )
+  if (above) {
+    for (const texel of texels) {
+      const share = 1 - smoothstep(EDGE[0], EDGE[1], texel.rise)
+      if (share <= 0) continue
+      const p = texel.texel * 4
+      const want = angleColour(above, texel.theta)
+      fixes.set(
+        texel.texel,
+        [0, 1, 2].map((c) => fixed.data[p + c]! + (want[c]! - fixed.data[p + c]!) * share) as Rgb,
+      )
+      whole.set(texel.texel, Math.max(whole.get(texel.texel) ?? 0, share))
+    }
   }
   return { texels, near, colour, whole, fixes }
 }
