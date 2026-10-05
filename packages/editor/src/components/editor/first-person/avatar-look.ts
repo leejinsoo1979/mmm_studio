@@ -16,6 +16,8 @@ import { useAvatarShape } from './avatar-shape'
 import { hasBodyShape } from './body-shape'
 import { hasFacePaint, NO_PAINT } from './face-paint'
 import { loadFaceTargets } from './face-targets'
+import { footGeometry } from './feet'
+import { packFeet } from './feet-paint'
 import { SHOD } from './footwear'
 import { headGeometry } from './head-geometry'
 import { type LookBody, type LookJob, type LookResult, type Part, runLookJob } from './look-job'
@@ -73,6 +75,9 @@ function lookBody(parts: Record<Part, PartMesh[]>): Promise<LookBody> | null {
         skin: packTriangles(geometry.skin),
         eyes: geometry.eyes.map(packTriangles),
       },
+      feet:
+        parts.body.map(({ mesh }) => footGeometry(mesh)).find(({ frames }) => frames.length > 0) ??
+        packFeet([], []),
     }))
     found.catch(() => bodies.delete(headMap))
     bodies.set(headMap, found)
@@ -183,8 +188,8 @@ function makeLook(body: object, job: LookJob, signal: AbortSignal): Promise<Look
 
 /**
  * Dresses a body in a look: its own copies of the textures the look changes
- * (the dyes, a shave, the swapped face, the face paint) on its own copies
- * of the materials. Returns what undoes it (the original materials back,
+ * (the dyes, a shave, the swapped face, the face paint, socks or bare feet)
+ * on its own copies of the materials. Returns what undoes it (the original materials back,
  * the copies freed), or null when `signal` aborted it first; `retry` when
  * the face or the landmarks it and the paint are placed by couldn't be
  * loaded (the look went on without them) and may load later.
@@ -223,12 +228,14 @@ async function applyLook(
     face: target && look.face,
     paint: look.paint,
     bald: look.bald,
+    feet: look.feet,
     target,
   }
   // Without landmarks only the irises of the paint go on, and no shave:
   // it would take the brows and lashes with the hair (a retry puts it on).
   const painted = target ? hasFacePaint(job.paint) || job.bald : job.paint.eyes
-  if (!(job.hair || job.skin || job.face || painted)) return { undo: () => {}, retry }
+  const shoeless = job.feet.wear !== 'shoes'
+  if (!(job.hair || job.skin || job.face || painted || shoeless)) return { undo: () => {}, retry }
   const result = await makeLook(model, job, signal)
   if (!result || signal.aborted) {
     for (const bitmap of Object.values(result?.parts ?? {})) bitmap.close()

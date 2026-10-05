@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { NO_PAINT } from './face-paint'
+import { SHOD } from './footwear'
 import type { HeadGeometry } from './head-geometry'
 import { analyseBody, dressBody, type LookJob } from './look-job'
 import {
@@ -95,6 +96,7 @@ const look = (key: string, change: Partial<Omit<LookJob, 'body'>>) => ({
   face: null,
   paint: NO_PAINT,
   bald: false,
+  feet: SHOD,
   target: null,
   ...change,
 })

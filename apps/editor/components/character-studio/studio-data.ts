@@ -38,6 +38,21 @@ import {
 
 export type Swatch = { hex: string; name: string }
 
+/** Sock colours: the plain default is the original (no swatch picked). */
+export const SOCK_SWATCHES: Swatch[] = [
+  { hex: '#1f1f22', name: '검정' },
+  { hex: '#7c7f86', name: '회색' },
+  { hex: '#1f2f55', name: '네이비' },
+  { hex: '#b9a68a', name: '베이지' },
+  { hex: '#a8323e', name: '빨강' },
+  { hex: '#e8a7b8', name: '분홍' },
+  { hex: '#4f7a4a', name: '초록' },
+  { hex: '#e5c34b', name: '노랑' },
+  { hex: '#6aa3d8', name: '하늘' },
+  { hex: '#6b4a8c', name: '보라' },
+  { hex: '#7a5232', name: '갈색' },
+]
+
 /** Natural hair shades, darkest first: what a random look mostly dyes to. */
 export const NATURAL_HAIR_SWATCHES: Swatch[] = [
   { hex: '#1B1918', name: '자연 흑발' },

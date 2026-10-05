@@ -16,6 +16,7 @@ import { bodyShaper } from './body-shape'
 import { earShaper } from './ear-shape'
 import { faceShapeField, hasSliders, type ShapeField } from './face-shape'
 import { loadFaceTargets } from './face-targets'
+import { feetShaper } from './feet'
 import { type HeadFrame, headFrame, originalGeometry } from './head-geometry'
 
 /**
@@ -317,20 +318,22 @@ export function applyShape(model: Object3D, shapers: readonly Shaper[]): () => v
 
 /**
  * Keeps a body shaped by a look: the face (the photo's proportions and the
- * sliders), the ears, the build, and the head under a borrowed hairstyle
- * (`hair`, from useAvatarHair). All go in one reshaping, each mesh built
- * from its original once. The face waits for the character's landmarks (a
- * download, once); the rest needs none.
+ * sliders), the ears, the build, feet out of their shoes, and the head
+ * under a borrowed hairstyle (`hair`, from useAvatarHair). All go in one
+ * reshaping, each mesh built from its original once. The face waits for the
+ * character's landmarks (a download, once); the rest needs none.
  */
 export function useAvatarShape(
   model: Object3D,
-  look: Pick<AvatarLook, 'face' | 'shape' | 'body'> | null | undefined,
+  look: Pick<AvatarLook, 'face' | 'shape' | 'body' | 'feet'> | null | undefined,
   avatarId: string,
   hair: Shaper | null,
 ) {
   const shape = look?.shape
   const body = look?.body
   const points = look?.face?.points
+  // The shape follows what is worn on the feet, not the socks' colour.
+  const wear = look?.feet?.wear
   useEffect(() => {
     const head = headOf(model)
     if (!head) return
@@ -338,6 +341,8 @@ export function useAvatarShape(
     if (hair) ready.push(hair)
     const build = body ? bodyShaper(body) : null
     if (build) ready.push(build)
+    const footwear = wear ? feetShaper({ wear, color: null }) : null
+    if (footwear) ready.push(footwear)
     const ears = shape ? earShaper(head, shape) : null
     if (ears) ready.push(ears)
     let undo: (() => void) | null = null
@@ -363,5 +368,5 @@ export function useAvatarShape(
       cancelled = true
       undo?.()
     }
-  }, [model, shape, body, points, avatarId, hair])
+  }, [model, shape, body, points, wear, avatarId, hair])
 }

@@ -8,6 +8,7 @@ import {
   shaveHead,
 } from './face-paint'
 import { FACE_PARTS, facePointOf, type Point, unpackPoints } from './face-points'
+import { SHOD } from './footwear'
 import type { HeadGeometry } from './head-geometry'
 import { analyseBody, dressBody } from './look-job'
 import { luminance, type Pixels, type Rgb } from './look-pixels'
@@ -516,6 +517,7 @@ describe('a body dressed in a look, placed by its landmarks', () => {
         face: null,
         paint: NO_PAINT,
         bald: false,
+        feet: SHOD,
         target: FACE,
         ...change,
       },
@@ -551,6 +553,14 @@ describe('a body dressed in a look, placed by its landmarks', () => {
     expect(strayChanges(shaved, (_, y) => y < HAIRLINE + 0.06, head)).toBe(0)
   })
 
+  test('a dyed head under a borrowed hairstyle is shaved all the same', () => {
+    const { head } = hairy()
+    const shaved = dress(head, { bald: true, hair: '#c03020' })
+    let crown = 0
+    for (let k = 0; k < 20; k++) crown += lightAt(shaved, [0.1 + k * 0.04, HAIRLINE / 2])
+    expect(Math.abs(crown / 20 - luminance(...SKIN))).toBeLessThan(25)
+  })
+
   test('the same body shaved and then not: its own hair again', () => {
     const { head } = hairy()
     const analysis = analyseBody(head, BODY, null, GRID)
@@ -561,6 +571,7 @@ describe('a body dressed in a look, placed by its landmarks', () => {
       skin: null,
       face: null,
       paint: NO_PAINT,
+      feet: SHOD,
       target: FACE,
     }
     dressBody(analysis, { ...job, bald: true }, null)

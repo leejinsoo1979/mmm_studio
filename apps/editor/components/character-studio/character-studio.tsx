@@ -747,8 +747,10 @@ function Studio() {
               <BodyPanel
                 avatar={shown.avatar}
                 body={shown.look.body}
+                feet={shown.look.feet}
                 onAvatar={pickAvatar}
                 onCommit={(body) => lookPatch({ body }, true)}
+                onFeet={(feet) => lookPatch({ feet }, true)}
                 onPreview={(body) => lookPatch({ body }, false)}
               />
             )}

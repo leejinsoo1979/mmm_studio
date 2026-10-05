@@ -142,6 +142,25 @@ function toLab(r: number, g: number, b: number, out: number[]) {
   out[2] = 200 * (y - z)
 }
 
+/** An sRGB colour (0–255 channels) in CIELAB, written into `out`. */
+export function lab(r: number, g: number, b: number, out: number[]) {
+  toLab(r, g, b, out)
+  return out
+}
+
+const labA = [0, 0, 0]
+const labB = [0, 0, 0]
+
+/**
+ * How different two colours look (CIELAB ΔE*ab: about 2 is just noticeable),
+ * alike however dark they are, where colorDistance's hue grows unsteady.
+ */
+export function deltaE(a: Rgb, b: Rgb) {
+  toLab(a[0], a[1], a[2], labA)
+  toLab(b[0], b[1], b[2], labB)
+  return Math.hypot(labA[0]! - labB[0]!, labA[1]! - labB[1]!, labA[2]! - labB[2]!)
+}
+
 /** A CIELAB colour back in sRGB (0–255, clamped), written into `out`. */
 function fromLab(l: number, a: number, b: number, out: number[]) {
   const fy = (l + 16) / 116

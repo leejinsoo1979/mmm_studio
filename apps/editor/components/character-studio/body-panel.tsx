@@ -1,6 +1,7 @@
 'use client'
 
 import {
+  type AvatarFeet,
   avatarGender,
   BODY_SLIDER_GROUPS,
   BODY_SLIDERS,
@@ -8,12 +9,19 @@ import {
   type BodySliderGroup,
   type BodySliderId,
   DEFAULT_BODY_SHAPE,
+  type Footwear,
   hasBodyShape,
 } from '@pascal-app/editor'
 import { useState } from 'react'
 import { counterpartAvatar, isChild } from './avatar-counterpart'
-import { BipolarSlider, PanelSection, ResetButton, Segmented } from './studio-controls'
-import { BODY_GROUP_LABELS, BODY_SLIDER_TEXT, GENDER_LABELS, HEIGHT_TEXT } from './studio-data'
+import { BipolarSlider, PanelSection, ResetButton, Segmented, SwatchGrid } from './studio-controls'
+import {
+  BODY_GROUP_LABELS,
+  BODY_SLIDER_TEXT,
+  GENDER_LABELS,
+  HEIGHT_TEXT,
+  SOCK_SWATCHES,
+} from './studio-data'
 
 const GENDER_OPTIONS = (['male', 'female'] as const).map((id) => ({ id, label: GENDER_LABELS[id] }))
 const AGE_OPTIONS = [
@@ -21,22 +29,32 @@ const AGE_OPTIONS = [
   { id: 'child', label: '어린이' },
 ] as const
 const GROUP_OPTIONS = BODY_SLIDER_GROUPS.map((id) => ({ id, label: BODY_GROUP_LABELS[id] }))
+const FOOTWEAR_OPTIONS: readonly { id: Footwear; label: string }[] = [
+  { id: 'shoes', label: '신발' },
+  { id: 'socks', label: '양말' },
+  { id: 'bare', label: '맨발' },
+]
 
 /**
  * The body, the Sims' and inZOI's way: sex and age switch the character to
  * its nearest counterpart in the library (the rest of the look stays), the
  * height scales the whole body and the sliders reshape it part by part.
+ * The feet can come out of their shoes, in socks or bare.
  */
 export function BodyPanel({
   avatar,
   body,
+  feet,
   onAvatar,
+  onFeet,
   onPreview,
   onCommit,
 }: {
   avatar: string
   body: BodyShape
+  feet: AvatarFeet
   onAvatar: (avatar: string) => void
+  onFeet: (feet: AvatarFeet) => void
   onPreview: (body: BodyShape) => void
   onCommit: (body: BodyShape) => void
 }) {
@@ -103,6 +121,22 @@ export function BodyPanel({
             />
           ))}
         </div>
+      </PanelSection>
+
+      <PanelSection title="발">
+        <Segmented
+          onPick={(wear) => onFeet({ ...feet, wear })}
+          options={FOOTWEAR_OPTIONS}
+          value={feet.wear}
+        />
+        {feet.wear === 'socks' && (
+          <SwatchGrid
+            onPick={(color) => onFeet({ ...feet, color })}
+            original="기본 흰색"
+            swatches={SOCK_SWATCHES}
+            value={feet.color}
+          />
+        )}
       </PanelSection>
 
       <div className="grid grid-cols-2 gap-2">
