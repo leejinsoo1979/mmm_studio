@@ -56,13 +56,19 @@ type Built = {
  * its points skinned wholly to `bone`: its own points (a texture island of
  * its own, though its rings may sit where another's do).
  */
-function tube(into: Built, radius: number, heights: number[], bone: number) {
+function tube(
+  into: Built,
+  radius: number,
+  heights: number[],
+  bone: number,
+  uv: readonly [number, number] = [0.5, 0.5],
+) {
   const first = into.positions.length / 3
   for (const y of heights) {
     for (let k = 0; k < SIDES; k++) {
       const angle = (2 * Math.PI * k) / SIDES
       into.positions.push(ANKLE[0]! + radius * Math.cos(angle), y, radius * Math.sin(angle))
-      into.uvs.push(0.5, 0.5)
+      into.uvs.push(uv[0], uv[1])
       into.joints.push(bone, 0, 0, 0)
       into.weights.push(1, 0, 0, 0)
     }
@@ -326,6 +332,51 @@ describe('a carried foot cut and fitted to the leg', () => {
     expect(fitToRing(carried(), foot.ring, bind, frame, 'weld').snap).toBeGreaterThan(CLOTH_SNAP)
     expect(fitFoot(carried(), { ...foot, skin: false }, bind, frame).mode).toBe('tuck')
     expect(fitFoot(carried(), foot, bind, frame).mode).toBe('weld')
+  })
+
+  test('a boot’s shaft, the boot’s colour, is hidden with what it hid; a trouser’s banded hem is not', () => {
+    // A 2×2 texture: the boot, its shaft or a hem, the trouser.
+    const texture = (shaft: Rgb): Pixels => {
+      const data = new Uint8ClampedArray(2 * 2 * 4)
+      for (const [texel, colour] of [
+        [0, [35, 33, 30]],
+        [1, shaft],
+        [2, [40, 60, 120]],
+        [3, [40, 60, 120]],
+      ] as const)
+        data.set([...colour, 255], texel * 4)
+      return { data, width: 2, height: 2 }
+    }
+    const built: Built = { positions: [], uvs: [], joints: [], weights: [], index: [] }
+    tube(built, 0.04, [0, 0.05, HEM], FOOT, [0.25, 0.25])
+    tube(built, 0.04, [HEM, 0.2, 0.3], CALF, [0.75, 0.25])
+    // A strap round the shaft, an island of its own.
+    tube(built, 0.045, [0.15, 0.18], CALF, [0.75, 0.25])
+    tube(built, 0.04, [0.3, 0.6, 0.9], CALF, [0.25, 0.75])
+    const bind: BodyBind = {
+      ...shodLeg(),
+      positions: Float32Array.from(built.positions),
+      normals: new Float32Array(built.positions.length),
+      uvs: Float32Array.from(built.uvs),
+      joints: Uint16Array.from(built.joints),
+      weights: Float32Array.from(built.weights),
+      index: Uint32Array.from(built.index),
+    }
+    const shown = (plan: ReturnType<typeof planFeet>, from: number, to: number) =>
+      Array.from(plan!.hidden.subarray(from / 3, to / 3)).every((side) => side < 0)
+    const quads = SIDES * 6
+    const [shoe, shaft, strap] = [2 * quads, 2 * quads, quads]
+
+    const boot = planFeet(bind, texture([40, 34, 28]), [SKIN])!
+    expect(boot.feet[0]!.shaft).toBe(true)
+    expect(Array.from(boot.hidden.subarray(0, (shoe + shaft + strap) / 3))).toEqual(
+      new Array((shoe + shaft + strap) / 3).fill(0),
+    )
+    expect(shown(boot, shoe + shaft + strap, bind.index.length)).toBe(true)
+
+    const hem = planFeet(bind, texture([122, 116, 95]), [SKIN])!
+    expect(hem.feet[0]!.shaft).toBe(false)
+    expect(shown(hem, shoe, bind.index.length)).toBe(true)
   })
 
   test('a leg that isn’t skin above a shoe is cloth: a trouser leg round both legs is tucked into', () => {

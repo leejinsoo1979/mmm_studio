@@ -493,12 +493,68 @@ export type FeetPlan = {
 const AROUND_LEG = 0.9
 /** A boot's shaft ends below this (in the foot's lengths): a trouser leg reaches far higher. */
 const SHAFT_TOP = 4.2
+/**
+ * A boot's shaft is the colour of the boot below it (see colorDistance):
+ * a trouser's hem piece over a shoe (a firefighter's banded cuff) is not,
+ * and stays.
+ */
+const SHAFT_LIKE = 0.25
+/** A boot's shaft flares wider at the ankle than a leg's ring (see AROUND_LEG), up to this. */
+const AROUND_SHAFT = 1.1
+
+/**
+ * Hides what a boot's shaft hid (up to `top`, round the leg at `ring`): its
+ * straps and buckles, and the ragged end of a trouser leg tucked into it,
+ * any island of the side's leg that lies wholly inside it.
+ */
+function hideInShaft(
+  bind: BodyBind,
+  layout: Layout,
+  members: ReadonlyMap<number, number[]>,
+  hidden: Int8Array,
+  side: 0 | 1,
+  frame: FootFrame,
+  ring: Ring,
+  top: number,
+) {
+  const { index } = bind
+  const local = [0, 0, 0]
+  const inside = new Set<number>()
+  for (const [island, points] of members) {
+    let ours = 0
+    let total = 0
+    let within = true
+    for (const i of points) {
+      toFoot(
+        frame,
+        bind.positions[i * 3]!,
+        bind.positions[i * 3 + 1]!,
+        bind.positions[i * 3 + 2]!,
+        local,
+      )
+      const off = Math.hypot(local[0]! - ring.centre[0], local[1]! - ring.centre[1])
+      if (local[2]! < ring.low - 0.1 || local[2]! > top + 0.25 || off > ring.radius + 0.6) {
+        within = false
+        break
+      }
+      for (let k = 0; k < 4; k++) {
+        const weight = bind.weights[i * 4 + k]!
+        total += weight
+        if (legSide(bind.bones[bind.joints[i * 4 + k]!]!) === side) ours += weight
+      }
+    }
+    if (within && ours > total * 0.5) inside.add(island)
+  }
+  for (let t = 0; t < index.length / 3; t++) {
+    if (hidden[t]! < 0 && inside.has(layout.islands[index[t * 3]!]!)) hidden[t] = side
+  }
+}
 
 /**
  * What to hide on each side and how each foot goes on: the shoe always, and
  * the foot's own skin a leg's island carries (see hideFootSkin); a ring
  * round a single leg is welded to, unless what carries on above it is a
- * boot's shaft (not skin, ending below the knee), hidden too and welded
+ * boot's shaft (not skin, the boot's colour, ending below the knee), hidden too and welded
  * above; anything else (a trouser leg, a skirt's or robe's lining) is
  * tucked into. `skins` are the character's own skin's colours (its
  * hands', its face's), which a leg's skin is told by. Null for a body
@@ -578,6 +634,27 @@ export function planFeet(bind: BodyBind, texture: Pixels, skins: readonly Rgb[])
       }
       const colour = middleColour(near)
       const skin = colour !== null && isSkin(colour, skins)
+      // What is hidden just below the ring (the shoe's top, or a shaft's
+      // lower part), which a boot's shaft above it is the colour of.
+      const belowRing: Rgb[] = []
+      for (let t = 0; t < triangles; t++) {
+        if (hidden[t] !== side) continue
+        for (let k = 0; k < 3; k++) {
+          const i = index[t * 3 + k]!
+          toFoot(
+            frame,
+            bind.positions[i * 3]!,
+            bind.positions[i * 3 + 1]!,
+            bind.positions[i * 3 + 2]!,
+            local,
+          )
+          if (local[2]! > ring.low - 0.3 && local[2]! < ring.high + 0.05) {
+            belowRing.push(colourAt(texture, bind.uvs[i * 2]!, bind.uvs[i * 2 + 1]!))
+            break
+          }
+        }
+      }
+      const below = middleColour(belowRing)
       const plan = (mode: FootPlan['mode']): FootPlan => ({
         side,
         ring,
@@ -587,15 +664,25 @@ export function planFeet(bind: BodyBind, texture: Pixels, skins: readonly Rgb[])
         colour,
         adjoining: [...adjoining].flatMap((island) => members.get(island)!),
       })
+      const shaftLike =
+        adjoining.size === 1 &&
+        colour !== null &&
+        !skin &&
+        top < SHAFT_TOP &&
+        below !== null &&
+        colourDistance(colour, below) < SHAFT_LIKE &&
+        extent <= AROUND_SHAFT &&
+        otherShare < 0.05
+      if (shaftLike && round < 2) {
+        const island = [...adjoining][0]!
+        for (let t = 0; t < triangles; t++) if (islands[index[t * 3]!] === island) hidden[t] = side
+        hideInShaft(bind, layout, members, hidden, side, frame, ring, top)
+        shaft = true
+        continue
+      }
       if (!(extent <= AROUND_LEG && otherShare < 0.05)) {
         feet.push(plan('tuck'))
         break
-      }
-      if (adjoining.size === 1 && colour && !skin && top < SHAFT_TOP && round < 2) {
-        const island = [...adjoining][0]!
-        for (let t = 0; t < triangles; t++) if (islands[index[t * 3]!] === island) hidden[t] = side
-        shaft = true
-        continue
       }
       feet.push(plan('weld'))
       break
