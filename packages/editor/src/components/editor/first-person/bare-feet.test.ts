@@ -334,15 +334,15 @@ describe('a carried foot cut and fitted to the leg', () => {
     expect(fitFoot(carried(), foot, bind, frame).mode).toBe('weld')
   })
 
-  test('a boot’s shaft, the boot’s colour, is hidden with what it hid; a trouser’s banded hem is not', () => {
+  test('a boot’s shaft, the boot’s colour, is hidden with what it hid; a trouser’s banded hem is not, a long sock over bare skin is', () => {
     // A 2×2 texture: the boot, its shaft or a hem, the trouser.
-    const texture = (shaft: Rgb): Pixels => {
+    const texture = (shaft: Rgb, above: Rgb = [40, 60, 120]): Pixels => {
       const data = new Uint8ClampedArray(2 * 2 * 4)
       for (const [texel, colour] of [
         [0, [35, 33, 30]],
         [1, shaft],
-        [2, [40, 60, 120]],
-        [3, [40, 60, 120]],
+        [2, above],
+        [3, above],
       ] as const)
         data.set([...colour, 255], texel * 4)
       return { data, width: 2, height: 2 }
@@ -377,6 +377,11 @@ describe('a carried foot cut and fitted to the leg', () => {
     const hem = planFeet(bind, texture([122, 116, 95]), [SKIN])!
     expect(hem.feet[0]!.shaft).toBe(false)
     expect(shown(hem, shoe, bind.index.length)).toBe(true)
+
+    const sock = planFeet(bind, texture([122, 116, 95], SKIN), [SKIN])!
+    expect(sock.feet[0]!.shaft).toBe(true)
+    expect(sock.feet[0]!.skin).toBe(true)
+    expect(shown(sock, shoe + shaft + strap, bind.index.length)).toBe(true)
   })
 
   test('a leg that isn’t skin above a shoe is cloth: a trouser leg round both legs is tucked into', () => {

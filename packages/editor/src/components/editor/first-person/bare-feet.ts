@@ -494,9 +494,10 @@ const AROUND_LEG = 0.9
 /** A boot's shaft ends below this (in the foot's lengths): a trouser leg reaches far higher. */
 const SHAFT_TOP = 4.2
 /**
- * A boot's shaft is the colour of the boot below it (see colorDistance):
- * a trouser's hem piece over a shoe (a firefighter's banded cuff) is not,
- * and stays.
+ * A boot's shaft is the colour of the boot below it (see colorDistance);
+ * anything else shaped like one (a footballer's sock) goes only when bare
+ * skin carries on above it: a trouser's hem piece over a shoe (a
+ * firefighter's banded cuff) stays.
  */
 const SHAFT_LIKE = 0.25
 /** A boot's shaft flares wider at the ankle than a leg's ring (see AROUND_LEG), up to this. */
@@ -587,7 +588,12 @@ export function planFeet(bind: BodyBind, texture: Pixels, skins: readonly Rgb[])
     hideFootSkin(bind, layout, hidden, side, frame, texture)
     const otherSide = side === 0 ? 1 : 0
     let shaft = false
-    for (let round = 0; round < 3; round++) {
+    let shafts = 0
+    // Before hiding a shaft not the boot's colour (a footballer's sock over
+    // his shin): kept only if bare skin carries on above it.
+    let tentative: { hidden: Int8Array; shaft: boolean } | null = null
+    let tried = false
+    for (let round = 0; round < 5; round++) {
       const ring = ringOf(bind, layout, hidden, side, frame)
       if (!ring) break
       const ringSpots = new Set(ring.legPoint.filter((p) => p >= 0).map((p) => layout.spots[p]))
@@ -664,20 +670,33 @@ export function planFeet(bind: BodyBind, texture: Pixels, skins: readonly Rgb[])
         colour,
         adjoining: [...adjoining].flatMap((island) => members.get(island)!),
       })
-      const shaftLike =
+      if (tentative) {
+        if (!(skin && extent <= AROUND_LEG && otherShare < 0.05)) {
+          hidden.set(tentative.hidden)
+          shaft = tentative.shaft
+          shafts--
+          tentative = null
+          tried = true
+          continue
+        }
+        tentative = null
+      }
+      const shaftShaped =
         adjoining.size === 1 &&
         colour !== null &&
         !skin &&
         top < SHAFT_TOP &&
-        below !== null &&
-        colourDistance(colour, below) < SHAFT_LIKE &&
         extent <= AROUND_SHAFT &&
         otherShare < 0.05
-      if (shaftLike && round < 2) {
+      const bootColoured =
+        colour !== null && below !== null && colourDistance(colour, below) < SHAFT_LIKE
+      if (shaftShaped && shafts < 2 && (bootColoured || !tried)) {
+        if (!bootColoured) tentative = { hidden: hidden.slice(), shaft }
         const island = [...adjoining][0]!
         for (let t = 0; t < triangles; t++) if (islands[index[t * 3]!] === island) hidden[t] = side
         hideInShaft(bind, layout, members, hidden, side, frame, ring, top)
         shaft = true
+        shafts++
         continue
       }
       if (!(extent <= AROUND_LEG && otherShare < 0.05)) {
