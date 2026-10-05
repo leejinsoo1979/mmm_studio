@@ -2,6 +2,7 @@
 
 import { type AssetInput, constructionBuildUpMm, nodeRegistry } from '@pascal-app/core'
 import {
+  avatarThumbnailUrl,
   CATALOG_SCROLL,
   CatalogBandPill,
   CatalogCard,
@@ -15,6 +16,7 @@ import {
 } from '@pascal-app/editor'
 import {
   LevelTakeoffSummary,
+  NPC_PRESETS,
   useLiquidLineToolOptions,
   WallConstructionFields,
 } from '@pascal-app/nodes'
@@ -32,6 +34,7 @@ import {
   PenLine,
   Spline,
   Square,
+  UserRound,
   Warehouse,
 } from 'lucide-react'
 import Image from 'next/image'
@@ -67,6 +70,7 @@ type BuildToolKind =
   | 'column'
   | 'shelf'
   | 'spawn'
+  | 'npc'
 
 type MepToolKind =
   | 'duct-segment'
@@ -223,6 +227,8 @@ const DOOR1_ASSET: AssetInput = {
   source: 'library',
   tags: ['door', 'wall', 'glb'],
 }
+
+const NPC_SECTION_TITLE = '사람 (NPC)'
 
 const DRAW_MODE_ICONS: Record<string, typeof Minus> = {
   wall: Minus,
@@ -399,6 +405,18 @@ const BUILD_SECTIONS: BuildSection[] = [
       { id: 'mep', label: '설비 (MEP)', meta: '설비', iconSrc: '/icons/HVAC.webp' },
     ],
   },
+  {
+    id: 'npc',
+    title: NPC_SECTION_TITLE,
+    items: NPC_PRESETS.map((preset) => ({
+      id: `npc-${preset.id}`,
+      label: preset.label,
+      description: preset.description,
+      iconSrc: avatarThumbnailUrl(preset.fields.avatar ?? ''),
+      kind: 'npc' as const,
+      defaults: { preset: preset.id },
+    })),
+  },
 ]
 
 const MEP_ITEMS: MepItem[] = [
@@ -473,6 +491,7 @@ const SECTION_ICONS: Record<string, ReactNode> = {
   문: <DoorOpen />,
   창문: <AppWindow />,
   구조: <House />,
+  [NPC_SECTION_TITLE]: <UserRound />,
   '도면 가져오기': <FileUp />,
   [ROOF_SECTION_TITLE]: <Warehouse />,
   [MEP_SECTION_TITLE]: <AirVent />,
@@ -677,6 +696,7 @@ export function BuildTab() {
   const selectedItem = useEditor((s) => s.selectedItem)
   const doorVariant = useEditor((s) => s.toolDefaults.door?.variant)
   const windowVariant = useEditor((s) => s.toolDefaults.window?.variant)
+  const npcPreset = useEditor((s) => s.toolDefaults.npc?.preset)
   const fencePresetId = useEditor(
     (s) => (s.toolDefaults.fence as { presetId?: string } | null | undefined)?.presetId,
   )
@@ -737,6 +757,8 @@ export function BuildTab() {
       const variant = (type.kind === 'door' ? doorVariant : windowVariant) ?? type.kind
       return mode === 'build' && activeTool === type.kind && variant === type.id
     }
+    if (type.kind === 'npc')
+      return mode === 'build' && activeTool === 'npc' && npcPreset === type.defaults?.preset
     return mode === 'build' && activeTool === type.kind && type.id === type.kind
   }
 

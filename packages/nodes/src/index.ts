@@ -25,6 +25,7 @@ import { lightDefinition } from './light'
 import { lightSwitchDefinition } from './light-switch'
 import { linesetDefinition } from './lineset'
 import { liquidLineDefinition } from './liquid-line'
+import { npcDefinition } from './npc'
 import { pipeFittingDefinition } from './pipe-fitting'
 import { pipeSegmentDefinition } from './pipe-segment'
 import { pipeTrapDefinition } from './pipe-trap'
@@ -134,6 +135,16 @@ export const cabinetPlugin: Plugin = {
   ],
 }
 
+/**
+ * Play-mode NPCs (`npc`). A separate plugin like the cabinets: the schema
+ * lives here, outside core's `AnyNode` union.
+ */
+export const npcPlugin: Plugin = {
+  id: 'mmm:npc',
+  apiVersion: 1,
+  nodes: [npcDefinition as unknown as AnyNodeDefinition],
+}
+
 export { boxVentDefinition } from './box-vent'
 export { buildingDefinition } from './building'
 export {
@@ -202,6 +213,86 @@ export { lightDefinition } from './light'
 export { lightSwitchDefinition } from './light-switch'
 export { linesetDefinition } from './lineset'
 export { liquidLineDefinition, useLiquidLineToolOptions } from './liquid-line'
+export {
+  applyNpcWorldEntry,
+  collectSceneFacts,
+  DialogueAction,
+  DialogueChoice,
+  DialogueGraph,
+  DialogueLine,
+  formatSceneFactsKo,
+  getNpcChatTransport,
+  getNpcPreset,
+  isChildAvatar,
+  josa,
+  type LevelFact,
+  NPC_DIALOGUE_TEMPLATES,
+  NPC_PRESETS,
+  NPC_ROLE_COLORS,
+  NPC_ROLE_LABELS,
+  NpcAi,
+  NpcBehavior,
+  NpcBehaviorMode,
+  type NpcBubble,
+  type NpcChasePhase,
+  type NpcChatErrorCode,
+  type NpcChatRequest,
+  type NpcChatResult,
+  type NpcChatStatus,
+  type NpcChatTransport,
+  type NpcChatTurn,
+  type NpcDialogueCloseReason,
+  NpcDialoguePanel,
+  type NpcDialogueSurface,
+  type NpcDialogueTemplateId,
+  type NpcEmoteCue,
+  type NpcEngagement,
+  type NpcEngagementContext,
+  type NpcEngagementHandler,
+  type NpcEngagementMode,
+  NpcGreet,
+  NpcInteraction,
+  NpcInteractionMenu,
+  NpcLook,
+  type NpcNameResolvers,
+  NpcNode,
+  type NpcNodeInput,
+  type NpcPlayerPose,
+  type NpcPose,
+  type NpcPoseOverride,
+  type NpcPoseState,
+  type NpcPreset,
+  type NpcPresetId,
+  NpcRole,
+  type NpcRuntimeState,
+  type NpcSocialAct,
+  type NpcSpeaking,
+  type NpcSpeechRequest,
+  NpcSpeed,
+  NpcVoice,
+  type NpcVoiceEngine,
+  type NpcVoiceRequest,
+  npcDefinition,
+  npcDialogueTemplate,
+  npcPoses,
+  npcSpeaking,
+  npcWorldFeet,
+  type RoomFact,
+  readNpcChatStream,
+  readNpcWorldEntries,
+  type SceneFacts,
+  type SceneFactsScope,
+  setNpcChatTransport,
+  setNpcNameResolvers,
+  setNpcVoiceMuted,
+  speakNpc,
+  stopNpcSpeech,
+  useNpcDialogue,
+  useNpcRuntime,
+  useNpcStudioRequest,
+  useNpcVoiceMuted,
+  withJosa,
+} from './npc'
 export { pipeFittingDefinition } from './pipe-fitting'
 export { pipeSegmentDefinition } from './pipe-segment'
 export { pipeTrapDefinition } from './pipe-trap'

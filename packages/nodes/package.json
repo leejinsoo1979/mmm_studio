@@ -15,6 +15,16 @@
       "types": "./dist/cabinet/schema.d.ts",
       "import": "./dist/cabinet/schema.js",
       "default": "./dist/cabinet/schema.js"
+    },
+    "./npc/schema": {
+      "types": "./dist/npc/schema.d.ts",
+      "import": "./dist/npc/schema.js",
+      "default": "./dist/npc/schema.js"
+    },
+    "./npc/knowledge": {
+      "types": "./dist/npc/knowledge/index.d.ts",
+      "import": "./dist/npc/knowledge/index.js",
+      "default": "./dist/npc/knowledge/index.js"
     }
   },
   "files": [

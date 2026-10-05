@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { CabinetNode, CountertopNode } from '@pascal-app/nodes/cabinet/schema'
+import { NpcNode } from '@pascal-app/nodes/npc/schema'
 import { apiGraphSchema } from './graph-schema'
 
 const graphWith = (node: Record<string, unknown>) => ({
@@ -22,15 +23,26 @@ describe('apiGraphSchema', () => {
     expect(apiGraphSchema.safeParse(graphWith(cabinet)).success).toBe(false)
   })
 
+  test('accepts an NPC and rejects one with a broken dialogue graph', () => {
+    const npc = NpcNode.parse({
+      name: '지아',
+      dialogue: { start: 'hi', lines: [{ id: 'hi', text: '안녕하세요!' }] },
+    })
+    expect(apiGraphSchema.safeParse(graphWith(npc)).success).toBe(true)
+    const broken = { ...npc, dialogue: { start: 'missing', lines: npc.dialogue?.lines } }
+    expect(apiGraphSchema.safeParse(graphWith(broken)).success).toBe(false)
+  })
+
   test('still rejects unknown node types', () => {
     expect(apiGraphSchema.safeParse(graphWith({ id: 'x_1', type: 'mystery' })).success).toBe(false)
   })
 })
 
 describe('apiGraphSchema level children', () => {
-  test('a level may hold cabinet and countertop ids', () => {
+  test('a level may hold cabinet, countertop and NPC ids', () => {
     const cabinet = CabinetNode.parse({ parentId: 'level_a' })
     const top = CountertopNode.parse({ parentId: 'level_a' })
+    const npc = NpcNode.parse({ parentId: 'level_a' })
     const level = {
       object: 'node',
       id: 'level_a',
@@ -39,10 +51,10 @@ describe('apiGraphSchema level children', () => {
       visible: true,
       metadata: {},
       level: 0,
-      children: [cabinet.id, top.id],
+      children: [cabinet.id, top.id, npc.id],
     }
     const graph = {
-      nodes: { level_a: level, [cabinet.id]: cabinet, [top.id]: top },
+      nodes: { level_a: level, [cabinet.id]: cabinet, [top.id]: top, [npc.id]: npc },
       rootNodeIds: ['level_a'],
     }
     const result = apiGraphSchema.safeParse(graph)

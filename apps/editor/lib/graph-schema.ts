@@ -1,5 +1,6 @@
 import { AnyNode, SceneMaterial } from '@pascal-app/core/schema'
 import { CabinetNode, CountertopNode } from '@pascal-app/nodes/cabinet/schema'
+import { NpcNode } from '@pascal-app/nodes/npc/schema'
 import { z } from 'zod'
 
 /**
@@ -10,6 +11,7 @@ import { z } from 'zod'
 const REGISTRY_NODE_SCHEMAS: Record<string, z.ZodType> = {
   cabinet: CabinetNode,
   countertop: CountertopNode,
+  npc: NpcNode,
 }
 
 /**
@@ -25,8 +27,8 @@ const REGISTRY_NODE_SCHEMAS: Record<string, z.ZodType> = {
  */
 /**
  * `LevelNode.children` only lists core id shapes, so a level holding a
- * cabinet would fail. Validate the level with those children set aside —
- * each of them is still validated as a node in its own right below.
+ * cabinet or an NPC would fail. Validate the level with those children set
+ * aside — each of them is still validated as a node in its own right below.
  */
 function withoutRegistryChildren(node: unknown, nodes: Record<string, unknown>): unknown {
   const children = (node as { children?: unknown } | null)?.children

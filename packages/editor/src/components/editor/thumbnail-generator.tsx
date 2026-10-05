@@ -205,14 +205,15 @@ export const ThumbnailGenerator = ({ onThumbnailCapture }: ThumbnailGeneratorPro
           restoreLevels = snapLevelsToTruePositions()
         }
 
-        // Hide scan, guide, and spawn nodes directly so they are excluded from
-        // the thumbnail regardless of whether ScanSystem/GuideSystem listeners
-        // are registered. Spawn renders on SCENE_LAYER for occlusion, so the
-        // thumbnail camera's layer mask can't filter it either. Returns a
-        // function that restores the original visibility.
+        // Hide scan, guide, spawn and npc nodes directly so they are excluded
+        // from the thumbnail regardless of whether ScanSystem/GuideSystem
+        // listeners are registered. Spawn markers and NPC avatars render on
+        // SCENE_LAYER for occlusion, so the thumbnail camera's layer mask can't
+        // filter them either. Returns a function that restores the original
+        // visibility.
         const restoreNodeVisibility = (() => {
           const saved = new Map<THREE.Object3D, boolean>()
-          for (const type of ['scan', 'guide', 'spawn'] as const) {
+          for (const type of ['scan', 'guide', 'spawn', 'npc'] as const) {
             const ids = sceneRegistry.byType[type]!
             ids.forEach((id) => {
               const node = sceneRegistry.nodes.get(id)

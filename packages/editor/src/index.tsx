@@ -26,6 +26,22 @@ export {
   findAvatar,
 } from './components/editor/first-person/avatar-catalog'
 export { useAvatarLook } from './components/editor/first-person/avatar-look'
+export {
+  type ArmBones,
+  type ArmSide,
+  AvatarReach,
+  armPole,
+  type BodyAnchors,
+  createBodyAnchors,
+  curlFingers,
+  estimateBodyAnchors,
+  findArmBones,
+  findBipedBone,
+  measureBodyAnchors,
+  reachArm,
+  solveTwoBoneIk,
+  type TwoBoneSolution,
+} from './components/editor/first-person/avatar-reach'
 export { useAvatarBody } from './components/editor/first-person/avatar-rig'
 export {
   BODY_SLIDER_GROUPS,
@@ -89,10 +105,29 @@ export {
   type HairStyleEntry,
   loadHairStyles,
 } from './components/editor/first-person/hair-styles'
-export type {
-  LocalPresence,
-  RemotePresence,
+// Gait blending and presence smoothing, for bodies driven outside the player
+// controller (NPCs in `@pascal-app/nodes`).
+export {
+  advanceGaitPhase,
+  GAITS,
+  type Gait,
+  locomotionWeights,
+  MOTION_SETS,
+  WALK_SPEED,
+} from './components/editor/first-person/locomotion'
+export {
+  type LocalPresence,
+  lerpAngle,
+  PRESENCE_DELAY,
+  type PresencePose,
+  type PresenceSample,
+  type RemotePresence,
+  samplePresence,
 } from './components/editor/first-person/presence'
+export {
+  setWalkthroughBodyOverlay,
+  type WalkthroughBodyOverlay,
+} from './components/editor/first-person/walkthrough-character'
 export { FloatingActionMenu as FloatingMenu } from './components/editor/floating-action-menu'
 // Embed surface — the editor's real in-canvas affordances, so a host can mount
 // authentic selection handles, interactive build tools, and the mover on top
@@ -144,6 +179,13 @@ export {
   useInvisibleHitAreaMaterial,
 } from './components/editor/node-arrow-handles'
 export { type PaintFocus, usePaintFocus } from './components/editor/paint-focus'
+// Where the other players in a live session are drawn, for NPCs that follow
+// or look at them.
+export {
+  getRemotePlayerPose,
+  listRemotePlayerPoses,
+  type RemotePlayerPose,
+} from './components/editor/remote-players'
 export {
   type SnapshotCameraData,
   ThumbnailGenerator,
@@ -484,6 +526,10 @@ export {
 // dependency.
 export { cn } from './lib/utils'
 export {
+  registerWalkthroughDynamicCollider,
+  type WalkthroughColliderProvider,
+} from './lib/walkthrough-colliders'
+export {
   nearestHit,
   registerWalkthroughInteraction,
   type WalkthroughInteraction,
@@ -570,6 +616,7 @@ export { passesSelectionFilter, useSelectionFilter } from './store/use-selection
 export { useUiHidden } from './store/use-ui-hidden'
 export { type UiTheme, useUiTheme } from './store/use-ui-theme'
 export { useUploadStore } from './store/use-upload'
+export { default as useWalkthroughFacing } from './store/use-walkthrough-facing'
 export { default as useWalkthroughView } from './store/use-walkthrough-view'
 export { useWallMoveGhosts, type WallMoveGhostBridge } from './store/use-wall-move-ghosts'
 export {

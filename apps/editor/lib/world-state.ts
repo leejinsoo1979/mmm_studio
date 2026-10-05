@@ -6,7 +6,13 @@ import {
   useScene,
 } from '@pascal-app/core'
 import { moveDoorTo, moveWindowTo } from '@pascal-app/editor'
-import { type ScreenProjection, useCabinetDoors, useItemScreens } from '@pascal-app/nodes'
+import {
+  applyNpcWorldEntry,
+  readNpcWorldEntries,
+  type ScreenProjection,
+  useCabinetDoors,
+  useItemScreens,
+} from '@pascal-app/nodes'
 import { useViewer, WEATHERS, type Weather } from '@pascal-app/viewer'
 import { getClock, setClock } from './time-of-day'
 import type { WorldEntries, WorldValue } from './world-sync'
@@ -43,6 +49,25 @@ function projectionFrom(p: unknown): ScreenProjection | null {
     quaternion: [qx!, qy!, qz!, qw!],
     width: width!,
   }
+}
+
+/**
+ * Every field an NPC engagement (`npc:<id>`) may carry. The world doc merges
+ * maps key by key, so a field one kind leaves out (a talk's line, a chase's
+ * winner) would outlive it: each is always written, null when absent.
+ */
+const NPC_ENGAGEMENT_FIELDS = ['by', 'yaw', 'line', 'room', 'act', 'ph', 'pt', 'won'] as const
+
+function npcEntryForDoc(key: string, value: unknown): WorldValue {
+  if (!key.startsWith('npc:') || !value || typeof value !== 'object') return value as WorldValue
+  const entry: Record<string, WorldValue> = {}
+  for (const field of NPC_ENGAGEMENT_FIELDS) entry[field] = null
+  return { ...entry, ...(value as Record<string, WorldValue>) }
+}
+
+function npcEntryFromDoc(value: WorldValue): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== null))
 }
 
 /** The shared deck each set of slide pages was shared as, or came from. */
@@ -107,6 +132,9 @@ export function readWorld(): WorldEntries {
           : { k: 'idle', p }
     entries[`screen:${id}`] = shared
   }
+  for (const [key, value] of Object.entries(readNpcWorldEntries())) {
+    entries[key] = npcEntryForDoc(key, value)
+  }
   return entries
 }
 
@@ -121,6 +149,7 @@ const wantedDecks = new Map<string, SharedScreen & { k: 'slides' }>()
  * elsewhere doesn't take this player's remote.
  */
 export function applyWorldEntry(key: string, value: WorldValue, loadDeck: DeckLoader) {
+  if (applyNpcWorldEntry(key, npcEntryFromDoc(value))) return
   if (key === 'clock') {
     if (typeof value === 'number') setClock(value)
     return

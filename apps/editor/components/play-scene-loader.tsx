@@ -1,9 +1,12 @@
 'use client'
 
 import { Editor, type SceneGraph, useEditor } from '@pascal-app/editor'
+import { NpcDialoguePanel, NpcInteractionMenu } from '@pascal-app/nodes'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useState } from 'react'
+import { installNpcSceneServices } from '@/lib/npc-chat-client'
 import { CharacterStudio } from './character-studio/character-studio'
+import { NpcStudioBridge } from './npc-studio-bridge'
 import { PlayEmoteBar } from './play-emote-bar'
 import { PlayGameHud } from './play-game-hud'
 import { PlayGameLobby } from './play-game-lobby'
@@ -60,6 +63,8 @@ export function PlaySceneLoader({
     }
   }, [])
 
+  useEffect(() => installNpcSceneServices(sceneId), [sceneId])
+
   if (!ready) return <div className="h-screen w-screen bg-[#111]" />
 
   return (
@@ -70,7 +75,10 @@ export function PlaySceneLoader({
       <PlayGameHud />
       <PlayTvRemote />
       <PlayEmoteBar />
+      <NpcDialoguePanel />
+      <NpcInteractionMenu />
       <CharacterStudio />
+      <NpcStudioBridge />
       <RuntimeCollaboration
         chatEnabled={scene.experience?.multiplayer.chat ?? true}
         enabled={scene.experience?.multiplayer.enabled ?? true}

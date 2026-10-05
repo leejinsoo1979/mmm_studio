@@ -14,6 +14,7 @@ import { advanceGaitPhase, GAITS, type Gait, locomotionWeights } from './first-p
 import {
   lerpAngle,
   PRESENCE_DELAY,
+  type PresencePose,
   type PresenceSample,
   pushPresenceSample,
   type RemotePresence,
@@ -29,6 +30,29 @@ const TURN_RESPONSE = 10
 type Player = { id: string; name: string; avatar: string; look: AvatarLook | null }
 type Bubble = { text: string; until: number }
 
+/** Every other player's latest reports, while `RemotePlayers` is mounted. */
+const presenceSamples = new Map<string, PresenceSample[]>()
+
+/** Another player where their body is drawn right now: world feet and facing. */
+export type RemotePlayerPose = PresencePose & { id: string }
+
+/** Where the player `id` is drawn right now, or null when they aren't here. */
+export function getRemotePlayerPose(id: string): PresencePose | null {
+  const buffer = presenceSamples.get(id)
+  return buffer ? samplePresence(buffer, performance.now() - PRESENCE_DELAY) : null
+}
+
+/** Every other player where their body is drawn right now. */
+export function listRemotePlayerPoses(): RemotePlayerPose[] {
+  const time = performance.now() - PRESENCE_DELAY
+  const poses: RemotePlayerPose[] = []
+  for (const [id, buffer] of presenceSamples) {
+    const pose = samplePresence(buffer, time)
+    if (pose) poses.push({ id, position: pose.position, yaw: pose.yaw })
+  }
+  return poses
+}
+
 /**
  * Everyone else in the live session, as the Rocketbox body each picked in
  * the look they gave it: walking where they walk (drawn a moment behind
@@ -41,7 +65,6 @@ type Bubble = { text: string; until: number }
 export function RemotePlayers() {
   const [players, setPlayers] = useState<Player[]>([])
   const [bubbles, setBubbles] = useState<Record<string, Bubble>>({})
-  const samplesRef = useRef(new Map<string, PresenceSample[]>())
   const cuesRef = useRef(new Map<string, EmoteCue | null>())
 
   useEffect(() => {
@@ -49,15 +72,14 @@ export function RemotePlayers() {
       const detail = (event as CustomEvent<RemotePresence[]>).detail
       const next = Array.isArray(detail) ? detail : []
       const now = performance.now()
-      const samples = samplesRef.current
       for (const presence of next) {
-        const buffer = samples.get(presence.id) ?? []
+        const buffer = presenceSamples.get(presence.id) ?? []
         pushPresenceSample(buffer, { time: now, position: presence.position, yaw: presence.yaw })
-        samples.set(presence.id, buffer)
+        presenceSamples.set(presence.id, buffer)
         cuesRef.current.set(presence.id, presence.emote ?? null)
       }
       const present = new Set(next.map((presence) => presence.id))
-      for (const id of samples.keys()) if (!present.has(id)) samples.delete(id)
+      for (const id of presenceSamples.keys()) if (!present.has(id)) presenceSamples.delete(id)
       for (const id of cuesRef.current.keys()) if (!present.has(id)) cuesRef.current.delete(id)
       setPlayers((current) => {
         const changed =
@@ -87,6 +109,7 @@ export function RemotePlayers() {
     return () => {
       window.removeEventListener('mmm-presence-update', update)
       window.removeEventListener('mmm-chat-bubble', say)
+      presenceSamples.clear()
     }
   }, [])
 
@@ -107,12 +130,7 @@ export function RemotePlayers() {
     <group name="remote-players">
       {players.map((player) => (
         <Suspense fallback={null} key={player.id}>
-          <RemotePlayer
-            bubble={bubbles[player.id]?.text}
-            cues={cuesRef.current}
-            player={player}
-            samples={samplesRef.current}
-          />
+          <RemotePlayer bubble={bubbles[player.id]?.text} cues={cuesRef.current} player={player} />
         </Suspense>
       ))}
     </group>
@@ -123,12 +141,10 @@ type Actions = { mixer: AnimationMixer } & Record<'idle' | Gait, AnimationAction
 
 function RemotePlayer({
   player,
-  samples,
   cues,
   bubble,
 }: {
   player: Player
-  samples: Map<string, PresenceSample[]>
   cues: Map<string, EmoteCue | null>
   bubble?: string
 }) {
@@ -174,10 +190,8 @@ function RemotePlayer({
 
   useFrame((_, delta) => {
     const root = rootRef.current
-    const buffer = samples.get(player.id)
-    if (!(root && actions && buffer) || delta <= 0) return
-    const pose = samplePresence(buffer, performance.now() - PRESENCE_DELAY)
-    if (!pose) return
+    const pose = getRemotePlayerPose(player.id)
+    if (!(root && actions && pose) || delta <= 0) return
     const [x, y, z] = pose.position
     const motion = motionRef.current
     let stepped = 0

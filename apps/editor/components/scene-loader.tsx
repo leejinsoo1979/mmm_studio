@@ -22,7 +22,7 @@ import {
   useEditor,
 } from '@pascal-app/editor'
 import { CATALOG_ITEMS } from '@pascal-app/editor/catalog'
-import { CabinetDoorControls } from '@pascal-app/nodes'
+import { CabinetDoorControls, NpcDialoguePanel, NpcInteractionMenu } from '@pascal-app/nodes'
 import TreesPanel from '@pascal-app/plugin-trees/panel'
 import {
   Archive,
@@ -56,17 +56,20 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { getStudioAuthHeaders } from '@/lib/auth-client'
 import { CATALOG_ROOM_TREE, withMyModelTag, withRoomTags } from '@/lib/catalog-rooms'
+import { installNpcSceneServices } from '@/lib/npc-chat-client'
 import { SCENE_BACKUP_PREFIX } from '@/lib/scene-backup'
 import { ArchipleFloorplanBridge } from './archiple-floorplan-bridge'
 import { BuildTab } from './build-tab'
 import { RoomHero } from './catalog/build-hero-art'
 import { useBuildPanelPrefs } from './catalog/build-panel-prefs'
+import { CharacterStudio } from './character-studio/character-studio'
 import { EditorHeader } from './editor-header'
 import { FurnitureTab } from './furniture-tab'
 import { LightingTab } from './lighting-tab'
 import { MaterialPalette } from './material-palette'
 import { MaterialSurfaceInspector } from './material-surface-inspector'
 import { MaterialTab } from './material-tab'
+import { NpcStudioBridge } from './npc-studio-bridge'
 import { SceneStatusBanner } from './scene-status-banner'
 import { CommunityViewerToolbarRight } from './viewer-toolbar'
 import { TourEnvironment } from './world-environment'
@@ -929,6 +932,8 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
     }
   }, [initialScene])
 
+  useEffect(() => installNpcSceneServices(meta.id), [meta.id])
+
   const handleLoad = useCallback(async () => initialScene, [initialScene])
 
   const enqueueWrite = useCallback(<T,>(write: () => Promise<T>): Promise<T> => {
@@ -1152,6 +1157,10 @@ export function SceneLoader({ initialScene, meta }: SceneLoaderProps) {
         }
         viewerToolbarRight={<CommunityViewerToolbarRight sceneId={meta.id} sceneName={sceneName} />}
       />
+      <NpcDialoguePanel />
+      <NpcInteractionMenu />
+      <CharacterStudio />
+      <NpcStudioBridge />
     </div>
   )
 }

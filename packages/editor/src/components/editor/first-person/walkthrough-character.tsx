@@ -3,7 +3,7 @@
 import { characterStatus } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
-import { type AnimationAction, AnimationMixer, type Group, Vector3 } from 'three'
+import { type AnimationAction, AnimationMixer, type Group, type Object3D, Vector3 } from 'three'
 import useAvatarProfile, { useAvatarEmote } from '../../../store/use-avatar-profile'
 import useWalkthroughView from '../../../store/use-walkthrough-view'
 import { bodyStrideScale } from './avatar-body'
@@ -53,6 +53,16 @@ const MAX_CURVE_ACCELERATION = 40
 const GRAVITY = 9.81
 
 const worldPosition = new Vector3()
+
+/** Turns the walker's bones over its animation each frame (an arm reaching for a high five). */
+export type WalkthroughBodyOverlay = (model: Object3D, delta: number) => void
+
+let bodyOverlay: WalkthroughBodyOverlay | null = null
+
+/** Sets (or clears, with null) what poses the walker's body over its animation. */
+export function setWalkthroughBodyOverlay(overlay: WalkthroughBodyOverlay | null) {
+  bodyOverlay = overlay
+}
 
 const JUMP_KINDS: JumpKind[] = ['jump', 'jumpRun']
 
@@ -362,6 +372,7 @@ export function WalkthroughCharacter({
     actions.idle.setEffectiveWeight(gaitWeight * gait.idle)
     for (const name of GAITS) actions[name].setEffectiveWeight(gaitWeight * gait[name])
     actions.mixer.update(delta)
+    bodyOverlay?.(model, delta)
   })
 
   return (

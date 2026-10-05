@@ -39,6 +39,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   type Object3D,
+  Quaternion,
   Ray,
   Raycaster,
   Vector2,
@@ -59,6 +60,7 @@ import {
   toggleDoorOpenState,
 } from '../../lib/door-interaction'
 import { cn } from '../../lib/utils'
+import { collectWalkthroughDynamicColliders } from '../../lib/walkthrough-colliders'
 import {
   activateWalkthroughTarget,
   type ResolvedWalkthroughTarget,
@@ -72,6 +74,7 @@ import {
 } from '../../lib/window-interaction'
 import useAvatarProfile, { useAvatarEmote } from '../../store/use-avatar-profile'
 import useEditor from '../../store/use-editor'
+import useWalkthroughFacing from '../../store/use-walkthrough-facing'
 import useWalkthroughView, { THIRD_PERSON_DISTANCE } from '../../store/use-walkthrough-view'
 import {
   buildFirstPersonColliderWorldFromRegistry,
@@ -113,6 +116,8 @@ const THIRD_PERSON_ACCELERATION = 7
 const THIRD_PERSON_DECELERATION = 8
 /** A brisk hop: about half a metre up. */
 const JUMP_SPEED = 3.2
+/** How quickly (1/s) the body turns to a heading it is asked to hold. */
+const HELD_FACING_RESPONSE = 7
 const CONTROLLER_CENTER_FROM_EYE = 0.85
 const DOOR_INTERACTION_DISTANCE = 2.5
 const DOOR_LEAF_INTERACTION_DEPTH = 0.08
@@ -167,6 +172,8 @@ function focusFirstPersonCanvas(canvas: HTMLCanvasElement) {
 
 const cameraOffset = new Vector3(0, CAMERA_EYE_OFFSET, 0)
 const presenceFacing = new Vector3()
+const worldUp = new Vector3(0, 1, 0)
+const heldFacing = new Quaternion()
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 /**
  * The walker's eyes. Interaction rays start here rather than at the camera, so
@@ -648,6 +655,8 @@ export const FirstPersonControls = () => {
   const elevatorColliderMeshesRef = useRef<ElevatorColliderMesh[]>([])
   const [world, setWorld] = useState<FirstPersonColliderWorld | null>(null)
   const [elevatorColliderMeshes, setElevatorColliderMeshes] = useState<ElevatorColliderMesh[]>([])
+  const dynamicColliderMeshesRef = useRef<readonly Mesh[]>([])
+  const [dynamicColliderMeshes, setDynamicColliderMeshes] = useState<readonly Mesh[]>([])
   const [controllerStart, setControllerStart] = useState<{
     position: [number, number, number]
     yaw: number
@@ -1334,6 +1343,11 @@ export const FirstPersonControls = () => {
 
   useFrame(() => {
     syncElevatorColliderMeshes()
+    const dynamic = collectWalkthroughDynamicColliders(dynamicColliderMeshesRef.current)
+    if (dynamic !== dynamicColliderMeshesRef.current) {
+      dynamicColliderMeshesRef.current = dynamic
+      setDynamicColliderMeshes(dynamic)
+    }
   }, -1)
 
   const syncElevatorRide = useCallback(
@@ -1532,6 +1546,19 @@ export const FirstPersonControls = () => {
     }
 
     group.rotation.y = 0
+    const facing = useWalkthroughFacing.getState()
+    const model = controllerRef.current.model
+    if (facing.yaw !== null && model) {
+      if (characterStatus.inputDir.lengthSq() > 0) {
+        facing.release()
+      } else {
+        heldFacing.setFromAxisAngle(worldUp, facing.yaw)
+        model.quaternion.slerp(heldFacing, 1 - Math.exp(-delta * HELD_FACING_RESPONSE))
+        // A resting controller stops reporting the body's heading; the turn
+        // must still reach the presence report and anyone reading the status.
+        model.getWorldQuaternion(characterStatus.quaternion)
+      }
+    }
     const walkthrough = useWalkthroughView.getState()
     const thirdPerson = walkthrough.view === 'third'
     if (thirdPerson) {
@@ -1574,6 +1601,7 @@ export const FirstPersonControls = () => {
     return () => {
       walkerEyeKnown = false
       useWalkthroughPrompt.setState({ label: null })
+      useWalkthroughFacing.getState().release()
       if (useViewer.getState().hoveredId === interactableTargetRef.current?.id) {
         useViewer.getState().setHoveredId(null)
       }
@@ -1581,8 +1609,11 @@ export const FirstPersonControls = () => {
   }, [])
 
   const firstPersonColliderMeshes = useMemo(
-    () => (world ? [world.mesh, ...elevatorColliderMeshes] : elevatorColliderMeshes),
-    [world, elevatorColliderMeshes],
+    () =>
+      world
+        ? [world.mesh, ...elevatorColliderMeshes, ...dynamicColliderMeshes]
+        : [...elevatorColliderMeshes, ...dynamicColliderMeshes],
+    [world, elevatorColliderMeshes, dynamicColliderMeshes],
   )
 
   if (!world) {
@@ -1770,6 +1801,7 @@ export const FirstPersonOverlay = ({ onExit }: { onExit: () => void }) => {
             <InlineControlHint keyLabel="Space" label="점프" />
             <InlineControlHint keyLabel="C" label="앉기 / 일어서기" />
             <InlineControlHint keyLabel="E / R" label="열기 · 누르기" />
+            <InlineControlHint keyLabel="E" label="대화" />
             <InlineControlHint keyLabel="T" label="닫기" />
             <InlineControlHint keyLabel="V" label="1인칭 / 3인칭" />
             <InlineControlHint keyLabel="휠" label="카메라 거리" />

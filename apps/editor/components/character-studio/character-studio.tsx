@@ -1,5 +1,6 @@
 'use client'
 
+import { type AnyNodeId, useScene } from '@pascal-app/core'
 import {
   ALL_AVATARS,
   AVATAR_TABS,
@@ -62,7 +63,7 @@ import { randomLook } from './random-look'
 import { ColorPanel, PanelSection, Segmented } from './studio-controls'
 import { EMOTE_ICONS, SKIN_SWATCHES } from './studio-data'
 import { type CameraFocus, StudioStage } from './studio-stage'
-import { useCharacterStudio } from './use-character-studio'
+import { type StudioTarget, useCharacterStudio } from './use-character-studio'
 
 type Draft = { avatar: string; look: AvatarLook; keys: Record<string, EmoteId> }
 
@@ -127,13 +128,16 @@ const TABS: { id: Tab; label: string; icon: LucideIcon; title: string; hint: str
   },
 ]
 
+/** An NPC's look has no face photo (scenes are public) and no game keys. */
+const NPC_TABS = TABS.filter((entry) => entry.id !== 'face' && entry.id !== 'motion')
+
 const TAB_FOCUS: Record<Tab, CameraFocus> = {
   character: 'full',
   body: 'full',
   face: 'face',
   shape: 'face',
   makeup: 'face',
-  hair: 'face',
+  hair: 'hair',
   skin: 'upper',
   motion: 'full',
 }
@@ -415,22 +419,30 @@ function MotionPanel({
  * the middle, a rail of steps on the left (캐릭터 · 체형 · 얼굴 · 얼굴형 ·
  * 메이크업 · 헤어 · 피부 · 동작) with each step's options beside it, undo /
  * redo / random / reset on top, and 완료 to keep the result (body, look and
- * emote keys) for the game.
+ * emote keys) for the game. For an NPC it edits that NPC's body and look
+ * (no face photo, no keys), kept on its node as one undoable change.
  */
 export function CharacterStudio() {
   const open = useCharacterStudio((state) => state.open)
+  const target = useCharacterStudio((state) => state.target)
   if (!open) return null
-  return <Studio />
+  return <Studio key={target.kind === 'npc' ? target.nodeId : 'player'} target={target} />
 }
 
-function Studio() {
+function Studio({ target }: { target: StudioTarget }) {
+  const npc = target.kind === 'npc' ? target : null
   // A look saved before the studio kept a character's own hairstyle as its
   // own hair (null) may still name it: it opens as its own hair.
   const initial = useMemo<Draft>(() => {
+    if (target.kind === 'npc') {
+      const look = { ...(target.look ?? NO_LOOK), face: null }
+      return { avatar: target.avatar, look: lookOn(look, target.avatar), keys: {} }
+    }
     const avatar = useWalkthroughView.getState().character
     const { look, keys } = useAvatarProfile.getState()
     return { avatar, look: lookOn(look, avatar), keys }
-  }, [])
+  }, [target])
+  const tabs = npc ? NPC_TABS : TABS
   const [draft, setDraft] = useState<Draft>(initial)
   const [preview, setPreview] = useState<Draft | null>(null)
   const [past, setPast] = useState<Draft[]>([])
@@ -481,9 +493,18 @@ function Studio() {
 
   const close = () => useCharacterStudio.getState().hide()
   const save = () => {
-    useWalkthroughView.getState().setCharacter(draft.avatar)
-    useAvatarProfile.getState().setLook(draft.look)
-    useAvatarProfile.getState().setKeys(draft.keys)
+    if (npc) {
+      const { nodes, updateNode } = useScene.getState()
+      const id = npc.nodeId as AnyNodeId
+      // The node may have been deleted meanwhile (by another editor).
+      if (nodes[id]) {
+        updateNode(id, { avatar: draft.avatar, look: { ...draft.look, face: null } } as never)
+      }
+    } else {
+      useWalkthroughView.getState().setCharacter(draft.avatar)
+      useAvatarProfile.getState().setLook(draft.look)
+      useAvatarProfile.getState().setKeys(draft.keys)
+    }
     close()
   }
   const cancel = () => (dirty ? setConfirming(true) : close())
@@ -626,7 +647,7 @@ function Studio() {
               CHARACTER STUDIO
             </p>
             <h1 className="font-bold text-[18px] text-neutral-900 leading-tight">
-              나만의 캐릭터 만들기
+              {npc ? `NPC 꾸미기: ${npc.name}` : '나만의 캐릭터 만들기'}
             </h1>
           </div>
         </div>
@@ -673,7 +694,9 @@ function Studio() {
           <button
             aria-label="초기화"
             className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] text-neutral-700 transition hover:bg-neutral-100"
-            onClick={() => commit({ ...draft, look: NO_LOOK, keys: DEFAULT_EMOTE_KEYS })}
+            onClick={() =>
+              commit({ ...draft, look: NO_LOOK, keys: npc ? draft.keys : DEFAULT_EMOTE_KEYS })
+            }
             title="처음 모습으로 초기화"
             type="button"
           >
@@ -702,7 +725,7 @@ function Studio() {
       {/* The rail of steps and the step's options. */}
       <aside className="absolute top-[84px] bottom-5 left-5 flex gap-3">
         <nav className="flex max-h-full w-[72px] flex-col items-center gap-0.5 self-start overflow-y-auto rounded-[28px] bg-white/85 p-2 shadow-[0_8px_30px_rgba(15,23,42,0.1)] backdrop-blur-xl">
-          {TABS.map(({ id, label, icon: Icon }, index) => (
+          {tabs.map(({ id, label, icon: Icon }, index) => (
             <button
               aria-pressed={tab === id}
               className={cn(
