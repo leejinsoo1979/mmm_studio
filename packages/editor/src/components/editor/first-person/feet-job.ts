@@ -150,6 +150,9 @@ function legSurface(
  */
 const EDGE: readonly [number, number, number] = [0.05, 0.1, 0.25]
 
+/** Where above a ring (in the foot's lengths) the leg's skin is read clear of the shoe. */
+const CLEAR: readonly [number, number] = [0.6, 0.9]
+
 /** Texels of the leg this near its ring (in the foot's lengths, above it) give its colour there. */
 const NEAR_RING: readonly [number, number] = [-0.02, 0.15]
 /** Fewer texels than this by the ring, and it tells nothing of the leg's colour. */
@@ -187,12 +190,26 @@ function legOf(
   )
   if (!colour || near.length < LEAST_NEAR || !isSkin(colour, skins)) return null
   const lum = luminance(...colour)
+  // The leg's skin higher up, clear of the shoe: by a pump's low ring the
+  // skin is shaded darker than the leg, which is no less skin for it.
+  const higher = medianColour(
+    texture,
+    texels
+      .filter((texel) => texel.rise > CLEAR[0] && texel.rise < CLEAR[1])
+      .map((texel) => texel.texel),
+  )
+  const clear = higher && isSkin(higher, [colour, ...skins]) ? higher : null
+  const clearLum = clear ? luminance(...clear) : 0
   const whole = new Map<number, number>()
   const fixes = new Map<number, Rgb>()
   for (const texel of texels) {
     const p = texel.texel * 4
     const was: Rgb = [texture.data[p]!, texture.data[p + 1]!, texture.data[p + 2]!]
-    let alike = 1 - smoothstep(0.2, 0.45, colorDistance(was[0], was[1], was[2], colour, lum))
+    const distance = Math.min(
+      colorDistance(was[0], was[1], was[2], colour, lum),
+      clear ? colorDistance(was[0], was[1], was[2], clear, clearLum) : Number.POSITIVE_INFINITY,
+    )
+    let alike = 1 - smoothstep(0.2, 0.45, distance)
     // Right by the ring the leg is skin whatever its texture holds there:
     // it takes the leg's colour, at its own lightness.
     const byRing = 1 - smoothstep(ring.high + 0.3, ring.high + 0.5, texel.u)
