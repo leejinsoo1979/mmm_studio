@@ -119,27 +119,44 @@ export function headSpan(model: Object3D): HeadSpan | null {
   return { top, bottom, x: point.setFromMatrixPosition(head.matrixWorld).x }
 }
 
-/** The share of the head's own height left clear above its crown, and again below its chin. */
-const HEAD_ROOM = 0.15
-/** How far (CSS px) the top bar reaches down the stage, and the camera controls up it: the head is framed between. */
-const CHROME = 80
-/** However short the stage, the head is framed in at least this share of its height. */
+/**
+ * The stage a camera frames a head on: its size, and how far the studio's
+ * bars reach in over it from the top and the bottom (CSS px).
+ */
+export type Stage = { width: number; height: number; top: number; bottom: number }
+
+/** How wide a head (with its hair) is for its height, near enough to keep a narrow stage from cutting its sides. */
+const HEAD_ASPECT = 0.8
+/** The share of a narrow stage's width a head may take at most. */
+const SIDE_ROOM = 0.9
+/** However far the bars reach in, a head is framed in at least this share of the stage's height. */
 const LEAST_ROOM = 0.5
 
-/** A camera's aim at a head: the point it looks at (across and up), and from how far. */
-export type HeadFraming = { x: number; y: number; distance: number }
+/**
+ * A camera's aim at a head: the point it looks at (across and up), and half
+ * the height of what it sees there (its distance follows from its field of
+ * view).
+ */
+export type HeadFraming = { x: number; y: number; half: number }
 
 /**
- * Where a camera with a vertical field of view of `fov` degrees looks, and
- * from how far away, to frame a head crown to chin (with room round it)
- * as large as fits between the studio's bars on a stage `viewHeight` px tall.
+ * Where a camera looks, and how much it sees there, for the head's crown to
+ * chin to fill `fill` of the height left between the stage's bars, centred
+ * between them — or less, on a stage too narrow for the head's width.
  */
-export function headFraming(span: HeadSpan, fov: number, viewHeight: number): HeadFraming {
-  const half = (span.top - span.bottom) * (0.5 + HEAD_ROOM)
-  const room = Math.max(LEAST_ROOM, 1 - (2 * CHROME) / viewHeight)
+export function headFraming(span: HeadSpan, stage: Stage, fill: number): HeadFraming {
+  const tall = span.top - span.bottom
+  const free = Math.max(stage.height * LEAST_ROOM, stage.height - stage.top - stage.bottom)
+  const half = Math.max(
+    (tall * stage.height) / (2 * fill * free),
+    (tall * HEAD_ASPECT * stage.height) / (2 * SIDE_ROOM * stage.width),
+  )
+  // The free room's middle, in px below the view's: the camera looks that
+  // far above the head's middle to show it there.
+  const below = (stage.top - stage.bottom) / 2
   return {
     x: span.x,
-    y: (span.top + span.bottom) / 2,
-    distance: half / Math.tan(((fov / 2) * Math.PI) / 180) / room,
+    y: (span.top + span.bottom) / 2 + (below * 2 * half) / stage.height,
+    half,
   }
 }

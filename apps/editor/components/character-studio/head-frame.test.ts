@@ -9,7 +9,7 @@ import {
   SkinnedMesh,
   Uint16BufferAttribute,
 } from 'three'
-import { headSpan } from './head-frame'
+import { headFraming, headSpan } from './head-frame'
 
 type Point = { at: [number, number, number]; bones: [number, number]; weights: [number, number] }
 
@@ -128,5 +128,36 @@ describe('the span of a head', () => {
     model.updateMatrixWorld(true)
     mesh(model, [root], [{ at: [0, 1, 0], bones: [0, 0], weights: ALL }])
     expect(headSpan(model)).toBeNull()
+  })
+})
+
+describe('framing a head', () => {
+  const span = { top: 1.75, bottom: 1.47, x: 0.02 }
+  /** Where a height shows on the stage, in px from its top. */
+  const onStage = (y: number, aim: { y: number; half: number }, height: number) =>
+    height / 2 - ((y - aim.y) / (2 * aim.half)) * height
+
+  test('fills the share asked of the room between the bars, centred there', () => {
+    const stage = { width: 1060, height: 860, top: 100, bottom: 40 }
+    const aim = headFraming(span, stage, 0.8)
+    const crown = onStage(span.top, aim, stage.height)
+    const chin = onStage(span.bottom, aim, stage.height)
+    expect(chin - crown).toBeCloseTo(0.8 * (860 - 140), 6)
+    expect((crown + chin) / 2).toBeCloseTo(100 + (860 - 140) / 2, 6)
+    expect(aim.x).toBeCloseTo(0.02, 6)
+  })
+
+  test('keeps the head inside a narrow stage', () => {
+    const stage = { width: 300, height: 860, top: 72, bottom: 72 }
+    const aim = headFraming(span, stage, 0.8)
+    const seen = (2 * aim.half * stage.width) / stage.height
+    expect((0.28 * 0.8) / seen).toBeCloseTo(0.9, 6)
+    expect(onStage(span.bottom, aim, 860) - onStage(span.top, aim, 860)).toBeLessThan(0.8 * 716)
+  })
+
+  test('leaves the head room on a stage the bars nearly cover', () => {
+    const stage = { width: 1000, height: 200, top: 72, bottom: 72 }
+    const aim = headFraming(span, stage, 0.8)
+    expect(onStage(span.bottom, aim, 200) - onStage(span.top, aim, 200)).toBeCloseTo(0.8 * 100, 6)
   })
 })
