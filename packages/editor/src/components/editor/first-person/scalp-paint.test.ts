@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { type ScalpPaint, SHADED, SHADOW_REFS } from './bald-head'
+import { type ScalpPaint, SHADED } from './bald-head'
 import type { Pixels, Rgb } from './look-pixels'
 import { relightBody, scalpPainter } from './scalp-paint'
 
@@ -180,48 +180,28 @@ describe('a scalp painter', () => {
 })
 
 describe('the body lit again under the hair taken off', () => {
-  // A shirt down the left half shaded darker where the hair hung, the
-  // right half lit; and a red strap of another colour.
+  // A shirt lit on the right, shaded where the hair hung on the left; a
+  // strap of another colour down the middle.
   const SHIRT: Rgb = [120, 120, 160]
   const SHADED_SHIRT: Rgb = [60, 60, 80]
   const STRAP: Rgb = [200, 40, 40]
-  const corner = (u: number, v: number, shade: number, refs: number[][]) => [
-    u,
-    v,
-    shade,
-    ...refs.slice(0, SHADOW_REFS).flat(),
-  ]
+  const SIDE = 64
+  /** The left quarter, wholly in the shadow. */
+  const leftQuarter = Float32Array.from([
+    0, 0, 1, 0.25, 0, 1, 0.25, 1, 1, 0, 0, 1, 0.25, 1, 1, 0, 1, 1,
+  ])
 
   test('lights the shadow as bright as the same cloth out of it', () => {
-    const body = image((x) => (x < 8 ? SHADED_SHIRT : SHIRT))
-    const lit = [
-      [0.8, 0.5],
-      [0.8, 0.5],
-      [0.8, 0.5],
-      [0.8, 0.5],
-    ]
-    const shadow = Float32Array.from([
-      ...corner(0, 0, 1, lit),
-      ...corner(0.4, 0, 1, lit),
-      ...corner(0.4, 1, 1, lit),
-    ])
-    expect(shadow.length).toBe(SHADED)
-    relightBody(body, shadow)
-    expect(near(at(body, 2, 3), SHIRT)).toBe(true)
-    expect(at(body, 12, 3)).toEqual(SHIRT)
+    const body = image((x) => (x < 16 ? SHADED_SHIRT : SHIRT), SIDE)
+    expect(leftQuarter.length).toBe(SHADED * 2)
+    relightBody(body, leftQuarter)
+    expect(near(at(body, 5, 30), SHIRT)).toBe(true)
+    expect(at(body, 40, 30)).toEqual(SHIRT)
   })
 
-  test('leaves it be where the cloth round it is of another colour', () => {
-    const body = image((x) => (x < 8 ? SHADED_SHIRT : STRAP))
-    const strap = Array.from({ length: SHADOW_REFS }, () => [0.8, 0.5])
-    relightBody(
-      body,
-      Float32Array.from([
-        ...corner(0, 0, 1, strap),
-        ...corner(0.4, 0, 1, strap),
-        ...corner(0.4, 1, 1, strap),
-      ]),
-    )
-    expect(at(body, 2, 3)).toEqual(SHADED_SHIRT)
+  test('leaves it be where no cloth of its colour is out of it', () => {
+    const body = image((x) => (x < 16 ? SHADED_SHIRT : STRAP), SIDE)
+    relightBody(body, leftQuarter)
+    expect(at(body, 5, 30)).toEqual(SHADED_SHIRT)
   })
 })

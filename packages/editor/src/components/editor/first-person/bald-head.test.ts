@@ -559,7 +559,7 @@ describe('the nape smoothed', () => {
 })
 
 describe('the hair’s shadow on the body', () => {
-  test('is the body behind and under the neck near the hair, with the light read beside it', () => {
+  test('is the body behind and under the neck near the hair', () => {
     // A strip of body down the back, the hair hanging over its first quads.
     const body = strip(20, () => ({ y: -0.2, z: -0.1 }))
     const uvs = Float32Array.from({ length: (body.points.length / 3) * 2 }, (_, j) =>
@@ -573,9 +573,8 @@ describe('the hair’s shadow on the body', () => {
     const triangles = shadow.length / SHADED
     expect(triangles).toBeGreaterThan(0)
     expect(triangles).toBeLessThan(40)
-    // Its first corner deep in the shadow, its light read further along.
+    // Its first corner deep in the shadow.
     expect(shadow[2]!).toBeGreaterThan(0.8)
-    expect(shadow[3]!).toBeGreaterThan(0.05)
     // Over the neck, none.
     expect(
       hairShadow({ points: body.points, uvs, index: body.index }, hair, { neck: -1, nape: 0 })

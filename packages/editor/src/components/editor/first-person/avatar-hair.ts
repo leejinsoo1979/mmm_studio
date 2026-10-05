@@ -1133,6 +1133,21 @@ const UNDER_KEPT = 0.0008
 const UNDER_CLOTHES = 0.003
 const TUCK_REACH = 0.015
 
+/** Where on a hair card (its corners' weights) its shadow is cast from. */
+const CARD_SAMPLES = [
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+  [0.5, 0.5, 0],
+  [0, 0.5, 0.5],
+  [0.5, 0, 0.5],
+  [1 / 3, 1 / 3, 1 / 3],
+] as const
+
+/** How far down the neck (bind units, from its top) and how near the body the bald surface gives way to the body. */
+const LOW_NECK = 0.04
+const ON_BODY = 0.01
+
 /** How far (bind units) under the middle of the body's neckline the bald surface reaches. */
 const UNDER_NECKLINE = 0.01
 
@@ -1248,6 +1263,8 @@ function makeBald(
     keptNormals.set(normals.subarray(i * 3, i * 3 + 3), k * 3)
   })
   const keptGrid = new PointGrid(anchors, SKULL_CELL)
+  const found: number[] = []
+  const distances: number[] = []
   tuckUnder(
     scalpPoints,
     { points: anchors, normals: keptNormals, grid: keptGrid },
@@ -1284,11 +1301,34 @@ function makeBald(
       scalpPoints[i] = Math.max(scalpPoints[i]!, lowest)
     }
   }
+  // Low down the neck where the body's own skin or collar is, the body
+  // shows: what of the bald surface reaches there would stand out of it.
+  {
+    const kept: number[] = []
+    for (let t = 0; t < corners.length; t += 3) {
+      const onBody = [0, 1, 2].every((k) => {
+        const i = corners[t + k]!
+        return (
+          scalpPoints[i * 3 + 1]! < neck - LOW_NECK &&
+          bodySurface.grid.nearest(
+            scalpPoints[i * 3]!,
+            scalpPoints[i * 3 + 1]!,
+            scalpPoints[i * 3 + 2]!,
+            1,
+            found,
+            distances,
+            ON_BODY,
+          ) > 0
+        )
+      })
+      if (!onBody) kept.push(corners[t]!, corners[t + 1]!, corners[t + 2]!)
+    }
+    corners.length = 0
+    corners.push(...kept)
+  }
   const scalpNormals = vertexNormals(scalpPoints, corners)
   // The kept skin and the bald surface lit alike where they meet: each
   // turned halfway to the other at the cut, back to its own by TURN_BACK.
-  const found: number[] = []
-  const distances: number[] = []
   const turned = new Float32Array(normals)
   const scalpLit = new Float32Array(scalpNormals)
   {
@@ -1431,9 +1471,14 @@ function makeBald(
     const cardIndex = indexOf(cardGeometry)
     for (let t = 0; t < kinds.length; t++) {
       if (kinds[t] !== HAIR) continue
-      for (let k = 0; k < 3; k++) {
-        const i = cardIndex[t * 3 + k]!
-        hairPoints.push(cardPoints[i * 3]!, cardPoints[i * 3 + 1]!, cardPoints[i * 3 + 2]!)
+      // A card is a few points far apart: its middle and its edges' too.
+      const [a, b, c] = [0, 1, 2].map((k) => cardIndex[t * 3 + k]! * 3)
+      for (const [wa, wb, wc] of CARD_SAMPLES) {
+        for (let axis = 0; axis < 3; axis++) {
+          hairPoints.push(
+            cardPoints[a! + axis]! * wa + cardPoints[b! + axis]! * wb + cardPoints[c! + axis]! * wc,
+          )
+        }
       }
     }
   }
@@ -1529,12 +1574,16 @@ function makeBald(
   }
 }
 
+/** How far past a neckline's rim (in texture coordinates) the notch closing it reads the body's texture. */
+const PAST_RIM = 0.012
+
 /**
  * The notch closing the back of a body's neckline (see `necklineFan`), in
  * the body mesh's own space and skinned, lit and textured as the body round
- * it: its middle as all of its rim, so the body's texture — a collar, or
- * skin — goes on across it.
+ * it: its middle as all of its rim, and its texture the body's just past
+ * the rim — a collar, or skin.
  */
+
 function collarOf(
   fan: ReturnType<typeof necklineFan>,
   body: SkinnedMesh,
@@ -1542,6 +1591,10 @@ function collarOf(
 ): BufferGeometry | null {
   const count = fan.points.length / 3
   if (count === 0) return null
+  let lowest = 1
+  for (let k = 2; k < count; k++) {
+    if (fan.points[k * 3 + 1]! < fan.points[lowest * 3 + 1]!) lowest = k
+  }
   const collar = new BufferGeometry()
   const position = new BufferAttribute(fan.points.slice(), 3)
   position.applyMatrix4(body.bindMatrix.clone().invert())
@@ -1556,11 +1609,21 @@ function collarOf(
     }
     if (name === 'skinIndex' || name === 'skinWeight') {
       // The middle hangs from the bones of the rim's lowest point.
-      let lowest = 1
-      for (let k = 2; k < count; k++) {
-        if (fan.points[k * 3 + 1]! < fan.points[lowest * 3 + 1]!) lowest = k
-      }
       for (let c = 0; c < size; c++) values[c] = values[lowest * size + c]!
+    } else if (name === 'uv') {
+      // The texture inside a neckline's rim is the hole's (dark, or none):
+      // all of it shows the body's just out past the rim's lowest point.
+      const middle = [0, 0]
+      for (let k = 1; k < count; k++) {
+        middle[0]! += values[k * 2]! / (count - 1)
+        middle[1]! += values[k * 2 + 1]! / (count - 1)
+      }
+      const du = values[lowest * 2]! - middle[0]!
+      const dv = values[lowest * 2 + 1]! - middle[1]!
+      const length = Math.hypot(du, dv) || 1
+      const u = values[lowest * 2]! + (du / length) * PAST_RIM
+      const v = values[lowest * 2 + 1]! + (dv / length) * PAST_RIM
+      for (let k = 0; k < count; k++) values.set([u, v], k * 2)
     } else {
       for (let c = 0; c < size; c++) {
         let sum = 0

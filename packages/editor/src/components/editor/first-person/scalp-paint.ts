@@ -1,4 +1,4 @@
-import { PAINTED, READ, SCALP, type ScalpPaint, SHADED, SHADOW_REFS, SKIN_REF } from './bald-head'
+import { PAINTED, READ, SCALP, type ScalpPaint, SHADED, SKIN_REF } from './bald-head'
 import { rasterise } from './front-render'
 import { byLightness, luminance, type Pixels, type Rgb } from './look-pixels'
 
@@ -365,94 +365,153 @@ export function scalpPainter(
   }
 }
 
-/** How far round (px, on a 2048 texture) a body texture's light is read, and how much brighter at most the shadow is lit. */
-const LIGHT_READ = 4
-const LIGHT_MOST = 2
-
 /**
- * Of the places a shaded corner's light is read from, those this unlike it
- * in hue (its colour over its lightness) are another cloth or skin, and
- * left out.
+ * The light the shadow is lifted to is that of the body of its hue out of
+ * it: hues in steps of 1 / HUE_STEPS of the colour (and HUE_NEAR steps
+ * round, the shadow shifting a hue a little), lightness read at
+ * LIGHT_QUANTILE of at least FEWEST_LIT texels (every LIT_SAMPLE-th). The
+ * shadow's own is read over SHADOW_READ texels round (on a 2048 texture),
+ * so the cloth's weave stays. At most LIGHT_MOST times as bright.
  */
-const SAME_HUE = 0.12
+const HUE_STEPS = 40
+const HUE_NEAR = 2
+const LIGHT_QUANTILE = 0.5
+const FEWEST_LIT = 100
+const LIT_SAMPLE = 3
+const SHADOW_READ = 6
+const LIGHT_MOST = 1.8
+
+/** How far round (texels, on a 2048 texture) the lift is smoothed. */
+const GAIN_BLEND = 16
+
+/** A colour's hue bin (see HUE_STEPS). */
+const hueBin = (r: number, g: number, b: number) => {
+  const total = r + g + b || 1
+  return Math.round((r / total) * HUE_STEPS) * (HUE_STEPS + 1) + Math.round((g / total) * HUE_STEPS)
+}
+
+/** Sums of `values` (`width` × `height`, `channels` per texel) over the box `reach` texels round each. */
+function boxSums(
+  values: Float32Array,
+  width: number,
+  height: number,
+  channels: number,
+  reach: number,
+) {
+  const across = new Float32Array(values.length)
+  for (let y = 0; y < height; y++) {
+    for (let c = 0; c < channels; c++) {
+      let sum = 0
+      for (let x = -reach; x < width + reach; x++) {
+        const add = x + reach
+        if (add >= 0 && add < width) sum += values[(y * width + add) * channels + c]!
+        const drop = x - reach - 1
+        if (drop >= 0 && drop < width) sum -= values[(y * width + drop) * channels + c]!
+        if (x >= 0 && x < width) across[(y * width + x) * channels + c] = sum
+      }
+    }
+  }
+  const out = new Float32Array(values.length)
+  for (let x = 0; x < width; x++) {
+    for (let c = 0; c < channels; c++) {
+      let sum = 0
+      for (let y = -reach; y < height + reach; y++) {
+        const add = y + reach
+        if (add >= 0 && add < height) sum += across[(add * width + x) * channels + c]!
+        const drop = y - reach - 1
+        if (drop >= 0 && drop < height) sum -= across[(drop * width + x) * channels + c]!
+        if (y >= 0 && y < height) out[(y * width + x) * channels + c] = sum
+      }
+    }
+  }
+  return out
+}
 
 /**
  * Lights the body's texture (in place) where the hair taken out of the
  * head shaded it (see `hairShadow`, packed SHADED per triangle): each
- * corner as bright as the body round it out of the shadow of its own hue,
- * as much as it lay in the shadow.
+ * texel as bright as the body of its hue out of the shadow usually is (see
+ * HUE_STEPS), as much as it lay in the shadow.
  */
 export function relightBody(body: Pixels, shadow: Float32Array) {
   const { width, height, data } = body
-  const reach = Math.max(1, Math.round((LIGHT_READ * width) / 2048))
-  /** Mean colour round a place (u, v). */
-  const around = (u: number, v: number): Rgb => {
-    const cx = Math.floor(u * width)
-    const cy = Math.floor(v * height)
-    const sum = [0, 0, 0]
-    let n = 0
-    for (let y = Math.max(0, cy - reach); y <= Math.min(height - 1, cy + reach); y++) {
-      for (let x = Math.max(0, cx - reach); x <= Math.min(width - 1, cx + reach); x++) {
-        const p = (y * width + x) * 4
-        sum[0]! += data[p]!
-        sum[1]! += data[p + 1]!
-        sum[2]! += data[p + 2]!
-        n++
-      }
-    }
-    return [sum[0]! / (n || 1), sum[1]! / (n || 1), sum[2]! / (n || 1)]
-  }
-  const hue = (c: Rgb) => {
-    const total = c[0] + c[1] + c[2] || 1
-    return [c[0] / total, c[1] / total, c[2] / total]
-  }
-  const per = 3 + 2 * SHADOW_REFS
-  const count = shadow.length / SHADED
-  const gains = new Float32Array(count * 3)
-  for (let t = 0; t < count; t++) {
-    for (let k = 0; k < 3; k++) {
-      const at = t * SHADED + k * per
-      const own = around(shadow[at]!, shadow[at + 1]!)
-      const ownHue = hue(own)
-      const lights: number[] = []
-      for (let r = 0; r < SHADOW_REFS; r++) {
-        const ref = around(shadow[at + 3 + r * 2]!, shadow[at + 4 + r * 2]!)
-        const refHue = hue(ref)
-        const apart = Math.hypot(
-          refHue[0]! - ownHue[0]!,
-          refHue[1]! - ownHue[1]!,
-          refHue[2]! - ownHue[2]!,
-        )
-        if (apart <= SAME_HUE) lights.push(luminance(...ref))
-      }
-      lights.sort((a, b) => a - b)
-      const light = lights[lights.length >> 1]
-      const gain =
-        light === undefined
-          ? 1
-          : Math.min(LIGHT_MOST, Math.max(1, light / Math.max(1, luminance(...own))))
-      gains[t * 3 + k] = 1 + (gain - 1) * shadow[at + 2]!
-    }
-  }
-  const done = new Uint8Array(width * height)
-  for (let t = 0; t < count; t++) {
+  const size = width * height
+  const shaded = new Float32Array(size)
+  for (let t = 0; t < shadow.length / SHADED; t++) {
     const at = t * SHADED
     rasterise(
       shadow[at]! * width,
       shadow[at + 1]! * height,
-      shadow[at + per]! * width,
-      shadow[at + per + 1]! * height,
-      shadow[at + 2 * per]! * width,
-      shadow[at + 2 * per + 1]! * height,
+      shadow[at + 3]! * width,
+      shadow[at + 4]! * height,
+      shadow[at + 6]! * width,
+      shadow[at + 7]! * height,
       width,
       height,
       MARGIN,
       (texel, w0, w1, w2) => {
-        if (done[texel]) return
-        done[texel] = 1
-        const gain = gains[t * 3]! * w0 + gains[t * 3 + 1]! * w1 + gains[t * 3 + 2]! * w2
-        for (let c = 0; c < 3; c++) data[texel * 4 + c] = data[texel * 4 + c]! * gain
+        const share = shadow[at + 2]! * w0 + shadow[at + 5]! * w1 + shadow[at + 8]! * w2
+        if (share > shaded[texel]!) shaded[texel] = share
       },
     )
+  }
+  if (!shaded.some((share) => share > 0)) return
+  // How light the body out of the shadow is, by hue.
+  const lightness = new Map<number, number[]>()
+  for (let i = 0; i < size; i += LIT_SAMPLE) {
+    const r = data[i * 4]!
+    const g = data[i * 4 + 1]!
+    const b = data[i * 4 + 2]!
+    if (shaded[i]! > 0 || data[i * 4 + 3] === 0 || r + g + b === 0) continue
+    const bin = hueBin(r, g, b)
+    const list = lightness.get(bin)
+    if (list) list.push(luminance(r, g, b))
+    else lightness.set(bin, [luminance(r, g, b)])
+  }
+  const lightOf = new Map<number, number | null>()
+  const lightAt = (bin: number) => {
+    let light = lightOf.get(bin)
+    if (light !== undefined) return light
+    const all: number[] = []
+    for (let dr = -HUE_NEAR; dr <= HUE_NEAR; dr++) {
+      for (let dg = -HUE_NEAR; dg <= HUE_NEAR; dg++) {
+        for (const value of lightness.get(bin + dr * (HUE_STEPS + 1) + dg) ?? []) all.push(value)
+      }
+    }
+    all.sort((a, b) => a - b)
+    light = all.length >= FEWEST_LIT ? all[Math.floor(LIGHT_QUANTILE * (all.length - 1))]! : null
+    lightOf.set(bin, light)
+    return light
+  }
+  const own = new Float32Array(size * 4)
+  for (let i = 0; i < size; i++) {
+    own.set([data[i * 4]!, data[i * 4 + 1]!, data[i * 4 + 2]!, 1], i * 4)
+  }
+  const near = boxSums(own, width, height, 4, Math.max(1, Math.round((SHADOW_READ * width) / 2048)))
+  // How much brighter each texel would be, smoothed: neighbouring texels
+  // of hues a step apart are lifted alike.
+  const gains = new Float32Array(size * 2)
+  for (let i = 0; i < size; i++) {
+    if (shaded[i]! <= 0) continue
+    const n = near[i * 4 + 3]!
+    const [r, g, b] = [near[i * 4]! / n, near[i * 4 + 1]! / n, near[i * 4 + 2]! / n]
+    const light = lightAt(hueBin(r, g, b))
+    if (light === null) continue
+    gains[i * 2] = Math.min(LIGHT_MOST, Math.max(1, light / Math.max(1, luminance(r, g, b))))
+    gains[i * 2 + 1] = 1
+  }
+  const smooth = boxSums(
+    gains,
+    width,
+    height,
+    2,
+    Math.max(1, Math.round((GAIN_BLEND * width) / 2048)),
+  )
+  for (let i = 0; i < size; i++) {
+    const share = shaded[i]!
+    const n = smooth[i * 2 + 1]!
+    if (share <= 0 || n === 0) continue
+    const k = 1 + (smooth[i * 2]! / n - 1) * share
+    for (let c = 0; c < 3; c++) data[i * 4 + c] = data[i * 4 + c]! * k
   }
 }

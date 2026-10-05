@@ -844,8 +844,13 @@ export function nearEar(x: number, y: number, z: number, marks: HeadMarks) {
 /** How far under the top of the neck (bind units) the bald surface keeps behind the neck's middle. */
 const LOW_NECK = 0.04
 
-/** A patch of bald surface this much smaller than the largest is a stray (but the neck's piece). */
+/**
+ * A patch of bald surface this much smaller than the largest is a stray,
+ * but one of the neck's piece of NECK_PATCH triangles or more: under long
+ * hair the nape may be closed apart from the cranium.
+ */
 const STRAY = 0.1
+const NECK_PATCH = 12
 
 /**
  * Which triangles of the bald surface close the head over what was taken
@@ -1023,7 +1028,8 @@ export function scalpTriangles(bald: BaldSkull, kept: KeptHead, marks: HeadMarks
   return chosen.filter(
     (t) =>
       sizes.get(find(triangles[t * 3]!))! >= STRAY * largest ||
-      [0, 1, 2].some((k) => triangles[t * 3 + k]! >= bald.neckFrom),
+      (sizes.get(find(triangles[t * 3]!))! >= NECK_PATCH &&
+        [0, 1, 2].some((k) => triangles[t * 3 + k]! >= bald.neckFrom)),
   )
 }
 
@@ -1680,18 +1686,11 @@ export function scalpPaint(
  * body's texture has painted on: wholly within SHADOW_FULL, none from
  * SHADOW_REACH.
  */
-const SHADOW_FULL = 0.02
-const SHADOW_REACH = 0.06
+const SHADOW_FULL = 0.04
+const SHADOW_REACH = 0.12
 
-/** How many points of the body out of the shadow, nearest each in it, its light is read from. */
-export const SHADOW_REFS = 4
-
-/**
- * Numbers per triangle of the body packed for lighting again, per corner:
- * u, v, how much it lay in the shadow, and the u, v of SHADOW_REFS points
- * out of it nearest.
- */
-export const SHADED = 3 * (3 + 2 * SHADOW_REFS)
+/** Numbers per triangle of the body packed for lighting again, per corner: u, v and how much it lay in the shadow. */
+export const SHADED = 9
 
 /**
  * The body's triangles the head's own hair (`hair`, its points: what was
@@ -1716,34 +1715,11 @@ export function hairShadow(
     if (hairGrid.nearest(x, y, z, 1, found, distances, SHADOW_REACH) === 0) return 0
     return 1 - smoothstep(SHADOW_FULL, SHADOW_REACH, Math.sqrt(distances[0]!))
   })
-  const lit: number[] = []
-  const litIds: number[] = []
-  for (let i = 0; i < count; i++) {
-    if (shade[i]! > 0) continue
-    lit.push(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!)
-    litIds.push(i)
-  }
-  if (litIds.length === 0) return new Float32Array()
-  const litGrid = new PointGrid(lit, SKULL_CELL)
   const packed: number[] = []
   for (let t = 0; t < index.length / 3; t++) {
     const corners = [0, 1, 2].map((k) => index[t * 3 + k]!)
     if (!corners.some((i) => shade[i]! > 0)) continue
-    for (const i of corners) {
-      packed.push(uvs[i * 2]!, uvs[i * 2 + 1]!, shade[i]!)
-      const n = litGrid.nearest(
-        points[i * 3]!,
-        points[i * 3 + 1]!,
-        points[i * 3 + 2]!,
-        SHADOW_REFS,
-        found,
-        distances,
-      )
-      for (let k = 0; k < SHADOW_REFS; k++) {
-        const j = litIds[found[Math.min(k, n - 1)]!]!
-        packed.push(uvs[j * 2]!, uvs[j * 2 + 1]!)
-      }
-    }
+    for (const i of corners) packed.push(uvs[i * 2]!, uvs[i * 2 + 1]!, shade[i]!)
   }
   return Float32Array.from(packed)
 }
