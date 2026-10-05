@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { type AnimationAction, AnimationMixer, type Group, Vector3 } from 'three'
 import useAvatarProfile, { useAvatarEmote } from '../../../store/use-avatar-profile'
 import useWalkthroughView from '../../../store/use-walkthrough-view'
-import { bodyHeightScale } from './avatar-body'
+import { bodyStrideScale } from './avatar-body'
 import { useAvatarLook } from './avatar-look'
 import { useAvatarBody } from './avatar-rig'
 import { EmoteLayer, useEmoteClips } from './emote-player'
@@ -110,7 +110,7 @@ export function WalkthroughCharacter({
   const look = useAvatarProfile((state) => state.look)
   const { avatar, motion, model, clips, gaitSet } = useAvatarBody(
     useWalkthroughView((state) => state.character),
-    bodyHeightScale(look.body),
+    bodyStrideScale(look.body),
   )
   useAvatarLook(model, look, avatar.id)
   const emoteClips = useEmoteClips(avatar, true)

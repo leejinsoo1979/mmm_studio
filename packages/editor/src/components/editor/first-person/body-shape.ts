@@ -26,6 +26,7 @@ export const BODY_SLIDERS = [
   { id: 'weight', group: 'build' },
   { id: 'muscle', group: 'build' },
   { id: 'headSize', group: 'build' },
+  { id: 'torsoLength', group: 'torso' },
   { id: 'shoulders', group: 'torso' },
   { id: 'chest', group: 'torso' },
   { id: 'waist', group: 'torso' },
@@ -33,6 +34,7 @@ export const BODY_SLIDERS = [
   { id: 'hips', group: 'torso' },
   { id: 'neck', group: 'limbs' },
   { id: 'arms', group: 'limbs' },
+  { id: 'legLength', group: 'limbs' },
   { id: 'legs', group: 'limbs' },
 ] as const satisfies readonly { id: string; group: BodySliderGroup }[]
 
@@ -98,6 +100,49 @@ export function bonePart(name: string): BonePart | null {
     if (pattern.test(plain)) return part as BonePart
   }
   return null
+}
+
+/**
+ * How much longer (as a share of their own length) the length sliders make
+ * their stretch of the body at full setting, or shorter at −1: the legs'
+ * thighs and shins, and the spine from the small of the back to the neck.
+ */
+export const LENGTH_GROWTH = { legLength: 0.1, torsoLength: 0.1 } as const
+
+type LengthSliderId = keyof typeof LENGTH_GROWTH
+
+/** How many times its own length a build makes a length slider's stretch of the body. */
+export const lengthScale = (body: BodyShape, id: LengthSliderId) =>
+  1 + LENGTH_GROWTH[id] * (body.sliders[id] ?? 0)
+
+/**
+ * The bones the length sliders stretch, each from its joint to its child's
+ * (`next`), which moves out along it — and everything beyond, unstretched,
+ * with it: the feet, the neck and the head, the shoulders and the arms.
+ * The thighs hang from the spine's first bone beside the next, so the
+ * torso's stretch starts above them and leaves the hips and the legs be.
+ */
+const STRETCHED: Partial<Record<BonePart, { slider: LengthSliderId; next: BonePart }>> = {
+  thigh: { slider: 'legLength', next: 'calf' },
+  calf: { slider: 'legLength', next: 'foot' },
+  spine: { slider: 'torsoLength', next: 'spine1' },
+  spine1: { slider: 'torsoLength', next: 'spine2' },
+  spine2: { slider: 'torsoLength', next: 'neck' },
+}
+
+/** How a bone's stretch runs: its slider, if it has one, and the child its line runs to. */
+const stretchOf = (bone: Object3D) => {
+  const part = bonePart(bone.name)
+  return part ? STRETCHED[part] : undefined
+}
+
+/**
+ * How many times further from its parent's joint a build sets a bone: the
+ * end of a stretched bone's line moves out along it.
+ */
+export function boneReach(body: BodyShape, bone: Object3D) {
+  const stretch = bone.parent ? stretchOf(bone.parent) : undefined
+  return stretch && stretch.next === bonePart(bone.name) ? lengthScale(body, stretch.slider) : 1
 }
 
 /**
@@ -283,7 +328,7 @@ function lineBetween(start: Vector3, end: Vector3, middle: boolean): Line | null
 type Carried = { line: Line; swells: { swell: Swell; amount: number }[] }[]
 
 /** Where each of a skeleton's bones stands in the bind pose. */
-function bindPositions(mesh: SkinnedMesh): Vector3[] {
+export function bindPositions(mesh: SkinnedMesh): Vector3[] {
   const matrix = new Matrix4()
   return mesh.skeleton.boneInverses.map((inverse) =>
     new Vector3().setFromMatrixPosition(matrix.copy(inverse).invert()),
@@ -1010,6 +1055,63 @@ function unfolded(
   }
 }
 
+/** A stretched bone's line in the bind pose — from its joint along `span` to its child's — and how much it grows. */
+type Stretch = { start: Vector3; span: Vector3; lengthSq: number; growth: number }
+
+/**
+ * The length sliders' moves for a mesh's points: each stretches along the
+ * lines of the bones carrying it (by their skin weights) as much as it lies
+ * along them, so a thigh lengthens evenly from the hip to the knee rather
+ * than all in the bend of the knee. What lies past a line's end moves as
+ * far as its end. That end itself, and all beyond it, the bones carry
+ * (applyBodyBones moves the joints out), so a point the shin carries only
+ * stretches with the shin here, and the foot's points don't move at all.
+ * Null when the build stretches nothing this mesh's bones carry.
+ */
+function stretchMove(mesh: SkinnedMesh, body: BodyShape): PointMove | null {
+  const bones = mesh.skeleton.bones
+  const positions = bindPositions(mesh)
+  const indexOf = new Map<Object3D, number>(bones.map((bone, index) => [bone, index]))
+  const stretches = bones.map((bone, index): Stretch | null => {
+    const stretch = stretchOf(bone)
+    const growth = stretch ? lengthScale(body, stretch.slider) - 1 : 0
+    if (!stretch || growth === 0) return null
+    const child = bone.children.find((each) => bonePart(each.name) === stretch.next)
+    const end = child ? indexOf.get(child) : undefined
+    if (end === undefined) return null
+    const span = positions[end]!.clone().sub(positions[index]!)
+    const lengthSq = span.lengthSq()
+    return lengthSq < SHORTEST_LINE ** 2
+      ? null
+      : { start: positions[index]!, span, lengthSq, growth }
+  })
+  if (stretches.every((each) => each === null)) return null
+  const skinIndex = mesh.geometry.getAttribute('skinIndex')
+  const skinWeight = mesh.geometry.getAttribute('skinWeight')
+  return (point, index, move) => {
+    move.set(0, 0, 0)
+    for (let k = 0; k < skinIndex.itemSize; k++) {
+      const weight = skinWeight.getComponent(index, k)
+      const stretch = stretches[skinIndex.getComponent(index, k)]
+      if (weight === 0 || !stretch) continue
+      const t = fromStart.copy(point).sub(stretch.start).dot(stretch.span) / stretch.lengthSq
+      move.addScaledVector(stretch.span, weight * stretch.growth * clamp(t, 0, 1))
+    }
+  }
+}
+
+const stretched = new Vector3()
+
+/** Two moves of the same points together, either of them none. */
+function together(a: PointMove | null, b: PointMove | null): PointMove | null {
+  if (!(a && b)) return a ?? b
+  return (point, index, move) => {
+    a(point, index, move)
+    b(point, index, stretched)
+    move.add(stretched)
+  }
+}
+
 /** Whether a mesh bends with a skeleton, by its bones' skin weights. */
 const isSkinned = (mesh: Mesh): mesh is SkinnedMesh =>
   (mesh as SkinnedMesh).isSkinnedMesh === true &&
@@ -1023,15 +1125,31 @@ function isOwn(mesh: Mesh) {
 }
 
 /**
- * The build's girth sliders as moves of a skinned body's bind-pose points:
- * each point fills out or slims round the bones that carry it, as much as
- * they carry it, so the reshaped body still bends with its skeleton — and
- * nowhere folds. Null when no girth slider is set (height, shoulders and
- * head size are the skeleton's; see avatar-body.ts). Everything worn by
+ * The build's girth and length sliders as moves of a skinned body's
+ * bind-pose points: each point fills out or slims round the bones that
+ * carry it, as much as they carry it, so the reshaped body still bends
+ * with its skeleton — and nowhere folds — and stretches along them (see
+ * stretchMove). Null when neither is set (height, shoulders and head size
+ * are the skeleton's alone; see avatar-body.ts).
+ */
+export function bodyShaper(body: BodyShape): Shaper | null {
+  const girth = girthShaper(body)
+  const lengthened = (Object.keys(LENGTH_GROWTH) as LengthSliderId[]).some(
+    (id) => (body.sliders[id] ?? 0) !== 0,
+  )
+  if (!(girth || lengthened)) return null
+  return (mesh) => {
+    if (!isSkinned(mesh)) return null
+    return together(girth?.(mesh) ?? null, lengthened ? stretchMove(mesh, body) : null)
+  }
+}
+
+/**
+ * The girth sliders' moves, or null when none is set. Everything worn by
  * one body (its meshes' siblings) is moved together, worked out when the
  * first of it is shaped.
  */
-export function bodyShaper(body: BodyShape): Shaper | null {
+function girthShaper(body: BodyShape): Shaper | null {
   const active: [Swell, number][] = []
   for (const [id, swells] of Object.entries(SWELLS) as [BodySliderId, readonly Swell[]][]) {
     const amount = body.sliders[id] ?? 0

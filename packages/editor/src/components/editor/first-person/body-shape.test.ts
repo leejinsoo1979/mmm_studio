@@ -18,6 +18,8 @@ import {
   bonePart,
   DEFAULT_BODY_SHAPE,
   hasBodyShape,
+  LENGTH_GROWTH,
+  lengthScale,
   readBodyShape,
 } from './body-shape'
 
@@ -137,6 +139,16 @@ describe('a build as saved', () => {
     ).toEqual({ height: 1, sliders: { weight: 0.4, legs: -1 } })
   })
 
+  test('keeps the length sliders, and reads a build saved before them as it was', () => {
+    const lengths = readBodyShape({ height: 0, sliders: { legLength: 0.5, torsoLength: -3 } })
+    expect(lengths).toEqual({ height: 0, sliders: { legLength: 0.5, torsoLength: -1 } })
+    const older = { height: -0.3, sliders: { weight: 0.4, legs: -0.2 } }
+    const read = readBodyShape(older)
+    expect(read).toEqual(older)
+    expect(lengthScale(read, 'legLength')).toBe(1)
+    expect(lengthScale(read, 'torsoLength')).toBe(1)
+  })
+
   test('falls back to the default build for anything else', () => {
     expect(readBodyShape(null)).toBe(DEFAULT_BODY_SHAPE)
     expect(readBodyShape('tall')).toBe(DEFAULT_BODY_SHAPE)
@@ -164,7 +176,7 @@ describe('bone parts', () => {
 })
 
 describe('the body shaper', () => {
-  test('is nothing without a girth slider', () => {
+  test('is nothing without a girth or a length slider', () => {
     expect(bodyShaper(DEFAULT_BODY_SHAPE)).toBeNull()
     expect(bodyShaper({ height: 1, sliders: { shoulders: 1, headSize: -1 } })).toBeNull()
   })
@@ -815,5 +827,107 @@ describe('worn things', () => {
     ).toBe(true)
     // Between the band's top's move up and its front's forward.
     expect(average([top!, front!]).distanceTo(average([worn[0]!, worn[2]!]))).toBeLessThan(0.003)
+  })
+})
+
+/** Where a bone of the test body stands in the bind pose. */
+const jointOf = (name: string) => new Vector3(...SKELETON.find(([each]) => each === name)![1])
+
+describe('the length sliders', () => {
+  const [hip, knee, ankle] = ['Bip01_L_Thigh', 'Bip01_L_Calf', 'Bip01_L_Foot'].map(jointOf) as [
+    Vector3,
+    Vector3,
+    Vector3,
+  ]
+  const thigh = knee.clone().sub(hip)
+  const shin = ankle.clone().sub(knee)
+  /** A point `t` of the way along a line, a little in front of it. */
+  const along = (from: Vector3, span: Vector3, t: number) =>
+    from
+      .clone()
+      .addScaledVector(span, t)
+      .add(new Vector3(0, 0, 0.06))
+      .toArray() as [number, number, number]
+  const legGrowth = LENGTH_GROWTH.legLength
+
+  test('stretch a thigh evenly from the hip to the knee, and no further', () => {
+    const ts = [-0.2, 0, 0.25, 0.5, 1, 1.2]
+    const points = ts.map((t) => ({ at: along(hip, thigh, t), bones: { Bip01_L_Thigh: 1 } }))
+    for (const amount of [1, -1, 0.5]) {
+      const moved = movesOn(trunk(points), { legLength: amount })
+      ts.forEach((t, k) => {
+        const expected = thigh
+          .clone()
+          .multiplyScalar(amount * legGrowth * Math.min(1, Math.max(0, t)))
+        expect(moved[k]!.distanceTo(expected)).toBeLessThan(1e-6)
+      })
+    }
+  })
+
+  test('leave what lies past a line’s end to the bones, so the knee keeps together', () => {
+    // At the knee, carried by the thigh, by the shin, and by both: the shin's
+    // bone moves out along the thigh by as much as the thigh grows.
+    const points: BodyPoint[] = [
+      { at: along(knee, shin, 0), bones: { Bip01_L_Thigh: 1 } },
+      { at: along(knee, shin, 0), bones: { Bip01_L_Thigh: 0.5, Bip01_L_Calf: 0.5 } },
+      { at: along(knee, shin, 0), bones: { Bip01_L_Calf: 1 } },
+      { at: along(knee, shin, 0.5), bones: { Bip01_L_Calf: 1 } },
+    ]
+    const moved = movesOn(trunk(points), { legLength: 1 })
+    const kneeMoves = thigh.clone().multiplyScalar(legGrowth)
+    const carried = [0, 0.5, 1, 1]
+    for (let k = 0; k < 3; k++) {
+      const shown = moved[k]!.clone().addScaledVector(kneeMoves, carried[k]!)
+      expect(shown.distanceTo(kneeMoves)).toBeLessThan(1e-6)
+    }
+    expect(moved[3]!.distanceTo(shin.clone().multiplyScalar(legGrowth / 2))).toBeLessThan(1e-6)
+  })
+
+  test('stretch the torso from the small of the back to the neck, not the hips or the legs', () => {
+    const [spine, spine1, spine2, neck] = [
+      'Bip01_Spine',
+      'Bip01_Spine1',
+      'Bip01_Spine2',
+      'Bip01_Neck',
+    ].map(jointOf) as [Vector3, Vector3, Vector3, Vector3]
+    const points: BodyPoint[] = [
+      { at: [0, 0.05, 0.1], bones: { Bip01_Pelvis: 1 } },
+      { at: along(hip, thigh, 0.1), bones: { Bip01_L_Thigh: 1 } },
+      { at: along(spine, spine1.clone().sub(spine), 0.5), bones: { Bip01_Spine: 1 } },
+      { at: along(spine2, neck.clone().sub(spine2), 0.5), bones: { Bip01_Spine2: 1 } },
+    ]
+    const moved = movesOn(trunk(points), { torsoLength: 1 })
+    const growth = LENGTH_GROWTH.torsoLength
+    expect(moved[0]!.length()).toBe(0)
+    expect(moved[1]!.length()).toBe(0)
+    const small = spine1
+      .clone()
+      .sub(spine)
+      .multiplyScalar(growth / 2)
+    expect(moved[2]!.distanceTo(small)).toBeLessThan(1e-6)
+    const chest = neck
+      .clone()
+      .sub(spine2)
+      .multiplyScalar(growth / 2)
+    expect(moved[3]!.distanceTo(chest)).toBeLessThan(1e-6)
+  })
+
+  test('stretch what is worn as the body under it', () => {
+    const ring = around(along(hip, thigh, 0.6), 0.07, { Bip01_L_Thigh: 1 })
+    const [own, worn] = dressed([ring, 'm001_body', []], [ring, 'm001_equipment', []])
+    const bodyMoves = movesOn(own!, { legLength: 1 })
+    movesOn(worn!, { legLength: 1 }).forEach((moved, k) => {
+      expect(moved.distanceTo(bodyMoves[k]!)).toBeLessThan(1e-6)
+      expect(moved.length()).toBeGreaterThan(0.02)
+    })
+  })
+
+  test('add to the girth sliders’ moves', () => {
+    const ring = () => around(along(hip, thigh, 0.5), 0.07, { Bip01_L_Thigh: 1 })
+    const girth = movesOn(trunk(ring()), { legs: 1 })
+    const length = movesOn(trunk(ring()), { legLength: 1 })
+    movesOn(trunk(ring()), { legs: 1, legLength: 1 }).forEach((moved, k) => {
+      expect(moved.distanceTo(girth[k]!.clone().add(length[k]!))).toBeLessThan(1e-6)
+    })
   })
 })

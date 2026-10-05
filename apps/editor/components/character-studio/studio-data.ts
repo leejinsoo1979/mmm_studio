@@ -192,6 +192,7 @@ export const BODY_SLIDER_TEXT: Record<BodySliderId, SliderText> = {
   weight: { label: '체중', low: '마름', high: '통통' },
   muscle: { label: '근육', low: '적게', high: '탄탄하게' },
   headSize: { label: '머리 크기', low: '작게', high: '크게' },
+  torsoLength: { label: '상체 길이', low: '짧게', high: '길게' },
   shoulders: { label: '어깨 너비', low: '좁게', high: '넓게' },
   chest: { label: '가슴', low: '작게', high: '크게' },
   waist: { label: '허리', low: '잘록하게', high: '굵게' },
@@ -199,6 +200,7 @@ export const BODY_SLIDER_TEXT: Record<BodySliderId, SliderText> = {
   hips: { label: '골반', low: '좁게', high: '넓게' },
   neck: { label: '목 두께', low: '가늘게', high: '굵게' },
   arms: { label: '팔 두께', low: '가늘게', high: '굵게' },
+  legLength: { label: '다리 길이', low: '짧게', high: '길게' },
   legs: { label: '다리 두께', low: '가늘게', high: '굵게' },
 }
 

@@ -5,7 +5,7 @@ import { useFrame } from '@react-three/fiber'
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { type AnimationAction, AnimationMixer, type Group } from 'three'
 import type { AvatarLook } from '../../store/use-avatar-profile'
-import { bodyHeightScale } from './first-person/avatar-body'
+import { bodyHeightScale, bodyStrideScale } from './first-person/avatar-body'
 import { useAvatarLook } from './first-person/avatar-look'
 import { useAvatarBody } from './first-person/avatar-rig'
 import { EmoteLayer, useEmoteClips } from './first-person/emote-player'
@@ -133,7 +133,10 @@ function RemotePlayer({
   bubble?: string
 }) {
   const heightScale = player.look ? bodyHeightScale(player.look.body) : 1
-  const { avatar, model, clips, gaitSet } = useAvatarBody(player.avatar, heightScale)
+  const { avatar, model, clips, gaitSet } = useAvatarBody(
+    player.avatar,
+    player.look ? bodyStrideScale(player.look.body) : 1,
+  )
   useAvatarLook(model, player.look, avatar.id)
   const [emoted, setEmoted] = useState(false)
   const emoteClips = useEmoteClips(avatar, emoted)

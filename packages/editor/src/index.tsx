@@ -12,7 +12,7 @@ export { default as Editor } from './components/editor'
 // surface uses the shorter, shell-friendly names from the unified
 // preset-system spec.
 export { BakeExporter } from './components/editor/bake-exporter'
-export { bodyHeightScale } from './components/editor/first-person/avatar-body'
+export { bodyHeightScale, bodyStrideScale } from './components/editor/first-person/avatar-body'
 // Walkthrough avatars and the live-session presence the app relays between players.
 export {
   ALL_AVATARS,
