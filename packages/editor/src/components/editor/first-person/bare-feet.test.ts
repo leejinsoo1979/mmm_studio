@@ -21,9 +21,9 @@ import {
   TUCK_ABOVE,
   toFoot,
 } from './bare-feet'
-import { medianColour } from './bare-feet-paint'
+import { medianColour, paintBare, SOCK_TOP, type Texel } from './bare-feet-paint'
 import { type FeetBody, type FeetDonor, paintFeet, type WornFeet, wornFeet } from './feet-job'
-import { hexToRgb, luminance, type Pixels, type Rgb } from './look-pixels'
+import { deltaE, hexToRgb, luminance, type Pixels, type Rgb } from './look-pixels'
 
 const BONES = [
   'Bip01 Pelvis',
@@ -58,16 +58,17 @@ type Built = {
  */
 function tube(
   into: Built,
-  radius: number,
+  radius: number | number[],
   heights: number[],
   bone: number,
   uv: readonly [number, number] = [0.5, 0.5],
 ) {
   const first = into.positions.length / 3
-  for (const y of heights) {
+  for (const [row, y] of heights.entries()) {
+    const r = typeof radius === 'number' ? radius : radius[row]!
     for (let k = 0; k < SIDES; k++) {
       const angle = (2 * Math.PI * k) / SIDES
-      into.positions.push(ANKLE[0]! + radius * Math.cos(angle), y, radius * Math.sin(angle))
+      into.positions.push(ANKLE[0]! + r * Math.cos(angle), y, r * Math.sin(angle))
       into.uvs.push(uv[0], uv[1])
       into.joints.push(bone, 0, 0, 0)
       into.weights.push(1, 0, 0, 0)
@@ -82,11 +83,23 @@ function tube(
   }
 }
 
-/** A left leg (its calf's skin) standing in a shoe (its foot's), the two meeting at HEM. */
-function shodLeg(): BodyBind {
+/**
+ * A left leg (its calf's skin) standing in a shoe (its foot's), the two
+ * meeting at `hem`; or, given a `flare`, the leg that wide at the hem (a
+ * pump's opening), narrowing to an ankle's girth by `hem` + 0.06.
+ */
+function shodLeg(hem = HEM, flare?: number): BodyBind {
   const built: Built = { positions: [], uvs: [], joints: [], weights: [], index: [] }
-  tube(built, 0.04, [HEM, 0.2, 0.3, 0.45], CALF)
-  tube(built, 0.04, [0, 0.05, HEM], FOOT)
+  if (flare === undefined) tube(built, 0.04, [hem, 0.2, 0.3, 0.45], CALF)
+  else {
+    tube(
+      built,
+      [flare, (flare + 0.04) / 2, 0.04, 0.04, 0.04],
+      [hem, hem + 0.03, hem + 0.06, 0.3, 0.45],
+      CALF,
+    )
+  }
+  tube(built, flare ?? 0.04, [0, 0.05, hem], FOOT)
   const bonePlaces = new Float32Array(BONES.length * 3)
   bonePlaces.set(ANKLE, FOOT * 3)
   bonePlaces.set(BALL, 3 * 3)
@@ -107,10 +120,20 @@ function shodLeg(): BodyBind {
 }
 
 const SKIN: Rgb = [200, 150, 120]
-const skinTexture = (): Pixels => {
-  const data = new Uint8ClampedArray(4 * 4 * 4)
-  for (let i = 0; i < 16; i++) data.set([...SKIN, 255], i * 4)
-  return { data, width: 4, height: 4 }
+const skinTexture = (size = 4): Pixels => {
+  const data = new Uint8ClampedArray(size * size * 4)
+  for (let i = 0; i < size * size; i++) data.set([...SKIN, 255], i * 4)
+  return { data, width: size, height: size }
+}
+
+/** A body's texture coordinates unwrapped round the ankle's line and up it (so its leg covers texels to paint). */
+function unwrap(bind: BodyBind) {
+  for (let i = 0; i < bind.positions.length / 3; i++) {
+    const angle = Math.atan2(bind.positions[i * 3 + 2]!, bind.positions[i * 3]! - ANKLE[0]!)
+    bind.uvs[i * 2] = 0.05 + (0.9 * (angle + Math.PI)) / (2 * Math.PI)
+    bind.uvs[i * 2 + 1] = 0.05 + (0.9 * bind.positions[i * 3 + 1]!) / 0.5
+  }
+  return bind
 }
 
 /** A donor's foot as carried (DonorFoot): a tube `radius` round the ankle's line up to `top` (foot lengths), its lower half on the foot, its upper on the calf. */
@@ -334,6 +357,44 @@ describe('a carried foot cut and fitted to the leg', () => {
     expect(fitFoot(carried(), foot, bind, frame).mode).toBe('weld')
   })
 
+  test('a ring folded back on itself round the leg (a strap’s saw-tooth) loses its tooth: the donor’s top can follow it', () => {
+    // A leg in short rows (5 of them) over the shoe.
+    const bind = shodLeg(HEM, 0.04)
+    // The leg's lowest corner at 90° hung lower and turned past the one at
+    // 135°: round the leg, its open edge steps back there.
+    const tooth = [
+      ANKLE[0]! + 0.04 * Math.cos((5 * Math.PI) / 6),
+      HEM - 0.01,
+      0.04 * Math.sin((5 * Math.PI) / 6),
+    ]
+    bind.positions.set(tooth, 2 * 3)
+    bind.positions.set(tooth, (5 * SIDES + 2 * SIDES + 2) * 3)
+    const plan = planFeet(bind, skinTexture(), [SKIN])!
+    const [foot] = plan.feet
+    expect(foot!.mode).toBe('weld')
+    for (let t = 0; t < 4 * SIDES * 2; t++) {
+      if ([0, 1, 2].some((k) => bind.index[t * 3 + k] === 2)) expect(plan.hidden[t]).toBe(0)
+    }
+    expect(foot!.ring.low).toBeGreaterThan(HEM / LENGTH - 1e-6)
+    const frame = plan.frames[0]!
+    const { piece } = fitToRing(
+      carryFoot(donorTube(0.3), [FOOT, CALF], frame, 3),
+      foot!.ring,
+      bind,
+      frame,
+      'weld',
+    )
+    const open = Array.from({ length: piece.open.length }, (_, i) => i).filter((i) => piece.open[i])
+    for (const place of foot!.ring.places) {
+      const nearest = Math.min(
+        ...open.map((i) =>
+          Math.hypot(...place.map((value, k) => value - piece.positions[i * 3 + k]!)),
+        ),
+      )
+      expect(nearest).toBeLessThan(1e-6)
+    }
+  })
+
   test('a boot’s shaft, the boot’s colour, is hidden with what it hid; a trouser’s banded hem is not, a long sock over bare skin is', () => {
     // A 2×2 texture: the boot, its shaft or a hem, the trouser.
     const texture = (shaft: Rgb, above: Rgb = [40, 60, 120]): Pixels => {
@@ -422,8 +483,8 @@ describe('a donor’s feet', () => {
 
 describe('borrowed feet as a look puts them on', () => {
   const DONOR_SKIN: Rgb = [235, 160, 165]
-  const donor = (): FeetDonor => {
-    const foot = donorTube(0.3)
+  const donor = (radius = 0.3): FeetDonor => {
+    const foot = donorTube(radius)
     // Unwrapped round the tube onto a 32 × 32 atlas.
     for (let i = 0; i < foot.uvs.length / 2; i++) {
       foot.uvs[i * 2] = 0.05 + 0.9 * ((i % 12) / 12)
@@ -501,5 +562,116 @@ describe('borrowed feet as a look puts them on', () => {
       null,
     )
     expect(colourDistance(feetColour(socked, worn), navy)).toBeLessThan(0.15)
+  })
+
+  const bodyOf = (bind: BodyBind): FeetBody => {
+    const texture = skinTexture(64)
+    return {
+      bind: unwrap(bind),
+      texture,
+      face: SKIN,
+      bodySkin: SKIN,
+      bodySkinMask: new Float32Array(texture.width * texture.height).fill(1),
+    }
+  }
+
+  test('a leg flared wider than the donor’s at a pump’s opening is met higher up, where the two agree', () => {
+    const feet = bodyOf(shodLeg(HEM, 0.06))
+    const plan = planFeet(feet.bind, feet.texture, [SKIN])!
+    expect(plan.feet[0]!.mode).toBe('weld')
+    const frame = plan.frames[0]!
+    const low = fitToRing(
+      carryFoot(donorTube(0.2), [FOOT, CALF], frame, 3),
+      plan.feet[0]!.ring,
+      feet.bind,
+      frame,
+      'weld',
+    )
+    expect(low.snap).toBeGreaterThan(0.15)
+    const worn = wornFeet(feet, donor(0.2), 'bare')!
+    const [foot] = worn.feet
+    expect(foot!.plan.ring.low).toBeGreaterThan(HEM / LENGTH + 0.1)
+    expect(foot!.fitted.snap).toBeLessThan(0.15)
+    expect(worn.hidden.filter((side) => side === 0).length).toBeGreaterThan(
+      plan.hidden.filter((side) => side === 0).length,
+    )
+    expect(worn.legs[0]).not.toBeNull()
+  })
+
+  test('the seam’s normals are the shown leg’s, on the body and on the feet’s tops alike', () => {
+    const feet = bodyOf(shodLeg())
+    const worn = wornFeet(feet, donor(), 'bare')!
+    expect(worn.seam.points.length).toBeGreaterThanOrEqual(SIDES)
+    const seam = new Map<string, number[]>()
+    const key = (positions: ArrayLike<number>, i: number) =>
+      [0, 1, 2].map((k) => Math.round(positions[i * 3 + k]! * 1e5)).join(',')
+    worn.seam.points.forEach((point, k) => {
+      const n = Array.from(worn.seam.normals.subarray(k * 3, k * 3 + 3))
+      // Square to the leg's side (the tube's faces stand upright).
+      expect(Math.abs(n[1]!)).toBeLessThan(0.05)
+      seam.set(key(feet.bind.positions, point), n)
+    })
+    let matched = 0
+    for (let i = 0; i < worn.mesh.positions.length / 3; i++) {
+      const n = seam.get(key(worn.mesh.positions, i))
+      if (!n) continue
+      matched++
+      for (let k = 0; k < 3; k++) expect(worn.mesh.normals[i * 3 + k]!).toBeCloseTo(n[k]!, 4)
+    }
+    expect(matched).toBeGreaterThanOrEqual(SIDES)
+  })
+
+  test('socks welded on a ring above a crew sock’s cuff cover the foot to the ring: no skin between', () => {
+    // A heel's lift puts the pump's ring well up the shin.
+    const feet = bodyOf(shodLeg(0.2))
+    const given = donor()
+    const worn = wornFeet(feet, given, 'socks')!
+    expect(worn.feet[0]!.plan.ring.low).toBeGreaterThan(SOCK_TOP)
+    const navy = hexToRgb('#1f2a4a')
+    const socked = paintFeet(
+      feet.texture,
+      feet,
+      given,
+      worn,
+      { wear: 'socks', color: '#1f2a4a' },
+      null,
+    )
+    for (const texel of worn.feet[0]!.texels) {
+      const p = texel.texel * 4
+      const colour: Rgb = [socked.data[p]!, socked.data[p + 1]!, socked.data[p + 2]!]
+      expect(colourDistance(colour, navy)).toBeLessThan(0.3)
+    }
+  })
+})
+
+describe('bare feet’s paint', () => {
+  test('matched to the leg at the weld, two of the donor’s texture islands toned apart meet it alike', () => {
+    // Two islands side by side, a gap between: yellower and pinker skin.
+    const width = 40
+    const height = 4
+    const data = new Uint8ClampedArray(width * height * 4)
+    const texels: Texel[] = []
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (x >= 10 && x < 30) continue
+        const texel = y * width + x
+        data.set(x < 10 ? [214, 170, 110, 255] : [226, 150, 150, 255], texel * 4)
+        texels.push({ texel, a: 0, o: 0, u: 1, rise: 0, theta: 0, size: 0.01 })
+      }
+    }
+    const pixels: Pixels = { data, width, height }
+    const leg: Rgb = [140, 88, 60]
+    paintBare(
+      pixels,
+      texels,
+      leg,
+      Array.from({ length: 12 }, () => leg),
+    )
+    for (const { texel } of texels) {
+      const p = texel * 4
+      expect(deltaE([pixels.data[p]!, pixels.data[p + 1]!, pixels.data[p + 2]!], leg)).toBeLessThan(
+        3,
+      )
+    }
   })
 })

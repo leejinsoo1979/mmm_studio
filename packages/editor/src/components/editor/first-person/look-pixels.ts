@@ -130,7 +130,7 @@ const labInverse = (f: number) => (f ** 3 > 216 / 24389 ? f ** 3 : (116 * f - 16
 const WHITE = [0.95047, 1, 1.08883] as const
 
 /** An sRGB colour (0–255 channels, not necessarily whole) in CIELAB, written into `out`. */
-function toLab(r: number, g: number, b: number, out: number[]) {
+export function toLab(r: number, g: number, b: number, out: number[]) {
   const lr = LINEAR[Math.round(r)]!
   const lg = LINEAR[Math.round(g)]!
   const lb = LINEAR[Math.round(b)]!
@@ -162,7 +162,7 @@ export function deltaE(a: Rgb, b: Rgb) {
 }
 
 /** A CIELAB colour back in sRGB (0–255, clamped), written into `out`. */
-function fromLab(l: number, a: number, b: number, out: number[]) {
+export function fromLab(l: number, a: number, b: number, out: number[]) {
   const fy = (l + 16) / 116
   const x = labInverse(fy + a / 500) * WHITE[0]
   const y = labInverse(fy)

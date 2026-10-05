@@ -16,7 +16,7 @@ import {
   skinHued,
   toFoot,
 } from './bare-feet'
-import { luminance, type Pixels, type Rgb, toneSkin } from './look-pixels'
+import { fromLab, luminance, type Pixels, type Rgb, toLab, toneSkin } from './look-pixels'
 
 const smoothstep = (from: number, to: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - from) / (to - from)))
@@ -215,15 +215,22 @@ export function tonedColour(colour: Rgb, skin: Rgb, ref: Rgb): Rgb {
 
 /** How far down from a weld (in the foot's lengths) the foot's colour is matched to the leg's above it. */
 const MATCH_FADE = 0.45
-/** How far down from a weld the foot's own colour is taken by angle, to match. */
-const MATCH_BAND = 0.12
+/**
+ * How far round each texel (in the foot's lengths, and at most in texels)
+ * the foot's own colour is taken, to match: its broad colour, not its
+ * veins and creases, nor the next texture island's.
+ */
+const MATCH_REACH = 0.08
+const MATCH_TEXELS = 12
 
 /**
  * A bare foot: the donor's skin under `texels` toned to `skin` (from its
  * own middle colour, so its light and shade, veins and nails stay); then,
- * where it is welded to a bare leg, each angle round the weld pulled to the
- * leg's colour just above it there (`leg`, see byAngle), fading out down
- * the foot — the two meet without a line.
+ * where it is welded to a bare leg, its broad colour round each texel
+ * pulled to the leg's just above the weld at that angle (`leg`, see
+ * byAngle), fading out down the foot — the two meet without a line, and a
+ * seam of the donor's own texture islands by the weld (its leg's and its
+ * foot's, toned apart) goes with it.
  */
 export function paintBare(
   pixels: Pixels,
@@ -236,26 +243,69 @@ export function paintBare(
     texels.map((texel) => texel.texel),
   )
   if (!own) return
-  const mask = new Float32Array(pixels.width * pixels.height)
+  const { width, height } = pixels
+  const mask = new Float32Array(width * height)
   for (const texel of texels) mask[texel.texel] = 1
   toneSkin(pixels, skin, own, mask)
   if (!leg) return
-  const atWeld = byAngle(
-    pixels,
-    texels.filter((texel) => depthOf(texel) < MATCH_BAND),
-  )
-  if (!atWeld) return
+  // Running sums of the toned texels (and their count) over the texture,
+  // for each texel's broad colour.
+  const stride = width + 1
+  const sums = Array.from({ length: 4 }, () => new Float64Array(stride * (height + 1)))
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const texel = y * width + x
+      const at = (y + 1) * stride + x + 1
+      for (let c = 0; c < 4; c++) {
+        const value = mask[texel] ? (c === 3 ? 1 : pixels.data[texel * 4 + c]!) : 0
+        sums[c]![at] =
+          value + sums[c]![at - 1]! + sums[c]![at - stride]! - sums[c]![at - stride - 1]!
+      }
+    }
+  }
+  const broad = (texel: number, reach: number) => {
+    const x = texel % width
+    const y = (texel - x) / width
+    const x0 = Math.max(0, x - reach)
+    const y0 = Math.max(0, y - reach)
+    const x1 = Math.min(width, x + reach + 1)
+    const y1 = Math.min(height, y + reach + 1)
+    const box = (c: number) =>
+      sums[c]![y1 * stride + x1]! -
+      sums[c]![y0 * stride + x1]! -
+      sums[c]![y1 * stride + x0]! +
+      sums[c]![y0 * stride + x0]!
+    const n = box(3)
+    return [0, 1, 2].map((c) => box(c) / Math.max(n, 1))
+  }
+  // Moved in Lab by the difference, so a dark tone's strong hue is matched
+  // as well as its lightness.
+  const changes: [number, number[]][] = []
+  const want = [0, 0, 0]
+  const have = [0, 0, 0]
+  const lab = [0, 0, 0]
   for (const texel of texels) {
     const weight = 1 - smoothstep(0, MATCH_FADE, depthOf(texel))
     if (weight <= 0) continue
-    const want = angleColour(leg, texel.theta)
-    const have = angleColour(atWeld, texel.theta)
+    const reach = Math.max(
+      1,
+      Math.min(MATCH_TEXELS, Math.round(MATCH_REACH / Math.max(texel.size, 1e-6))),
+    )
+    toLab(...angleColour(leg, texel.theta), want)
+    const [r, g, b] = broad(texel.texel, reach)
+    toLab(r!, g!, b!, have)
     const p = texel.texel * 4
-    for (let c = 0; c < 3; c++) {
-      const ratio = Math.min(1.6, Math.max(0.6, want[c]! / Math.max(1, have[c]!)))
-      pixels.data[p + c] = pixels.data[p + c]! * (1 + (ratio - 1) * weight)
-    }
+    toLab(pixels.data[p]!, pixels.data[p + 1]!, pixels.data[p + 2]!, lab)
+    const rgb = [0, 0, 0]
+    fromLab(
+      lab[0]! + (want[0]! - have[0]!) * weight,
+      lab[1]! + (want[1]! - have[1]!) * weight,
+      lab[2]! + (want[2]! - have[2]!) * weight,
+      rgb,
+    )
+    changes.push([p, rgb])
   }
+  for (const [p, rgb] of changes) pixels.data.set(rgb, p)
 }
 
 /** Socks' colour when none is chosen: a soft grey-white. */

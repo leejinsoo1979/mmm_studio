@@ -19,6 +19,7 @@ import {
   fitFoot,
   isSkin,
   planFeet,
+  raiseRing,
   remapBones,
   skinHued,
   sockify,
@@ -80,11 +81,12 @@ type Leg = {
   fixes: Map<number, Rgb>
 }
 
-/** A body's feet planned, with what their paint needs of its own texture. */
+/** A body's feet planned, with what their paint needs of its own texture (`skins`: its hands' and face's skin, as found). */
 type Planned = {
   plan: FeetPlan
   hands: Rgb | null
   face: Rgb | null
+  skins: Rgb[]
   legs: (Leg | null)[]
 }
 
@@ -157,6 +159,10 @@ const CLEAR: readonly [number, number] = [0.6, 0.9]
 const NEAR_RING: readonly [number, number] = [-0.02, 0.15]
 /** Fewer texels than this by the ring, and it tells nothing of the leg's colour. */
 const LEAST_NEAR = 30
+/** How far above a ring (in the foot's lengths) the leg is recoloured to its skin, fading out between the two. */
+const FIX_RISE: readonly [number, number] = [0.3, 0.5]
+/** How far above a ring a skin-hued texel the body's mask leaves out is still toned as skin, fading out. */
+const SHADOW_RISE: readonly [number, number] = [0.4, 0.7]
 
 /**
  * A welded bare leg's paint (see Leg), or null when the leg at the ring
@@ -211,19 +217,29 @@ function legOf(
     )
     let alike = 1 - smoothstep(0.2, 0.45, distance)
     // Right by the ring the leg is skin whatever its texture holds there:
-    // it takes the leg's colour, at its own lightness.
-    const byRing = 1 - smoothstep(ring.high + 0.3, ring.high + 0.5, texel.u)
+    // it takes the leg's colour there, at its own lightness — the shaded
+    // colour by the ring, the clear one by the time it fades out, so its
+    // top edge leaves no band. By the rise, not the height: the fade
+    // follows the ring round, not a texture island's slant.
+    const byRing = 1 - smoothstep(FIX_RISE[0], FIX_RISE[1], texel.rise)
     if (byRing > 0 && alike < 1) {
-      const light = Math.min(1.1, Math.max(0.75, luminance(...was) / Math.max(lum, 1)))
+      const toClear = smoothstep(NEAR_RING[1], FIX_RISE[0], texel.rise)
+      const want = clear
+        ? ([0, 1, 2].map((c) => colour[c]! + (clear[c]! - colour[c]!) * toClear) as Rgb)
+        : colour
+      const light = Math.min(
+        1.1,
+        Math.max(0.75, luminance(...was) / Math.max(luminance(...want), 1)),
+      )
       const share = byRing * (1 - alike)
       fixes.set(
         texel.texel,
-        [0, 1, 2].map((c) => was[c]! + (colour[c]! * light - was[c]!) * share) as Rgb,
+        [0, 1, 2].map((c) => was[c]! + (want[c]! * light - was[c]!) * share) as Rgb,
       )
       alike = Math.max(alike, byRing)
     }
     // And any skin's hue near it: the collar's shadow too.
-    const shadow = skinHued(was) ? 1 - smoothstep(ring.high + 0.4, ring.high + 0.7, texel.u) : 0
+    const shadow = skinHued(was) ? 1 - smoothstep(SHADOW_RISE[0], SHADOW_RISE[1], texel.rise) : 0
     const weight = Math.max(alike, shadow)
     if (weight > 0) whole.set(texel.texel, Math.max(whole.get(texel.texel) ?? 0, weight))
   }
@@ -272,6 +288,7 @@ function plannedOf(body: FeetBody): Planned | null {
     plan,
     hands,
     face,
+    skins,
     legs: [0, 1].map((side) => {
       const foot = plan.feet.find((each) => each.side === side)
       const frame = plan.frames[side]
@@ -304,23 +321,33 @@ export type FeetMesh = {
 }
 
 /**
+ * The body's points along its welds and the normals they take there (in
+ * the bind pose; see Ring's `normals`), which the feet's tops take too.
+ */
+export type FeetSeam = { points: Uint32Array; normals: Float32Array }
+
+/**
  * Fitted feet as the main thread wears them (see avatar-feet.ts): `key`
  * names the fit (the body, the donor and the kind); the body's triangles
- * to hide (by side, −1 shown); the feet's mesh in the body's bind pose.
+ * to hide (by side, −1 shown); the feet's mesh in the body's bind pose;
+ * and the seam's normals on the body.
  */
-export type FittedFeet = { key: string; hidden: Int8Array; mesh: FeetMesh }
+export type FittedFeet = { key: string; hidden: Int8Array; mesh: FeetMesh; seam: FeetSeam }
 
 /**
  * Borrowed feet fitted to a body: `kind` names the fit (the donor, bare or
  * socked); the body's triangles hidden for them (by side, −1 shown); the
- * feet's mesh; and each foot.
+ * feet's mesh; the seam's normals; each foot; and each side's welded bare
+ * leg (see Leg).
  */
 export type WornFeet = {
   kind: string
   hidden: Int8Array
   mesh: FeetMesh
+  seam: FeetSeam
   feet: FootFit[]
   planned: Planned
+  legs: (Leg | null)[]
 }
 
 const fits = new WeakMap<BodyBind, Map<string, WornFeet | null>>()
@@ -343,26 +370,57 @@ export function wornFeet(
   }
   if (kept.has(kind)) return kept.get(kind)!
   const found = plannedOf(body)
-  const worn = found && fitFeet(body.bind, found, donor, wear, kind)
+  const worn = found && fitFeet(body, found, donor, wear, kind)
   kept.set(kind, worn)
   return worn
 }
 
+/**
+ * A weld onto a bare leg that has to snap the donor's leg further than this
+ * (in the foot's lengths) meets it too low, where the shoe's opening flares
+ * the leg wider than an ankle: its ring is raised (see raiseRing) by
+ * RAISE_STEP at a time, up to RAISE_MOST, while that brings the two closer.
+ */
+const RAISE_SNAP = 0.15
+const RAISE_STEP = 0.1
+const RAISE_MOST = 0.8
+
 function fitFeet(
-  bind: BodyBind,
+  body: FeetBody,
   found: Planned,
   donor: FeetDonor,
   wear: 'socks' | 'bare',
   kind: string,
 ): WornFeet | null {
+  const { bind } = body
   const { plan } = found
   const bones = remapBones(donor.bones, bind.bones)
   const feet: FootFit[] = []
-  for (const foot of plan.feet) {
-    const frame = plan.frames[foot.side]
-    const donorFoot = donor.feet[foot.side]
+  let hidden = plan.hidden
+  const raisedSides = new Set<number>()
+  for (const planned of plan.feet) {
+    const frame = plan.frames[planned.side]
+    const donorFoot = donor.feet[planned.side]
     if (!(frame && donorFoot)) continue
-    const fitted = fitFoot(carryFoot(donorFoot, bones, frame, carryHeight(foot)), foot, bind, frame)
+    const fit = (foot: FootPlan) =>
+      fitFoot(carryFoot(donorFoot, bones, frame, carryHeight(foot)), foot, bind, frame)
+    let foot = planned
+    let fitted = fit(foot)
+    for (
+      let rise = RAISE_STEP;
+      fitted.mode === 'weld' && foot.skin && fitted.snap > RAISE_SNAP && rise <= RAISE_MOST;
+      rise += RAISE_STEP
+    ) {
+      const trial = hidden.slice()
+      const raised = raiseRing(bind, plan, foot, trial, planned.ring.high + rise)
+      if (!raised) continue
+      const refitted = fit(raised)
+      if (refitted.mode !== 'weld' || refitted.snap >= fitted.snap) continue
+      hidden = trial
+      foot = raised
+      fitted = refitted
+      raisedSides.add(foot.side)
+    }
     if (fitted.piece.index.length === 0) continue
     if (wear === 'socks') sockify(fitted.piece, frame, fitted.depth)
     const texels = texelsOf(
@@ -378,10 +436,44 @@ function fitFeet(
   }
   if (feet.length === 0) return null
   // A shoe no foot could be fitted to stays on.
-  const hidden = plan.hidden.map((side) =>
-    feet.some((each) => each.plan.side === side) ? side : -1,
-  )
-  return { kind, hidden: Int8Array.from(hidden), mesh: meshOf(feet), feet, planned: found }
+  const shown = hidden.map((side) => (feet.some((each) => each.plan.side === side) ? side : -1))
+  const raisedPlan = { ...plan, hidden }
+  const legs = found.legs.map((leg, side) => {
+    if (!raisedSides.has(side)) return leg
+    const foot = feet.find((each) => each.plan.side === side)!
+    return legOf(bind, body.texture, raisedPlan, foot.plan, foot.frame, found.skins)
+  })
+  return {
+    kind,
+    hidden: shown,
+    mesh: meshOf(feet),
+    seam: seamOf(bind, plan, feet),
+    feet,
+    planned: found,
+    legs,
+  }
+}
+
+/** The body's points along the feet's welds, all of each spot's, with their ring's normals. */
+function seamOf(bind: BodyBind, plan: FeetPlan, feet: readonly FootFit[]): FeetSeam {
+  const { spots } = plan.layout
+  const bySpot = new Map<number, number[]>()
+  for (const { plan: foot, fitted } of feet) {
+    if (fitted.mode !== 'weld') continue
+    foot.ring.legPoint.forEach((point, k) => {
+      const normal = foot.ring.normals[k]
+      if (point >= 0 && normal) bySpot.set(spots[point]!, normal)
+    })
+  }
+  const points: number[] = []
+  const normals: number[] = []
+  for (let i = 0; i < bind.positions.length / 3; i++) {
+    const normal = bySpot.get(spots[i]!)
+    if (!normal) continue
+    points.push(i)
+    normals.push(...normal)
+  }
+  return { points: Uint32Array.from(points), normals: Float32Array.from(normals) }
 }
 
 /** The feet's pieces as one mesh. */
@@ -412,9 +504,21 @@ function meshOf(feet: readonly FootFit[]): FeetMesh {
   }
 }
 
-/** Whether a foot is welded to a bare leg low enough for a sock's cuff to carry on up it. */
-const cuffedLeg = (foot: FootFit) =>
-  foot.fitted.mode === 'weld' && !foot.plan.shaft && foot.plan.ring.low < SOCK_TOP
+/**
+ * How far above a weld (in the foot's lengths) a sock's cuff reaches at
+ * least, over the leg's shaded edge there (a pump's low ring sits well up
+ * a raised heel's shin: a crew sock's cuff below it would leave a band of
+ * that shading between the two), and how high a cuff may go for that.
+ */
+const CUFF_OVER = 0.15
+const CUFF_MOST = 2
+
+/** Where a sock's cuff on a welded foot's bare leg is, or null for a foot whose sock stops on the foot (see paintFeet). */
+function legCuff(foot: FootFit) {
+  if (foot.fitted.mode !== 'weld' || foot.plan.shaft) return null
+  const top = Math.max(SOCK_TOP, foot.plan.ring.high + CUFF_OVER)
+  return top <= CUFF_MOST ? top : null
+}
 
 /**
  * The body's texture (`body`, the look's copy of its own, changed in place)
@@ -430,7 +534,7 @@ export function dressLegs(
   skin: Rgb | null,
 ) {
   const legs = worn.feet.map((foot) =>
-    foot.fitted.mode === 'weld' ? worn.planned.legs[foot.plan.side] : null,
+    foot.fitted.mode === 'weld' ? worn.legs[foot.plan.side] : null,
   )
   for (const leg of legs) {
     if (!leg) continue
@@ -474,7 +578,8 @@ export function dressLegs(
     const sock = wear.color ? hexToRgb(wear.color) : DEFAULT_SOCK
     worn.feet.forEach((foot, k) => {
       const leg = legs[k]
-      if (leg && cuffedLeg(foot)) paintSock(body, leg.texels, sock, SOCK_TOP, foot.front)
+      const cuff = legCuff(foot)
+      if (leg && cuff !== null) paintSock(body, leg.texels, sock, cuff, foot.front)
     })
   }
 }
@@ -509,14 +614,20 @@ export function paintFeet(
   }
   const { hands, face } = worn.planned
   for (const foot of worn.feet) {
-    const leg = foot.fitted.mode === 'weld' ? worn.planned.legs[foot.plan.side] : null
+    const leg = foot.fitted.mode === 'weld' ? worn.legs[foot.plan.side] : null
     let colour = leg?.colour ?? hands ?? face ?? DEFAULT_SKIN
     if (skin) colour = tonedColour(colour, skin, feet.bodySkin)
     const matched = wear.wear === 'bare' && leg ? byAngle(body, leg.near) : null
     paintBare(atlas, foot.texels, colour, matched)
     if (wear.wear === 'socks') {
       const sock = wear.color ? hexToRgb(wear.color) : DEFAULT_SOCK
-      paintSock(atlas, foot.texels, sock, cuffedLeg(foot) ? null : SOCK_TOP, foot.front)
+      paintSock(
+        atlas,
+        foot.texels,
+        sock,
+        leg && legCuff(foot) !== null ? null : SOCK_TOP,
+        foot.front,
+      )
     }
   }
   return atlas

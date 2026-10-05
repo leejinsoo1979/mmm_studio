@@ -281,14 +281,17 @@ export function middleColour(colours: Rgb[]): Rgb | null {
  * The open edge where a side's hidden triangles meet the body's shown ones
  * — a shoe's seam with the leg, or the cut through a leg's own island —
  * as a loop round the leg, sorted by angle about its middle: each corner's
- * foot coordinates, its bind-pose place, and a shown point there (−1 for
- * none), whose skin and normal the weld takes; its middle (seen from
- * above), mean radius, and lowest and highest.
+ * foot coordinates, its bind-pose place, a shown point there (−1 for
+ * none), whose skin the weld takes, and the shown surface's normal there
+ * (`normals`, null for none: the body's own normal there leans with the
+ * hidden shoe's faces); its middle (seen from above), mean radius, and
+ * lowest and highest.
  */
 export type Ring = {
   points: number[][]
   places: number[][]
   legPoint: number[]
+  normals: (number[] | null)[]
   theta: number[]
   centre: [number, number]
   radius: number
@@ -296,8 +299,19 @@ export type Ring = {
   high: number
 }
 
+/** A triangle's normal, as long as twice its area (so summed round a point, bigger faces count for more). */
+function faceNormal(positions: ArrayLike<number>, a: number, b: number, c: number) {
+  const e1 = [0, 1, 2].map((k) => positions[b * 3 + k]! - positions[a * 3 + k]!)
+  const e2 = [0, 1, 2].map((k) => positions[c * 3 + k]! - positions[a * 3 + k]!)
+  return [
+    e1[1]! * e2[2]! - e1[2]! * e2[1]!,
+    e1[2]! * e2[0]! - e1[0]! * e2[2]!,
+    e1[0]! * e2[1]! - e1[1]! * e2[0]!,
+  ]
+}
+
 /** A body's points' spots and islands, worked out once for a plan. */
-type Layout = { spots: Int32Array; islands: Int32Array }
+export type Layout = { spots: Int32Array; islands: Int32Array }
 
 export function ringOf(
   bind: BodyBind,
@@ -338,11 +352,24 @@ export function ringOf(
   const list = [...ends].map(([spot, i]) => {
     const place = [bind.positions[i * 3]!, bind.positions[i * 3 + 1]!, bind.positions[i * 3 + 2]!]
     return {
+      spot,
       point: toFoot(frame, place[0]!, place[1]!, place[2]!),
       place,
       leg: shownAt.get(spot) ?? -1,
     }
   })
+  const faces = new Map<number, number[]>()
+  for (const spot of ends.keys()) faces.set(spot, [0, 0, 0])
+  for (let t = 0; t < index.length / 3; t++) {
+    if (hidden[t]! >= 0) continue
+    const tri = [index[t * 3]!, index[t * 3 + 1]!, index[t * 3 + 2]!]
+    if (!tri.some((i) => faces.has(spots[i]!))) continue
+    const face = faceNormal(bind.positions, tri[0]!, tri[1]!, tri[2]!)
+    for (const i of tri) {
+      const sum = faces.get(spots[i]!)
+      if (sum) for (let k = 0; k < 3; k++) sum[k]! += face[k]!
+    }
+  }
   const ca = list.reduce((sum, each) => sum + each.point[0]!, 0) / list.length
   const co = list.reduce((sum, each) => sum + each.point[1]!, 0) / list.length
   const angle = (each: { point: number[] }) => Math.atan2(each.point[1]! - co, each.point[0]! - ca)
@@ -351,6 +378,11 @@ export function ringOf(
     points: list.map((each) => each.point),
     places: list.map((each) => each.place),
     legPoint: list.map((each) => each.leg),
+    normals: list.map((each) => {
+      const sum = faces.get(each.spot)!
+      const length = Math.hypot(sum[0]!, sum[1]!, sum[2]!)
+      return length > 0 ? sum.map((value) => value / length) : null
+    }),
     theta: list.map(angle),
     centre: [ca, co],
     radius:
@@ -385,6 +417,134 @@ export function ringHeight(ring: Ring, theta: number) {
 /** A point's angle round a ring's middle, from its foot coordinates. */
 export const ringAngle = (ring: Ring, point: readonly number[]) =>
   Math.atan2(point[1]! - ring.centre[1], point[0]! - ring.centre[0])
+
+/**
+ * The open edge between a side's hidden triangles and the shown ones,
+ * followed round as one loop of spots (each by a point there); null when it
+ * isn't one simple loop.
+ */
+function ringLoop(bind: BodyBind, layout: Layout, hidden: Int8Array, side: 0 | 1) {
+  const { spots } = layout
+  const { index } = bind
+  const count = bind.positions.length / 3
+  const edgeKey = (a: number, b: number) => (a < b ? a * count + b : b * count + a)
+  const shownEdges = new Set<number>()
+  for (let t = 0; t < index.length / 3; t++) {
+    if (hidden[t]! >= 0) continue
+    for (let e = 0; e < 3; e++) {
+      shownEdges.add(edgeKey(spots[index[t * 3 + e]!]!, spots[index[t * 3 + ((e + 1) % 3)]!]!))
+    }
+  }
+  const next = new Map<number, Set<number>>()
+  const pointAt = new Map<number, number>()
+  for (let t = 0; t < index.length / 3; t++) {
+    if (hidden[t] !== side) continue
+    for (let e = 0; e < 3; e++) {
+      const a = index[t * 3 + e]!
+      const b = index[t * 3 + ((e + 1) % 3)]!
+      const sa = spots[a]!
+      const sb = spots[b]!
+      if (sa === sb || !shownEdges.has(edgeKey(sa, sb))) continue
+      pointAt.set(sa, a)
+      pointAt.set(sb, b)
+      for (const [from, to] of [
+        [sa, sb],
+        [sb, sa],
+      ] as const) {
+        const set = next.get(from) ?? new Set<number>()
+        set.add(to)
+        next.set(from, set)
+      }
+    }
+  }
+  if (next.size < 3 || [...next.values()].some((set) => set.size !== 2)) return null
+  const start = next.keys().next().value!
+  const loop = [start]
+  let before = start
+  let at = [...next.get(start)!][0]!
+  while (at !== start) {
+    loop.push(at)
+    const [x, y] = [...next.get(at)!]
+    const step = x === before ? y! : x!
+    before = at
+    at = step
+    if (loop.length > next.size) return null
+  }
+  return loop.length === next.size ? loop.map((spot) => pointAt.get(spot)!) : null
+}
+
+/** How many times the leg's teeth are taken off a ring folded back on itself (see unfoldRing). */
+const UNFOLD_ROUNDS = 6
+
+/**
+ * Takes off the leg's teeth where the open edge folds back on itself round
+ * the leg (a sandal's strap island cut a saw-tooth into it): seen from
+ * above, the loop turns back where a tooth's tip hangs below its neighbours,
+ * and a ring sorted by angle (see Ring) then crosses itself there, leaving
+ * a hole between the leg and the donor's top. The lower end of each such
+ * step goes, with the leg's triangles at it, until the loop runs round the
+ * leg one way. Returns how many triangles it hid.
+ */
+function unfoldRing(
+  bind: BodyBind,
+  layout: Layout,
+  hidden: Int8Array,
+  side: 0 | 1,
+  frame: FootFrame,
+) {
+  const { index } = bind
+  const { spots } = layout
+  let count = 0
+  const local = [0, 0, 0]
+  for (let round = 0; round < UNFOLD_ROUNDS; round++) {
+    const ring = ringOf(bind, layout, hidden, side, frame)
+    const loop = ring && ringLoop(bind, layout, hidden, side)
+    if (!(ring && loop)) break
+    const at = loop.map((i) =>
+      toFoot(frame, bind.positions[i * 3]!, bind.positions[i * 3 + 1]!, bind.positions[i * 3 + 2]!),
+    )
+    const theta = at.map((point) => ringAngle(ring, point))
+    const steps = theta.map((from, k) => {
+      let d = theta[(k + 1) % theta.length]! - from
+      if (d > Math.PI) d -= 2 * Math.PI
+      if (d < -Math.PI) d += 2 * Math.PI
+      return d
+    })
+    const turn = Math.sign(steps.reduce((sum, d) => sum + d, 0))
+    const off = new Set<number>()
+    steps.forEach((d, k) => {
+      if (d * turn >= 0) return
+      const j = (k + 1) % loop.length
+      off.add(spots[at[k]![2]! < at[j]![2]! ? loop[k]! : loop[j]!]!)
+    })
+    if (off.size === 0) break
+    let hid = 0
+    for (let t = 0; t < index.length / 3; t++) {
+      if (hidden[t]! >= 0) continue
+      const tri = [index[t * 3]!, index[t * 3 + 1]!, index[t * 3 + 2]!]
+      if (!tri.some((i) => off.has(spots[i]!))) continue
+      const inLeg = tri.every((i) => {
+        toFoot(
+          frame,
+          bind.positions[i * 3]!,
+          bind.positions[i * 3 + 1]!,
+          bind.positions[i * 3 + 2]!,
+          local,
+        )
+        return (
+          local[2]! < ring.high + 0.6 &&
+          Math.hypot(local[0]! - ring.centre[0], local[1]! - ring.centre[1]) < ring.radius * 1.6
+        )
+      })
+      if (!inLeg) continue
+      hidden[t] = side
+      hid++
+    }
+    if (hid === 0) break
+    count += hid
+  }
+  return count
+}
 
 /**
  * A leg's island reaching on over the instep below this (in the foot's
@@ -478,12 +638,17 @@ export type FootPlan = {
   adjoining: number[]
 }
 
-/** A body's feet planned: each point's shoe (−1 none), each foot's frame, the triangles hidden (by side, −1 shown). */
+/**
+ * A body's feet planned: each point's shoe (−1 none), each foot's frame,
+ * the triangles hidden (by side, −1 shown), and the body's spots and
+ * islands (for raiseRing).
+ */
 export type FeetPlan = {
   footOf: Int8Array
   frames: (FootFrame | null)[]
   hidden: Int8Array
   feet: FootPlan[]
+  layout: Layout
 }
 
 /**
@@ -551,6 +716,86 @@ function hideInShaft(
   }
 }
 
+/** The islands of the shown triangles at a ring. */
+function adjoiningOf(bind: BodyBind, layout: Layout, hidden: Int8Array, ring: Ring) {
+  const { index } = bind
+  const { spots, islands } = layout
+  const ringSpots = new Set(ring.legPoint.filter((p) => p >= 0).map((p) => spots[p]))
+  const adjoining = new Set<number>()
+  for (let t = 0; t < index.length / 3; t++) {
+    if (hidden[t]! >= 0) continue
+    for (let k = 0; k < 3; k++) {
+      if (ringSpots.has(spots[index[t * 3 + k]!]!)) adjoining.add(islands[index[t * 3]!]!)
+    }
+  }
+  return adjoining
+}
+
+/**
+ * A welded foot's ring moved up its bare leg to `level` (in the foot's
+ * lengths): the leg's triangles wholly below it hidden too (in `hidden`,
+ * changed in place), so the donor's leg meets the wearer's higher up — a
+ * pump's opening flares wider than an ankle, and a donor's leg snapped
+ * onto it is dented and banded. Null, with `hidden` unchanged, when no
+ * triangle is below it or no ring is left.
+ */
+export function raiseRing(
+  bind: BodyBind,
+  plan: FeetPlan,
+  foot: FootPlan,
+  hidden: Int8Array,
+  level: number,
+): FootPlan | null {
+  const frame = plan.frames[foot.side]
+  if (!frame) return null
+  const { index } = bind
+  const { ring, side } = foot
+  const inLeg = new Uint8Array(bind.positions.length / 3)
+  for (const point of foot.adjoining) inLeg[point] = 1
+  const before = hidden.slice()
+  const local = [0, 0, 0]
+  let count = 0
+  for (let t = 0; t < index.length / 3; t++) {
+    if (hidden[t]! >= 0) continue
+    const tri = [index[t * 3]!, index[t * 3 + 1]!, index[t * 3 + 2]!]
+    const below = tri.every((i) => {
+      if (!inLeg[i]) return false
+      toFoot(
+        frame,
+        bind.positions[i * 3]!,
+        bind.positions[i * 3 + 1]!,
+        bind.positions[i * 3 + 2]!,
+        local,
+      )
+      return (
+        local[2]! < level &&
+        Math.hypot(local[0]! - ring.centre[0], local[1]! - ring.centre[1]) < ring.radius * 1.6
+      )
+    })
+    if (!below) continue
+    hidden[t] = side
+    count++
+  }
+  const raised = count > 0 ? ringOf(bind, plan.layout, hidden, side, frame) : null
+  if (!raised) {
+    hidden.set(before)
+    return null
+  }
+  unfoldRing(bind, plan.layout, hidden, side, frame)
+  const unfolded = ringOf(bind, plan.layout, hidden, side, frame)
+  if (!unfolded) {
+    hidden.set(before)
+    return null
+  }
+  const { islands } = plan.layout
+  const islandsAt = adjoiningOf(bind, plan.layout, hidden, unfolded)
+  const adjoining: number[] = []
+  islands.forEach((island, i) => {
+    if (islandsAt.has(island)) adjoining.push(i)
+  })
+  return { ...foot, ring: unfolded, adjoining }
+}
+
 /**
  * What to hide on each side and how each foot goes on: the shoe always, and
  * the foot's own skin a leg's island carries (see hideFootSkin); a ring
@@ -593,18 +838,11 @@ export function planFeet(bind: BodyBind, texture: Pixels, skins: readonly Rgb[])
     // his shin): kept only if bare skin carries on above it.
     let tentative: { hidden: Int8Array; shaft: boolean } | null = null
     let tried = false
-    for (let round = 0; round < 5; round++) {
+    let unfolded = false
+    for (let round = 0; round < 6; round++) {
       const ring = ringOf(bind, layout, hidden, side, frame)
       if (!ring) break
-      const ringSpots = new Set(ring.legPoint.filter((p) => p >= 0).map((p) => layout.spots[p]))
-      const adjoining = new Set<number>()
-      for (let t = 0; t < triangles; t++) {
-        if (hidden[t]! >= 0) continue
-        for (let k = 0; k < 3; k++) {
-          if (ringSpots.has(layout.spots[index[t * 3 + k]!]!))
-            adjoining.add(islands[index[t * 3]!]!)
-        }
-      }
+      const adjoining = adjoiningOf(bind, layout, hidden, ring)
       const alongs = ring.points.map((point) => point[0]!)
       const extent = Math.max(...alongs) - Math.min(...alongs)
       // A leg's island the other leg carries much of is a skirt's.
@@ -703,11 +941,17 @@ export function planFeet(bind: BodyBind, texture: Pixels, skins: readonly Rgb[])
         feet.push(plan('tuck'))
         break
       }
+      // The weld's open edge round the leg one way, so the donor's top can
+      // follow it.
+      if (!unfolded) {
+        unfolded = true
+        if (unfoldRing(bind, layout, hidden, side, frame) > 0) continue
+      }
       feet.push(plan('weld'))
       break
     }
   }
-  return { footOf, frames, hidden, feet }
+  return { footOf, frames, hidden, feet, layout }
 }
 
 /** Which side (0 left, 1 right) a bone is, by the letter standing alone in its name (Rocketbox's "Bip01 R Calf"), or null. */
@@ -1063,6 +1307,14 @@ export function clip(piece: Piece, side: (i: number) => number): Piece {
 
 /** How far down from the ring (in the foot's lengths) a weld's snap, skins and normals fade out, at least. */
 export const FALLOFF = 0.4
+/**
+ * How far down from a weld (in the foot's lengths) the donor's leg is
+ * brought to the ring's girth and middle, at most and at least, and the
+ * height it stops above (the instep's top: the foot below keeps its shape).
+ */
+const GIRTH_SPREAD = 0.6
+const GIRTH_LEAST = 0.15
+const INSTEP_TOP = 0.45
 /** How far above a tucked ring's top (in the foot's lengths) the foot's leg is cut off, inside what covers it. */
 export const TUCK_ABOVE = 0.45
 
@@ -1213,13 +1465,7 @@ function weldNormals(
   const sums = new Map<string, number[]>()
   for (let t = 0; t < piece.index.length; t += 3) {
     const [a, b, c] = [piece.index[t]!, piece.index[t + 1]!, piece.index[t + 2]!]
-    const e1 = [0, 1, 2].map((k) => piece.positions[b * 3 + k]! - piece.positions[a * 3 + k]!)
-    const e2 = [0, 1, 2].map((k) => piece.positions[c * 3 + k]! - piece.positions[a * 3 + k]!)
-    const face = [
-      e1[1]! * e2[2]! - e1[2]! * e2[1]!,
-      e1[2]! * e2[0]! - e1[0]! * e2[2]!,
-      e1[0]! * e2[1]! - e1[1]! * e2[0]!,
-    ]
+    const face = faceNormal(piece.positions, a, b, c)
     for (const v of [a, b, c]) {
       const key = placeKey(piece, v)
       const sum = sums.get(key) ?? [0, 0, 0]
@@ -1289,20 +1535,44 @@ export function fitToRing(
   }
   const spotOf = new Map<number, OpenSpot>()
   for (const spot of spots) for (const member of spot.members) spotOf.set(member, spot)
-  const moves = spots.map((spot) => ({
-    theta: spot.theta,
-    move: [0, 1, 2].map((k) => ring.points[spot.corner]![k]! - c[spot.members[0]!]![k]!),
-  }))
+  const movesOf = () =>
+    spots.map((spot) => ({
+      theta: spot.theta,
+      move: [0, 1, 2].map((k) => ring.points[spot.corner]![k]! - c[spot.members[0]!]![k]!),
+    }))
+  const longest = (list: { move: number[] }[]) =>
+    Math.max(0, ...list.map((each) => Math.hypot(each.move[0]!, each.move[1]!, each.move[2]!)))
+  const snap = longest(movesOf())
+  // The donor's leg made the ring's girth and put on its middle gradually
+  // up to it, so what is left to snap is the two outlines' difference, not
+  // a pinch or a step at the seam.
+  const depthAt = (i: number) => Math.max(0, ringHeight(ring, angles[i]!) - c[i]![2]!)
+  const top = spots.map((spot) => c[spot.members[0]!]!)
+  if (top.length >= 3) {
+    const middle = [0, 1].map((k) => top.reduce((sum, point) => sum + point[k]!, 0) / top.length)
+    const girth =
+      top.reduce(
+        (sum, point) => sum + Math.hypot(point[0]! - middle[0]!, point[1]! - middle[1]!),
+        0,
+      ) / top.length
+    const scale = girth > 1e-6 ? ring.radius / girth : 1
+    const spread = Math.min(GIRTH_SPREAD, Math.max(GIRTH_LEAST, ring.low - INSTEP_TOP))
+    for (let i = 0; i < c.length; i++) {
+      const w = 1 - smoothstep(0, spread, depthAt(i))
+      if (w <= 0) continue
+      for (const k of [0, 1]) {
+        const from = middle[k]!
+        c[i]![k] = from + (ring.centre[k]! - from) * w + (c[i]![k]! - from) * (1 + (scale - 1) * w)
+      }
+    }
+  }
+  const moves = movesOf()
   const moveThetas = moves.map((each) => each.theta)
   const moveAt = (theta: number) => {
     const [i, j, t] = between(moveThetas, theta)
     return lerp(moves[i]!.move, moves[j]!.move, t)
   }
-  const snap = Math.max(
-    0,
-    ...moves.map((each) => Math.hypot(each.move[0]!, each.move[1]!, each.move[2]!)),
-  )
-  const falloff = Math.min(1.2, Math.max(FALLOFF, 3 * snap))
+  const falloff = Math.min(1.2, Math.max(FALLOFF, 3 * longest(moves)))
   const legSkin = ring.legPoint.map((point) =>
     point >= 0
       ? {
@@ -1311,15 +1581,13 @@ export function fitToRing(
         }
       : null,
   )
-  const legNormal = ring.legPoint.map((point) =>
-    point >= 0 ? Array.from(bind.normals.subarray(point * 3, point * 3 + 3)) : null,
-  )
+  const legNormal = ring.normals
   const depth = new Float32Array(piece.open.length)
   const place = [0, 0, 0]
   for (let i = 0; i < piece.open.length; i++) {
     const theta = angles[i]!
     const spot = spotOf.get(i)
-    depth[i] = spot ? 0 : Math.max(0, ringHeight(ring, theta) - c[i]![2]!)
+    depth[i] = spot ? 0 : depthAt(i)
     const fade = 1 - smoothstep(0, falloff, depth[i]!)
     if (spot) {
       for (let k = 0; k < 3; k++) piece.positions[i * 3 + k] = ring.places[spot.corner]![k]!

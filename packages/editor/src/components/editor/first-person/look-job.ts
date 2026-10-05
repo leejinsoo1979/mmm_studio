@@ -468,7 +468,9 @@ function fittedFeet(analysis: Analysis, job: LookJob): FittedFeet | null {
   const feet = feetBodyOf(analysis, job)
   const worn: WornFeet | null =
     feet && job.feetDonor && wornFeet(feet, job.feetDonor, job.feet.wear)
-  return worn ? { key: `${job.body.key}|${worn.kind}`, hidden: worn.hidden, mesh: worn.mesh } : null
+  return worn
+    ? { key: `${job.body.key}|${worn.kind}`, hidden: worn.hidden, mesh: worn.mesh, seam: worn.seam }
+    : null
 }
 
 /** A canvas to read and write pixels on, wherever this runs. */

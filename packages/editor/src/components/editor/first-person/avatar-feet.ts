@@ -16,7 +16,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { avatarUrl } from './avatar-catalog'
 import { type AtlasRect, type BodyBind, donorFeet } from './bare-feet'
-import type { FeetDonor, FeetMesh, FittedFeet } from './feet-job'
+import type { FeetDonor, FeetMesh, FeetSeam, FittedFeet } from './feet-job'
 import type { Footwear } from './footwear'
 import { originalGeometry } from './head-geometry'
 import type { Pixels } from './look-pixels'
@@ -227,6 +227,29 @@ function withTriangles(geometry: BufferGeometry, index: Uint32Array) {
   return subset
 }
 
+/**
+ * A body's copy with its normals along the feet's welds turned as its shown
+ * surface there faces (see FeetSeam): the loaded ones lean with the hidden
+ * shoe's faces, and catch the light as a line round the leg.
+ */
+function withSeam(geometry: BufferGeometry, body: SkinnedMesh, seam: FeetSeam) {
+  const normal = geometry.getAttribute('normal')
+  if (!normal || seam.points.length === 0) return geometry
+  const turned = new BufferAttribute(new Float32Array(normal.count * 3), 3)
+  for (let i = 0; i < normal.count; i++)
+    turned.setXYZ(i, normal.getX(i), normal.getY(i), normal.getZ(i))
+  const fromBind = new Matrix3().getNormalMatrix(body.bindMatrix.clone().invert())
+  const n = new Vector3()
+  seam.points.forEach((point, k) => {
+    n.fromArray(seam.normals, k * 3)
+      .applyMatrix3(fromBind)
+      .normalize()
+    turned.setXYZ(point, n.x, n.y, n.z)
+  })
+  geometry.setAttribute('normal', turned)
+  return geometry
+}
+
 /** Puts a new skinned mesh beside a body, on its skeleton, bound as it is. */
 function besides(body: SkinnedMesh, geometry: BufferGeometry, material: Material, name: string) {
   const mesh = new SkinnedMesh(geometry, material)
@@ -325,7 +348,7 @@ export function wearFeet(
   // As loaded: the look's shape reshapes it with the feet (see useAvatarShape).
   const copy = besides(
     body,
-    withTriangles(original, index),
+    withSeam(withTriangles(original, index), body, fitted.seam),
     body.material as Material,
     `${body.name}:feet`,
   )
