@@ -1,8 +1,16 @@
 import { useGLTF } from '@react-three/drei/core/Gltf'
 import { useMemo } from 'react'
-import { AnimationClip, type Material, type Mesh, type Object3D } from 'three'
+import {
+  AnimationClip,
+  type Material,
+  type Mesh,
+  type MeshStandardMaterial,
+  type Object3D,
+} from 'three'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { avatarGender, avatarUrl, findAvatar } from './avatar-catalog'
+import { foldCardTwins } from './avatar-hair'
+import { bleedTexture } from './hair-bleed'
 import { MOTION_SETS, scaledGaits } from './locomotion'
 
 /** The hips carry the clips' only translation: their dips and bounce. */
@@ -40,11 +48,23 @@ function prepareModel(source: Object3D): Object3D {
     const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as Material[]
     for (const material of materials) {
       // Hair and lashes are alpha cards: cut them out instead of sorting them.
+      // Not softened by alpha to coverage here: it writes the cut's soft
+      // alpha, and the game's post-processing takes the scene's alpha for
+      // where geometry is, so the cards' edges would let the background
+      // through. A canvas drawn opaque with MSAA (the character studio's)
+      // turns it on itself.
       if (material.transparent) {
         material.transparent = false
         material.alphaTest = 0.4
         material.depthWrite = true
       }
+      if (material.alphaTest === 0) continue
+      // Drei's texture and geometry themselves, shared by every character
+      // drawn from them: none wants the black under the cards, nor a card's
+      // two sides drawn over each other.
+      const map = (material as MeshStandardMaterial).map
+      if (map) bleedTexture(map)
+      if (!Array.isArray(mesh.material)) foldCardTwins(mesh.geometry)
     }
   })
   return model

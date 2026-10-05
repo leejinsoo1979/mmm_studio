@@ -5,6 +5,7 @@ import { maskImage } from './face-swap'
 import { type FootGeometry, packFeet, paintFeet } from './feet-paint'
 import type { AvatarFeet } from './footwear'
 import { forEachTexel, renderFront, tintIris } from './front-render'
+import { bleedHair } from './hair-bleed'
 import type { HeadGeometry } from './head-geometry'
 import {
   colorDistance,
@@ -405,6 +406,9 @@ export function dressBody(
   if (hair && analysis.opacity) {
     const opacity = copyPixels(analysis.opacity)
     dye(opacity, hexToRgb(hair), analysis.hairLum)
+    // Under the cut-away texels, the dyed colour: the dye leaves them, and
+    // the canvas the texture was read through left them black.
+    bleedHair(opacity)
     changed.opacity = opacity
   }
   const shoeless = job.feet.wear !== 'shoes'
@@ -431,12 +435,16 @@ function pixelsOf(bitmap: ImageBitmap): Pixels {
   return context.getImageData(0, 0, bitmap.width, bitmap.height)
 }
 
-function bitmapOf(pixels: Pixels): ImageBitmap {
-  const canvas = canvasOf(pixels.width, pixels.height)
-  canvas
-    .getContext('2d')!
-    .putImageData(new ImageData(pixels.data, pixels.width, pixels.height), 0, 0)
-  return canvas.transferToImageBitmap()
+/**
+ * Pixels as a bitmap, their colours as they are: one from a canvas holds
+ * them premultiplied by alpha, which the GPU then gets — every see-through
+ * texel of the hair cards darkened, and the colour bled under the cut-away
+ * ones gone.
+ */
+function bitmapOf(pixels: Pixels): Promise<ImageBitmap> {
+  return createImageBitmap(new ImageData(pixels.data, pixels.width, pixels.height), {
+    premultiplyAlpha: 'none',
+  })
 }
 
 /** The last few bodies' analyses: each holds a few tens of MB. */
@@ -505,6 +513,6 @@ export async function runLookJob(job: LookJob): Promise<LookResult> {
     : null
   const changed = dressBody(analysisOf(job.body), { ...job, key: job.body.key }, photo)
   const parts: Partial<Record<Part, ImageBitmap>> = {}
-  for (const part of Object.keys(changed) as Part[]) parts[part] = bitmapOf(changed[part]!)
+  for (const part of Object.keys(changed) as Part[]) parts[part] = await bitmapOf(changed[part]!)
   return { parts, faceFailed }
 }

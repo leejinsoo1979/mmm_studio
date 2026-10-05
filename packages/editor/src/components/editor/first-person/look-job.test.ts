@@ -179,6 +179,24 @@ describe('a body dressed in a look', () => {
     expect(pg).toBeGreaterThan(Math.max(pr, pb) * 1.3)
   })
 
+  test('dyed hair cards carry the dye under their cut-away texels, alpha untouched', () => {
+    const { pixels, geometry } = head(HAIR)
+    const cards = texture([[0.25, 0.5, HAIR]])
+    for (let y = 0; y < SIZE; y++) {
+      if (y / SIZE < 0.25 || y / SIZE >= 0.5) {
+        for (let x = 0; x < SIZE; x++) cards.data[(y * SIZE + x) * 4 + 3] = 0
+      }
+    }
+    const analysis = analyseBody(pixels, body(), cards, geometry)
+    const dyed = dressBody(analysis, look('cards', { hair: '#c03020' }), null).opacity!
+    const strand = rows(dyed, 0.3, 0.45)
+    expect(strand[0]).toBeGreaterThan(strand[1] * 2)
+    // Beside the strands, where only filtering reaches, their dyed colour, not black.
+    expect(rows(dyed, 0.5, 0.56)).toEqual(strand)
+    expect(rows(dyed, 0.9, 1)).toEqual(strand)
+    for (let i = 0; i < SIZE * SIZE; i++) expect(dyed.data[i * 4 + 3]).toBe(cards.data[i * 4 + 3]!)
+  })
+
   test('the rest of the paint waits for the landmarks it is placed by', () => {
     const { pixels, geometry } = head(HAIR)
     const analysis = analyseBody(pixels, body(), null, geometry)

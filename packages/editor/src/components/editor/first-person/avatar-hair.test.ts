@@ -10,6 +10,7 @@ import {
   faceFit,
   fitAxes,
   fitSkull,
+  foldTwins,
   GEAR,
   HAIR,
   invertFit,
@@ -212,6 +213,33 @@ describe('an opacity mesh’s pieces', () => {
     expect([...cardKinds(joined.positions, joined.index, eyes)]).toEqual([HAIR, HAIR, HAIR, HAIR])
     const apart = halves(0.01)
     expect([...cardKinds(apart.positions, apart.index, eyes)]).toEqual([LASH, LASH, HAIR, HAIR])
+  })
+})
+
+describe('folding two-sided cards', () => {
+  // A square card twice over (points 0–3, and 4–7 at the same spots).
+  const square = [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]
+  const positions = [...square, ...square]
+  const facing = (front: number, back: number) => [
+    ...[0, 1, 2, 3].flatMap(() => [0, 0, front]),
+    ...[0, 1, 2, 3].flatMap(() => [0, 0, back]),
+  ]
+  // Wound towards +z, and its copy towards −z.
+  const front = [0, 1, 2, 0, 2, 3]
+  const back = [4, 6, 5, 4, 7, 6]
+
+  test('keeps the front where the back copy’s normals are the front’s', () => {
+    expect(foldTwins(positions, facing(1, 1), [...front, ...back])).toEqual(front)
+  })
+
+  test('keeps the copy whose normals agree with its winding, whichever comes first', () => {
+    expect(foldTwins(positions, facing(-1, -1), [...front, ...back])).toEqual(back)
+    expect(foldTwins(positions, facing(1, -1), [...back, ...front])).toEqual(back)
+  })
+
+  test('leaves a triangle with no twin, and copies wound the same way, be', () => {
+    const index = [0, 1, 2, 4, 5, 6, 0, 2, 3]
+    expect(foldTwins(positions, facing(1, 1), index)).toEqual(index)
   })
 })
 

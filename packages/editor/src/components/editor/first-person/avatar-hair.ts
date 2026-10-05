@@ -20,6 +20,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { avatarUrl } from './avatar-catalog'
 import { headOf, type PointMove, type Shaper } from './avatar-shape'
+import { BLEED_BELOW, bleedHair, pictureOf, texturePixels } from './hair-bleed'
 import {
   BALD,
   type HairLibrary,
@@ -908,6 +909,93 @@ export function cardKinds(positions: Triples, index: ArrayLike<number>, eyes: Tr
 }
 
 /**
+ * An opacity mesh's triangles (`index`) with its cards' twins folded into
+ * one. Rocketbox models a card two-sided — each triangle again at its
+ * corners' spots, wound the other way — and the material draws both sides
+ * of both: at one depth, so either copy wins a pixel, and a back copy's
+ * normals are often its front's, which, turned for the side it shows, face
+ * away from the light: the hair goes black in patches. Of each such pair the
+ * copy whose normals agree with its winding is kept (the first, when both
+ * or neither do): drawn double-sided, it shows from behind with them
+ * turned. Returns the corners kept, in order; a triangle with no twin
+ * stays.
+ */
+export function foldTwins(
+  positions: Triples,
+  normals: Triples,
+  index: ArrayLike<number>,
+): number[] {
+  const { spots } = spotsOf(positions)
+  const at = (corner: number, axis: number) => positions[index[corner]! * 3 + axis]!
+  // Each triangle's winding, as its corners turn (unnormalised), and
+  // whether its normals agree with it.
+  const winding = (t: number) => {
+    const e = [0, 1, 2].map((axis) => at(t * 3 + 1, axis) - at(t * 3, axis))
+    const f = [0, 1, 2].map((axis) => at(t * 3 + 2, axis) - at(t * 3, axis))
+    return [
+      e[1]! * f[2]! - e[2]! * f[1]!,
+      e[2]! * f[0]! - e[0]! * f[2]!,
+      e[0]! * f[1]! - e[1]! * f[0]!,
+    ]
+  }
+  const agrees = (t: number, w: number[]) => {
+    let along = 0
+    for (let k = 0; k < 3; k++) {
+      for (let axis = 0; axis < 3; axis++)
+        along += normals[index[t * 3 + k]! * 3 + axis]! * w[axis]!
+    }
+    return along > 0
+  }
+  const coincident = new Map<string, number[]>()
+  const count = index.length / 3
+  for (let t = 0; t < count; t++) {
+    const key = [0, 1, 2]
+      .map((k) => spots[index[t * 3 + k]!]!)
+      .sort((a, b) => a - b)
+      .join()
+    const found = coincident.get(key)
+    if (found) found.push(t)
+    else coincident.set(key, [t])
+  }
+  const dot = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!
+  const dropped = new Uint8Array(count)
+  for (const triangles of coincident.values()) {
+    if (triangles.length < 2) continue
+    const windings = triangles.map(winding)
+    // Copies wound the same way are no two-sided card: left be.
+    if (!windings.some((w) => dot(w, windings[0]!) < 0)) continue
+    const kept = triangles.find((t, i) => agrees(t, windings[i]!)) ?? triangles[0]!
+    for (const t of triangles) if (t !== kept) dropped[t] = 1
+  }
+  const corners: number[] = []
+  for (let t = 0; t < count; t++) {
+    if (!dropped[t]) corners.push(index[t * 3]!, index[t * 3 + 1]!, index[t * 3 + 2]!)
+  }
+  return corners
+}
+
+const foldedGeometries = new WeakSet<BufferGeometry>()
+
+/**
+ * Folds an opacity mesh's twin cards (see `foldTwins`) in its geometry
+ * itself, once: every copy of the character shares it.
+ */
+export function foldCardTwins(geometry: BufferGeometry) {
+  const position = geometry.getAttribute('position')
+  const normal = geometry.getAttribute('normal')
+  if (foldedGeometries.has(geometry) || !(position && normal)) return
+  foldedGeometries.add(geometry)
+  // As stored (often quantised, interleaved): read a component at a time.
+  const values = (attribute: typeof position) =>
+    Float32Array.from({ length: attribute.count * 3 }, (_, j) =>
+      attribute.getComponent(Math.floor(j / 3), j % 3),
+    )
+  const index = indexOf(geometry)
+  const kept = foldTwins(values(position), values(normal), index)
+  if (kept.length < index.length) geometry.setIndex(kept)
+}
+
+/**
  * Each of a donor's bone slots as one of the wearer's bones: by name, and
  * anything the wearer lacks on its head.
  */
@@ -1324,6 +1412,11 @@ export type HairPart = {
   /** Which of those pixels a dye takes (all that show, when null), and their usual lightness. */
   dyeMask: Float32Array | null
   lum: number
+  /**
+   * Its texels less opaque than this (0–255) are cut away: the rest's
+   * colour is bled under them (see `bleedHair`).
+   */
+  bleedBelow: number
   /** How far (bind units) it is kept off the wearer's head and body. */
   clearance: number
 }
@@ -1360,6 +1453,7 @@ const CARD_ALPHA_TEST = 0.4
 
 /** The cap's cut-out: its hair against the skin cut away round it. */
 const CAP_ALPHA_TEST = 0.5
+const CAP_BLEED_BELOW = Math.round(CAP_ALPHA_TEST * 255)
 
 /**
  * A hairstyle from a donor's loaded scene: the cap (its head's triangles
@@ -1414,6 +1508,7 @@ export function hairAssetOf(
       pixels: null,
       dyeMask: null,
       lum: 0,
+      bleedBelow: CAP_BLEED_BELOW,
       clearance: CAP_CLEARANCE,
     }
     const uv = geometry.getAttribute('uv')
@@ -1461,6 +1556,7 @@ export function hairAssetOf(
         pixels: pixels?.opacity ?? null,
         dyeMask: null,
         lum: hair ? luminance(...hair) : 0,
+        bleedBelow: BLEED_BELOW,
         clearance: CARD_CLEARANCE,
       })
     }
@@ -1619,24 +1715,10 @@ function hideOwnHair(model: Object3D, undo: (() => void)[]) {
   }
 }
 
-/** A texture's picture as pixels, at `size` × `size` when given. */
-function texturePixels(texture: Texture, size?: number): Pixels {
-  const image = texture.image as CanvasImageSource & { width: number; height: number }
-  const width = size ?? image.width
-  const height = size ?? image.height
-  const context = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true })!
-  context.drawImage(image, 0, 0, width, height)
-  return context.getImageData(0, 0, width, height)
-}
-
 /** A copy of `template` (its sampling, colour space, flip) showing `pixels`. */
 function textureFrom(pixels: Pixels, template: Texture): Texture {
-  const canvas = new OffscreenCanvas(pixels.width, pixels.height)
-  canvas
-    .getContext('2d')!
-    .putImageData(new ImageData(pixels.data, pixels.width, pixels.height), 0, 0)
   const texture = template.clone()
-  texture.source = new Source(canvas.transferToImageBitmap())
+  texture.source = new Source(pictureOf(pixels))
   texture.needsUpdate = true
   return texture
 }
@@ -1736,6 +1818,8 @@ function wearBorrowed(
               height: part.pixels.height,
             }
             dye(pixels, hexToRgb(dyeHex), part.lum, part.dyeMask)
+            // The dye leaves the cut-away texels as they were.
+            bleedHair(pixels, part.bleedBelow)
             return textureFrom(pixels, map)
           })()
         : null
@@ -1808,6 +1892,7 @@ export function loadHairAsset(donorId: string): Promise<HairAsset> {
     assets.delete(donorId)
   } else {
     found = Promise.all([loadHairLibrary(), loadDonor(donorId)]).then(([library, gltf]) => {
+      for (const mesh of ownMeshes(gltf.scene, 'opacity')) foldCardTwins(mesh.geometry)
       const head = headOf(gltf.scene)
       const headMap = head && (ownMaterial(head) as MeshStandardMaterial).map
       if (!headMap) throw new Error(`hair ${donorId}: no head texture`)
@@ -1818,9 +1903,12 @@ export function loadHairAsset(donorId: string): Promise<HairAsset> {
         head: texturePixels(headMap, CAP_TEXTURE),
         opacity: opacityMap ? texturePixels(opacityMap) : null,
       })
+      // Each part shows its own pixels — the cap's cut out, both bled
+      // (after the cap and the dyes have read the colours as painted).
       for (const part of asset.parts) {
         const material = part.material as MeshStandardMaterial
-        if (part.name === 'cap' && part.pixels && material.map) {
+        if (part.pixels && material.map) {
+          bleedHair(part.pixels, part.bleedBelow)
           const original = material.map
           material.map = textureFrom(part.pixels, original)
           freeTexture(original)
