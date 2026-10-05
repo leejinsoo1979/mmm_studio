@@ -10,6 +10,7 @@ import {
 import { delaunay, flattenLighting, polygonMask, seamlessClone, warpTriangles } from './face-warp'
 import { bakeFront, type FrontImage } from './front-render'
 import {
+  byLightness,
   colorDistance,
   type HeadTriangle,
   luminance,
@@ -149,8 +150,7 @@ function colorAround(image: Pixels, points: readonly Point[], radius: number): R
     }
   }
   if (samples.length === 0) return null
-  samples.sort((a, b) => luminance(...a) - luminance(...b))
-  return samples[Math.floor(samples.length / 2)]!
+  return byLightness(samples, 0.5)
 }
 
 /**
@@ -173,8 +173,7 @@ function hairColor(image: Pixels, crown: Float32Array, skin: Rgb): Rgb | null {
     samples.push([image.data[p]!, image.data[p + 1]!, image.data[p + 2]!])
   }
   if (samples.length < 50) return null
-  samples.sort((a, b) => luminance(...a) - luminance(...b))
-  const hair = samples[Math.floor(samples.length / 4)]!
+  const hair = byLightness(samples, 0.25)
   return colorDistance(...hair, skin, luminance(...skin)) > HAIR_APART ? hair : null
 }
 

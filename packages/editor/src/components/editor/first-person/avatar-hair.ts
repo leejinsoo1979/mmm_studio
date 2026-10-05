@@ -34,6 +34,7 @@ import {
   withNeckPiece,
 } from './bald-head'
 import { BLEED_BELOW, bleedHair, pictureOf, texturePixels } from './hair-bleed'
+import { dyeHair } from './hair-dye'
 import { BALD, type HairLibrary, type HairStyle, loadHairLibrary } from './hair-styles'
 import { loadedGeometry, originalGeometry } from './head-geometry'
 import {
@@ -51,9 +52,8 @@ import {
   tuckUnder,
 } from './head-skull'
 import {
-  dye,
+  byLightness,
   hairMask,
-  hexToRgb,
   luminance,
   maskedLuminance,
   meanColor,
@@ -469,8 +469,7 @@ function paintedHair(
     })
   }
   if (samples.length === 0) return null
-  samples.sort((a, b) => luminance(...a) - luminance(...b))
-  return samples[Math.floor(samples.length / 2)]!
+  return byLightness(samples, 0.5)
 }
 
 /** One texel in this many is read for a donor's painted hair colour: enough for a median. */
@@ -503,8 +502,7 @@ function skinTone(head: Pixels, uvs: Triples, points: Triples, cheeks: Triples[]
     samples.push([head.data[p]!, head.data[p + 1]!, head.data[p + 2]!])
   }
   if (samples.length === 0) return null
-  samples.sort((a, b) => luminance(...a) - luminance(...b))
-  return samples[Math.floor(samples.length / 2)]!
+  return byLightness(samples, 0.5)
 }
 
 /** A skinned mesh's bones' places in the bind pose (xyz per bone). */
@@ -1381,21 +1379,24 @@ function releaseTextures(material: Material) {
     if ((value as Texture | null)?.isTexture) value.dispose()
 }
 
-/**
- * A part's pixels dyed `hex`, every texel — those cut away too, which hold
- * the colour bled under them when it loaded (see `loadHairAsset`), so the
- * dye needs no bleeding again.
- */
-function dyedPixels(part: HairPart, pixels: Pixels, hex: string): Pixels {
-  const dyed: Pixels = {
-    data: new Uint8ClampedArray(pixels.data),
-    width: pixels.width,
-    height: pixels.height,
-  }
-  for (let p = 3; p < dyed.data.length; p += 4) dyed.data[p] = 255
-  dye(dyed, hexToRgb(hex), part.lum)
-  for (let p = 3; p < dyed.data.length; p += 4) dyed.data[p] = pixels.data[p]!
-  return dyed
+/** Each part's pixels as last dyed, and the dye: worn again in it, it shows at once. */
+const lastDyed = new WeakMap<HairPart, { hex: string; pixels: Pixels }>()
+
+/** A part's pixels dyed `hex` (see hair-dye.ts), kept as its last dye. */
+function dyedPart(part: HairPart, pixels: Pixels, hex: string): Promise<Pixels> {
+  const last = lastDyed.get(part)
+  if (last?.hex === hex) return Promise.resolve(last.pixels)
+  return dyeHair(pixels, part.lum, hex).then((dyed) => {
+    lastDyed.set(part, { hex, pixels: dyed })
+    return dyed
+  })
+}
+
+/** Dyes a hairstyle's parts `hex` ahead of wearing it (see `useAvatarHair`). */
+function dyeAhead(asset: HairAsset, hex: string): Promise<unknown> {
+  return Promise.all(
+    asset.parts.map((part) => (part.pixels ? dyedPart(part, part.pixels, hex) : null)),
+  )
 }
 
 /**
@@ -1462,19 +1463,45 @@ function wearBorrowed(
     const material = part.material.clone() as MeshStandardMaterial
     const map = material.map
     let dyed: Texture | null = null
-    dyes.push((hex) => {
-      const pixels = part.pixels
-      if (!(map && pixels)) return
-      const next = hex ? textureFrom(dyedPixels(part, pixels, hex), map) : null
+    const show = (pixels: Pixels | null) => {
+      const next = pixels && map ? textureFrom(pixels, map) : null
       material.map = next ?? map
       if (dyed) freeTexture(dyed)
       dyed = next
-    })
+    }
+    // One dye at a time is made: the latest asked for once it is done.
+    let wanted: string | null = null
+    let dyeing = false
+    let off = false
+    const dyeTo = (hex: string | null) => {
+      wanted = hex
+      const pixels = part.pixels
+      if (!(map && pixels) || dyeing) return
+      const last = hex ? lastDyed.get(part) : null
+      if (!hex || last?.hex === hex) {
+        show(last?.pixels ?? null)
+        return
+      }
+      dyeing = true
+      dyedPart(part, pixels, hex)
+        .then(
+          (done) => {
+            if (!off && wanted === hex) show(done)
+          },
+          (error: unknown) => console.warn('[look] could not dye the hair', error),
+        )
+        .finally(() => {
+          dyeing = false
+          if (!off && wanted !== hex) dyeTo(wanted)
+        })
+    }
+    dyes.push(dyeTo)
     const mesh = besides(head, geometry, material, `hair:${part.name}`)
     // The material isn't disposed, nor the asset's textures released: worn
     // again, its program and pictures are still on the GPU (see
     // `loadHairAsset`, which releases them once the asset is let go).
     undo.push(() => {
+      off = true
       mesh.removeFromParent()
       geometry.dispose()
       if (dyed) freeTexture(dyed)
@@ -1638,6 +1665,8 @@ export function useAvatarHair(
       .then(async (library) => {
         const offered = style === BALD || library.styles.some((entry) => entry.id === style)
         const asset = offered && style !== BALD ? await loadHairAsset(style) : null
+        // Dyed before it goes on, so it never shows undyed first.
+        if (asset && dyeRef.current) await dyeAhead(asset, dyeRef.current).catch(() => {})
         if (!current) return
         if (!offered) {
           takeOff()

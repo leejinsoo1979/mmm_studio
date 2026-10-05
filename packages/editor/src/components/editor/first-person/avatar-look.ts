@@ -21,7 +21,16 @@ import { footGeometry } from './feet'
 import { packFeet } from './feet-paint'
 import { SHOD } from './footwear'
 import { headGeometry } from './head-geometry'
-import { type LookBody, type LookJob, type LookResult, type Part, runLookJob } from './look-job'
+import {
+  BODIES_KEPT,
+  type LookBody,
+  type LookJob,
+  type LookMessage,
+  type LookReply,
+  type LookResult,
+  type Part,
+  runLookJob,
+} from './look-job'
 import { packTriangles } from './look-pixels'
 
 type PartMesh = { mesh: Mesh; material: MeshStandardMaterial }
@@ -112,6 +121,22 @@ let worker: Worker | null | undefined
 let running: Task | null = null
 /** The next task for each body: a newer look replaces the one still waiting (a colour drag makes many). */
 const waiting = new Map<object, Task>()
+/**
+ * The bodies the worker holds, by key, oldest first: as it keeps them (see
+ * look-worker.ts). Copying a body over takes the page a tenth of a second,
+ * so a job names one it has by its key.
+ */
+const sent = new Set<string>()
+
+/** Hands the worker a task, its body by its key alone when the worker has it. */
+function post(task: Task, worker: Worker) {
+  const { body, ...job } = task.job
+  const known = sent.delete(body.key)
+  sent.add(body.key)
+  if (sent.size > BODIES_KEPT) sent.delete(sent.values().next().value!)
+  const message: LookMessage = { job, key: body.key, body: known ? null : body }
+  worker.postMessage(message)
+}
 
 /** Runs a task here, settling it. */
 function runHere(task: Task): Promise<void> {
@@ -128,7 +153,7 @@ function next() {
       continue
     }
     running = task
-    worker.postMessage({ job: task.job })
+    post(task, worker)
     return
   }
 }
@@ -140,10 +165,15 @@ function lookWorker(): Worker | null {
   if (typeof Worker === 'undefined') return null
   try {
     const started = new Worker(new URL('./look-worker.ts', import.meta.url), { type: 'module' })
-    started.onmessage = (event: MessageEvent<{ result?: LookResult; error?: string }>) => {
+    started.onmessage = (event: MessageEvent<LookReply>) => {
       const task = running
+      const { result, error, missing } = event.data
+      if (missing && task) {
+        sent.delete(task.job.body.key)
+        post(task, started)
+        return
+      }
       running = null
-      const { result, error } = event.data
       if (result) task?.resolve(result)
       else task?.reject(new Error(error))
       next()

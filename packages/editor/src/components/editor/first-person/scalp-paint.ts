@@ -1,6 +1,6 @@
 import { PAINTED, READ, type ScalpPaint } from './bald-head'
 import { rasterise } from './front-render'
-import { luminance, type Pixels, type Rgb } from './look-pixels'
+import { byLightness, type Pixels, type Rgb } from './look-pixels'
 
 /**
  * A bald head's skin round the cut its hair was taken out along (see
@@ -59,7 +59,7 @@ const grain = (x: number, y: number) =>
 
 /** Calls `visit` with each texel of `head` a packed triangle covers (corners' u, v at `at`, `stride` apart). */
 function eachTexel(
-  head: Pixels,
+  head: { width: number; height: number },
   packed: Float32Array,
   t: number,
   size: number,
@@ -82,53 +82,53 @@ function eachTexel(
 }
 
 /**
- * The scalp's tone: a colour of the skin (see TONE_QUANTILE) under the
- * first of `tone`'s lists of triangles (see ScalpPaint) that shows enough
- * of it — `hair` and `skin` say, per texel, how surely it is either. Null
- * where none does.
+ * Paints a bald head's skin round the cut (see `ScalpPaint`), on textures
+ * `width` × `height` whose hair and skin are `hair` and `skin` (per texel,
+ * how surely it is either). Which texels it reads and paints, and how much
+ * of each, are worked out once: a skin tone's drag paints the same head
+ * over and over in a new colour.
  */
-export function scalpTone(
-  head: Pixels,
-  tone: readonly Float32Array[],
+export type ScalpPainter = {
+  /**
+   * The scalp's tone: a colour of the skin (see TONE_QUANTILE) under the
+   * first of the paint's lists of triangles to read that shows enough of
+   * it. Null where none does.
+   */
+  tone: (head: Pixels) => Rgb | null
+  /**
+   * Paints `tone` on the head (in place): each texel of the paint's
+   * triangles as much as its corners say, and wholly where it is the hair's
+   * colour; and the swatch, wholly. Grained like skin.
+   */
+  paint: (head: Pixels, tone: Rgb) => void
+}
+
+export function scalpPainter(
+  width: number,
+  height: number,
+  { paint, tone, swatch }: Pick<ScalpPaint, 'paint' | 'tone' | 'swatch'>,
   hair: Float32Array | null,
   skin: Float32Array | null,
-): Rgb | null {
-  for (const list of tone) {
-    const seen = new Uint8Array(head.width * head.height)
-    const samples: Rgb[] = []
+): ScalpPainter {
+  const size = { width, height }
+  const read = tone.map((list) => {
+    const seen = new Uint8Array(width * height)
+    const texels: number[] = []
     for (let t = 0; t < list.length / READ; t++) {
-      eachTexel(head, list, t, READ, 2, (texel) => {
+      eachTexel(size, list, t, READ, 2, (texel) => {
         if (seen[texel]) return
         seen[texel] = 1
         if ((hair && hair[texel]! > HAIR_MOST) || (skin && skin[texel]! < SKIN_LEAST)) return
-        const p = texel * 4
-        samples.push([head.data[p]!, head.data[p + 1]!, head.data[p + 2]!])
+        texels.push(texel)
       })
     }
-    if (samples.length < LEAST_READ) continue
-    samples.sort((a, b) => luminance(...a) - luminance(...b))
-    return samples[Math.floor(samples.length * TONE_QUANTILE)]!
-  }
-  return null
-}
+    return texels
+  })
 
-/**
- * Paints a bald head's skin round the cut to the scalp's `tone` (in
- * place): each texel of the paint's triangles as much as its corners say,
- * and wholly where it is the hair's colour (`hair`, its mask); and the
- * swatch, wholly. Grained like skin.
- */
-export function paintScalp(
-  head: Pixels,
-  { paint, swatch }: Pick<ScalpPaint, 'paint' | 'swatch'>,
-  tone: Rgb,
-  hair: Float32Array | null,
-) {
-  const { data, width, height } = head
   const amount = new Float32Array(width * height)
   for (let t = 0; t < paint.length / PAINTED; t++) {
     const at = t * PAINTED
-    eachTexel(head, paint, t, PAINTED, 3, (texel, w0, w1, w2) => {
+    eachTexel(size, paint, t, PAINTED, 3, (texel, w0, w1, w2) => {
       const own = paint[at + 2]! * w0 + paint[at + 5]! * w1 + paint[at + 8]! * w2
       const painted = Math.max(own, hair ? smoothstep(HAIR_FROM, HAIR_TO, hair[texel]!) : 0)
       if (painted > amount[texel]!) amount[texel] = painted
@@ -142,16 +142,40 @@ export function paintScalp(
       if (Math.hypot(x + 0.5 - sx, y + 0.5 - sy) <= SWATCH) amount[y * width + x] = 2
     }
   }
+  const painted: number[] = []
+  const weights: number[] = []
+  const shades: number[] = []
   for (let texel = 0; texel < amount.length; texel++) {
     const k = amount[texel]!
     if (k <= 0) continue
     const x = texel % width
+    painted.push(texel)
+    weights.push(Math.min(1, k))
     // The swatch is the tone itself: the bald surface shows it unshaded by grain.
-    const shade = k > 1 ? 1 : grain(x, (texel - x) / width)
-    const w = Math.min(1, k)
-    for (let c = 0; c < 3; c++) {
-      const p = texel * 4 + c
-      data[p] = data[p]! + (tone[c]! * shade - data[p]!) * w
-    }
+    shades.push(k > 1 ? 1 : grain(x, (texel - x) / width))
+  }
+
+  return {
+    tone: (head) => {
+      for (const texels of read) {
+        if (texels.length < LEAST_READ) continue
+        const samples = texels.map((texel): Rgb => {
+          const p = texel * 4
+          return [head.data[p]!, head.data[p + 1]!, head.data[p + 2]!]
+        })
+        return byLightness(samples, TONE_QUANTILE)
+      }
+      return null
+    },
+    paint: ({ data }, tone) => {
+      for (let i = 0; i < painted.length; i++) {
+        const w = weights[i]!
+        const shade = shades[i]!
+        for (let c = 0; c < 3; c++) {
+          const p = painted[i]! * 4 + c
+          data[p] = data[p]! + (tone[c]! * shade - data[p]!) * w
+        }
+      }
+    },
   }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { Pixels, Rgb } from './look-pixels'
-import { paintScalp, scalpTone } from './scalp-paint'
+import { scalpPainter } from './scalp-paint'
 
 const SIZE = 16
 
@@ -38,6 +38,26 @@ const leftHalf = (top: number, bottom: number) =>
     1,
     bottom,
   ])
+
+/** Paints a head as `scalpPainter` would, with no triangles to read the tone from. */
+function paintScalp(
+  head: Pixels,
+  scalp: { paint: Float32Array; swatch: [number, number] },
+  tone: Rgb,
+  hair: Float32Array | null,
+) {
+  scalpPainter(SIZE, SIZE, { ...scalp, tone: [] }, hair, null).paint(head, tone)
+}
+
+const scalpTone = (
+  head: Pixels,
+  tone: Float32Array[],
+  hair: Float32Array | null,
+  skin: Float32Array | null,
+) =>
+  scalpPainter(SIZE, SIZE, { paint: new Float32Array(), tone, swatch: [-1, -1] }, hair, skin).tone(
+    head,
+  )
 
 const SKIN: Rgb = [200, 150, 120]
 const HAIR: Rgb = [60, 40, 30]
@@ -93,5 +113,27 @@ describe('the scalp’s tone', () => {
     const hair = Float32Array.from({ length: SIZE * SIZE }, (_, i) => (i % SIZE < 8 ? 1 : 0))
     expect(scalpTone(head, [left, whole], hair, null)).toEqual(SKIN)
     expect(scalpTone(head, [left], hair, null)).toBeNull()
+  })
+})
+
+describe('a scalp painter', () => {
+  test('paints and reads any number of heads alike', () => {
+    const left = Float32Array.from([0, 0, 0.5, 0, 0.5, 1, 0, 0, 0.5, 1, 0, 1])
+    const painter = scalpPainter(
+      SIZE,
+      SIZE,
+      { paint: leftHalf(1, 0.5), tone: [left], swatch: [0.75, 0.75] },
+      null,
+      null,
+    )
+    for (const fill of [SKIN, TONE]) {
+      const head = image((x, y) => [fill[0] - y, fill[1], fill[2] + x])
+      const fresh = image((x, y) => [fill[0] - y, fill[1], fill[2] + x])
+      const tone = painter.tone(head)!
+      expect(tone).toEqual(scalpTone(fresh, [left], null, null)!)
+      painter.paint(head, tone)
+      paintScalp(fresh, { paint: leftHalf(1, 0.5), swatch: [0.75, 0.75] }, tone, null)
+      expect([...head.data]).toEqual([...fresh.data])
+    }
   })
 })

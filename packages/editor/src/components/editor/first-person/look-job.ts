@@ -9,6 +9,7 @@ import { forEachTexel, renderFront, tintIris } from './front-render'
 import { bleedHair } from './hair-bleed'
 import type { HeadGeometry } from './head-geometry'
 import {
+  byLightness,
   colorDistance,
   dye,
   type HeadTriangle,
@@ -23,7 +24,7 @@ import {
   toneSkin,
   unpackTriangles,
 } from './look-pixels'
-import { paintScalp, scalpTone } from './scalp-paint'
+import { type ScalpPainter, scalpPainter } from './scalp-paint'
 
 /**
  * A Rocketbox body's materials: `<code>_head`, `<code>_body` and, on about
@@ -75,6 +76,15 @@ export type LookJob = {
    */
   target: number[] | null
 }
+
+/** How many bodies the look worker keeps, the page sending each once (see avatar-look.ts). */
+export const BODIES_KEPT = 4
+
+/** A job as the page hands it to the look worker: its body by key, the body itself when the worker hasn't it. */
+export type LookMessage = { job: Omit<LookJob, 'body'>; key: string; body: LookBody | null }
+
+/** The look worker's answer: the look, why it failed, or that it lacks the job's body. */
+export type LookReply = { result?: LookResult; error?: string; missing?: boolean }
 
 /**
  * The textures the look changes, and whether the face was left out because
@@ -128,8 +138,7 @@ function colorWhere(
     samples.push([head.data[p]!, head.data[p + 1]!, head.data[p + 2]!])
   }
   if (samples.length === 0) return fallback
-  samples.sort((a, b) => luminance(...a) - luminance(...b))
-  return samples[Math.floor(samples.length / 2)]!
+  return byLightness(samples, 0.5)
 }
 
 /**
@@ -349,6 +358,31 @@ function baseHead(
   return copyPixels(base)
 }
 
+const sameNumbers = (a: ArrayLike<number>, b: ArrayLike<number>) =>
+  a.length === b.length && Array.prototype.every.call(a, (value, i) => value === b[i])
+
+const sameScalp = (a: ScalpPaint, b: ScalpPaint) =>
+  sameNumbers(a.paint, b.paint) &&
+  sameNumbers(a.swatch, b.swatch) &&
+  a.tone.length === b.tone.length &&
+  a.tone.every((list, i) => sameNumbers(list, b.tone[i]!))
+
+/** Each body's scalp painter, and the scalp it paints (a job brings its own copy). */
+const painters = new WeakMap<Analysis, { scalp: ScalpPaint; painter: ScalpPainter }>()
+
+function painterOf(analysis: Analysis, scalp: ScalpPaint): ScalpPainter {
+  let found = painters.get(analysis)
+  if (!found || !sameScalp(found.scalp, scalp)) {
+    const { width, height } = analysis.head
+    found = {
+      scalp,
+      painter: scalpPainter(width, height, scalp, analysis.hairMask, analysis.headSkinMask),
+    }
+    painters.set(analysis, found)
+  }
+  return found.painter
+}
+
 /**
  * A body's textures dressed in a look: the ones it changes, each its own
  * copy. On the head, in order: the skin tone, the hair dye (not on a bald
@@ -396,10 +430,8 @@ export function dressBody(
       }
     }
     if (scalp) {
-      const tone =
-        scalpTone(head, scalp.tone, analysis.hairMask, analysis.headSkinMask) ??
-        (skin ? hexToRgb(skin) : analysis.skin)
-      paintScalp(head, scalp, tone, analysis.hairMask)
+      const painter = painterOf(analysis, scalp)
+      painter.paint(head, painter.tone(head) ?? (skin ? hexToRgb(skin) : analysis.skin))
     }
     if (target) {
       paintFace(head, analysis.geometry, target, paint, {
