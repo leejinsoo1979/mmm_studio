@@ -398,7 +398,7 @@ const SKIN_FAR = 0.2
  */
 const CLOSE = 3
 const SPECK = 120
-const EDGE = 2
+const EDGE = 3
 
 /** A triangle of the cap on its texture (corners in 0–1 UVs): `solid` on the hair's sculpted shell. */
 export type CapTriangle = { u: number[]; v: number[]; solid: boolean }

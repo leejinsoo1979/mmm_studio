@@ -8,8 +8,9 @@ import { byLightness, luminance, type Pixels, type Rgb } from './look-pixels'
  * without a seam: the skin under the old hairline (a forehead painted
  * darker there, a nape or temples painted with hair) and any of the hair's
  * colour left on the skin. The bald surface shows the texels the hair did,
- * painted wholly the scalp's; the nape takes the neck's tone instead, so it
- * meets the neck's skin as well.
+ * painted wholly, plain. Near the skin kept, both take its colour — the
+ * cheek's by a cheek, the neck's down the nape — and the forehead's tone
+ * further off. And the body's texture, lit again where the hair shaded it.
  */
 
 /** Texels round a painted triangle (px) painted with it, so no seam shows at a UV island's rim. */
@@ -256,7 +257,10 @@ export function scalpPainter(
   for (let texel = 0; texel < amount.length; texel++) if (amount[texel]! > 0) painted.push(texel)
   const texels = Int32Array.from(painted)
   const weights = Float32Array.from(texels, (texel) => Math.min(1, amount[texel]!))
+  // The bald surface shows the hair's texels, laid out along its strands:
+  // grained, they would streak. Only the kept skin is.
   const shades = Float32Array.from(texels, (texel) => {
+    if (owner[texel]! < 0 || owner[texel]! >= paintCount) return 1
     const x = texel % width
     return grain(x, (texel - x) / width)
   })
