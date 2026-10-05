@@ -132,8 +132,8 @@ export const paintOf = (look: AvatarLook): AvatarPaint => ({
   face: look.face,
   paint: look.paint,
   feet: look.feet,
-  // Any hairstyle but the character's own shaves its painted hair, which
-  // would otherwise show where its own hair was taken in.
+  // Any hairstyle but the character's own makes the head bald, its skin
+  // painted round where its own hair was taken out.
   bald: look.hairStyle !== null,
 })
 

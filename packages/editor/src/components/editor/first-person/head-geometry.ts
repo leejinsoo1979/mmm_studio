@@ -40,9 +40,18 @@ export function originalGeometry(mesh: Mesh): BufferGeometry {
   return (mesh.userData.shapeOriginal as BufferGeometry | undefined) ?? mesh.geometry
 }
 
+/**
+ * The geometry a head had as loaded, its hair and all: a head made bald
+ * (see avatar-hair.ts) shows only some of its triangles, and is reshaped
+ * so, but its frame and looks go by the whole.
+ */
+export function loadedGeometry(mesh: Mesh): BufferGeometry {
+  return (mesh.userData.hairOriginal as BufferGeometry | undefined) ?? originalGeometry(mesh)
+}
+
 /** A head's points in the bind pose. */
 function bindPoints(head: Mesh): Vector3[] {
-  const position = originalGeometry(head).getAttribute('position')
+  const position = loadedGeometry(head).getAttribute('position')
   const skinned = head as SkinnedMesh
   const bind = skinned.isSkinnedMesh ? skinned.bindMatrix : new Matrix4()
   const points: Vector3[] = []
@@ -87,7 +96,7 @@ export function headFrame(head: Mesh): HeadFrame {
 }
 
 export function headGeometry(head: Mesh): HeadGeometry {
-  const geometry = originalGeometry(head)
+  const geometry = loadedGeometry(head)
   const position = geometry.getAttribute('position')
   const normal = geometry.getAttribute('normal')
   const uv = geometry.getAttribute('uv')

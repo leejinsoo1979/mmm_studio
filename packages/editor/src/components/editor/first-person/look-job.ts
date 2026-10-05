@@ -1,6 +1,7 @@
+import type { ScalpPaint } from './bald-head'
 import { connectedFrom } from './face-fill'
 import { runFaceJob } from './face-job'
-import { type FacePaint, hairHued, hasFacePaint, paintFace, shaveHead } from './face-paint'
+import { type FacePaint, hairHued, hasFacePaint, paintFace } from './face-paint'
 import { maskImage } from './face-swap'
 import { type FootGeometry, packFeet, paintFeet } from './feet-paint'
 import type { AvatarFeet } from './footwear'
@@ -22,6 +23,7 @@ import {
   toneSkin,
   unpackTriangles,
 } from './look-pixels'
+import { paintScalp, scalpTone } from './scalp-paint'
 
 /**
  * A Rocketbox body's materials: `<code>_head`, `<code>_body` and, on about
@@ -63,7 +65,8 @@ export type LookJob = {
     eyes: string | null
   } | null
   paint: FacePaint
-  bald: boolean
+  /** How a bald head's skin is painted round where its hair was taken out (see bald-head.ts); null for its own hair. */
+  scalp: ScalpPaint | null
   feet: AvatarFeet
   /**
    * The character's face landmarks (packed fractions of its front view):
@@ -254,7 +257,7 @@ export function analyseBody(
   const skin = skinColor(head, geometry)
   const skinLum = luminance(...skin)
   // A crown of a colour hair never is (a blue cap, camouflage, a hijab) is
-  // gear, not hair to dye or shave; so is a card's colour that isn't a
+  // gear, not hair to dye or paint over; so is a card's colour that isn't a
   // hair's (the opacity texture's gear, a helmet's visor or reflective
   // strip, outweighing the hair): the crown under the cards is the hair's.
   const crown = crownColor(head, geometry)
@@ -293,11 +296,11 @@ export function analyseBody(
 /**
  * Where a head with hair cards has their hair painted on — its hair shell,
  * which the hairstyle library is built from (see
- * scripts/characters/gen-hair-styles.ts). Unlike `analyseBody`'s mask, which
- * the look tunes for dye and shave, it stays the one the library's shells
- * were fitted to: the cards' colour told from the skin's down the middle of
- * the face (the cheeks and nose), the face below the eyes kept whatever the
- * hair's shade.
+ * scripts/characters/gen-hair-styles.ts). Unlike `analyseBody`'s mask,
+ * which the look tunes for dye and a bald scalp, it stays the one the
+ * library's shells were fitted to: the cards' colour told from the skin's
+ * down the middle of the face (the cheeks and nose), the face below the
+ * eyes kept whatever the hair's shade.
  */
 export function cardHairMask(head: Pixels, opacity: Pixels, geometry: HeadGeometry): Float32Array {
   const skin = colorWhere(
@@ -318,18 +321,18 @@ const copyPixels = (pixels: Pixels): Pixels => ({
   height: pixels.height,
 })
 
-/** The last few heads dyed and shaved, by what they depend on: each holds 16 MB, and a paint slider's drag repeats them. */
+/** The last few heads dyed, by what they depend on: each holds 16 MB, and a paint slider's drag repeats them. */
 const bases = new Map<string, Pixels>()
 const BASES_KEPT = 2
 
 /**
- * A body's head dyed and shaved as a look asks (see `dressBody`), its own
- * copy. `name` names the look's body, dyes and shave.
+ * A body's head toned and dyed as a look asks (see `dressBody`), its own
+ * copy. `name` names the look's body and dyes, and whether it is bald.
  */
 function baseHead(
   analysis: Analysis,
   name: string,
-  { hair, skin, bald, target }: Pick<LookJob, 'hair' | 'skin' | 'bald' | 'target'>,
+  { hair, skin, bald }: Pick<LookJob, 'hair' | 'skin'> & { bald: boolean },
 ): Pixels {
   let base = bases.get(name)
   if (base) {
@@ -337,12 +340,9 @@ function baseHead(
   } else {
     base = copyPixels(analysis.head)
     if (skin) toneSkin(base, hexToRgb(skin), analysis.skin, analysis.headSkinMask)
-    // A shaved head's painted hair goes, not dyed: the shave finds it by its
-    // own colour, and the hair worn over it is dyed on its own.
+    // A bald head's painted hair is painted over, not dyed: the hair worn
+    // over it is dyed on its own.
     if (hair && !bald) dye(base, hexToRgb(hair), analysis.headHairLum, analysis.hairMask)
-    if (bald && target) {
-      shaveHead(base, analysis.geometry, analysis.headSkinMask, target, analysis.hairColor)
-    }
   }
   bases.set(name, base)
   if (bases.size > BASES_KEPT) bases.delete(bases.keys().next().value!)
@@ -351,28 +351,29 @@ function baseHead(
 
 /**
  * A body's textures dressed in a look: the ones it changes, each its own
- * copy. On the head, in order: the skin tone, the hair dye, a shave, the
- * swapped face (onto the skin as dyed, the dyes' masks being the
- * character's own face and not the photo's), the face paint over it all,
- * and the irises last (a face photo's, unless the paint picks one).
- * `photo` is the face's photo, read (null leaves the face out).
+ * copy. On the head, in order: the skin tone, the hair dye (not on a bald
+ * head), the swapped face (onto the skin as dyed, the dyes' masks being the
+ * character's own face and not the photo's), a bald head's skin painted
+ * round the cut to the scalp's tone (read off the forehead as it now is),
+ * the face paint over it all, and the irises last (a face photo's, unless
+ * the paint picks one). `photo` is the face's photo, read (null leaves the
+ * face out).
  */
 export function dressBody(
   analysis: Analysis,
   job: Omit<LookJob, 'body'> & { key: string },
   photo: Pixels | null,
 ): Partial<Record<Part, Pixels>> {
-  const { face, hair, skin, paint, target } = job
-  // The shave, like the rest of the paint, goes by the landmarks: it keeps
-  // the face below the eyes and the brows.
-  const bald = job.bald && target !== null
+  const { face, hair, skin, paint, target, scalp } = job
+  const bald = scalp !== null
   const swap = face && photo && target
   const eyes = paint.eyes ?? face?.eyes ?? null
   const changed: Partial<Record<Part, Pixels>> = {}
   if (swap || hair || skin || bald || eyes || (target && hasFacePaint(paint))) {
-    const base = `${job.key}|${hair}|${skin}|${bald}`
-    let head = baseHead(analysis, base, { hair, skin, bald, target })
-    // A shaved head has no hair left over its face.
+    // A bald head's painted hair isn't dyed: a dye alone needs no new base.
+    const base = `${job.key}|${bald ? null : hair}|${skin}|${bald}`
+    let head = baseHead(analysis, base, { hair, skin, bald })
+    // A bald head has no hair left over its face.
     const hairMask = bald ? null : analysis.hairMask
     if (swap) {
       try {
@@ -393,6 +394,12 @@ export function dressBody(
         // The dyes still go on; the face is left out.
         console.warn('[look] face swap failed', error)
       }
+    }
+    if (scalp) {
+      const tone =
+        scalpTone(head, scalp.tone, analysis.hairMask, analysis.headSkinMask) ??
+        (skin ? hexToRgb(skin) : analysis.skin)
+      paintScalp(head, scalp, tone, analysis.hairMask)
     }
     if (target) {
       paintFace(head, analysis.geometry, target, paint, {

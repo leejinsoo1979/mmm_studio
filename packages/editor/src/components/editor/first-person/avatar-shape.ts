@@ -303,9 +303,10 @@ export function applyShape(model: Object3D, shapers: readonly Shaper[]): () => v
     mesh.userData.shapeOriginal = original
     mesh.geometry = geometry
     undo.push(() => {
-      // A later shape may have replaced this one since: leave that be.
+      // A later shape may have replaced this one since: leave that be. A
+      // hairstyle may have changed what it was shaped from (avatar-hair.ts).
       if (mesh.geometry === geometry) {
-        mesh.geometry = original
+        mesh.geometry = originalGeometry(mesh)
         delete mesh.userData.shapeOriginal
       }
       geometry.dispose()

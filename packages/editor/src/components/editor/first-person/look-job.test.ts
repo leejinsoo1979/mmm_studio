@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import type { ScalpPaint } from './bald-head'
 import { NO_PAINT } from './face-paint'
 import { SHOD } from './footwear'
 import type { HeadGeometry } from './head-geometry'
@@ -95,7 +96,7 @@ const look = (key: string, change: Partial<Omit<LookJob, 'body'>>) => ({
   skin: null,
   face: null,
   paint: NO_PAINT,
-  bald: false,
+  scalp: null,
   feet: SHOD,
   target: null,
   ...change,
@@ -138,14 +139,37 @@ describe('a body’s analysis', () => {
 })
 
 describe('a body dressed in a look', () => {
-  // A shave with the landmarks, and the paint, are face-paint.test.ts's.
-  test('a shave waits for the landmarks it is placed by', () => {
+  // The paint with the landmarks is face-paint.test.ts's.
+  /** A bald head's paint: the crown's quad painted (by its corners' rings), the tone read off the cheek's. */
+  const scalp: ScalpPaint = {
+    paint: Float32Array.from([
+      0.1, 0.02, 0.9, 0.9, 0.02, 0.9, 0.9, 0.23, 0.9, 0.1, 0.02, 0.9, 0.9, 0.23, 0.9, 0.1, 0.23,
+      0.9,
+    ]),
+    tone: [Float32Array.from([0.1, 0.27, 0.9, 0.27, 0.9, 0.48, 0.1, 0.27, 0.9, 0.48, 0.1, 0.48])],
+    swatch: [0.5, 0.4],
+  }
+  const near = (colour: Rgb, to: Rgb) =>
+    colour.forEach((value, c) => {
+      expect(Math.abs(value - to[c]!)).toBeLessThan(to[c]! * 0.12)
+    })
+
+  test('a bald head’s skin is painted round the cut to the forehead’s tone, without landmarks', () => {
     const { pixels, geometry } = head(HAIR)
     const analysis = analyseBody(pixels, body(), null, geometry)
-    expect(dressBody(analysis, look('unplaced', { bald: true }), null)).toEqual({})
-    // The dyes don't wait.
-    const dyed = dressBody(analysis, look('unplaced', { bald: true, hair: '#c03020' }), null).head!
-    const [r, g] = rows(dyed, 0.02, 0.2)
+    const bald = dressBody(analysis, look('unplaced', { scalp }), null).head!
+    near(rows(bald, 0.04, 0.2), SKIN)
+    // The jaw, as dark as the hair but not painted, stays.
+    expect(rows(bald, 0.52, 0.73)).toEqual(rows(pixels, 0.52, 0.73))
+  })
+
+  test('a bald head’s hair is painted over, not dyed; the same body with its own hair again is', () => {
+    const { pixels, geometry } = head(HAIR)
+    const analysis = analyseBody(pixels, body(), null, geometry)
+    const bald = dressBody(analysis, look('dyed', { scalp, hair: '#c03020' }), null).head!
+    near(rows(bald, 0.04, 0.2), SKIN)
+    const own = dressBody(analysis, look('dyed', { hair: '#c03020' }), null).head!
+    const [r, g] = rows(own, 0.02, 0.2)
     expect(r).toBeGreaterThan(g * 2)
   })
 

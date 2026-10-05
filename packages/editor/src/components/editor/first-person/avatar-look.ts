@@ -12,7 +12,8 @@ import {
 import { type AvatarLook, type AvatarPaint, hasLook } from '../../../store/use-avatar-profile'
 import { applyBodyBones } from './avatar-body'
 import { useAvatarHair } from './avatar-hair'
-import { useAvatarShape } from './avatar-shape'
+import { headOf, useAvatarShape } from './avatar-shape'
+import type { ScalpPaint } from './bald-head'
 import { hasBodyShape } from './body-shape'
 import { hasFacePaint, NO_PAINT } from './face-paint'
 import { loadFaceTargets } from './face-targets'
@@ -34,7 +35,8 @@ function partMeshes(model: Object3D) {
   const parts: Record<Part, PartMesh[]> = { head: [], body: [], opacity: [] }
   model.traverse((object) => {
     const mesh = object as Mesh
-    if (!mesh.isMesh || Array.isArray(mesh.material)) return
+    // A mesh showing another's material is dressed with it (see avatar-hair.ts).
+    if (!mesh.isMesh || Array.isArray(mesh.material) || mesh.userData.follows) return
     const material = (mesh.userData.lookOriginal ?? mesh.material) as MeshStandardMaterial
     const part = partOf(material)
     if (part && material.map) parts[part].push({ mesh, material })
@@ -52,15 +54,19 @@ function bitmapOf(texture: Texture): Promise<ImageBitmap> {
 
 const bodies = new WeakMap<Texture, Promise<LookBody>>()
 
-/** A body's textures and head geometry for a look, gathered once per body (its head texture names it). */
-function lookBody(parts: Record<Part, PartMesh[]>): Promise<LookBody> | null {
+/**
+ * A body's textures and head geometry for a look, gathered once per body
+ * (its head texture names it). `head` is its head mesh: a bald head's
+ * surface shares its texture (see avatar-hair.ts).
+ */
+function lookBody(parts: Record<Part, PartMesh[]>, head: Mesh | null): Promise<LookBody> | null {
   const headMap = parts.head[0]?.material.map
   const bodyMap = parts.body[0]?.material.map
   const opacityMap = parts.opacity[0]?.material.map
-  if (!(headMap && bodyMap)) return null
+  if (!(headMap && bodyMap && head)) return null
   let found = bodies.get(headMap)
   if (!found) {
-    const geometry = headGeometry(parts.head[0]!.mesh)
+    const geometry = headGeometry(head)
     found = Promise.all([
       bitmapOf(headMap),
       bitmapOf(bodyMap),
@@ -188,25 +194,26 @@ function makeLook(body: object, job: LookJob, signal: AbortSignal): Promise<Look
 
 /**
  * Dresses a body in a look: its own copies of the textures the look changes
- * (the dyes, a shave, the swapped face, the face paint, socks or bare feet)
- * on its own copies of the materials. Returns what undoes it (the original materials back,
- * the copies freed), or null when `signal` aborted it first; `retry` when
- * the face or the landmarks it and the paint are placed by couldn't be
- * loaded (the look went on without them) and may load later.
+ * (the dyes, a bald head's skin, the swapped face, the face paint, socks or
+ * bare feet) on its own copies of the materials — of every mesh showing
+ * them when it is ready. Returns what undoes it (the original materials
+ * back, the copies freed), or null when `signal` aborted it first; `retry`
+ * when the face or the landmarks it and the paint are placed by couldn't
+ * be loaded (the look went on without them) and may load later. `scalp` is
+ * how a bald head's skin is painted (see bald-head.ts).
  */
 async function applyLook(
   model: Object3D,
   look: AvatarPaint,
+  scalp: ScalpPaint | null,
   avatarId: string,
   signal: AbortSignal,
 ): Promise<{ undo: () => void; retry: boolean } | null> {
-  const parts = partMeshes(model)
-  const gathering = lookBody(parts)
+  const gathering = lookBody(partMeshes(model), headOf(model))
   if (!gathering) return { undo: () => {}, retry: false }
   let retry = false
-  // The face, the paint and a shave all go by the character's face
-  // landmarks.
-  const placed = look.face || look.bald || hasFacePaint(look.paint)
+  // The face and the paint go by the character's face landmarks.
+  const placed = look.face || hasFacePaint(look.paint)
   const [body, target] = await Promise.all([
     gathering,
     placed
@@ -227,15 +234,17 @@ async function applyLook(
     skin: look.skin,
     face: target && look.face,
     paint: look.paint,
-    bald: look.bald,
+    scalp: look.bald ? scalp : null,
     feet: look.feet,
     target,
   }
-  // Without landmarks only the irises of the paint go on, and no shave:
-  // it would take the brows and lashes with the hair (a retry puts it on).
-  const painted = target ? hasFacePaint(job.paint) || job.bald : job.paint.eyes
+  // Without landmarks only the irises of the paint go on (a retry puts the
+  // rest on).
+  const painted = target ? hasFacePaint(job.paint) : job.paint.eyes
   const shoeless = job.feet.wear !== 'shoes'
-  if (!(job.hair || job.skin || job.face || painted || shoeless)) return { undo: () => {}, retry }
+  if (!(job.hair || job.skin || job.face || job.scalp || painted || shoeless)) {
+    return { undo: () => {}, retry }
+  }
   const result = await makeLook(model, job, signal)
   if (!result || signal.aborted) {
     for (const bitmap of Object.values(result?.parts ?? {})) bitmap.close()
@@ -243,6 +252,9 @@ async function applyLook(
   }
   if (result.faceFailed) retry = true
 
+  // The meshes showing the textures now: a hairstyle put on meanwhile may
+  // have changed them.
+  const parts = partMeshes(model)
   const undo: (() => void)[] = []
   for (const part of Object.keys(result.parts) as Part[]) {
     const bitmap = result.parts[part]!
@@ -298,7 +310,7 @@ export function useAvatarLook(
   const hairStyle = look?.hairStyle ?? null
   const hair = look?.hair ?? null
   const worn = useAvatarHair(model, hairStyle, hair)
-  useAvatarShape(model, look, avatarId, worn)
+  useAvatarShape(model, look, avatarId, worn?.shaper ?? null)
 
   const body = look?.body
   useEffect(
@@ -308,17 +320,18 @@ export function useAvatarLook(
 
   // Only the painted part of a look is dressed here: a new shape alone
   // leaves the textures be. A hairstyle worn in place of the character's
-  // own shaves its painted hair, which would otherwise show where its hair
-  // was taken in; and a hairstyle going on adds lashes to dress (`worn`
-  // changes). One the library doesn't offer is never worn, so its painted
-  // hair stays with its own hair.
+  // own makes its head bald, its skin painted round where its hair was
+  // taken out; the meshes a hairstyle adds show the head's and the cards'
+  // materials as they are dressed, so a new one alone needs no new look.
+  // One the library doesn't offer is never worn, so its painted hair stays
+  // with its own hair.
   const skin = look?.skin ?? null
   const face = look?.face ?? null
   const paint = look?.paint ?? NO_PAINT
   const feet = look?.feet ?? SHOD
-  const bald = worn !== null
+  const scalp = worn?.paint ?? null
   useEffect(() => {
-    const look: AvatarPaint = { hair, skin, face, paint, feet, bald }
+    const look: AvatarPaint = { hair, skin, face, paint, feet, bald: scalp !== null }
     if (dressing.current && (dressing.current.model !== model || !hasLook(look))) {
       dressing.current.undo()
       dressing.current = null
@@ -327,7 +340,7 @@ export function useAvatarLook(
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const dress = (attempt: number) => {
-      applyLook(model, look, avatarId, controller.signal)
+      applyLook(model, look, scalp, avatarId, controller.signal)
         .then((applied) => {
           if (!applied) return
           if (controller.signal.aborted) {
@@ -347,8 +360,7 @@ export function useAvatarLook(
       controller.abort()
       clearTimeout(timer)
     }
-    // `worn` isn't read: a new one means new meshes to dress.
-  }, [model, hair, skin, face, paint, feet, bald, avatarId, worn])
+  }, [model, hair, skin, face, paint, feet, scalp, avatarId])
 
   useEffect(
     () => () => {
