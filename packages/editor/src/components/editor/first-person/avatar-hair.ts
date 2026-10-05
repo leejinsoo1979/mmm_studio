@@ -1680,7 +1680,7 @@ function goBald(model: Object3D, head: SkinnedMesh, bald: BaldHead, undo: (() =>
     const siblings = scalp.parent!.children
     siblings.splice(siblings.indexOf(scalp), 1)
     siblings.splice(siblings.indexOf(head), 0, scalp)
-    follow(scalp, head)
+    follow(scalp, head, unbumped)
   }
   const body = ownMeshes(model, 'body')[0]
   const collar =
@@ -1743,13 +1743,35 @@ function hideHeadwear(model: Object3D, top: number, neck: number, undo: (() => v
  * and frees what it dressed them in when a newer look replaces it, which a
  * mesh that only copied it would go on showing.
  */
-function follow(mesh: Mesh, source: Mesh) {
+function follow(mesh: Mesh, source: Mesh, as: (material: Material) => Material = (m) => m) {
   mesh.userData.follows = source
   Object.defineProperty(mesh, 'material', {
-    get: () => source.material,
+    get: () => as(source.material as Material),
     set: () => {},
     configurable: true,
   })
+}
+
+const unbumpedCopies = new WeakMap<Material, { copy: Material; version: number }>()
+
+/**
+ * A head's material as the bald surface shows it: without its normal map.
+ * The surface shows the texels the hair did (see `scalpUvs`), whose bumps
+ * are the hair's strands.
+ */
+function unbumped(material: Material): Material {
+  const standard = material as MeshStandardMaterial
+  if (!standard.normalMap) return material
+  let found = unbumpedCopies.get(material)
+  // Kept in step with the head's: a viewer may retune it.
+  if (!found || found.version !== standard.version) {
+    found?.copy.dispose()
+    const copy = standard.clone()
+    copy.normalMap = null
+    found = { copy, version: standard.version }
+    unbumpedCopies.set(material, found)
+  }
+  return found.copy
 }
 
 /** Puts a new skinned mesh beside another, on its skeleton, bound as it is. */
