@@ -557,11 +557,15 @@ function keepOwnership(model: Object3D, anisotropy: number) {
   })
 }
 
-/** The character, idling or playing `cue`; its model is put in `shown` for the camera to frame. */
+/**
+ * The character, idling (or held still on the idle's first frame) or playing
+ * `cue`; its model is put in `shown` for the camera to frame.
+ */
 function StudioAvatar({
   avatarId,
   look,
   cue,
+  still,
   yaw,
   shown,
   onCueEnd,
@@ -569,6 +573,7 @@ function StudioAvatar({
   avatarId: string
   look: AvatarLook
   cue: EmoteCue | null
+  still: boolean
   yaw: { current: number }
   shown: { current: Object3D | null }
   onCueEnd: () => void
@@ -590,6 +595,8 @@ function StudioAvatar({
   cueRef.current = cue
   const endRef = useRef(onCueEnd)
   endRef.current = onCueEnd
+  const stillRef = useRef(still)
+  stillRef.current = still
 
   const mixer = useMemo(() => new AnimationMixer(model), [model])
   const layer = useMemo(() => new EmoteLayer(mixer), [mixer])
@@ -607,9 +614,15 @@ function StudioAvatar({
     keepOwnership(model, anisotropy)
     const weight = layer.update(cueRef.current, false, delta)
     const idle = clips.find((clip) => clip.name === 'idle')
-    if (idle) mixer.clipAction(idle).setEffectiveWeight(1 - weight)
+    // A face being shaped holds still, unless an emote is being previewed.
+    const held = stillRef.current && weight === 0
+    if (idle) {
+      const action = mixer.clipAction(idle)
+      action.setEffectiveWeight(1 - weight)
+      if (held) action.time = 0
+    }
     if (cueRef.current && layer.finished(cueRef.current)) endRef.current()
-    mixer.update(delta)
+    mixer.update(held ? 0 : delta)
     if (groupRef.current) {
       groupRef.current.rotation.y += (yaw.current - groupRef.current.rotation.y) * 0.25
     }
@@ -700,6 +713,7 @@ export function StudioStage({
           look={look}
           onCueEnd={onCueEnd}
           shown={model}
+          still={focus === 'face' || focus === 'hair'}
           yaw={yaw}
         />
       </Suspense>
