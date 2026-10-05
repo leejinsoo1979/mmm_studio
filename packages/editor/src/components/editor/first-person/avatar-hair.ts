@@ -19,20 +19,50 @@ import {
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { avatarUrl } from './avatar-catalog'
-import { headOf, type PointMove, type Shaper } from './avatar-shape'
+import { headOf, type Shaper } from './avatar-shape'
+import {
+  bentSkull,
+  cleanCut,
+  cutRings,
+  hairShadow,
+  hollowShade,
+  keptTriangles,
+  nearEar,
+  neckFitted,
+  necklineFan,
+  type ScalpPaint,
+  scalpPaint,
+  scalpTriangles,
+  scalpUvs,
+  smoothNape,
+  spreadWeights,
+  TONE_RINGS,
+  vertexNormals,
+  withNeckPiece,
+} from './bald-head'
 import { BLEED_BELOW, bleedHair, pictureOf, texturePixels } from './hair-bleed'
+import { dyeHair } from './hair-dye'
+import { BALD, type HairLibrary, type HairStyle, loadHairLibrary } from './hair-styles'
+import { loadedGeometry, originalGeometry } from './head-geometry'
 import {
-  BALD,
-  type HairLibrary,
-  type HairStyle,
-  loadHairLibrary,
-  type SkullData,
-} from './hair-styles'
-import { originalGeometry } from './head-geometry'
+  type AxisFit,
+  composeFits,
+  faceFit,
+  fitSkull,
+  invertFit,
+  PointGrid,
+  pushOut,
+  SKULL_CELL,
+  type Surface,
+  smoothstep,
+  standingOver,
+  type Triples,
+  tuckUnder,
+} from './head-skull'
 import {
-  dye,
+  byLightness,
+  colorDistance,
   hairMask,
-  hexToRgb,
   luminance,
   maskedLuminance,
   meanColor,
@@ -41,754 +71,20 @@ import {
 } from './look-pixels'
 
 /**
- * Borrowed hairstyles: one character's hair worn by another. A Rocketbox
- * hairstyle is two things — a shell of the head mesh itself, sculpted to
- * the hair's volume and painted with it (the "cap"), and alpha cards for
- * its loose strands (`_opacity`, with the lashes). Both are carried over
- * through a bald skull every head shares: fitted to each character by its
- * face bones, it says where the donor's hair stood over its skull and how
- * far the wearer's own hair volume is to be taken in under it.
+ * Borrowed hairstyles: one character's hair worn by another, over its head
+ * made bald (see bald-head.ts) as a wig. A Rocketbox hairstyle is two
+ * things — a shell of the head mesh itself, sculpted to the hair's volume
+ * and painted with it (the "cap"), and alpha cards for its loose strands
+ * (`_opacity`, with the lashes). Both are carried over through the bald
+ * skull every head shares (see head-skull.ts): fitted to each character by
+ * its face bones, it says where the donor's hair stood over its skull.
  *
- * Lengths are in the bind pose's own units, not metres: each Rocketbox
- * body is scaled to about two of them from its feet to the top of its
- * head, so one is about 0.9 m on an adult and 0.7 m on a child. The sizes
+ * Lengths are in the bind pose's own units (see head-skull.ts). The sizes
  * below are an adult's; on a child they are a fifth smaller in metres.
  *
  * The pure geometry comes first (tested in avatar-hair.test.ts), then the
  * meshes built from it, then loading and the hook.
  */
-
-/** Points as flat x, y, z triples. */
-type Triples = ArrayLike<number>
-
-/** A key for grid cell (x, y, z): cells are indexed ±CELL_RANGE on each axis. */
-const CELL_RANGE = 512
-const cellKey = (x: number, y: number, z: number) =>
-  ((x + CELL_RANGE) * 2 * CELL_RANGE + (y + CELL_RANGE)) * 2 * CELL_RANGE + (z + CELL_RANGE)
-
-/**
- * Points bucketed into cubes `cell` across, for nearest-neighbour
- * questions: a head's few thousand points answer a hairstyle's in a moment.
- */
-export class PointGrid {
-  private readonly cells = new Map<number, number[]>()
-  private readonly low = [0, 0, 0]
-  private readonly high = [0, 0, 0]
-
-  constructor(
-    readonly points: Triples,
-    private readonly cell: number,
-  ) {
-    const count = points.length / 3
-    for (let i = 0; i < count; i++) {
-      const at = [0, 1, 2].map((axis) => Math.floor(points[i * 3 + axis]! / cell))
-      for (let axis = 0; axis < 3; axis++) {
-        this.low[axis] = i === 0 ? at[axis]! : Math.min(this.low[axis]!, at[axis]!)
-        this.high[axis] = i === 0 ? at[axis]! : Math.max(this.high[axis]!, at[axis]!)
-      }
-      const key = cellKey(at[0]!, at[1]!, at[2]!)
-      const bucket = this.cells.get(key)
-      if (bucket) bucket.push(i)
-      else this.cells.set(key, [i])
-    }
-  }
-
-  /**
-   * The `k` points nearest (x, y, z), nearest first, into `found` (their
-   * indices) and `distances` (squared); returns how many there are. The
-   * search stops once all that is left is further than `within` off, so
-   * there may be fewer (none where nothing is that near).
-   */
-  nearest(
-    x: number,
-    y: number,
-    z: number,
-    k: number,
-    found: number[],
-    distances: number[],
-    within = Number.POSITIVE_INFINITY,
-  ) {
-    let count = 0
-    const cell = this.cell
-    const points = this.points
-    const cx = Math.floor(x / cell)
-    const cy = Math.floor(y / cell)
-    const cz = Math.floor(z / cell)
-    // Past this ring of cells there is nothing left to search.
-    const last = Math.max(
-      Math.abs(cx - this.low[0]!),
-      Math.abs(cx - this.high[0]!),
-      Math.abs(cy - this.low[1]!),
-      Math.abs(cy - this.high[1]!),
-      Math.abs(cz - this.low[2]!),
-      Math.abs(cz - this.high[2]!),
-    )
-    for (let ring = 0; ring <= last; ring++) {
-      for (let dx = -ring; dx <= ring; dx++) {
-        for (let dy = -ring; dy <= ring; dy++) {
-          // Only the ring's shell: its inside was searched already.
-          const step = Math.abs(dx) === ring || Math.abs(dy) === ring ? 1 : 2 * ring
-          for (let dz = -ring; dz <= ring; dz += Math.max(1, step)) {
-            const bucket = this.cells.get(cellKey(cx + dx, cy + dy, cz + dz))
-            if (!bucket) continue
-            for (const i of bucket) {
-              const ex = points[i * 3]! - x
-              const ey = points[i * 3 + 1]! - y
-              const ez = points[i * 3 + 2]! - z
-              const d = ex * ex + ey * ey + ez * ez
-              if (count === k && d >= distances[k - 1]!) continue
-              let slot = count < k ? count++ : k - 1
-              while (slot > 0 && distances[slot - 1]! > d) {
-                distances[slot] = distances[slot - 1]!
-                found[slot] = found[slot - 1]!
-                slot--
-              }
-              distances[slot] = d
-              found[slot] = i
-            }
-          }
-        }
-      }
-      // Anything in a further ring is at least `ring` cells away.
-      if ((count === k && distances[k - 1]! <= (ring * cell) ** 2) || ring * cell > within) break
-    }
-    return count
-  }
-}
-
-/** A per-axis scale and shift: a point goes to `point · scale + shift`, axis by axis. */
-export type AxisFit = { scale: [number, number, number]; shift: [number, number, number] }
-
-/**
- * The per-axis scale and shift taking points `from` onto points `to` (the
- * same number of each) most closely, each axis on its own. Rocketbox faces
- * are one template per sex at slightly different sizes, so their bones
- * line up this way to within millimetres, and it never tilts a skull.
- */
-export function fitAxes(from: Triples, to: Triples): AxisFit {
-  const count = from.length / 3
-  const scale: [number, number, number] = [1, 1, 1]
-  const shift: [number, number, number] = [0, 0, 0]
-  for (let axis = 0; axis < 3; axis++) {
-    let meanFrom = 0
-    let meanTo = 0
-    for (let i = 0; i < count; i++) {
-      meanFrom += from[i * 3 + axis]!
-      meanTo += to[i * 3 + axis]!
-    }
-    meanFrom /= count
-    meanTo /= count
-    let across = 0
-    let spread = 0
-    for (let i = 0; i < count; i++) {
-      const d = from[i * 3 + axis]! - meanFrom
-      across += d * (to[i * 3 + axis]! - meanTo)
-      spread += d * d
-    }
-    scale[axis] = spread > 0 ? across / spread : 1
-    shift[axis] = meanTo - scale[axis]! * meanFrom
-  }
-  return { scale, shift }
-}
-
-/** `outer` after `inner`. */
-export const composeFits = (outer: AxisFit, inner: AxisFit): AxisFit => ({
-  scale: [0, 1, 2].map((axis) => outer.scale[axis]! * inner.scale[axis]!) as AxisFit['scale'],
-  shift: [0, 1, 2].map(
-    (axis) => outer.scale[axis]! * inner.shift[axis]! + outer.shift[axis]!,
-  ) as AxisFit['shift'],
-})
-
-export const invertFit = (fit: AxisFit): AxisFit => ({
-  scale: fit.scale.map((scale) => 1 / scale) as AxisFit['scale'],
-  shift: fit.shift.map((shift, axis) => -shift / fit.scale[axis]!) as AxisFit['shift'],
-})
-
-/** The shared skull fitted onto one character, in its bind pose. */
-export type Skull = {
-  points: Float32Array
-  normals: Float32Array
-  zone: Float32Array
-  grid: PointGrid
-}
-
-/** Grid cells for a head's points: a couple of points across each. */
-const SKULL_CELL = 0.02
-
-/** The shared skull in a character's bind pose, by the fit of its face bones (see `faceFit`). */
-export function fitSkull(data: SkullData, fit: AxisFit): Skull {
-  const count = data.points.length / 3
-  const points = new Float32Array(count * 3)
-  const normals = new Float32Array(count * 3)
-  for (let i = 0; i < count; i++) {
-    let length = 0
-    for (let axis = 0; axis < 3; axis++) {
-      points[i * 3 + axis] = data.points[i * 3 + axis]! * fit.scale[axis]! + fit.shift[axis]!
-      // A normal turns by the inverse of a stretch.
-      normals[i * 3 + axis] = data.normals[i * 3 + axis]! / fit.scale[axis]!
-      length += normals[i * 3 + axis]! ** 2
-    }
-    length = Math.sqrt(length) || 1
-    for (let axis = 0; axis < 3; axis++) normals[i * 3 + axis]! /= length
-  }
-  return { points, normals, zone: data.zone, grid: new PointGrid(points, SKULL_CELL) }
-}
-
-/**
- * How the shared skull fits a character: from its bones' bind positions by
- * name, those of the skull's face bones it has. Null without enough of them.
- */
-export function faceFit(
-  data: SkullData,
-  bones: ReadonlyMap<string, readonly number[]>,
-): AxisFit | null {
-  const from: number[] = []
-  const to: number[] = []
-  for (const [name, place] of Object.entries(data.bones)) {
-    const own = bones.get(name)
-    if (!own) continue
-    from.push(...place)
-    to.push(own[0]!, own[1]!, own[2]!)
-  }
-  // Two points fix a scale and shift on each axis; the face has dozens.
-  return from.length >= 3 * FEWEST_FACE_BONES ? fitAxes(from, to) : null
-}
-
-/** A fit on fewer face bones than this is not trusted. */
-const FEWEST_FACE_BONES = 8
-
-/** Neighbours a point's place on a surface is averaged over, so it doesn't jump from one to the next. */
-const NEIGHBOURS = 4
-
-/** Softens the nearest neighbour's weight so a point right on one doesn't divide by zero. */
-const NEAR_SOFTEN = 1e-6
-
-const found: number[] = []
-const distances: number[] = []
-
-/**
- * Where a point stands over a surface of points and normals, averaged over
- * its nearest few: its height along the surface's normal (negative inside)
- * into out[0], the normal into out[1..3], and the neighbours' weighted zone
- * (when given) into out[4]. The nearest point's index is returned (-1 for
- * an empty surface, or none within `within`), its squared distance left in
- * `distances[0]`.
- */
-function standOver(
-  surface: { points: Triples; normals: Triples; grid: PointGrid },
-  zone: Triples | null,
-  x: number,
-  y: number,
-  z: number,
-  out: number[],
-  within = Number.POSITIVE_INFINITY,
-) {
-  const count = surface.grid.nearest(x, y, z, NEIGHBOURS, found, distances, within)
-  let height = 0
-  let nx = 0
-  let ny = 0
-  let nz = 0
-  let share = 0
-  let total = 0
-  for (let j = 0; j < count; j++) {
-    const i = found[j]!
-    const w = 1 / (distances[j]! + NEAR_SOFTEN)
-    const px = surface.normals[i * 3]!
-    const py = surface.normals[i * 3 + 1]!
-    const pz = surface.normals[i * 3 + 2]!
-    height +=
-      w *
-      ((x - surface.points[i * 3]!) * px +
-        (y - surface.points[i * 3 + 1]!) * py +
-        (z - surface.points[i * 3 + 2]!) * pz)
-    nx += w * px
-    ny += w * py
-    nz += w * pz
-    if (zone) share += w * zone[i]!
-    total += w
-  }
-  const length = Math.hypot(nx, ny, nz) || 1
-  out[0] = total > 0 ? height / total : 0
-  out[1] = nx / length
-  out[2] = ny / length
-  out[3] = nz / length
-  out[4] = total > 0 ? share / total : 0
-  return count > 0 ? found[0]! : -1
-}
-
-const stand = [0, 0, 0, 0, 0]
-
-/**
- * How far each point stands over the skull (bind units, negative under
- * it), the skull's hair share where it stands, and how far it is off the
- * skull's nearest point.
- */
-export function standingOver(points: Triples, skull: Skull) {
-  const count = points.length / 3
-  const height = new Float32Array(count)
-  const zone = new Float32Array(count)
-  const off = new Float32Array(count)
-  for (let i = 0; i < count; i++) {
-    standOver(skull, skull.zone, points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!, stand)
-    height[i] = stand[0]!
-    zone[i] = stand[4]!
-    off[i] = Math.sqrt(distances[0]!)
-  }
-  return { height, zone, off }
-}
-
-/**
- * Where a ray from (x, y, z) along (dx, dy, dz) (a unit direction), no
- * further than `length`, first goes into a surface from outside it near its
- * points (within `reach`: a surface may be only partly there), and on to
- * `depth` under it: how far along, 0 for a point that deep already, -1
- * where it never goes in. The surface's normal there is left in
- * `stand[1..3]`.
- */
-export function crossing(
-  surface: Surface,
-  x: number,
-  y: number,
-  z: number,
-  dx: number,
-  dy: number,
-  dz: number,
-  length: number,
-  depth: number,
-  reach: number,
-): number {
-  // How far out of the surface the ray is `along` it (NaN off the
-  // surface), and how far on it surely still is.
-  let ahead = 0
-  const look = reach + CROSSING_LOOK
-  const over = (along: number) => {
-    const near = standOver(
-      surface,
-      null,
-      x + dx * along,
-      y + dy * along,
-      z + dz * along,
-      stand,
-      look,
-    )
-    if (near < 0) {
-      ahead = CROSSING_LOOK
-      return Number.NaN
-    }
-    const away = Math.sqrt(distances[0]!)
-    ahead = Math.max(CROSSING_STEP, away > reach ? away - reach : stand[0]!)
-    return away <= reach ? stand[0]! : Number.NaN
-  }
-  // On `depth` under the surface from where the ray goes into it.
-  const under = (along: number) => {
-    const falling = -(dx * stand[1]! + dy * stand[2]! + dz * stand[3]!)
-    return along + (depth + stand[0]!) / Math.max(falling, GRAZING)
-  }
-  const start = over(0)
-  if (start <= 0) return start <= -depth ? 0 : under(0)
-  // The last place it was out of the surface near it (if it has been), and how far out.
-  let outside = start > 0 ? 0 : Number.NaN
-  let outBy = start
-  let along = 0
-  while (along + ahead <= length + CROSSING_STEP) {
-    along += ahead
-    const at = over(along)
-    if (at > 0) {
-      outside = along
-      outBy = at
-    }
-    if (!(at <= 0 && outside >= 0)) continue
-    // Where it went in, between the two, as the surface lies straight.
-    const inside = outside + ((along - outside) * outBy) / (outBy - at)
-    if (!Number.isNaN(over(inside))) return under(inside)
-    over(along)
-    return under(along)
-  }
-  return -1
-}
-
-/**
- * The least step (bind units) a ray is walked in — a longer one where it
- * is surely that far from the surface.
- */
-const CROSSING_STEP = 0.004
-
-/**
- * How far (bind units) past its reach a ray looks for a surface's points,
- * stepping that far on where there are none.
- */
-const CROSSING_LOOK = 0.02
-
-/** A ray falling less steeply than this into a surface is taken under it as if this steeply. */
-const GRAZING = 0.3
-
-/**
- * How a head's own hair volume is taken in, for another's hair to go on —
- * or for none. Each point of its hair's shell (`shell`, 1 per such point)
- * goes in towards the middle of the head (of the neck, down the neck: the
- * skull's middle over its bottom's) until it is under the skull — fitted
- * to the head's own skin (`skin`: its points that aren't shell) where that
- * shows, see `skinFitted` — or the body (`body`), whichever it meets the
- * deeper: a little under (so no scalp shows through a borrowed cap), and
- * the further under the further out it stood (so a bun or a ponytail
- * pressed flat lies under the scalp round it, not over it). It goes over
- * the cranium above the top of the neck (`neck`, the head bone's height)
- * as much as the skull's zone there holds hair, and anywhere else where it
- * stands well off the skull, or out of the head's own skin: over the ears,
- * down the neck. A sideburn painted onto the face is neither, and stays.
- * Hair past the skull's edge that meets neither goes onto the skull's
- * nearest points, or below its bottom (a drape over a neckline a shirt
- * leaves open under long hair) to the body's, spanning the neckline.
- *
- * Returns each point's move, and the normal of the surface it is pressed
- * onto as long as how far it is pressed (0 to 1), for its shading.
- */
-export function deflation(
-  points: Triples,
-  skull: Skull,
-  shell: ArrayLike<number>,
-  around: { skin: Surface; body: Surface; neck: number },
-): { moves: Float32Array; pressed: Float32Array } {
-  const count = points.length / 3
-  const moves = new Float32Array(count * 3)
-  const pressed = new Float32Array(count * 3)
-  const middle = skullMiddle(skull, around.neck)
-  skull = skinFitted(skull, around.skin, around.neck)
-  for (let i = 0; i < count; i++) {
-    if (!shell[i]) continue
-    const x = points[i * 3]!
-    const y = points[i * 3 + 1]!
-    const z = points[i * 3 + 2]!
-    if (standOver(skull, skull.zone, x, y, z, stand) < 0) continue
-    // Under the skull already (inside the head, not past its edge), it is
-    // hidden: left be.
-    if (stand[0]! <= -SINK && distances[0]! <= SKULL_REACH ** 2) continue
-    const over = stand[0]!
-    const far = smoothstep(OFF_FROM, OFF_TO, Math.sqrt(distances[0]!))
-    const onSkull =
-      smoothstep(ZONE_FROM, ZONE_TO, stand[4]!) * smoothstep(-NECK_BAND, NECK_BAND, y - around.neck)
-    const out =
-      standOver(around.skin, null, x, y, z, stand) < 0 ? 0 : smoothstep(OUT_FROM, OUT_TO, stand[0]!)
-    const taken = over > 0 || far > 0 ? onSkull + (1 - onSkull) * Math.max(far, out) : 0
-    if (taken === 0) continue
-    // In towards the middle…
-    const [mx, my, mz] = middle.nearest(x, y, z) as [number, number, number]
-    const length = Math.hypot(mx - x, my - y, mz - z) || 1
-    const dx = (mx - x) / length
-    const dy = (my - y) / length
-    const dz = (mz - z) / length
-    // …under the deeper of the surfaces it meets.
-    let along = -1
-    let nx = 0
-    let ny = 0
-    let nz = 0
-    const meet = (at: number) => {
-      if (at <= along) return
-      along = at
-      nx = stand[1]!
-      ny = stand[2]!
-      nz = stand[3]!
-    }
-    const depth = SINK + FOLD * Math.max(0, over)
-    meet(crossing(skull, x, y, z, dx, dy, dz, length, depth, SKULL_REACH))
-    meet(crossing(around.body, x, y, z, dx, dy, dz, length, BODY_SINK, BODY_REACH))
-    // Below the skull, where it has no neck, under the head's own.
-    if (y < middle.bottom)
-      meet(crossing(around.skin, x, y, z, dx, dy, dz, length, depth, SKULL_REACH))
-    let tx = x + dx * along
-    let ty = y + dy * along
-    let tz = z + dz * along
-    if (along < 0) {
-      // Meeting nothing (past the skull's edge): below its bottom, into the
-      // body's nearest point; above, down onto the skull as its nearest
-      // points lie.
-      const onto =
-        y < middle.bottom
-          ? standOver(around.body, null, x, y, z, stand)
-          : standOver(skull, null, x, y, z, stand)
-      if (onto < 0) continue
-      const from = y < middle.bottom ? around.body.points : skull.points
-      const sink = y < middle.bottom ? BODY_SINK : depth
-      nx = stand[1]!
-      ny = stand[2]!
-      nz = stand[3]!
-      tx = y < middle.bottom ? from[onto * 3]! - nx * sink : x - nx * (stand[0]! + sink)
-      ty = y < middle.bottom ? from[onto * 3 + 1]! - ny * sink : y - ny * (stand[0]! + sink)
-      tz = y < middle.bottom ? from[onto * 3 + 2]! - nz * sink : z - nz * (stand[0]! + sink)
-    }
-    moves[i * 3] = (tx - x) * taken
-    moves[i * 3 + 1] = (ty - y) * taken
-    moves[i * 3 + 2] = (tz - z) * taken
-    pressed[i * 3] = nx * taken
-    pressed[i * 3 + 1] = ny * taken
-    pressed[i * 3 + 2] = nz * taken
-  }
-  return { moves, pressed }
-}
-
-/**
- * A skull fitted to the head's own surface (`skin`) where it shows: to its
- * neck, from NAPE above the top of the neck (`neck`) down — in where it is
- * thinner than the skull's (a woman's is), so hair taken in over the nape
- * meets the neck's skin below it without a step, and out where it is
- * fuller; and out to a painted-haired head's scalp over the cranium (by
- * the skull's zone), so a bun taken in lies under the scalp round it, not
- * in a pit. Each skull point goes to the skin where it has some beside it,
- * and as far as those round it do where it hasn't (under long hair, or a
- * bun).
- */
-function skinFitted(skull: Skull, skin: Surface, neck: number): Skull {
-  const count = skull.points.length / 3
-  const known = new Float32Array(count).fill(Number.NaN)
-  // How much of the way to the skin each point may go: down the neck
-  // either way, over the cranium only out.
-  const outward = (i: number) => smoothstep(ZONE_FROM, ZONE_TO, skull.zone[i]!)
-  const inward = (y: number) => smoothstep(neck + NAPE, neck, y)
-  for (let i = 0; i < count; i++) {
-    const y = skull.points[i * 3 + 1]!
-    if (outward(i) === 0 && inward(y) === 0) continue
-    if (standOver(skin, null, skull.points[i * 3]!, y, skull.points[i * 3 + 2]!, stand) < 0)
-      continue
-    const sideways = Math.sqrt(Math.max(0, distances[0]! - stand[0]! ** 2))
-    if (sideways <= SKIN_BESIDE && Math.abs(stand[0]!) <= SKIN_FIT) known[i] = stand[0]!
-  }
-  const points = new Float32Array(skull.points)
-  for (let i = 0; i < count; i++) {
-    let taken = known[i]!
-    if (Number.isNaN(taken)) {
-      // As far as the known ones round it, the nearer the more.
-      const near = skull.grid.nearest(
-        skull.points[i * 3]!,
-        skull.points[i * 3 + 1]!,
-        skull.points[i * 3 + 2]!,
-        FIT_AROUND,
-        found,
-        distances,
-      )
-      let sum = 0
-      let total = 0
-      for (let j = 0; j < near; j++) {
-        const other = known[found[j]!]!
-        if (Number.isNaN(other) || distances[j]! > FIT_REACH ** 2) continue
-        const weight = 1 / (distances[j]! + NEAR_SOFTEN)
-        sum += other * weight
-        total += weight
-      }
-      taken = total > 0 ? sum / total : 0
-    }
-    const down = inward(skull.points[i * 3 + 1]!)
-    taken *= taken > 0 ? down : Math.max(down, outward(i))
-    for (let axis = 0; axis < 3; axis++) {
-      points[i * 3 + axis]! -= skull.normals[i * 3 + axis]! * taken
-    }
-  }
-  return { ...skull, points, grid: new PointGrid(points, SKULL_CELL) }
-}
-
-/**
- * How far (bind units) above the top of the neck the skull's back of the
- * head comes in to the neck under it.
- */
-const NAPE = 0.05
-
-/**
- * How far (bind units) a skull point goes to the skin at most (further,
- * the skin beside it is an ear, a nose), and how far to one side of the
- * skin's nearest point it may be.
- */
-const SKIN_FIT = 0.03
-const SKIN_BESIDE = 0.04
-
-/** How many skull points round one it goes as far as, and how far off they may be. */
-const FIT_AROUND = 12
-const FIT_REACH = 0.04
-
-/**
- * The line down the middle of a fitted skull: from the middle of its
- * bounds above the top of the neck (`neck`) through the middle of those of
- * its bottom, and on down. `nearest` is a point's nearest place on it (no
- * higher than its top); `bottom` the skull's lowest height.
- */
-function skullMiddle(skull: Skull, neck: number) {
-  let bottom = Number.POSITIVE_INFINITY
-  for (let i = 1; i < skull.points.length; i += 3) bottom = Math.min(bottom, skull.points[i]!)
-  const low = [0, 1, 2].map(() => Number.POSITIVE_INFINITY)
-  const high = low.map(() => Number.NEGATIVE_INFINITY)
-  const bottomLow = [...low]
-  const bottomHigh = [...high]
-  for (let i = 0; i < skull.points.length / 3; i++) {
-    const y = skull.points[i * 3 + 1]!
-    const [from, to] = y > neck ? [low, high] : y < bottom + RIM ? [bottomLow, bottomHigh] : []
-    if (!(from && to)) continue
-    for (let axis = 0; axis < 3; axis++) {
-      from[axis] = Math.min(from[axis]!, skull.points[i * 3 + axis]!)
-      to[axis] = Math.max(to[axis]!, skull.points[i * 3 + axis]!)
-    }
-  }
-  const top = low.map((value, axis) => (value + high[axis]!) / 2)
-  const base = bottomLow.map((value, axis) => (value + bottomHigh[axis]!) / 2)
-  const length = Math.hypot(...base.map((value, axis) => value - top[axis]!)) || 1
-  const down = base.map((value, axis) => (value - top[axis]!) / length)
-  return {
-    bottom,
-    nearest: (x: number, y: number, z: number) => {
-      const along = Math.max(
-        0,
-        (x - top[0]!) * down[0]! + (y - top[1]!) * down[1]! + (z - top[2]!) * down[2]!,
-      )
-      return top.map((value, axis) => value + down[axis]! * along)
-    },
-  }
-}
-
-/**
- * A head's hair volume taken in (see `deflation`) ironed flat: its points
- * (`points`, joined by the triangles of `index`, and at one spot across a
- * texture seam) each drawn a few times towards the middle of those round
- * it, never out along the normal it was pressed onto — so the hem of long
- * hair, its outside taken in past its inside, lies flat instead of folding
- * out in flaps. Points not pressed at all (lying on the skin already) hold
- * it in place, save one with pressed points all round it. Returns the
- * ironed moves.
- */
-export function ironed(
-  points: Triples,
-  index: ArrayLike<number>,
-  { moves, pressed }: { moves: Float32Array; pressed: Float32Array },
-): Float32Array {
-  const { spots, count } = spotsOf(points)
-  const around = Array.from({ length: count }, () => new Set<number>())
-  for (let t = 0; t < index.length; t += 3) {
-    for (let a = 0; a < 3; a++) {
-      for (let b = 0; b < 3; b++) {
-        if (a !== b) around[spots[index[t + a]!]!]!.add(spots[index[t + b]!]!)
-      }
-    }
-  }
-  let at = new Float32Array(count * 3)
-  const normal = new Float32Array(count * 3)
-  const pressing = new Uint8Array(count)
-  for (let i = 0; i < points.length / 3; i++) {
-    const spot = spots[i]!
-    for (let axis = 0; axis < 3; axis++) {
-      at[spot * 3 + axis] = points[i * 3 + axis]! + moves[i * 3 + axis]!
-      normal[spot * 3 + axis] = pressed[i * 3 + axis]!
-    }
-    if (pressed[i * 3]! || pressed[i * 3 + 1]! || pressed[i * 3 + 2]!) pressing[spot] = 1
-  }
-  // A few points the shell was missing (a speck the hair mask found none
-  // on) with pressed points all round them are ironed with them, as they lie.
-  const seen = new Uint8Array(count)
-  for (let spot = 0; spot < count; spot++) {
-    if (pressing[spot] || seen[spot]) continue
-    const hole = [spot]
-    seen[spot] = 1
-    for (let k = 0; k < hole.length; k++) {
-      for (const other of around[hole[k]!]!) {
-        if (pressing[other] || seen[other]) continue
-        seen[other] = 1
-        hole.push(other)
-      }
-    }
-    if (hole.length > HOLE || around[spot]!.size === 0) continue
-    for (const each of hole) {
-      for (const other of around[each]!) {
-        for (let axis = 0; axis < 3; axis++) normal[each * 3 + axis]! += normal[other * 3 + axis]!
-      }
-    }
-    for (const each of hole) pressing[each] = 1
-  }
-  const pull = [0, 0, 0]
-  for (let round = 0; round < IRON_ROUNDS; round++) {
-    const next = new Float32Array(at)
-    for (let spot = 0; spot < count; spot++) {
-      const others = around[spot]!
-      if (!pressing[spot] || others.size === 0) continue
-      pull.fill(0)
-      for (const other of others) {
-        for (let axis = 0; axis < 3; axis++) pull[axis]! += at[other * 3 + axis]! / others.size
-      }
-      for (let axis = 0; axis < 3; axis++)
-        pull[axis] = (pull[axis]! - at[spot * 3 + axis]!) * IRON_PULL
-      const nx = normal[spot * 3]!
-      const ny = normal[spot * 3 + 1]!
-      const nz = normal[spot * 3 + 2]!
-      const out =
-        (pull[0]! * nx + pull[1]! * ny + pull[2]! * nz) / (nx * nx + ny * ny + nz * nz || 1)
-      for (let axis = 0; axis < 3; axis++) {
-        next[spot * 3 + axis]! += pull[axis]! - Math.max(0, out) * normal[spot * 3 + axis]!
-      }
-    }
-    at = next
-  }
-  return Float32Array.from(
-    { length: points.length },
-    (_, j) => at[spots[Math.floor(j / 3)]! * 3 + (j % 3)]! - points[j]!,
-  )
-}
-
-/** The most points a hole in the shell has (more, and it is skin the hair surrounds, such as an ear). */
-const HOLE = 6
-
-/**
- * How many times the taken-in hair is ironed, and how far each time
- * towards the middle of the points round each.
- */
-const IRON_ROUNDS = 12
-const IRON_PULL = 0.5
-
-/**
- * How far (bind units) out of the head's own skin a shell point starts to
- * be volume to take in, and surely is (a sideburn painted onto the face
- * lies on it).
- */
-const OUT_FROM = 0.003
-const OUT_TO = 0.008
-
-/** Where the skull's hair zone starts taking a head's volume in, and where it takes all of it. */
-const ZONE_FROM = 0.05
-const ZONE_TO = 0.3
-
-/**
- * How far (bind units) off the skull's nearest point shell starts to be
- * taken in whatever the zone, and where it all is (a face's own shape
- * strays from the skull's by 0.005 at most).
- */
-const OFF_FROM = 0.006
-const OFF_TO = 0.012
-
-/**
- * How far (bind units) under the skull's surface a head's own hair volume
- * is taken, and under the body's (a collar's cloth is thin).
- */
-const SINK = 0.002
-const BODY_SINK = 0.01
-
-/** How much further under the skull a point goes for each unit it stood out of it. */
-const FOLD = 0.1
-
-/**
- * How near (bind units) a point of the skull, or of the body, a ray must
- * go into it for that to count: past the edge of either (a head's skull
- * ends at its neck, a body at its neckline) the nearest point is further
- * off. The body's points are sparser.
- */
-const SKULL_REACH = 0.04
-const BODY_REACH = 0.06
-
-/** Skull points this near (bind units) its bottom are round the neck's bottom. */
-const RIM = 0.02
-
-/**
- * How far (bind units) either side of the top of the neck the cranium's
- * zone gives way to taking in only what stands off.
- */
-const NECK_BAND = 0.02
-
-const smoothstep = (from: number, to: number, x: number) => {
-  const t = Math.min(1, Math.max(0, (x - from) / (to - from)))
-  return t * t * (3 - 2 * t)
-}
 
 /** Kinds of an opacity mesh's pieces. */
 export const LASH = 0
@@ -1047,30 +343,6 @@ export function carryPoints(
   return carried
 }
 
-/** A body's surface as points with normals (bind pose), for hair to stay out of. */
-export type Surface = { points: Triples; normals: Triples; grid: PointGrid }
-
-/**
- * Lifts points out of a surface (in place): each one inside it, or nearer
- * it than `clearance` (bind units), goes out along its normal to that
- * clearance. A point deeper in than `reach` is left be: the surface
- * nearest it is not one it went through.
- */
-export function pushOut(points: Float32Array, surface: Surface, clearance: number, reach: number) {
-  const count = points.length / 3
-  for (let i = 0; i < count; i++) {
-    const x = points[i * 3]!
-    const y = points[i * 3 + 1]!
-    const z = points[i * 3 + 2]!
-    if (standOver(surface, null, x, y, z, stand) < 0) continue
-    const lift = clearance - stand[0]!
-    if (lift <= 0 || lift > reach) continue
-    points[i * 3] = x + stand[1]! * lift
-    points[i * 3 + 1] = y + stand[2]! * lift
-    points[i * 3 + 2] = z + stand[3]! * lift
-  }
-}
-
 /** A triangle with less area (texels²) than this on its texture covers none of it. */
 const FLAT = 1e-12
 
@@ -1110,63 +382,195 @@ function fillTexels(
   }
 }
 
-/** Grows a mask by a texel each way (the largest value round each texel), so a UV island's rim keeps it. */
-function grown(mask: Float32Array, width: number, height: number): Float32Array {
-  const out = new Float32Array(mask)
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let most = out[y * width + x]!
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx
-          const ny = y + dy
-          if (nx >= 0 && ny >= 0 && nx < width && ny < height) {
-            most = Math.max(most, mask[ny * width + nx]!)
+/**
+ * In the donor's sculpted shell (see `CapTriangle`), a texel this unlike
+ * its skin (see `colorDistance`) starts to be hair, and this unlike is
+ * wholly: a highlight can come near the skin's colour, but not to it.
+ */
+const SKIN_NEAR = 0.1
+const SKIN_FAR = 0.2
+
+/**
+ * The cap's hair, on a 1024 texture: closed over gaps CLOSE texels across
+ * (a sideburn's or a hairline's sparse strands one patch, not specks);
+ * without patches of fewer than SPECK texels (a pore, a mole, a blemish of
+ * the donor's skin); its edge faded over EDGE texels.
+ */
+const CLOSE = 3
+const SPECK = 120
+const EDGE = 3
+
+/** A triangle of the cap on its texture (corners in 0–1 UVs): `solid` on the hair's sculpted shell. */
+export type CapTriangle = { u: number[]; v: number[]; solid: boolean }
+
+/**
+ * The cap's texture: the donor's head texture with everything but its hair
+ * cut away (alpha 0), the donor's skin round it and on it never carried
+ * over. Hair is what is nearer the hair's colour than the skin's — the hair
+ * painted onto the scalp, the temples, the sideburns — and, on the sculpted
+ * shell (`solid`), what isn't plainly skin; closed over its gaps, cleared
+ * of specks and faded at its edge, never across a UV island's rim (see
+ * CLOSE; the cap is drawn blended: see `hairAssetOf`).
+ */
+export function capPixels(
+  head: Pixels,
+  hair: Rgb,
+  skin: Rgb,
+  triangles: readonly CapTriangle[],
+): Pixels {
+  const { width, height, data } = head
+  const mask = hairMask(head, hair, skin)
+  const skinLum = luminance(...skin)
+  const notSkin = (texel: number) =>
+    smoothstep(
+      SKIN_NEAR,
+      SKIN_FAR,
+      colorDistance(data[texel * 4]!, data[texel * 4 + 1]!, data[texel * 4 + 2]!, skin, skinLum),
+    )
+  const covered = new Uint8Array(mask.length)
+  const hairy = new Uint8Array(mask.length)
+  for (const tri of triangles) {
+    fillTexels(width, height, tri.u, tri.v, (texel) => {
+      covered[texel] = 1
+      const share = tri.solid ? Math.max(mask[texel]!, notSkin(texel)) : mask[texel]!
+      if (share >= 0.5) hairy[texel] = 1
+    })
+  }
+  const scale = width / 1024
+  const reach = Math.max(1, Math.round(CLOSE * scale))
+  const closed = spread(
+    spread(hairy, covered, width, height, reach, 1),
+    covered,
+    width,
+    height,
+    reach,
+    0,
+  )
+  const kept = withoutSpecks(closed, width, height, Math.round(SPECK * scale * scale))
+  const soft = softened(kept, covered, width, height, Math.max(1, Math.round(EDGE * scale)))
+  const out: Pixels = { data: new Uint8ClampedArray(data), width, height }
+  for (let i = 0; i < mask.length; i++) out.data[i * 4 + 3] = Math.round(255 * soft[i]!)
+  return out
+}
+
+/**
+ * A mask grown (`value` 1) or shrunk (`value` 0) by `reach` texels each way
+ * over the texels `covered` holds; texels it doesn't hold neither grow nor
+ * shrink it, so a UV island's rim stays where it is.
+ */
+function spread(
+  mask: Uint8Array,
+  covered: Uint8Array,
+  width: number,
+  height: number,
+  reach: number,
+  value: 0 | 1,
+): Uint8Array {
+  const pass = (from: Uint8Array, along: boolean) => {
+    const out = new Uint8Array(from)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const texel = y * width + x
+        if (!covered[texel] || from[texel] === value) continue
+        for (let d = -reach; d <= reach; d++) {
+          const nx = along ? x + d : x
+          const ny = along ? y : y + d
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
+          const other = ny * width + nx
+          if (covered[other] && from[other] === value) {
+            out[texel] = value
+            break
           }
         }
       }
-      out[y * width + x] = most
+    }
+    return out
+  }
+  return pass(pass(mask, true), false)
+}
+
+/** A mask without its patches (4-connected) of fewer than `fewest` texels. */
+function withoutSpecks(mask: Uint8Array, width: number, height: number, fewest: number) {
+  const out = new Uint8Array(mask)
+  const seen = new Uint8Array(mask.length)
+  const patch: number[] = []
+  for (let start = 0; start < mask.length; start++) {
+    if (!mask[start] || seen[start]) continue
+    patch.length = 0
+    patch.push(start)
+    seen[start] = 1
+    for (let k = 0; k < patch.length; k++) {
+      const texel = patch[k]!
+      const x = texel % width
+      const neighbours = [
+        x > 0 ? texel - 1 : -1,
+        x < width - 1 ? texel + 1 : -1,
+        texel >= width ? texel - width : -1,
+        texel < width * (height - 1) ? texel + width : -1,
+      ]
+      for (const other of neighbours) {
+        if (other >= 0 && mask[other] && !seen[other]) {
+          seen[other] = 1
+          patch.push(other)
+        }
+      }
+    }
+    if (patch.length < fewest) for (const texel of patch) out[texel] = 0
+  }
+  return out
+}
+
+/** A mask averaged over each texel and those within `reach` round it that `covered` holds: only texels it holds change. */
+function softened(
+  mask: Uint8Array,
+  covered: Uint8Array,
+  width: number,
+  height: number,
+  reach: number,
+): Float32Array {
+  const out = Float32Array.from(mask)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (!covered[y * width + x]) continue
+      let sum = 0
+      let n = 0
+      for (let dy = -reach; dy <= reach; dy++) {
+        for (let dx = -reach; dx <= reach; dx++) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height || !covered[ny * width + nx]) continue
+          sum += mask[ny * width + nx]!
+          n++
+        }
+      }
+      out[y * width + x] = sum / n
     }
   }
   return out
 }
 
 /**
- * The cap's texture: the donor's head texture with everything but its hair
- * cut away (alpha 0) — the skin round the hairline, where the cap reaches
- * past the hair. A triangle all of whose corners are the hair's shell
- * (`shell`, 1 or 0 per corner) is hair whatever its colour (a highlight
- * can pass for skin); along the hairline, hair is what is nearer the
- * hair's colour than the skin's, and less so towards corners off the
- * shell (a pale skin can pass for blond hair).
+ * The colour of a donor's hair as its head is painted with it: the median
+ * (by lightness) of the texels of its sculpted shell (`solid` triangles).
+ * Short hair painted onto the scalp is nearer it than the cards' colour,
+ * which strands lit through and edge on make lighter. Null for none.
  */
-export function capPixels(
-  head: Pixels,
-  hair: Rgb,
-  skin: Rgb,
-  triangles: readonly { u: number[]; v: number[]; shell: number[] }[],
-): Pixels {
-  const mask = hairMask(head, hair, skin)
-  const solid = new Float32Array(mask.length)
-  const edge = new Float32Array(mask.length)
+function paintedHair(head: Pixels, triangles: readonly CapTriangle[]): Rgb | null {
+  const samples: Rgb[] = []
   for (const tri of triangles) {
-    const [a, b, c] = tri.shell as [number, number, number]
-    fillTexels(head.width, head.height, tri.u, tri.v, (texel, w0, w1, w2) => {
-      if (a && b && c) solid[texel] = 1
-      else edge[texel] = Math.max(edge[texel]!, mask[texel]! * (a * w0 + b * w1 + c * w2))
+    if (!tri.solid) continue
+    fillTexels(head.width, head.height, tri.u, tri.v, (texel) => {
+      if (texel % PAINTED_SAMPLE !== 0) return
+      const p = texel * 4
+      samples.push([head.data[p]!, head.data[p + 1]!, head.data[p + 2]!])
     })
   }
-  const shell = grown(solid, head.width, head.height)
-  const out: Pixels = {
-    data: new Uint8ClampedArray(head.data),
-    width: head.width,
-    height: head.height,
-  }
-  for (let i = 0; i < mask.length; i++) {
-    out.data[i * 4 + 3] = Math.round(255 * Math.max(edge[i]!, shell[i]!))
-  }
-  return out
+  if (samples.length === 0) return null
+  return byLightness(samples, 0.5)
 }
+
+/** One texel in this many is read for a donor's painted hair colour: enough for a median. */
+const PAINTED_SAMPLE = 7
 
 /** How far (bind units) round a cheek bone the skin's colour is sampled. */
 const CHEEK_REACH = 0.015
@@ -1195,8 +599,7 @@ function skinTone(head: Pixels, uvs: Triples, points: Triples, cheeks: Triples[]
     samples.push([head.data[p]!, head.data[p + 1]!, head.data[p + 2]!])
   }
   if (samples.length === 0) return null
-  samples.sort((a, b) => luminance(...a) - luminance(...b))
-  return samples[Math.floor(samples.length / 2)]!
+  return byLightness(samples, 0.5)
 }
 
 /** A skinned mesh's bones' places in the bind pose (xyz per bone). */
@@ -1308,7 +711,7 @@ function ownMeshes(model: Object3D, part: 'body' | 'opacity'): SkinnedMesh[] {
   const found: SkinnedMesh[] = []
   model.traverse((object) => {
     const mesh = object as SkinnedMesh
-    if (!mesh.isSkinnedMesh || Array.isArray(mesh.material)) return
+    if (!mesh.isSkinnedMesh || Array.isArray(mesh.material) || mesh.userData.follows) return
     if (ownMaterial(mesh).name.endsWith(`_${part}`)) found.push(mesh)
   })
   return found
@@ -1339,10 +742,11 @@ function kindsOf(mesh: SkinnedMesh): Uint8Array {
 }
 
 /**
- * What a hairstyle is carried over by: the shared skull, and which points
- * of each card-haired head (by its material's name) are its hair's shell.
+ * What a hairstyle is carried over by: the shared skull; which points of
+ * each card-haired head (by its material's name) are its hair's shell; and
+ * which triangles of every head are its own hair (see bald-head.ts).
  */
-export type HairBasis = Pick<HairLibrary, 'skull' | 'shells'>
+export type HairBasis = Pick<HairLibrary, 'skull' | 'shells' | 'bald'>
 
 /** Which points of a head are its hair's shell (1), or null for a head whose hair is only painted on. */
 const shellOf = (head: Mesh, basis: HairBasis) => basis.shells.get(ownMaterial(head).name) ?? null
@@ -1437,9 +841,15 @@ export type HairAsset = {
 
 /**
  * The skull's hair share a cap triangle's every corner has at least, when
- * on the skull: a beard or sideburn painted onto the face stays the donor's.
+ * on the skull: the face — its brows, a beard — stays the donor's.
  */
-const CAP_ZONE = 0.1
+const CAP_ZONE = 0.02
+
+/** Where the skull's zone is at least this at every corner, the donor's head is scalp: in the cap, for any hair painted there. */
+const CAP_SCALP = 0.05
+
+/** A cap triangle's corners off the skull's nearest point by more than this are hair whatever the zone. */
+const CAP_OFF = 0.006
 
 /** How far (bind units) the cap and the cards are kept off the wearer. */
 const CAP_CLEARANCE = 0.0015
@@ -1451,9 +861,94 @@ const PUSH_REACH = 0.03
 /** The cards' cut-out, as the characters' own (see avatar-rig.ts). */
 const CARD_ALPHA_TEST = 0.4
 
-/** The cap's cut-out: its hair against the skin cut away round it. */
-const CAP_ALPHA_TEST = 0.5
-const CAP_BLEED_BELOW = Math.round(CAP_ALPHA_TEST * 255)
+/**
+ * The cap is blended over the bald head, its faintest texels (below
+ * CAP_ALPHA_TEST) not drawn. Every texel not wholly hair takes the colour
+ * of the hair round it (see `bleedHair`): a hairline's strands over the
+ * donor's skin, or short hair the skin shows through, are hair-coloured
+ * and as opaque as there is hair, the wearer's own skin showing through
+ * them instead of the donor's.
+ */
+const CAP_ALPHA_TEST = 0.05
+const CAP_BLEED_BELOW = 255
+
+/** A piece of a head's hair this small beside its largest, wholly below the neck, is worn there: a bead, a pendant. */
+const JEWEL = 0.05
+
+/**
+ * Which of a head's own hair triangles (`own`) are jewellery its mesh
+ * models with it (see JEWEL): pieces joined at corners, or at corners at
+ * one spot; `neck` the top of the neck's height (bind pose).
+ */
+function jewellery(
+  own: Uint8Array,
+  index: ArrayLike<number>,
+  points: Triples,
+  spots: Int32Array,
+  spotCount: number,
+  neck: number,
+): Uint8Array {
+  const parent = Int32Array.from({ length: spotCount }, (_, i) => i)
+  const find = (a: number): number => {
+    while (parent[a] !== a) {
+      parent[a] = parent[parent[a]!]!
+      a = parent[a]!
+    }
+    return a
+  }
+  const count = index.length / 3
+  for (let t = 0; t < count; t++) {
+    if (!own[t]) continue
+    const a = find(spots[index[t * 3]!]!)
+    parent[find(spots[index[t * 3 + 1]!]!)] = a
+    parent[find(spots[index[t * 3 + 2]!]!)] = a
+  }
+  const pieces = new Map<number, { size: number; top: number }>()
+  for (let t = 0; t < count; t++) {
+    if (!own[t]) continue
+    const root = find(spots[index[t * 3]!]!)
+    const piece = pieces.get(root) ?? { size: 0, top: Number.NEGATIVE_INFINITY }
+    piece.size++
+    for (let k = 0; k < 3; k++) piece.top = Math.max(piece.top, points[index[t * 3 + k]! * 3 + 1]!)
+    pieces.set(root, piece)
+  }
+  const largest = Math.max(0, ...[...pieces.values()].map((piece) => piece.size))
+  return Uint8Array.from({ length: count }, (_, t) => {
+    const piece = own[t] ? pieces.get(find(spots[index[t * 3]!]!)) : undefined
+    return piece && piece.size < JEWEL * largest && piece.top < neck ? 1 : 0
+  })
+}
+
+/**
+ * Of a cap's triangles, those in pieces (joined at corners, or at corners
+ * at one spot) that hold some of the hair (`onHair`, by spot): what else
+ * the donor's head mesh models on the scalp's zone — a necklace's beads on
+ * its chest — stays the donor's.
+ */
+function joinedToHair(
+  triangles: readonly number[],
+  index: ArrayLike<number>,
+  spots: Int32Array,
+  spotCount: number,
+  onHair: Uint8Array,
+): number[] {
+  const parent = Int32Array.from({ length: spotCount }, (_, i) => i)
+  const find = (a: number): number => {
+    while (parent[a] !== a) {
+      parent[a] = parent[parent[a]!]!
+      a = parent[a]!
+    }
+    return a
+  }
+  for (const t of triangles) {
+    const a = find(spots[index[t * 3]!]!)
+    parent[find(spots[index[t * 3 + 1]!]!)] = a
+    parent[find(spots[index[t * 3 + 2]!]!)] = a
+  }
+  const hairy = new Uint8Array(spotCount)
+  for (let spot = 0; spot < spotCount; spot++) if (onHair[spot]) hairy[find(spot)] = 1
+  return triangles.filter((t) => hairy[find(spots[index[t * 3]!]!)])
+}
 
 /**
  * A hairstyle from a donor's loaded scene: the cap (its head's triangles
@@ -1479,21 +974,49 @@ export function hairAssetOf(
   const { zone, off } = standingOver(points, skull)
   const shell = shellOf(head, basis)
   const index = indexOf(geometry)
-  const clearOfFace = (i: number) => zone[i]! >= CAP_ZONE || off[i]! > OFF_FROM
+  const clearOfFace = (i: number) => zone[i]! >= CAP_ZONE || off[i]! > CAP_OFF
+  // The cap: the donor's own hair as a bald head of it would lose it (see
+  // bald-head.ts) — its sculpted shell, and its hair painted onto the
+  // scalp — and the skin round it clear of the face, where a hairline, a
+  // temple or a sideburn is painted.
+  const own = basis.bald.get(ownMaterial(head).name)
+  const { spots, count: spotCount } = spotsOf(points)
+  const onHair = new Uint8Array(spotCount)
   const capTriangles: number[] = []
-  for (let t = 0; shell && t < index.length / 3; t++) {
+  const neck =
+    boneBindPositions(head)[head.skeleton.bones.findIndex((b) => isHeadBone(b.name)) * 3 + 1]
+  const worn =
+    own && neck !== undefined ? jewellery(own, index, points, spots, spotCount, neck) : null
+  for (let t = 0; (own || shell) && t < index.length / 3; t++) {
     const corners = [0, 1, 2].map((k) => index[t * 3 + k]!)
-    if (corners.some((i) => shell[i]) && corners.every(clearOfFace)) capTriangles.push(t)
+    // What a bald head of the donor loses is all its hair, to its hairline
+    // (the face is never among it), but for what it wears below its neck.
+    if (
+      own
+        ? own[t] === 1 && !worn?.[t]
+        : corners.some((i) => shell![i]) && corners.every(clearOfFace)
+    ) {
+      capTriangles.push(t)
+      for (const i of corners) onHair[spots[i]!] = 1
+    }
   }
+  for (let t = 0; shell && own && t < index.length / 3; t++) {
+    const corners = [0, 1, 2].map((k) => index[t * 3 + k]!)
+    if (own[t]) continue
+    const round = corners.some((i) => onHair[spots[i]!]) && corners.every(clearOfFace)
+    if (round || corners.every((i) => zone[i]! >= CAP_SCALP)) capTriangles.push(t)
+  }
+  const capped = joinedToHair(capTriangles, index, spots, spotCount, onHair)
   const opacity = ownMeshes(scene, 'opacity')[0]
   const parts: HairPart[] = []
   const opacityMaterial = opacity && ownMaterial(opacity)
   const hair = pixels?.opacity ? meanColor(pixels.opacity) : null
-  if (capTriangles.length > 0) {
+  if (capped.length > 0) {
     const material = ownMaterial(head).clone()
     material.name = `${id}:hair-cap`
     Object.assign(material, {
-      transparent: false,
+      transparent: true,
+      depthWrite: true,
       alphaTest: CAP_ALPHA_TEST,
       side: FrontSide,
       // Where the cap lies on the wearer's own scalp, it is drawn over it.
@@ -1503,7 +1026,7 @@ export function hairAssetOf(
     })
     const cap: HairPart = {
       name: 'cap',
-      geometry: subset(head, geometry, capTriangles, true),
+      geometry: subset(head, geometry, capped, true),
       material,
       pixels: null,
       dyeMask: null,
@@ -1521,18 +1044,19 @@ export function hairAssetOf(
     const cheeks = [...places].filter(([name]) => /Cheek$/.test(name)).map(([, place]) => place)
     const skin = pixels && skinTone(pixels.head, uvs, points, cheeks)
     if (pixels && hair && skin) {
+      const triangles = capped.map((t): CapTriangle => {
+        const at = [0, 1, 2].map((k) => index[t * 3 + k]!)
+        return {
+          u: at.map((i) => uvs[i * 2]!),
+          v: at.map((i) => uvs[i * 2 + 1]!),
+          solid: !!shell && at.every((i) => shell[i]),
+        }
+      })
       cap.pixels = capPixels(
         pixels.head,
-        hair,
+        paintedHair(pixels.head, triangles) ?? hair,
         skin,
-        capTriangles.map((t) => {
-          const at = [0, 1, 2].map((k) => index[t * 3 + k]!)
-          return {
-            u: at.map((i) => uvs[i * 2]!),
-            v: at.map((i) => uvs[i * 2 + 1]!),
-            shell: at.map((i) => shell![i]!),
-          }
-        }),
+        triangles,
       )
       cap.dyeMask = Float32Array.from(
         { length: cap.pixels.width * cap.pixels.height },
@@ -1571,96 +1095,683 @@ export function hairAssetOf(
   }
 }
 
-/** A head's own hair volume taken in (see `deflation`), and where its points stood (bind pose). */
-type Deflation = { moves: Float32Array; pressed: Float32Array; points: Float32Array }
-
-const deflations = new WeakMap<BufferGeometry, Deflation>()
+/**
+ * A head made bald (see bald-head.ts): its kept triangles, and its normals
+ * turned to the bald surface's near the cut; the bald
+ * surface closing it, in the head mesh's own space, skinned as the head
+ * round it and showing the texels the hair did; the notch the hair hid
+ * in the body's neckline closed (see `collarOf`); the head and the bald
+ * surface as one surface (bind pose) for another's hair to stay off; how
+ * its skin is painted round the cut; and the heights of the top of its
+ * skull and of its neck.
+ */
+type BaldHead = {
+  index: BufferAttribute
+  normal: BufferAttribute
+  scalp: BufferGeometry | null
+  collar: BufferGeometry | null
+  surface: Surface
+  paint: ScalpPaint
+  top: number
+  neck: number
+}
 
 /**
- * How a head's own hair volume is taken in under the skull (see
- * `deflation`, `ironed`), in its bind pose, worked out once per head
- * geometry. Null for a head whose hair is only painted on, or that the
- * skull doesn't fit.
+ * How far (bind units) from the nearest kept point the bald surface takes
+ * that point's skinning, and down the neck from the nearest point of the
+ * body (its clothes, its neck); the rest of it is skinned as what is round
+ * it (see `spreadWeights`).
  */
-function headDeflation(model: Object3D, head: SkinnedMesh, basis: HairBasis): Deflation | null {
-  const shell = shellOf(head, basis)
-  if (!shell) return null
-  const geometry = originalGeometry(head)
-  let taken = deflations.get(geometry)
-  if (!taken) {
-    const fit = faceFit(basis.skull, bonePlaces(head))
-    if (!fit) return null
-    const points = bindPoints(head, geometry, 'position')
-    const normals = bindPoints(head, geometry, 'normal')
-    const skin = (values: Float32Array) => values.filter((_, i) => !shell[Math.floor(i / 3)])
-    const skinPoints = skin(points)
-    const neck =
-      boneBindPositions(head)[
-        head.skeleton.bones.findIndex((bone) => isHeadBone(bone.name)) * 3 + 1
-      ]!
-    const pressed = deflation(points, fitSkull(basis.skull, fit), shell, {
-      skin: {
-        points: skinPoints,
-        normals: skin(normals),
-        grid: new PointGrid(skinPoints, SKULL_CELL),
-      },
-      body: surfaceOf(ownMeshes(model, 'body')),
-      neck,
-    })
-    taken = {
-      moves: ironed(points, indexOf(geometry), pressed),
-      pressed: pressed.pressed,
-      points,
+const SKINNED_AS_SKIN = 0.008
+const SKINNED_AS_BODY = 0.015
+
+/**
+ * How far (bind units) under the kept skin and the clothes the bald surface
+ * is tucked where it would stand out of them, within TUCK_REACH of them.
+ */
+const UNDER_KEPT = 0.0008
+const UNDER_CLOTHES = 0.003
+const TUCK_REACH = 0.015
+
+/** Where on a hair card (its corners' weights) its shadow is cast from. */
+const CARD_SAMPLES = [
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+  [0.5, 0.5, 0],
+  [0, 0.5, 0.5],
+  [0.5, 0, 0.5],
+  [1 / 3, 1 / 3, 1 / 3],
+] as const
+
+/** How far down the neck (bind units, from its top) and how near the body the bald surface gives way to the body. */
+const LOW_NECK = 0.04
+const ON_BODY = 0.01
+
+/** How far (bind units) under the middle of the body's neckline the bald surface reaches. */
+const UNDER_NECKLINE = 0.01
+
+/**
+ * Kept skin and the bald surface this near the cut (bind units) are lit
+ * alike, turning back to their own normals by TURN_BACK: at the cut the
+ * skin's own were smoothed with the hair taken out, and would shade the
+ * two apart.
+ */
+const TURN_FULL = 0.003
+const TURN_BACK = 0.015
+
+/** Kept skin standing this far over the skull, or on an ear, keeps its own normals. */
+const TURN_STANDING = 0.006
+
+const baldHeads = new WeakMap<BufferGeometry, BaldHead | null>()
+
+/**
+ * A head made bald (see `BaldHead`), worked out once per head geometry as
+ * loaded. Null for a head the library takes no hair off (one wearing a
+ * garment over it), or the skull doesn't fit.
+ */
+function baldHeadOf(model: Object3D, head: SkinnedMesh, basis: HairBasis): BaldHead | null {
+  const geometry = loadedGeometry(head)
+  let bald = baldHeads.get(geometry)
+  if (bald === undefined) {
+    bald = makeBald(model, head, geometry, basis)
+    baldHeads.set(geometry, bald)
+  }
+  return bald
+}
+
+/** A skinned mesh's bone slots and weights at a point, as pairs, its slots as `slots` maps them. */
+function skinOf(geometry: BufferGeometry, i: number, slots: (slot: number) => number) {
+  const index = geometry.getAttribute('skinIndex')
+  const weight = geometry.getAttribute('skinWeight')
+  const pairs: [number, number][] = []
+  for (let k = 0; k < index.itemSize; k++) {
+    const w = weight.getComponent(i, k)
+    if (w > 0) pairs.push([slots(index.getComponent(i, k)), w])
+  }
+  return pairs
+}
+
+function makeBald(
+  model: Object3D,
+  head: SkinnedMesh,
+  geometry: BufferGeometry,
+  basis: HairBasis,
+): BaldHead | null {
+  const own = basis.bald.get(ownMaterial(head).name)
+  const fit = faceFit(basis.skull, bonePlaces(head))
+  const eyes = eyesOf(head)
+  const headBone = head.skeleton.bones.findIndex((bone) => isHeadBone(bone.name))
+  const index = indexOf(geometry)
+  if (!(own?.includes(1) && fit && eyes && headBone >= 0) || own.length < index.length / 3) {
+    return null
+  }
+  const points = bindPoints(head, geometry, 'position')
+  const normals = bindPoints(head, geometry, 'normal')
+  const count = points.length / 3
+  const places = boneBindPositions(head)
+  const neck = places[headBone * 3 + 1]!
+  const marks = {
+    eyes: [eyes.slice(0, 3), eyes.slice(3, 6)],
+    neck,
+    nape: places[headBone * 3 + 2]!,
+  }
+  const { spots, count: spotCount } = spotsOf(points)
+  const fitted = fitSkull(basis.skull, fit)
+  const { height } = standingOver(points, fitted)
+  const taken = cleanCut({ points, index, spots, spotCount, height }, own, marks)
+  const kept = keptTriangles(index, taken)
+  const keptPoint = new Uint8Array(count)
+  for (const i of kept) keptPoint[i] = 1
+  const keptIds = [...keptPoint.keys()].filter((i) => keptPoint[i])
+  const anchors = new Float32Array(keptIds.length * 3)
+  keptIds.forEach((i, k) => {
+    anchors.set(points.subarray(i * 3, i * 3 + 3), k * 3)
+  })
+  const skull = neckFitted(fitted, anchors, neck)
+  // Hung before it is bent, so the neck skin kept to either side shapes the piece too.
+  const hung = withNeckPiece(skull, basis.skull.triangles, neck)
+  const bent = bentSkull({ ...skull, ...hung }, hung.triangles, anchors)
+  smoothNape(bent.points, hung.triangles, bent.known, neck, marks.nape)
+  const bald = { ...hung, points: bent.points, normals: vertexNormals(bent.points, hung.triangles) }
+  const chosen = scalpTriangles(bald, { points, normals, index: kept }, marks)
+
+  // The bald surface as a mesh beside the head: its points used.
+  const remap = new Map<number, number>()
+  const corners: number[] = []
+  for (const t of chosen) {
+    for (let k = 0; k < 3; k++) {
+      const old = bald.triangles[t * 3 + k]!
+      let fresh = remap.get(old)
+      if (fresh === undefined) {
+        fresh = remap.size
+        remap.set(old, fresh)
+      }
+      corners.push(fresh)
     }
-    deflations.set(geometry, taken)
   }
-  return taken
+  const olds = [...remap.keys()]
+  const scalpPoints = new Float32Array(olds.length * 3)
+  olds.forEach((old, i) => {
+    scalpPoints.set(bald.points.subarray(old * 3, old * 3 + 3), i * 3)
+  })
+  // Nowhere standing out of the skin the head keeps, nor down the neck out
+  // of the body's clothes: the skull's shape and the head's part by some
+  // millimetres round the cut, more round a thin neck.
+  const keptNormals = new Float32Array(anchors.length)
+  keptIds.forEach((i, k) => {
+    keptNormals.set(normals.subarray(i * 3, i * 3 + 3), k * 3)
+  })
+  const keptGrid = new PointGrid(anchors, SKULL_CELL)
+  const found: number[] = []
+  const distances: number[] = []
+  tuckUnder(
+    scalpPoints,
+    { points: anchors, normals: keptNormals, grid: keptGrid },
+    UNDER_KEPT,
+    TUCK_REACH,
+  )
+  const bodyMesh = ownMeshes(model, 'body')[0]
+  const bodyGeometry = bodyMesh && originalGeometry(bodyMesh)
+  const bodySurface = surfaceOf(ownMeshes(model, 'body'))
+  const low = olds.map((_, i) => i).filter((i) => scalpPoints[i * 3 + 1]! < neck)
+  const lowPoints = new Float32Array(low.length * 3)
+  low.forEach((i, k) => {
+    lowPoints.set(scalpPoints.subarray(i * 3, i * 3 + 3), k * 3)
+  })
+  tuckUnder(lowPoints, bodySurface, UNDER_CLOTHES, TUCK_REACH)
+  low.forEach((i, k) => {
+    scalpPoints.set(lowPoints.subarray(k * 3, k * 3 + 3), i * 3)
+  })
+  // The back of the body's neckline, which long hair may have hidden a
+  // notch in, closed with what the body shows round it.
+  const fan =
+    bodyMesh && bodyGeometry
+      ? necklineFan(
+          bindPoints(bodyMesh, bodyGeometry, 'position'),
+          indexOf(bodyGeometry),
+          places.subarray(headBone * 3, headBone * 3 + 3),
+        )
+      : null
+  // Nothing hangs into the clothes below that: seen down the neckline, it
+  // would show inside them.
+  if (fan && fan.points.length > 0) {
+    const lowest = fan.points[1]! - UNDER_NECKLINE
+    for (let i = 1; i < scalpPoints.length; i += 3) {
+      scalpPoints[i] = Math.max(scalpPoints[i]!, lowest)
+    }
+  }
+  // Low down the neck where the body's own skin or collar is, the body
+  // shows: what of the bald surface reaches there would stand out of it.
+  {
+    const kept: number[] = []
+    for (let t = 0; t < corners.length; t += 3) {
+      const onBody = [0, 1, 2].every((k) => {
+        const i = corners[t + k]!
+        return (
+          scalpPoints[i * 3 + 1]! < neck - LOW_NECK &&
+          bodySurface.grid.nearest(
+            scalpPoints[i * 3]!,
+            scalpPoints[i * 3 + 1]!,
+            scalpPoints[i * 3 + 2]!,
+            1,
+            found,
+            distances,
+            ON_BODY,
+          ) > 0
+        )
+      })
+      if (!onBody) kept.push(corners[t]!, corners[t + 1]!, corners[t + 2]!)
+    }
+    corners.length = 0
+    corners.push(...kept)
+  }
+  const scalpNormals = vertexNormals(scalpPoints, corners)
+  // The kept skin and the bald surface lit alike where they meet: each
+  // turned halfway to the other at the cut, back to its own by TURN_BACK.
+  const turned = new Float32Array(normals)
+  const scalpLit = new Float32Array(scalpNormals)
+  {
+    const onCut = new Uint8Array(count)
+    for (let t = 0; t < index.length / 3; t++) {
+      if (taken[t]) for (let k = 0; k < 3; k++) onCut[index[t * 3 + k]!] = 1
+    }
+    const cutIds = keptIds.filter((i) => onCut[i])
+    const cutGrid = new PointGrid(
+      Float32Array.from(
+        cutIds.flatMap((i) => [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!]),
+      ),
+      SKULL_CELL,
+    )
+    const scalpGrid = new PointGrid(scalpPoints, SKULL_CELL)
+    const turnOf = (x: number, y: number, z: number) =>
+      cutGrid.nearest(x, y, z, 1, found, distances, TURN_BACK) === 0
+        ? 0
+        : (1 - smoothstep(TURN_FULL, TURN_BACK, Math.sqrt(distances[0]!))) / 2
+    const turn = (
+      out: Float32Array,
+      own: Float32Array,
+      i: number,
+      other: Float32Array,
+      j: number,
+      share: number,
+    ) => {
+      let length = 0
+      for (let axis = 0; axis < 3; axis++) {
+        const value = own[i * 3 + axis]! + (other[j * 3 + axis]! - own[i * 3 + axis]!) * share
+        out[i * 3 + axis] = value
+        length += value * value
+      }
+      length = Math.sqrt(length) || 1
+      for (let axis = 0; axis < 3; axis++) out[i * 3 + axis]! /= length
+    }
+    for (const i of keptIds) {
+      const [x, y, z] = [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!]
+      if (height[i]! > TURN_STANDING || nearEar(x, y, z, marks)) continue
+      const share = turnOf(x, y, z)
+      if (share <= 0 || scalpGrid.nearest(x, y, z, 1, found, distances) === 0) continue
+      turn(turned, normals, i, scalpNormals, found[0]!, share)
+    }
+    for (let j = 0; j < scalpPoints.length / 3; j++) {
+      const [x, y, z] = [scalpPoints[j * 3]!, scalpPoints[j * 3 + 1]!, scalpPoints[j * 3 + 2]!]
+      if (nearEar(x, y, z, marks)) continue
+      const share = turnOf(x, y, z)
+      if (share <= 0 || keptGrid.nearest(x, y, z, 1, found, distances) === 0) continue
+      const i = keptIds[found[0]!]!
+      if (height[i]! > TURN_STANDING) continue
+      turn(scalpLit, scalpNormals, j, normals, i, share)
+    }
+  }
+  const vertices = olds.length
+  const aroundPoints = new Float32Array(anchors.length + scalpPoints.length)
+  aroundPoints.set(anchors)
+  aroundPoints.set(scalpPoints, anchors.length)
+  const surfaceAround = { points: aroundPoints, grid: new PointGrid(aroundPoints, SKULL_CELL) }
+
+  const uv = geometry.getAttribute('uv')
+  const uvs = new Float32Array(count * 2)
+  for (let i = 0; i < count; i++) {
+    uvs[i * 2] = uv.getX(i)
+    uvs[i * 2 + 1] = uv.getY(i)
+  }
+  const placed = scalpUvs(scalpPoints, corners, {
+    points,
+    uvs,
+    index,
+    triangles: [...taken.keys()].filter((t) => taken[t]),
+  })
+
+  // Skinned as the kept skin and the body where it meets them, and as what
+  // is round it elsewhere: a nape bound to the head alone would shear off
+  // the neck as the head turns.
+  const nearest = Array.from({ length: vertices }, (_, i) => {
+    const n = keptGrid.nearest(
+      scalpPoints[i * 3]!,
+      scalpPoints[i * 3 + 1]!,
+      scalpPoints[i * 3 + 2]!,
+      1,
+      found,
+      distances,
+    )
+    return n > 0 ? { at: keptIds[found[0]!]!, near: distances[0]! <= SKINNED_AS_SKIN ** 2 } : null
+  })
+  const bodyBones =
+    bodyMesh?.skeleton.bones.map((bone) => {
+      const same = head.skeleton.bones.indexOf(bone)
+      return same >= 0 ? same : head.skeleton.bones.findIndex((b) => b.name === bone.name)
+    }) ?? []
+  const known = nearest.map((from, i) => {
+    if (from?.near) return skinOf(geometry, from.at, (slot) => slot)
+    if (!(bodyGeometry && scalpPoints[i * 3 + 1]! < neck)) return null
+    const n = bodySurface.grid.nearest(
+      scalpPoints[i * 3]!,
+      scalpPoints[i * 3 + 1]!,
+      scalpPoints[i * 3 + 2]!,
+      1,
+      found,
+      distances,
+      SKINNED_AS_BODY,
+    )
+    if (n === 0) return null
+    const pairs = skinOf(bodyGeometry, found[0]!, (slot) => bodyBones[slot] ?? -1)
+    return pairs.every(([bone]) => bone >= 0) ? pairs : null
+  })
+  const skin = spreadWeights(
+    vertices,
+    corners,
+    known,
+    headBone,
+    geometry.getAttribute('skinIndex').itemSize,
+  )
+
+  const rings = cutRings(index, taken, spots, spotCount, TONE_RINGS)
+  const { zone } = standingOver(points, skull)
+  const scalpCorners = {
+    uvs: new Float32Array(placed.triangles.length * 2),
+    points: new Float32Array(placed.triangles.length * 3),
+  }
+  placed.triangles.forEach((f, k) => {
+    scalpCorners.uvs.set(placed.uvs.subarray(f * 2, f * 2 + 2), k * 2)
+    const i = placed.from[f]!
+    scalpCorners.points.set(scalpPoints.subarray(i * 3, i * 3 + 3), k * 3)
+  })
+  // What shaded the body: what was taken out of the head, and the cards.
+  const hairPoints: number[] = []
+  for (let t = 0; t < index.length / 3; t++) {
+    if (!taken[t]) continue
+    for (let k = 0; k < 3; k++) {
+      const i = index[t * 3 + k]!
+      hairPoints.push(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!)
+    }
+  }
+  for (const cards of ownMeshes(model, 'opacity')) {
+    const kinds = kindsOf(cards)
+    const cardGeometry = originalGeometry(cards)
+    const cardPoints = bindPoints(cards, cardGeometry, 'position')
+    const cardIndex = indexOf(cardGeometry)
+    for (let t = 0; t < kinds.length; t++) {
+      if (kinds[t] !== HAIR) continue
+      // A card is a few points far apart: its middle and its edges' too.
+      const [a, b, c] = [0, 1, 2].map((k) => cardIndex[t * 3 + k]! * 3)
+      for (const [wa, wb, wc] of CARD_SAMPLES) {
+        for (let axis = 0; axis < 3; axis++) {
+          hairPoints.push(
+            cardPoints[a! + axis]! * wa + cardPoints[b! + axis]! * wb + cardPoints[c! + axis]! * wc,
+          )
+        }
+      }
+    }
+  }
+  const bodyUv = bodyGeometry?.getAttribute('uv')
+  const shadow =
+    bodyMesh && bodyGeometry && bodyUv
+      ? hairShadow(
+          {
+            points: bindPoints(bodyMesh, bodyGeometry, 'position'),
+            uvs: Float32Array.from({ length: bodyUv.count * 2 }, (_, j) =>
+              bodyUv.getComponent(j >> 1, j & 1),
+            ),
+            index: indexOf(bodyGeometry),
+          },
+          hairPoints,
+          marks,
+        )
+      : new Float32Array()
+  const paint: ScalpPaint = {
+    ...scalpPaint({ points, normals, uvs, index }, taken, rings, spots, zone, marks, scalpCorners),
+    shadow,
+  }
+  let scalp: BufferGeometry | null = null
+  if (vertices > 0) {
+    const shade = hollowShade(scalpPoints, scalpNormals, surfaceAround)
+    scalp = new BufferGeometry()
+    const unbind = head.bindMatrix.clone().invert()
+    const unbindNormal = new Matrix3().getNormalMatrix(unbind)
+    const total = placed.from.length
+    const spread = (values: Float32Array) =>
+      Float32Array.from(
+        { length: total * 3 },
+        (_, j) => values[placed.from[Math.floor(j / 3)]! * 3 + (j % 3)]!,
+      )
+    const position = new BufferAttribute(spread(scalpPoints), 3)
+    const normal = new BufferAttribute(spread(scalpLit), 3)
+    position.applyMatrix4(unbind)
+    normal.applyNormalMatrix(unbindNormal)
+    scalp.setAttribute('position', position)
+    scalp.setAttribute('normal', normal)
+    scalp.setAttribute('uv', new BufferAttribute(placed.uvs, 2))
+    for (const [name, attribute] of Object.entries(geometry.attributes)) {
+      if (name === 'position' || name === 'normal' || name === 'uv') continue
+      const size = attribute.itemSize
+      const values =
+        name === 'skinIndex' ? new Uint16Array(total * size) : new Float32Array(total * size)
+      for (let f = 0; f < total; f++) {
+        const i = placed.from[f]!
+        const from = nearest[i]
+        for (let c = 0; c < size; c++) {
+          const at = f * size + c
+          if (name === 'skinIndex') values[at] = skin.index[i * size + c]!
+          else if (name === 'skinWeight') values[at] = skin.weight[i * size + c]!
+          else if (name === 'color' && c < 3)
+            values[at] = (from ? attribute.getComponent(from.at, c) : 1) * shade[i]!
+          else values[at] = from ? attribute.getComponent(from.at, c) : 0
+        }
+      }
+      scalp.setAttribute(name, new BufferAttribute(values, size))
+    }
+    scalp.setIndex(Array.from(placed.triangles))
+  }
+
+  const normal = new BufferAttribute(turned, 3)
+  normal.applyNormalMatrix(new Matrix3().getNormalMatrix(head.bindMatrix.clone().invert()))
+
+  const surfacePoints = new Float32Array((keptIds.length + olds.length) * 3)
+  const surfaceNormals = new Float32Array(surfacePoints.length)
+  keptIds.forEach((i, k) => {
+    surfacePoints.set(points.subarray(i * 3, i * 3 + 3), k * 3)
+    surfaceNormals.set(normals.subarray(i * 3, i * 3 + 3), k * 3)
+  })
+  surfacePoints.set(scalpPoints, keptIds.length * 3)
+  surfaceNormals.set(scalpNormals, keptIds.length * 3)
+  let top = Number.NEGATIVE_INFINITY
+  for (let i = 1; i < bald.points.length; i += 3) top = Math.max(top, bald.points[i]!)
+  return {
+    index: new BufferAttribute(
+      geometry.index?.array instanceof Uint16Array ? Uint16Array.from(kept) : kept,
+      1,
+    ),
+    normal,
+    scalp,
+    collar: fan && bodyMesh && bodyGeometry ? collarOf(fan, bodyMesh, bodyGeometry) : null,
+    surface: {
+      points: surfacePoints,
+      normals: surfaceNormals,
+      grid: new PointGrid(surfacePoints, SKULL_CELL),
+    },
+    paint,
+    top,
+    neck,
+  }
+}
+
+/** How far past a neckline's rim (in texture coordinates) the notch closing it reads the body's texture. */
+const PAST_RIM = 0.012
+
+/**
+ * The notch closing the back of a body's neckline (see `necklineFan`), in
+ * the body mesh's own space and skinned, lit and textured as the body round
+ * it: its middle as all of its rim, and its texture the body's just past
+ * the rim — a collar, or skin.
+ */
+
+function collarOf(
+  fan: ReturnType<typeof necklineFan>,
+  body: SkinnedMesh,
+  geometry: BufferGeometry,
+): BufferGeometry | null {
+  const count = fan.points.length / 3
+  if (count === 0) return null
+  let lowest = 1
+  for (let k = 2; k < count; k++) {
+    if (fan.points[k * 3 + 1]! < fan.points[lowest * 3 + 1]!) lowest = k
+  }
+  const collar = new BufferGeometry()
+  const position = new BufferAttribute(fan.points.slice(), 3)
+  position.applyMatrix4(body.bindMatrix.clone().invert())
+  collar.setAttribute('position', position)
+  for (const [name, attribute] of Object.entries(geometry.attributes)) {
+    if (name === 'position') continue
+    const size = attribute.itemSize
+    const values =
+      name === 'skinIndex' ? new Uint16Array(count * size) : new Float32Array(count * size)
+    for (let k = 1; k < count; k++) {
+      for (let c = 0; c < size; c++) values[k * size + c] = attribute.getComponent(fan.body[k]!, c)
+    }
+    if (name === 'skinIndex' || name === 'skinWeight') {
+      // The middle hangs from the bones of the rim's lowest point.
+      for (let c = 0; c < size; c++) values[c] = values[lowest * size + c]!
+    } else if (name === 'uv') {
+      // The texture inside a neckline's rim is the hole's (dark, or none):
+      // all of it shows the body's just out past the rim's lowest point.
+      const middle = [0, 0]
+      for (let k = 1; k < count; k++) {
+        middle[0]! += values[k * 2]! / (count - 1)
+        middle[1]! += values[k * 2 + 1]! / (count - 1)
+      }
+      const du = values[lowest * 2]! - middle[0]!
+      const dv = values[lowest * 2 + 1]! - middle[1]!
+      const length = Math.hypot(du, dv) || 1
+      const u = values[lowest * 2]! + (du / length) * PAST_RIM
+      const v = values[lowest * 2 + 1]! + (dv / length) * PAST_RIM
+      for (let k = 0; k < count; k++) values.set([u, v], k * 2)
+    } else {
+      for (let c = 0; c < size; c++) {
+        let sum = 0
+        for (let k = 1; k < count; k++) sum += values[k * size + c]!
+        values[c] = sum / (count - 1)
+      }
+    }
+    collar.setAttribute(name, new BufferAttribute(values, size))
+  }
+  collar.setIndex(fan.triangles)
+  return collar
+}
+
+/** Each head geometry as loaded, by a copy of it showing only its kept triangles (see `BaldHead`). */
+const baldGeometries = new WeakMap<BufferGeometry, BufferGeometry>()
+
+/** A geometry as loaded showing a bald head's kept triangles alone, sharing all else with it. */
+function baldGeometry(loaded: BufferGeometry, bald: BaldHead): BufferGeometry {
+  let geometry = baldGeometries.get(loaded)
+  if (!geometry) {
+    geometry = new BufferGeometry()
+    for (const [name, attribute] of Object.entries(loaded.attributes)) {
+      geometry.setAttribute(name, name === 'normal' ? bald.normal : attribute)
+    }
+    geometry.setIndex(bald.index)
+    baldGeometries.set(loaded, geometry)
+  }
+  return geometry
 }
 
 /**
- * Of the flatness a point pressed all the way onto a surface is given
- * across it, what is kept (the reshaping needs its stretch not to vanish).
+ * Makes a character's head bald (steps to undo it into `undo`): it shows
+ * only its kept triangles — as loaded, or as a shape already reshaped it
+ * (which reshapes the bald one from then on: see avatar-shape.ts) — and the
+ * bald surface closing it, a mesh just before it showing its material.
  */
-const PRESS_KEEP = 0.02
+function goBald(model: Object3D, head: SkinnedMesh, bald: BaldHead, undo: (() => void)[]) {
+  const loaded = loadedGeometry(head)
+  const shown = baldGeometry(loaded, bald)
+  head.userData.hairOriginal = loaded
+  // The kept triangles are numbered as the geometry's own points: a
+  // reshaped copy of it shows them as well.
+  if (head.userData.shapeOriginal) {
+    head.userData.shapeOriginal = shown
+    head.geometry.setIndex(bald.index)
+  } else {
+    head.geometry = shown
+  }
+  const scalp = bald.scalp && besides(head, bald.scalp, head.material as Material, 'hair:scalp')
+  if (scalp) {
+    // Coarser than the head, it would shade itself in facets.
+    scalp.castShadow = false
+    // Before the head, which `headOf` finds as the last.
+    const siblings = scalp.parent!.children
+    siblings.splice(siblings.indexOf(scalp), 1)
+    siblings.splice(siblings.indexOf(head), 0, scalp)
+    follow(scalp, head, unbumped)
+  }
+  const body = ownMeshes(model, 'body')[0]
+  const collar =
+    bald.collar && body && besides(body, bald.collar, body.material as Material, 'hair:collar')
+  if (collar) follow(collar, body!)
+  undo.push(() => {
+    scalp?.removeFromParent()
+    collar?.removeFromParent()
+    if (head.userData.shapeOriginal === shown) {
+      head.userData.shapeOriginal = loaded
+      head.geometry.setIndex(loaded.index)
+    } else if (head.geometry === shown) {
+      head.geometry = loaded
+    }
+    delete head.userData.hairOriginal
+  })
+}
+
+/** Worn on the head this near the skull's top (bind units) or higher, a mesh is headwear. */
+const HEADWEAR = 0.02
 
 /**
- * A deflation's moves for the reshaping: each point's own, the same
- * wherever the point is — save across the surface it is pressed onto,
- * where its surroundings are squashed flat. The reshaping turns a point's
- * normal by how its surroundings stretch, so hair pressed flat is shaded
- * as the skull it lies on, not as the bun or the lock it was.
+ * Hides what a character wears on its head as meshes of their own, for
+ * another's hair to go on (steps to undo it into `undo`): headwear — a
+ * helmet, a hat, what reaches up past the top of its skull (`top`, less
+ * HEADWEAR) — and with it what else it wears above the top of its neck
+ * (`neck`), a visor or a mask fixed to it. Glasses alone stay. Returns
+ * whether it had headwear.
  */
-function pressedMoves({ moves, pressed, points }: Deflation): PointMove {
-  return (point, index, move) => {
-    move.fromArray(moves, index * 3)
-    const px = pressed[index * 3]!
-    const py = pressed[index * 3 + 1]!
-    const pz = pressed[index * 3 + 2]!
-    const press = Math.hypot(px, py, pz)
-    if (press === 0) return
-    const across =
-      (((point.x - points[index * 3]!) * px +
-        (point.y - points[index * 3 + 1]!) * py +
-        (point.z - points[index * 3 + 2]!) * pz) *
-        (1 - PRESS_KEEP)) /
-      press
-    move.x -= px * across
-    move.y -= py * across
-    move.z -= pz * across
+function hideHeadwear(model: Object3D, top: number, neck: number, undo: (() => void)[]): boolean {
+  const worn: { mesh: SkinnedMesh; high: number; middle: number }[] = []
+  model.traverse((object) => {
+    const mesh = object as SkinnedMesh
+    if (!mesh.isSkinnedMesh || !mesh.visible || mesh.userData.follows) return
+    if (mesh.name.startsWith('hair:') || /_(head|body|opacity)$/.test(ownMaterial(mesh).name))
+      return
+    const points = bindPoints(mesh, originalGeometry(mesh), 'position')
+    let high = Number.NEGATIVE_INFINITY
+    let sum = 0
+    for (let i = 1; i < points.length; i += 3) {
+      high = Math.max(high, points[i]!)
+      sum += points[i]!
+    }
+    worn.push({ mesh, high, middle: sum / (points.length / 3) })
+  })
+  if (!worn.some(({ high }) => high >= top - HEADWEAR)) return false
+  for (const { mesh, high, middle } of worn) {
+    if (high < top - HEADWEAR && middle < neck) continue
+    mesh.visible = false
+    undo.push(() => {
+      mesh.visible = true
+    })
   }
+  return true
 }
 
 /**
- * The reshaping a character needs to wear another's hair, or none: its own
- * hair volume (a shell of its head, where it has hair cards) taken in under
- * the skull, for the borrowed hair to sit on — or, bald, to show the skull.
- * A character whose hair is only painted on keeps its head as it is.
+ * Makes a mesh show another's material, whatever that is from one frame to
+ * the next: a look dresses the character's own meshes (see avatar-look.ts)
+ * and frees what it dressed them in when a newer look replaces it, which a
+ * mesh that only copied it would go on showing.
  */
-export function hairShaper(model: Object3D, basis: HairBasis): Shaper {
-  const head = headOf(model) as SkinnedMesh | null
-  const taken = head?.isSkinnedMesh ? headDeflation(model, head, basis) : null
-  const move = taken && pressedMoves(taken)
-  return (mesh) => (move && mesh === head ? move : null)
+function follow(mesh: Mesh, source: Mesh, as: (material: Material) => Material = (m) => m) {
+  mesh.userData.follows = source
+  Object.defineProperty(mesh, 'material', {
+    get: () => as(source.material as Material),
+    set: () => {},
+    configurable: true,
+  })
+}
+
+const unbumpedCopies = new WeakMap<Material, { copy: Material; version: number }>()
+
+/**
+ * A head's material as the bald surface shows it: without its normal map.
+ * The surface shows the texels the hair did (see `scalpUvs`), whose bumps
+ * are the hair's strands.
+ */
+function unbumped(material: Material): Material {
+  const standard = material as MeshStandardMaterial
+  if (!standard.normalMap) return material
+  let found = unbumpedCopies.get(material)
+  // Kept in step with the head's: a viewer may retune it.
+  if (!found || found.version !== standard.version) {
+    found?.copy.dispose()
+    const copy = standard.clone()
+    copy.normalMap = null
+    found = { copy, version: standard.version }
+    unbumpedCopies.set(material, found)
+  }
+  return found.copy
 }
 
 /** Puts a new skinned mesh beside another, on its skeleton, bound as it is. */
@@ -1681,18 +1792,20 @@ function besides(beside: SkinnedMesh, geometry: BufferGeometry, material: Materi
 
 /**
  * Hides a character's own hair cards (steps to undo them into `undo`),
- * keeping what else its opacity mesh holds — its lashes, and gear such as
- * a visor — as a mesh of its own beside it: same skeleton, its geometry
- * reshaped with the rest, and the same material, dressed as the mesh's is
- * until the look (which finds it by that material's name) dresses it too.
+ * keeping what else its opacity mesh holds — its lashes, and (`keepGear`)
+ * gear such as a visor — as a mesh of its own beside it: same skeleton, its geometry
+ * reshaped with the rest, showing the hidden mesh's material as the look
+ * dresses it.
  */
-function hideOwnHair(model: Object3D, undo: (() => void)[]) {
+function hideOwnHair(model: Object3D, keepGear: boolean, undo: (() => void)[]) {
   for (const mesh of ownMeshes(model, 'opacity')) {
     const kinds = kindsOf(mesh)
-    if (!kinds.includes(HAIR)) continue
+    if (!(kinds.includes(HAIR) || (!keepGear && kinds.includes(GEAR)))) continue
     const wasVisible = mesh.visible
     mesh.visible = false
-    const kept = [...kinds.keys()].filter((t) => kinds[t] !== HAIR)
+    const kept = [...kinds.keys()].filter(
+      (t) => kinds[t] === LASH || (keepGear && kinds[t] === GEAR),
+    )
     const keptMesh =
       kept.length > 0
         ? besides(
@@ -1702,9 +1815,7 @@ function hideOwnHair(model: Object3D, undo: (() => void)[]) {
             `${mesh.name}:kept`,
           )
         : null
-    if (keptMesh && mesh.userData.lookOriginal) {
-      keptMesh.userData.lookOriginal = mesh.userData.lookOriginal
-    }
+    if (keptMesh) follow(keptMesh, mesh)
     undo.push(() => {
       mesh.visible = wasVisible
       if (keptMesh) {
@@ -1730,39 +1841,59 @@ function freeTexture(texture: Texture) {
   if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) image.close()
 }
 
+/** The textures a material shows. */
+function texturesOf(material: Material): Set<Texture> {
+  const found = new Set<Texture>()
+  for (const value of Object.values(material)) {
+    if ((value as Texture | null)?.isTexture) found.add(value as Texture)
+  }
+  return found
+}
+
 /**
- * Frees the GPU's copies of a material's textures. Another wearer of the
- * same hairstyle still showing them has them uploaded again; one taken off
- * for good leaves nothing on the GPU.
+ * Frees the GPU's copies of a material's textures. A wearer still showing
+ * them has them uploaded again.
  */
 function releaseTextures(material: Material) {
-  for (const value of Object.values(material))
-    if ((value as Texture | null)?.isTexture) value.dispose()
+  for (const texture of texturesOf(material)) texture.dispose()
+}
+
+/** Each part's pixels as last dyed, and the dye: worn again in it, it shows at once. */
+const lastDyed = new WeakMap<HairPart, { hex: string; pixels: Pixels }>()
+
+/** A part's pixels dyed `hex` (see hair-dye.ts), kept as its last dye. */
+function dyedPart(part: HairPart, pixels: Pixels, hex: string): Promise<Pixels> {
+  const last = lastDyed.get(part)
+  if (last?.hex === hex) return Promise.resolve(last.pixels)
+  return dyeHair(pixels, part.lum, hex).then((dyed) => {
+    lastDyed.set(part, { hex, pixels: dyed })
+    return dyed
+  })
+}
+
+/** Dyes a hairstyle's parts `hex` ahead of wearing it (see `useAvatarHair`). */
+function dyeAhead(asset: HairAsset, hex: string): Promise<unknown> {
+  return Promise.all(
+    asset.parts.map((part) => (part.pixels ? dyedPart(part, part.pixels, hex) : null)),
+  )
 }
 
 /**
  * Puts a hairstyle on a character (steps to undo it into `undo`): each part
  * carried from the donor's bind pose into the wearer's, on the wearer's
- * skeleton, kept off its head (as the borrowed hair will find it, its own
- * volume taken in) and body, dyed `dyeHex` when given.
+ * skeleton, kept off its head (`headSurface`: bald, where it could be made
+ * so) and body. Returns what dyes it (`null` for its own colour).
  */
 function wearBorrowed(
   model: Object3D,
   head: SkinnedMesh,
   asset: HairAsset,
-  dyeHex: string | null,
+  headSurface: Surface,
   undo: (() => void)[],
-) {
+): (hex: string | null) => void {
   const fit = faceFit(asset.basis.skull, bonePlaces(head))
-  if (!fit) return
+  if (!fit) return () => {}
   const carry = composeFits(fit, invertFit(asset.fit))
-  const headSurface = surfaceOf([head])
-  const taken = headDeflation(model, head, asset.basis)
-  if (taken) {
-    const points = headSurface.points as Float32Array
-    for (let i = 0; i < points.length; i++) points[i]! += taken.moves[i]!
-  }
-  // The head as the borrowed hair will find it, its own volume taken in.
   const surface = surfaceOf([], [headSurface, surfaceOf(ownMeshes(model, 'body'))])
 
   const names = head.skeleton.bones.map((bone) => bone.name)
@@ -1781,6 +1912,7 @@ function wearBorrowed(
   const unbind = head.bindMatrix.clone().invert()
   const unbindNormal = new Matrix3().getNormalMatrix(unbind)
 
+  const dyes: ((hex: string | null) => void)[] = []
   for (const part of asset.parts) {
     const geometry = part.geometry.clone()
     const skinIndex = geometry.getAttribute('skinIndex')
@@ -1807,54 +1939,110 @@ function wearBorrowed(
     for (let i = 0; i < skinIndex.array.length; i++)
       skinIndex.array[i] = slots[skinIndex.array[i]!]!
 
-    const material = part.material.clone()
-    const map = (part.material as MeshStandardMaterial).map
-    const dyed =
-      dyeHex && map && part.pixels
-        ? (() => {
-            const pixels: Pixels = {
-              data: new Uint8ClampedArray(part.pixels.data),
-              width: part.pixels.width,
-              height: part.pixels.height,
-            }
-            dye(pixels, hexToRgb(dyeHex), part.lum, part.dyeMask)
-            // The dye leaves the cut-away texels as they were.
-            bleedHair(pixels, part.bleedBelow)
-            return textureFrom(pixels, map)
-          })()
-        : null
-    if (dyed) (material as MeshStandardMaterial).map = dyed
+    const material = part.material.clone() as MeshStandardMaterial
+    const map = material.map
+    const shared = texturesOf(part.material)
+    let dyed: Texture | null = null
+    const show = (pixels: Pixels | null) => {
+      const next = pixels && map ? textureFrom(pixels, map) : null
+      const old = material.map
+      material.map = next ?? map
+      // A copy someone made of the map in its place (a viewer sharpening
+      // it) is freed with it.
+      if (old && old !== material.map && old !== dyed && !shared.has(old)) old.dispose()
+      if (dyed) freeTexture(dyed)
+      dyed = next
+    }
+    // One dye at a time is made: the latest asked for once it is done.
+    let wanted: string | null = null
+    let dyeing = false
+    let off = false
+    const dyeTo = (hex: string | null) => {
+      wanted = hex
+      const pixels = part.pixels
+      if (!(map && pixels) || dyeing) return
+      const last = hex ? lastDyed.get(part) : null
+      if (!hex || last?.hex === hex) {
+        show(last?.pixels ?? null)
+        return
+      }
+      dyeing = true
+      dyedPart(part, pixels, hex)
+        .then(
+          (done) => {
+            if (!off && wanted === hex) show(done)
+          },
+          (error: unknown) => console.warn('[look] could not dye the hair', error),
+        )
+        .finally(() => {
+          dyeing = false
+          if (!off && wanted !== hex) dyeTo(wanted)
+        })
+    }
+    dyes.push(dyeTo)
     const mesh = besides(head, geometry, material, `hair:${part.name}`)
+    // Reshaped with what it is worn over (see ear-shape.ts).
+    mesh.userData.wornOn = head
+    // The asset's textures aren't released: worn again, its pictures are
+    // still on the GPU (see `loadHairAsset`, which releases them once the
+    // asset is let go). Copies of them made for this wearing are.
     undo.push(() => {
+      off = true
       mesh.removeFromParent()
       geometry.dispose()
-      releaseTextures(material)
-      material.dispose()
       if (dyed) freeTexture(dyed)
+      for (const texture of texturesOf(material)) {
+        if (texture !== dyed && !shared.has(texture)) texture.dispose()
+      }
+      material.dispose()
     })
+  }
+  return (hex) => {
+    for (const each of dyes) each(hex)
   }
 }
 
+/** A hairstyle being worn (see `wearHair`). */
+export type WornHair = {
+  /** How the bald head's skin is painted round the cut (see scalp-paint.ts); null with no bald head. */
+  paint: ScalpPaint | null
+  /** Dyes the borrowed hair (`null` for its own colour). */
+  dye: (hex: string | null) => void
+  /** Takes it all off again. */
+  takeOff: () => void
+}
+
 /**
- * Puts a hairstyle on a character, bald (`asset` null) taking its own hair
- * cards off and no more: its lashes and any gear stay (a mesh of their own
- * beside its hidden opacity mesh). Its own hair volume, a shell of its
- * head, is the shape's to take in: pass `hairShaper(model, …)` to the
- * body's reshaping. Returns what takes it all off again.
+ * Puts a hairstyle on a character over its head made bald (see
+ * bald-head.ts) — or, `asset` null, leaves it bald: its own hair cards come
+ * off (its lashes and any gear among them stay, a mesh of their own), and
+ * under another's hair what it wears on its head. A head the library takes
+ * no hair off (a garment over it), or the skull doesn't fit, keeps its own
+ * head, and wears no other hair over it.
  */
-export function wearHair(
-  model: Object3D,
-  asset: HairAsset | null,
-  options: { dye: string | null },
-): () => void {
+export function wearHair(model: Object3D, asset: HairAsset | null, basis: HairBasis): WornHair {
   const head = headOf(model) as SkinnedMesh | null
-  if (!head?.isSkinnedMesh) return () => {}
   const undo: (() => void)[] = []
-  hideOwnHair(model, undo)
-  if (asset) wearBorrowed(model, head, asset, options.dye, undo)
-  return () => {
+  const takeOff = () => {
     for (const step of undo.reverse()) step()
   }
+  if (!head?.isSkinnedMesh) return { paint: null, dye: () => {}, takeOff }
+  const bald = baldHeadOf(model, head, basis)
+  if (bald) goBald(model, head, bald, undo)
+  const headwear = !!bald && !!asset && hideHeadwear(model, bald.top, bald.neck, undo)
+  hideOwnHair(model, !headwear, undo)
+  const dye = asset && bald ? wearBorrowed(model, head, asset, bald.surface, undo) : () => {}
+  return { paint: bald?.paint ?? null, dye, takeOff }
+}
+
+/**
+ * Whether a character's own hair can come off for another's (see
+ * `wearHair`): not on a head the library takes no hair off, a garment over
+ * it, where no hairstyle changes anything.
+ */
+export function canChangeHair(model: Object3D, basis: HairBasis): boolean {
+  const head = headOf(model)
+  return !!head && !!basis.bald.get(ownMaterial(head).name)?.includes(1)
 }
 
 /** The side (px) the cap's texture is read at: the head's 2048 is more than hair needs. */
@@ -1919,36 +2107,56 @@ export function loadHairAsset(donorId: string): Promise<HairAsset> {
     found.catch(() => assets.delete(donorId))
   }
   assets.set(donorId, found)
-  if (assets.size > ASSETS_KEPT) assets.delete(assets.keys().next().value!)
+  if (assets.size > ASSETS_KEPT) {
+    const [oldest, letGo] = assets.entries().next().value!
+    assets.delete(oldest)
+    letGo.then(
+      (asset) => {
+        for (const part of asset.parts) releaseTextures(part.material)
+      },
+      () => {},
+    )
+  }
   return found
 }
 
 /** Donors whose hairstyle failed to load, warned of once each. */
 const warned = new Set<string>()
 
+/** What a hairstyle worn needs of the rest of the look (see `useAvatarHair`). */
+export type HairOn = {
+  /** The reshaping its new meshes need with the body's (it moves nothing itself). */
+  shaper: Shaper
+  /** How the bald head's skin is painted (see scalp-paint.ts), or null. */
+  paint: ScalpPaint | null
+}
+
 /**
- * Keeps a character in a hairstyle: none (null) leaves its own; BALD takes
- * its hair cards off; a donor's id in the library puts that donor's hair
- * on, dyed `dye` when given — any other id (an old or a foreign save) is
- * the character's own hair. A new style replaces the old one only once it
- * has loaded, so the character never shows bald in between.
+ * Keeps a character in a hairstyle: none (null) leaves its own; BALD makes
+ * it bald (see bald-head.ts); a donor's id in the library puts that
+ * donor's hair on over the bald head, dyed `dyeHex` when given — any other
+ * id (an old or a foreign save) is the character's own hair. A new style
+ * replaces the old one only once it has loaded, so the character never
+ * shows bald in between; a new dye only dyes it again.
  *
- * Returns the reshaping the hair needs (see `hairShaper`) — a new one each
- * time hair goes on, so the body's reshaping, given it, runs again over the
- * new meshes too — or null while the character's own hair is on.
+ * Returns, while any hair but its own is on, a new reshaping each time hair
+ * goes on — so the body's reshaping, given it, runs again over the new
+ * meshes too — and how the look paints the bald head's skin.
  */
 export function useAvatarHair(
   model: Object3D,
   style: HairStyle,
   dyeHex: string | null,
-): Shaper | null {
-  const worn = useRef<{ model: Object3D; undo: () => void } | null>(null)
-  const [shaper, setShaper] = useState<{ model: Object3D; shaper: Shaper } | null>(null)
+): HairOn | null {
+  const worn = useRef<{ model: Object3D; hair: WornHair } | null>(null)
+  const [on, setOn] = useState<{ model: Object3D; on: HairOn } | null>(null)
+  const dyeRef = useRef(dyeHex)
+  dyeRef.current = dyeHex
   useEffect(() => {
     const takeOff = () => {
-      worn.current?.undo()
+      worn.current?.hair.takeOff()
       worn.current = null
-      setShaper(null)
+      setOn(null)
     }
     if (worn.current && (worn.current.model !== model || style === null)) takeOff()
     if (style === null) return
@@ -1957,14 +2165,18 @@ export function useAvatarHair(
       .then(async (library) => {
         const offered = style === BALD || library.styles.some((entry) => entry.id === style)
         const asset = offered && style !== BALD ? await loadHairAsset(style) : null
+        // Dyed before it goes on, so it never shows undyed first.
+        if (asset && dyeRef.current) await dyeAhead(asset, dyeRef.current).catch(() => {})
         if (!current) return
         if (!offered) {
           takeOff()
           return
         }
-        worn.current?.undo()
-        worn.current = { model, undo: wearHair(model, asset, { dye: dyeHex }) }
-        setShaper({ model, shaper: hairShaper(model, library) })
+        worn.current?.hair.takeOff()
+        const hair = wearHair(model, asset, library)
+        hair.dye(dyeRef.current)
+        worn.current = { model, hair }
+        setOn({ model, on: { shaper: () => null, paint: hair.paint } })
       })
       .catch((error: unknown) => {
         if (warned.has(style)) return
@@ -1974,14 +2186,18 @@ export function useAvatarHair(
     return () => {
       current = false
     }
-  }, [model, style, dyeHex])
+  }, [model, style])
+
+  useEffect(() => {
+    worn.current?.hair.dye(dyeHex)
+  }, [dyeHex])
 
   useEffect(
     () => () => {
-      worn.current?.undo()
+      worn.current?.hair.takeOff()
       worn.current = null
     },
     [],
   )
-  return shaper?.model === model ? shaper.shaper : null
+  return on?.model === model ? on.on : null
 }

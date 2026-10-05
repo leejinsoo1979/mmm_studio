@@ -1,0 +1,521 @@
+import { PAINTED, READ, SCALP, type ScalpPaint, SHADED, SKIN_REF } from './bald-head'
+import { rasterise } from './front-render'
+import { byLightness, luminance, type Pixels, type Rgb } from './look-pixels'
+
+/**
+ * A bald head's skin round the cut its hair was taken out along (see
+ * bald-head.ts), painted to the scalp's tone so it meets the bald surface
+ * without a seam: the skin under the old hairline (a forehead painted
+ * darker there, a nape or temples painted with hair) and any of the hair's
+ * colour left on the skin. The bald surface shows the texels the hair did,
+ * painted wholly, plain. Near the skin kept, both take its colour — the
+ * cheek's by a cheek, the neck's down the nape — and the forehead's tone
+ * further off. And the body's texture, lit again where the hair shaded it.
+ */
+
+/** Texels round a painted triangle (px) painted with it, so no seam shows at a UV island's rim. */
+const MARGIN = 1
+
+/** Where a texel counts as hair to paint over (its hair mask), fully from the second. */
+const HAIR_FROM = 0.25
+const HAIR_TO = 0.6
+
+/**
+ * A texel read for the scalp's tone is the skin's: no more than HAIR_MOST
+ * hair and at least SKIN_LEAST skin; LEAST_READ of them must be found.
+ */
+const HAIR_MOST = 0.2
+const SKIN_LEAST = 0.5
+const LEAST_READ = 50
+
+/**
+ * Where in the forehead's skin, darkest first, the scalp's tone is read: a
+ * little under the middle, the light catching a forehead's painted shine
+ * that a scalp under it doesn't.
+ */
+const TONE_QUANTILE = 0.4
+
+/** The scalp's grain: how much a texel's lightness strays, alone and with the texels round it. */
+const GRAIN_FINE = 0.05
+const GRAIN_COARSE = 0.03
+const GRAIN_CELL = 4
+
+const smoothstep = (from: number, to: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - from) / (to - from)))
+  return t * t * (3 - 2 * t)
+}
+
+/** A steady pseudo-random number in [0, 1) for a texel. */
+function hash(x: number, y: number, seed: number) {
+  const s = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453
+  return s - Math.floor(s)
+}
+
+const grain = (x: number, y: number) =>
+  1 +
+  GRAIN_FINE * (2 * hash(x, y, 3) - 1) +
+  GRAIN_COARSE * (2 * hash(Math.floor(x / GRAIN_CELL), Math.floor(y / GRAIN_CELL), 5) - 1)
+
+/** Calls `visit` with each texel of `head` a packed triangle covers (corners' u, v at `at`, `stride` apart). */
+function eachTexel(
+  head: { width: number; height: number },
+  packed: Float32Array,
+  t: number,
+  size: number,
+  stride: number,
+  visit: (texel: number, w0: number, w1: number, w2: number) => void,
+  margin = MARGIN,
+) {
+  const at = t * size
+  rasterise(
+    packed[at]! * head.width,
+    packed[at + 1]! * head.height,
+    packed[at + stride]! * head.width,
+    packed[at + stride + 1]! * head.height,
+    packed[at + 2 * stride]! * head.width,
+    packed[at + 2 * stride + 1]! * head.height,
+    head.width,
+    head.height,
+    margin,
+    visit,
+  )
+}
+
+/** How far round (px, on a 2048 texture) the skin a corner's colour comes from is read, and how much of what is there must be skin. */
+const SKIN_READ = 4
+const SKIN_SHARE = 0.3
+
+/** How many texels out from what is painted the texels on no triangle take its colour. */
+const PAD = 4
+const NEIGHBOURS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+] as const
+
+/**
+ * Each place's skin colour is the mean of those read within this (bind
+ * units) of it, nearer ones more: one pore, a stubbled patch or a place too
+ * little of which is skin doesn't stand out.
+ */
+const SKIN_BLEND = 0.02
+
+/**
+ * Paints a bald head's skin round the cut and the bald surface (see
+ * `ScalpPaint`), on textures `width` × `height` whose hair and skin are
+ * `hair` and `skin` (per texel, how surely it is either). Which texels it
+ * reads and paints, and how much of each, are worked out once: a skin
+ * tone's drag paints the same head over and over in a new colour.
+ */
+export type ScalpPainter = {
+  /**
+   * The scalp's tone: a colour of the skin (see TONE_QUANTILE) under the
+   * first of the paint's lists of triangles to read that shows enough of
+   * it. Null where none does.
+   */
+  tone: (head: Pixels) => Rgb | null
+  /**
+   * Paints the head (in place): each texel of the paint's triangles as much
+   * as its corners say, and wholly where it is the hair's colour; the bald
+   * surface's wholly. Each in the colour of the skin round it where there
+   * is skin near (read off `head` as it is), `tone` elsewhere; grained like
+   * skin.
+   */
+  paint: (head: Pixels, tone: Rgb) => void
+}
+
+export function scalpPainter(
+  width: number,
+  height: number,
+  {
+    paint,
+    scalp,
+    kept,
+    taken,
+    tone,
+    skin: refs,
+  }: Pick<ScalpPaint, 'paint' | 'scalp' | 'kept' | 'taken' | 'tone' | 'skin'>,
+  hair: Float32Array | null,
+  skin: Float32Array | null,
+): ScalpPainter {
+  const size = { width, height }
+  const isSkin = (texel: number) =>
+    !((hair && hair[texel]! > HAIR_MOST) || (skin && skin[texel]! < SKIN_LEAST))
+  const read = tone.map((list) => {
+    const seen = new Uint8Array(width * height)
+    const texels: number[] = []
+    for (let t = 0; t < list.length / READ; t++) {
+      eachTexel(size, list, t, READ, 2, (texel) => {
+        if (seen[texel]) return
+        seen[texel] = 1
+        if (isSkin(texel)) texels.push(texel)
+      })
+    }
+    return texels
+  })
+
+  // Each corner's skin round it and how much, the paint's triangles' first.
+  const paintCount = paint.length / PAINTED
+  const scalpCount = scalp.length / SCALP
+  const cornerRef = new Int32Array((paintCount + scalpCount) * 3)
+  const cornerShare = new Float32Array(cornerRef.length)
+  for (let t = 0; t < paintCount; t++) {
+    for (let k = 0; k < 3; k++) {
+      cornerRef[t * 3 + k] = paint[t * PAINTED + k * 6 + 3]!
+      cornerShare[t * 3 + k] = paint[t * PAINTED + k * 6 + 4]!
+    }
+  }
+  for (let t = 0; t < scalpCount; t++) {
+    for (let k = 0; k < 3; k++) {
+      cornerRef[(paintCount + t) * 3 + k] = scalp[t * SCALP + k * 4 + 2]!
+      cornerShare[(paintCount + t) * 3 + k] = scalp[t * SCALP + k * 4 + 3]!
+    }
+  }
+
+  const amount = new Float32Array(width * height)
+  const owner = new Int32Array(width * height).fill(-1)
+  const first = new Float32Array(width * height)
+  const second = new Float32Array(width * height)
+  for (let t = 0; t < paintCount; t++) {
+    const at = t * PAINTED
+    eachTexel(size, paint, t, PAINTED, 6, (texel, w0, w1, w2) => {
+      const own = paint[at + 2]! * w0 + paint[at + 8]! * w1 + paint[at + 14]! * w2
+      const hairy = paint[at + 5]! * w0 + paint[at + 11]! * w1 + paint[at + 17]! * w2
+      const wanted = Math.max(own, hair ? hairy * smoothstep(HAIR_FROM, HAIR_TO, hair[texel]!) : 0)
+      if (wanted > amount[texel]!) {
+        amount[texel] = wanted
+        owner[texel] = t
+        first[texel] = w0
+        second[texel] = w1
+      }
+    })
+  }
+  // The texels kept skin shows are painted only as the cut says, whatever
+  // of the bald surface's lies on them too.
+  const shown = new Uint8Array(width * height)
+  for (let t = 0; t < kept.length / READ; t++) {
+    eachTexel(
+      size,
+      kept,
+      t,
+      READ,
+      2,
+      (texel) => {
+        shown[texel] = 1
+      },
+      0,
+    )
+  }
+  for (let t = 0; t < scalpCount; t++) {
+    eachTexel(size, scalp, t, SCALP, 4, (texel, w0, w1) => {
+      if (shown[texel] || amount[texel]! >= 1) return
+      amount[texel] = 1
+      owner[texel] = paintCount + t
+      first[texel] = w0
+      second[texel] = w1
+    })
+  }
+  // The rest of what the hair showed the scalp's tone, and the texels
+  // round it on no triangle the colour next to them: a texture's smaller
+  // mipmaps blend texels across a triangle's rim.
+  const used = new Uint8Array(shown)
+  for (let t = 0; t < taken.length / READ; t++) {
+    eachTexel(size, taken, t, READ, 2, (texel) => {
+      used[texel] = 1
+      if (shown[texel] || amount[texel]! > 0) return
+      amount[texel] = 1
+    })
+  }
+  const pads: number[] = []
+  const padFrom: number[] = []
+  {
+    const done = Uint8Array.from(amount, (k) => (k >= 1 ? 1 : 0))
+    let ring: number[] = []
+    for (let texel = 0; texel < done.length; texel++) if (done[texel]) ring.push(texel)
+    for (let round = 0; round < PAD; round++) {
+      const next: number[] = []
+      for (const texel of ring) {
+        const x = texel % width
+        const y = (texel - x) / width
+        for (const [dx, dy] of NEIGHBOURS) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
+          const other = ny * width + nx
+          if (done[other] || used[other]) continue
+          done[other] = 1
+          pads.push(other)
+          padFrom.push(texel)
+          next.push(other)
+        }
+      }
+      ring = next
+    }
+  }
+  const painted: number[] = []
+  for (let texel = 0; texel < amount.length; texel++) if (amount[texel]! > 0) painted.push(texel)
+  const texels = Int32Array.from(painted)
+  const weights = Float32Array.from(texels, (texel) => Math.min(1, amount[texel]!))
+  // The bald surface shows the hair's texels, laid out along its strands:
+  // grained, they would streak. Only the kept skin is.
+  const shades = Float32Array.from(texels, (texel) => {
+    if (owner[texel]! < 0 || owner[texel]! >= paintCount) return 1
+    const x = texel % width
+    return grain(x, (texel - x) / width)
+  })
+  const owners = Int32Array.from(texels, (texel) => owner[texel]!)
+  const firsts = Float32Array.from(texels, (texel) => first[texel]!)
+  const seconds = Float32Array.from(texels, (texel) => second[texel]!)
+  const reach = Math.max(1, Math.round((SKIN_READ * width) / 2048))
+
+  /** The skin's colour round a place on the texture (u, v), or null where too little of it is skin. */
+  const skinAt = (head: Pixels, u: number, v: number): Rgb | null => {
+    const cx = Math.floor(u * width)
+    const cy = Math.floor(v * height)
+    const samples: Rgb[] = []
+    let all = 0
+    for (let y = cy - reach; y <= cy + reach; y++) {
+      for (let x = cx - reach; x <= cx + reach; x++) {
+        if (x < 0 || y < 0 || x >= width || y >= height) continue
+        all++
+        const texel = y * width + x
+        if (!isSkin(texel)) continue
+        const p = texel * 4
+        samples.push([head.data[p]!, head.data[p + 1]!, head.data[p + 2]!])
+      }
+    }
+    return samples.length > 0 && samples.length >= SKIN_SHARE * all
+      ? byLightness(samples, 0.5)
+      : null
+  }
+
+  return {
+    tone: (head) => {
+      for (const list of read) {
+        if (list.length < LEAST_READ) continue
+        const samples = list.map((texel): Rgb => {
+          const p = texel * 4
+          return [head.data[p]!, head.data[p + 1]!, head.data[p + 2]!]
+        })
+        return byLightness(samples, TONE_QUANTILE)
+      }
+      return null
+    },
+    paint: (head, tone) => {
+      const count = refs.length / SKIN_REF
+      const read = Array.from({ length: count }, (_, r) =>
+        skinAt(head, refs[r * SKIN_REF]!, refs[r * SKIN_REF + 1]!),
+      )
+      const local = Array.from({ length: count }, (_, r): Rgb | null => {
+        const sum = [0, 0, 0]
+        let total = 0
+        for (let o = 0; o < count; o++) {
+          const colour = read[o]
+          if (!colour) continue
+          const apart = Math.hypot(
+            refs[r * SKIN_REF + 2]! - refs[o * SKIN_REF + 2]!,
+            refs[r * SKIN_REF + 3]! - refs[o * SKIN_REF + 3]!,
+            refs[r * SKIN_REF + 4]! - refs[o * SKIN_REF + 4]!,
+          )
+          if (apart > SKIN_BLEND) continue
+          const weight = 1 - apart / SKIN_BLEND
+          total += weight
+          for (let c = 0; c < 3; c++) sum[c]! += colour[c]! * weight
+        }
+        return total > 0 ? [sum[0]! / total, sum[1]! / total, sum[2]! / total] : null
+      })
+      const targets = new Float32Array(cornerRef.length * 3)
+      for (let k = 0; k < cornerRef.length; k++) {
+        const found = cornerRef[k]! >= 0 ? local[cornerRef[k]!] : null
+        const share = found ? cornerShare[k]! : 0
+        for (let c = 0; c < 3; c++) {
+          targets[k * 3 + c] = tone[c]! + ((found?.[c] ?? tone[c]!) - tone[c]!) * share
+        }
+      }
+      const { data } = head
+      for (let i = 0; i < texels.length; i++) {
+        const w = weights[i]!
+        const shade = shades[i]!
+        const corner = owners[i]! * 3
+        if (corner < 0) {
+          for (let c = 0; c < 3; c++) {
+            const p = texels[i]! * 4 + c
+            data[p] = data[p]! + (tone[c]! * shade - data[p]!) * w
+          }
+          continue
+        }
+        const w0 = firsts[i]!
+        const w1 = seconds[i]!
+        const w2 = 1 - w0 - w1
+        for (let c = 0; c < 3; c++) {
+          const target =
+            (targets[corner * 3 + c]! * w0 +
+              targets[(corner + 1) * 3 + c]! * w1 +
+              targets[(corner + 2) * 3 + c]! * w2) *
+            shade
+          const p = texels[i]! * 4 + c
+          data[p] = data[p]! + (target - data[p]!) * w
+        }
+      }
+      for (let i = 0; i < pads.length; i++) {
+        const to = pads[i]! * 4
+        const from = padFrom[i]! * 4
+        data[to] = data[from]!
+        data[to + 1] = data[from + 1]!
+        data[to + 2] = data[from + 2]!
+      }
+    },
+  }
+}
+
+/**
+ * The light the shadow is lifted to is that of the body of its hue out of
+ * it: hues in steps of 1 / HUE_STEPS of the colour (and HUE_NEAR steps
+ * round, the shadow shifting a hue a little), lightness read at
+ * LIGHT_QUANTILE of at least FEWEST_LIT texels (every LIT_SAMPLE-th). The
+ * shadow's own is read over SHADOW_READ texels round (on a 2048 texture),
+ * so the cloth's weave stays. At most LIGHT_MOST times as bright.
+ */
+const HUE_STEPS = 40
+const HUE_NEAR = 2
+const LIGHT_QUANTILE = 0.5
+const FEWEST_LIT = 100
+const LIT_SAMPLE = 3
+const SHADOW_READ = 6
+const LIGHT_MOST = 1.8
+
+/** How far round (texels, on a 2048 texture) the lift is smoothed. */
+const GAIN_BLEND = 16
+
+/** A colour's hue bin (see HUE_STEPS). */
+const hueBin = (r: number, g: number, b: number) => {
+  const total = r + g + b || 1
+  return Math.round((r / total) * HUE_STEPS) * (HUE_STEPS + 1) + Math.round((g / total) * HUE_STEPS)
+}
+
+/** Sums of `values` (`width` × `height`, `channels` per texel) over the box `reach` texels round each. */
+function boxSums(
+  values: Float32Array,
+  width: number,
+  height: number,
+  channels: number,
+  reach: number,
+) {
+  const across = new Float32Array(values.length)
+  for (let y = 0; y < height; y++) {
+    for (let c = 0; c < channels; c++) {
+      let sum = 0
+      for (let x = -reach; x < width + reach; x++) {
+        const add = x + reach
+        if (add >= 0 && add < width) sum += values[(y * width + add) * channels + c]!
+        const drop = x - reach - 1
+        if (drop >= 0 && drop < width) sum -= values[(y * width + drop) * channels + c]!
+        if (x >= 0 && x < width) across[(y * width + x) * channels + c] = sum
+      }
+    }
+  }
+  const out = new Float32Array(values.length)
+  for (let x = 0; x < width; x++) {
+    for (let c = 0; c < channels; c++) {
+      let sum = 0
+      for (let y = -reach; y < height + reach; y++) {
+        const add = y + reach
+        if (add >= 0 && add < height) sum += across[(add * width + x) * channels + c]!
+        const drop = y - reach - 1
+        if (drop >= 0 && drop < height) sum -= across[(drop * width + x) * channels + c]!
+        if (y >= 0 && y < height) out[(y * width + x) * channels + c] = sum
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * Lights the body's texture (in place) where the hair taken out of the
+ * head shaded it (see `hairShadow`, packed SHADED per triangle): each
+ * texel as bright as the body of its hue out of the shadow usually is (see
+ * HUE_STEPS), as much as it lay in the shadow.
+ */
+export function relightBody(body: Pixels, shadow: Float32Array) {
+  const { width, height, data } = body
+  const size = width * height
+  const shaded = new Float32Array(size)
+  for (let t = 0; t < shadow.length / SHADED; t++) {
+    const at = t * SHADED
+    rasterise(
+      shadow[at]! * width,
+      shadow[at + 1]! * height,
+      shadow[at + 3]! * width,
+      shadow[at + 4]! * height,
+      shadow[at + 6]! * width,
+      shadow[at + 7]! * height,
+      width,
+      height,
+      MARGIN,
+      (texel, w0, w1, w2) => {
+        const share = shadow[at + 2]! * w0 + shadow[at + 5]! * w1 + shadow[at + 8]! * w2
+        if (share > shaded[texel]!) shaded[texel] = share
+      },
+    )
+  }
+  if (!shaded.some((share) => share > 0)) return
+  // How light the body out of the shadow is, by hue.
+  const lightness = new Map<number, number[]>()
+  for (let i = 0; i < size; i += LIT_SAMPLE) {
+    const r = data[i * 4]!
+    const g = data[i * 4 + 1]!
+    const b = data[i * 4 + 2]!
+    if (shaded[i]! > 0 || data[i * 4 + 3] === 0 || r + g + b === 0) continue
+    const bin = hueBin(r, g, b)
+    const list = lightness.get(bin)
+    if (list) list.push(luminance(r, g, b))
+    else lightness.set(bin, [luminance(r, g, b)])
+  }
+  const lightOf = new Map<number, number | null>()
+  const lightAt = (bin: number) => {
+    let light = lightOf.get(bin)
+    if (light !== undefined) return light
+    const all: number[] = []
+    for (let dr = -HUE_NEAR; dr <= HUE_NEAR; dr++) {
+      for (let dg = -HUE_NEAR; dg <= HUE_NEAR; dg++) {
+        for (const value of lightness.get(bin + dr * (HUE_STEPS + 1) + dg) ?? []) all.push(value)
+      }
+    }
+    all.sort((a, b) => a - b)
+    light = all.length >= FEWEST_LIT ? all[Math.floor(LIGHT_QUANTILE * (all.length - 1))]! : null
+    lightOf.set(bin, light)
+    return light
+  }
+  const own = new Float32Array(size * 4)
+  for (let i = 0; i < size; i++) {
+    own.set([data[i * 4]!, data[i * 4 + 1]!, data[i * 4 + 2]!, 1], i * 4)
+  }
+  const near = boxSums(own, width, height, 4, Math.max(1, Math.round((SHADOW_READ * width) / 2048)))
+  // How much brighter each texel would be, smoothed: neighbouring texels
+  // of hues a step apart are lifted alike.
+  const gains = new Float32Array(size * 2)
+  for (let i = 0; i < size; i++) {
+    if (shaded[i]! <= 0) continue
+    const n = near[i * 4 + 3]!
+    const [r, g, b] = [near[i * 4]! / n, near[i * 4 + 1]! / n, near[i * 4 + 2]! / n]
+    const light = lightAt(hueBin(r, g, b))
+    if (light === null) continue
+    gains[i * 2] = Math.min(LIGHT_MOST, Math.max(1, light / Math.max(1, luminance(r, g, b))))
+    gains[i * 2 + 1] = 1
+  }
+  const smooth = boxSums(
+    gains,
+    width,
+    height,
+    2,
+    Math.max(1, Math.round((GAIN_BLEND * width) / 2048)),
+  )
+  for (let i = 0; i < size; i++) {
+    const share = shaded[i]!
+    const n = smooth[i * 2 + 1]!
+    if (share <= 0 || n === 0) continue
+    const k = 1 + (smooth[i * 2]! / n - 1) * share
+    for (let c = 0; c < 3; c++) data[i * 4 + c] = data[i * 4 + c]! * k
+  }
+}

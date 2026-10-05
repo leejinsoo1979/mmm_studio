@@ -21,6 +21,62 @@ const smoothstep = (from: number, to: number, x: number) => {
   return t * t * (3 - 2 * t)
 }
 
+/**
+ * What a pixel function gives each colour, worked out once a colour: a
+ * character's texture holds a few tens of thousands of colours, one for
+ * every 40–150 texels, so a pass over one is mostly lookups. Each colour
+ * (0xRRGGBB) keeps `width` numbers.
+ */
+class ColorMemo {
+  private keys: Int32Array
+  private bits: number
+  private count = 0
+  values: Float64Array
+  /** Whether the colour last found is new, its values yet to be written. */
+  fresh = false
+
+  constructor(
+    private readonly width: number,
+    bits = 16,
+  ) {
+    this.bits = bits
+    this.keys = new Int32Array(1 << bits).fill(-1)
+    this.values = new Float64Array((1 << bits) * width)
+  }
+
+  private slotOf(key: number) {
+    const mask = this.keys.length - 1
+    let slot = Math.imul(key, 0x9e3779b1) >>> (32 - this.bits)
+    while (this.keys[slot] !== -1 && this.keys[slot] !== key) slot = (slot + 1) & mask
+    return slot
+  }
+
+  /** Where a colour's values start in `values`. */
+  find(key: number): number {
+    let slot = this.slotOf(key)
+    this.fresh = this.keys[slot] === -1
+    if (!this.fresh) return slot * this.width
+    if (++this.count * 2 > this.keys.length) {
+      const { keys, values, width } = this
+      this.bits++
+      this.keys = new Int32Array(1 << this.bits).fill(-1)
+      this.values = new Float64Array((1 << this.bits) * width)
+      for (let old = 0; old < keys.length; old++) {
+        if (keys[old] === -1) continue
+        const moved = this.slotOf(keys[old]!)
+        this.keys[moved] = keys[old]!
+        this.values.set(values.subarray(old * width, old * width + width), moved * width)
+      }
+      slot = this.slotOf(key)
+    }
+    this.keys[slot] = key
+    return slot * this.width
+  }
+}
+
+const colorKey = (data: Uint8ClampedArray, p: number) =>
+  (data[p]! << 16) | (data[p + 1]! << 8) | data[p + 2]!
+
 /** The mean colour of the pixels, weighted by `weights` (or by alpha when none). */
 export function meanColor(pixels: Pixels, weights?: Float32Array | null): Rgb {
   const { data } = pixels
@@ -58,10 +114,15 @@ export function similarityMask(pixels: Pixels, ref: Rgb, near = 0.12, far = 0.3)
   const { data } = pixels
   const mask = new Float32Array(data.length / 4)
   const refLum = luminance(...ref)
+  const memo = new ColorMemo(1)
   for (let i = 0, p = 0; p < data.length; i++, p += 4) {
     if (data[p + 3] === 0) continue
-    mask[i] =
-      1 - smoothstep(near, far, colorDistance(data[p]!, data[p + 1]!, data[p + 2]!, ref, refLum))
+    const at = memo.find(colorKey(data, p))
+    if (memo.fresh) {
+      memo.values[at] =
+        1 - smoothstep(near, far, colorDistance(data[p]!, data[p + 1]!, data[p + 2]!, ref, refLum))
+    }
+    mask[i] = memo.values[at]!
   }
   return mask
 }
@@ -75,14 +136,19 @@ export function hairMask(pixels: Pixels, hair: Rgb, skin: Rgb): Float32Array {
   const mask = new Float32Array(data.length / 4)
   const hairLum = luminance(...hair)
   const skinLum = luminance(...skin)
+  const memo = new ColorMemo(1)
   for (let i = 0, p = 0; p < data.length; i++, p += 4) {
     const r = data[p]!
     const g = data[p + 1]!
     const b = data[p + 2]!
     if (r + g + b < 6) continue
-    const toHair = colorDistance(r, g, b, hair, hairLum)
-    const toSkin = colorDistance(r, g, b, skin, skinLum)
-    mask[i] = smoothstep(-0.04, 0.08, toSkin - toHair)
+    const at = memo.find(colorKey(data, p))
+    if (memo.fresh) {
+      const toHair = colorDistance(r, g, b, hair, hairLum)
+      const toSkin = colorDistance(r, g, b, skin, skinLum)
+      memo.values[at] = smoothstep(-0.04, 0.08, toSkin - toHair)
+    }
+    mask[i] = memo.values[at]!
   }
   return mask
 }
@@ -214,20 +280,59 @@ export function toneSkin(pixels: Pixels, target: Rgb, ref: Rgb, mask: Float32Arr
   const sin = Math.sin(turn) * scale * shade
   const lab = [0, 0, 0]
   const rgb = [0, 0, 0]
+  const memo = new ColorMemo(3)
   for (let i = 0, p = 0; p < data.length; i++, p += 4) {
     const w = mask[i]!
     if (w <= 0) continue
-    toLab(data[p]!, data[p + 1]!, data[p + 2]!, lab)
-    const a = lab[1]! - from[1]!
-    const b = lab[2]! - from[2]!
-    fromLab(
-      Math.min(100, Math.max(0, to[0]! + (lab[0]! - from[0]!) * shade)),
-      to[1]! + a * cos - b * sin,
-      to[2]! + a * sin + b * cos,
-      rgb,
-    )
-    for (let c = 0; c < 3; c++) data[p + c] = data[p + c]! + (rgb[c]! - data[p + c]!) * w
+    const at = memo.find(colorKey(data, p))
+    const toned = memo.values
+    if (memo.fresh) {
+      toLab(data[p]!, data[p + 1]!, data[p + 2]!, lab)
+      const a = lab[1]! - from[1]!
+      const b = lab[2]! - from[2]!
+      fromLab(
+        Math.min(100, Math.max(0, to[0]! + (lab[0]! - from[0]!) * shade)),
+        to[1]! + a * cos - b * sin,
+        to[2]! + a * sin + b * cos,
+        rgb,
+      )
+      toned.set(rgb, at)
+    }
+    for (let c = 0; c < 3; c++) data[p + c] = data[p + c]! + (toned[at + c]! - data[p + c]!) * w
   }
+}
+
+/**
+ * The colour at `at` (0–1, rounded down) of `samples` in order of
+ * lightness, alike ones in the order given — as a stable sort puts them —
+ * picked out without sorting them all.
+ */
+export function byLightness(samples: readonly Rgb[], at: number): Rgb {
+  const count = samples.length
+  const lum = Float64Array.from(samples, (sample) => luminance(...sample))
+  const order = Int32Array.from({ length: count }, (_, i) => i)
+  const before = (a: number, b: number) => lum[a]! < lum[b]! || (lum[a] === lum[b] && a < b)
+  const k = Math.floor(count * at)
+  let low = 0
+  let high = count - 1
+  while (low < high) {
+    const pivot = order[(low + high) >> 1]!
+    let i = low
+    let j = high
+    while (i <= j) {
+      while (before(order[i]!, pivot)) i++
+      while (before(pivot, order[j]!)) j--
+      if (i <= j) {
+        const swap = order[i]!
+        order[i++] = order[j]!
+        order[j--] = swap
+      }
+    }
+    if (k <= j) high = j
+    else if (k >= i) low = i
+    else break
+  }
+  return samples[order[k]!]!
 }
 
 /** The mean lightness of the pixels under a mask. */

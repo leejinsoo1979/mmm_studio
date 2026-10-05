@@ -1,12 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  type FacePaint,
-  hasFacePaint,
-  NO_PAINT,
-  paintFace,
-  readFacePaint,
-  shaveHead,
-} from './face-paint'
+import { type FacePaint, hasFacePaint, NO_PAINT, paintFace, readFacePaint } from './face-paint'
 import { FACE_PARTS, facePointOf, type Point, unpackPoints } from './face-points'
 import { SHOD } from './footwear'
 import type { HeadGeometry } from './head-geometry'
@@ -431,78 +424,6 @@ describe('painting a face', () => {
   })
 })
 
-const HAIR: Rgb = [45, 32, 24]
-const HAIRLINE = 0.3
-const OVAL = FACE_PARTS.oval.map((i) => points[i]!)
-
-/**
- * A head with hair over its crown, and whatever else `over` draws; and
- * its skin's mask (1 where it shows the skin's colour, as analyseBody's
- * would be).
- */
-function hairy(over?: (x: number, y: number) => Rgb | null) {
-  const head = drawFace({ over: (x, y) => over?.(x, y) ?? (y < HAIRLINE ? HAIR : null) })
-  const skin = new Float32Array(SIZE * SIZE)
-  for (let i = 0; i < skin.length; i++) {
-    const p = i * 4
-    if (SKIN.every((c, k) => head.data[p + k] === c)) skin[i] = 1
-  }
-  return { head, skin, original: copy(head) }
-}
-
-describe('shaving a head', () => {
-  test('the crown goes to the skin’s colour, the face and its brows stay', () => {
-    const { head, skin, original } = hairy()
-    shaveHead(head, FLAT, skin, FACE, HAIR)
-    let crown = 0
-    for (let k = 0; k < 20; k++) crown += lightAt(head, [0.1 + k * 0.04, HAIRLINE / 2])
-    expect(Math.abs(crown / 20 - luminance(...SKIN))).toBeLessThan(20)
-    expect(strayChanges(head, (_, y) => y < HAIRLINE + 0.06, original)).toBe(0)
-  })
-
-  test('a beard of the hair’s colour stays, as does all the face below the eyes', () => {
-    const beard = (x: number, y: number) => y > at(17)[1] && inside(OVAL, x, y)
-    const { head, skin, original } = hairy((x, y) => (beard(x, y) ? HAIR : null))
-    shaveHead(head, FLAT, skin, FACE, HAIR)
-    expect(strayChanges(head, (_, y) => y < HAIRLINE + 0.06, original)).toBe(0)
-    expect(luminance(...patchColour(head, [0.5, HAIRLINE / 2]))).toBeGreaterThan(
-      luminance(...SKIN) * 0.85,
-    )
-  })
-
-  test('a fringe over a brow goes, and the brow under it is put back from the other', () => {
-    const brow = BROW_HAIRS[1]!
-    const xs = brow.map(([x]) => x)
-    const [left, right] = [Math.min(...xs) - 0.015, Math.max(...xs) + 0.015]
-    const bottom = Math.max(...brow.map(([, y]) => y)) + 0.015
-    const fringe = (x: number, y: number) => x > left && x < right && y < bottom
-    const { head, skin } = hairy((x, y) => (fringe(x, y) ? HAIR : null))
-    shaveHead(head, FLAT, skin, FACE, HAIR)
-    expect(luminance(...patchColour(head, [(left + right) / 2, HAIRLINE + 0.03]))).toBeGreaterThan(
-      luminance(...SKIN) * 0.85,
-    )
-    expect(lightAt(head, between(at(334), at(282), 0.5))).toBeLessThan(luminance(...SKIN) * 0.6)
-    // The other brow stays as it was.
-    expect(colourAt(head, between(at(105), at(52), 0.5))).toEqual(BROW)
-  })
-
-  test('a cap of another colour stays, the hair under its rim goes', () => {
-    const CAP: Rgb = [40, 70, 150]
-    const RIM = 0.2
-    // Hair down the sides, beside the eyes, where its colour is read.
-    const sides = (x: number, y: number) =>
-      Math.abs(y - at(159)[1]) < 0.08 &&
-      !inside(OVAL, x, y) &&
-      Math.abs(x - 0.5) < Math.abs(at(234)[0] - 0.5) + 0.1
-    const { head, skin } = hairy((x, y) => (y < RIM ? CAP : sides(x, y) ? HAIR : null))
-    shaveHead(head, FLAT, skin, FACE, null)
-    expect(colourAt(head, [0.5, RIM / 2])).toEqual(CAP)
-    expect(luminance(...patchColour(head, [0.5, (RIM + HAIRLINE) / 2]))).toBeGreaterThan(
-      luminance(...SKIN) * 0.85,
-    )
-  })
-})
-
 describe('a body dressed in a look, placed by its landmarks', () => {
   const GRID = flatHead(16)
   const BODY: Pixels = { data: new Uint8ClampedArray(16 * 16 * 4).fill(200), width: 16, height: 16 }
@@ -516,7 +437,7 @@ describe('a body dressed in a look, placed by its landmarks', () => {
         skin: null,
         face: null,
         paint: NO_PAINT,
-        bald: false,
+        scalp: null,
         feet: SHOD,
         feetBind: null,
         feetDonor: null,
@@ -544,45 +465,5 @@ describe('a body dressed in a look, placed by its landmarks', () => {
     expect(colourAt(blushed, forehead)).toEqual(colourAt(plain, forehead))
     const cheek = between(at(50), at(33), 0.3)
     expect(redness(colourAt(blushed, cheek))).toBeGreaterThan(redness(colourAt(plain, cheek)) + 5)
-  })
-
-  test('a shaved head: the crown’s hair goes to the skin’s colour, the face stays', () => {
-    const { head } = hairy()
-    const shaved = dress(head, { bald: true })
-    let crown = 0
-    for (let k = 0; k < 20; k++) crown += lightAt(shaved, [0.1 + k * 0.04, HAIRLINE / 2])
-    expect(Math.abs(crown / 20 - luminance(...SKIN))).toBeLessThan(25)
-    expect(strayChanges(shaved, (_, y) => y < HAIRLINE + 0.06, head)).toBe(0)
-  })
-
-  test('a dyed head under a borrowed hairstyle is shaved all the same', () => {
-    const { head } = hairy()
-    const shaved = dress(head, { bald: true, hair: '#c03020' })
-    let crown = 0
-    for (let k = 0; k < 20; k++) crown += lightAt(shaved, [0.1 + k * 0.04, HAIRLINE / 2])
-    expect(Math.abs(crown / 20 - luminance(...SKIN))).toBeLessThan(25)
-  })
-
-  test('the same body shaved and then not: its own hair again', () => {
-    const { head } = hairy()
-    const analysis = analyseBody(head, BODY, null, GRID)
-    const job = {
-      key: 'again',
-      avatar: 'again',
-      hair: '#c03020',
-      skin: null,
-      face: null,
-      paint: NO_PAINT,
-      feet: SHOD,
-      feetBind: null,
-      feetDonor: null,
-      target: FACE,
-    }
-    dressBody(analysis, { ...job, bald: true }, null)
-    const dyed = dressBody(analysis, { ...job, bald: false }, null).head!
-    const [r, g, b] = patchColour(dyed, [0.5, HAIRLINE / 2])
-    // Dyed red, not shaved to the skin.
-    expect(r).toBeGreaterThan(g * 2)
-    expect(luminance(r, g, b)).toBeLessThan(luminance(...SKIN) / 2)
   })
 })

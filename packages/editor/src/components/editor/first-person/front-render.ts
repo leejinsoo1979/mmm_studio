@@ -73,7 +73,7 @@ const spanEnd = (start: number, step: number, floor: number) =>
  * weights clamped onto the triangle: a grown rim takes its edge's values
  * rather than extrapolating them (which runs away across a sliver).
  */
-function rasterise(
+export function rasterise(
   ax: number,
   ay: number,
   bx: number,

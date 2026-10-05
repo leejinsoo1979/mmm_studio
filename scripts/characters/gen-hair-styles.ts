@@ -15,8 +15,12 @@
 // shell stands out of it there. The styles are the characters with hair
 // cards, once each (several professions reuse a character's hair), told
 // apart by sex and by how far the hair falls. Hair gear modelled in a head
-// (a scrunchie, a tie, a pin) is shell too. Lengths are in the bind pose's
-// own units (about 0.9 m on an adult: see avatar-hair.ts).
+// (a scrunchie, a tie, a pin) is shell too. For every head it finds which
+// of its triangles are its own hair, taken out for a bald head (see
+// bald-head.ts's ownHair), from its shape against the skull and from what
+// the look system's analysis reads off its texture (look-job.ts's
+// analyseBody). Lengths are in the bind pose's own units (about 0.9 m on
+// an adult: see head-skull.ts).
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import sharp from 'sharp'
@@ -25,15 +29,14 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { avatarGender } from '../../packages/editor/src/components/editor/first-person/avatar-catalog'
 import {
-  faceFit,
-  fitSkull,
   type HairAsset,
   type HairBasis,
   hairAssetOf,
-  invertFit,
-  PointGrid,
-  standingOver,
 } from '../../packages/editor/src/components/editor/first-person/avatar-hair'
+import {
+  ownHair,
+  texelShares,
+} from '../../packages/editor/src/components/editor/first-person/bald-head'
 import {
   type HairStyleEntry,
   NORMAL_UNIT,
@@ -44,7 +47,17 @@ import {
   ZONE_UNIT,
 } from '../../packages/editor/src/components/editor/first-person/hair-styles'
 import { headGeometry } from '../../packages/editor/src/components/editor/first-person/head-geometry'
-import { cardHairMask } from '../../packages/editor/src/components/editor/first-person/look-job'
+import {
+  faceFit,
+  fitSkull,
+  invertFit,
+  PointGrid,
+  standingOver,
+} from '../../packages/editor/src/components/editor/first-person/head-skull'
+import {
+  analyseBody,
+  cardHairMask,
+} from '../../packages/editor/src/components/editor/first-person/look-job'
 import type { Pixels } from '../../packages/editor/src/components/editor/first-person/look-pixels'
 import { ROCKETBOX_AVATARS } from '../../packages/editor/src/components/editor/first-person/rocketbox-catalog'
 
@@ -71,6 +84,21 @@ const KNOTTED = [
   'Sports_Female_01',
 ]
 const KNOT_OFF = 0.03
+
+/**
+ * Characters whose head mesh is a garment over the hair — a hijab, a
+ * headscarf, a keffiyeh, a hood — wrapped round the face and down onto the
+ * shoulders: taking it off would leave its folds round the face and an
+ * open body under it. Nothing of theirs is taken out for a bald head.
+ */
+const COVERED = [
+  'Female_Adult_06',
+  'Female_Adult_10',
+  'Female_Child_02',
+  'Male_Adult_18',
+  'Male_Adult_19',
+  'Male_Adult_21',
+]
 
 /** A bald man (shaved; Construction_Male_02 shares his head) whose skull is the smallest of the bald ones. */
 const SKULL_AVATAR = 'Business_Male_07'
@@ -379,7 +407,8 @@ function withoutPatches(head: SkinnedMesh, shell: Uint8Array): Uint8Array {
 /**
  * The skull: the bald head's main piece (not its eyeballs), its points at
  * one spot welded into one with their normals averaged, their neighbours
- * along its triangles, and its face bones (the head's children).
+ * along its triangles, its triangles, and its face bones (the head's
+ * children).
  */
 function skullOf(head: SkinnedMesh) {
   const { points, weldOf, neighbours } = welded(head)
@@ -424,7 +453,21 @@ function skullOf(head: SkinnedMesh) {
     neighbours: kept.map((old) =>
       neighbours[old]!.filter((n) => keptAt.has(n)).map((n) => keptAt.get(n)!),
     ),
+    triangles: Uint32Array.from(skullTriangles(head, weldOf, keptAt)),
   }
+}
+
+/** A mesh's triangles over its welded points (`weldOf`), those in `keptAt` renumbered so, the rest and any a weld folded flat left out. */
+function skullTriangles(mesh: SkinnedMesh, weldOf: number[], keptAt: Map<number, number>) {
+  const index = mesh.geometry.index!
+  const triangles: number[] = []
+  for (let t = 0; t < index.count; t += 3) {
+    const corners = [0, 1, 2].map((k) => keptAt.get(weldOf[index.getX(t + k)]!))
+    if (corners.some((corner) => corner === undefined)) continue
+    if (new Set(corners).size < 3) continue
+    triangles.push(...(corners as number[]))
+  }
+  return triangles
 }
 
 // The characters, adults first and professions after (so a style several
@@ -436,7 +479,7 @@ const ids = ROCKETBOX_AVATARS.map((avatar) => avatar.id).sort((a, b) => {
 const skullHead = meshOf((await loadCharacter(SKULL_AVATAR, false)).scene, 'head')!
 const skull = skullOf(skullHead)
 const noZone: SkullData = { ...skull, zone: new Float32Array(skull.points.length / 3) }
-const bare: HairBasis = { skull: noZone, shells: new Map() }
+const bare: HairBasis = { skull: noZone, shells: new Map(), bald: new Map() }
 
 // The card-haired heads' shells, and every head with a shell, by its
 // material's name.
@@ -613,7 +656,94 @@ for (const [name, head] of heads) {
   if (added > 0) console.log(`${name}: ${added} points of hair gear`)
   shells.set(name, geared)
 }
-const basis: HairBasis = { skull: { ...noZone, zone }, shells }
+/** Points at one spot within this are one (as avatar-hair.ts's spots). */
+const SPOT = 1e-4
+
+/** No body texture: the analysis's body skin is no matter here. */
+const NO_BODY: Pixels = { data: new Uint8ClampedArray(4), width: 1, height: 1 }
+
+/**
+ * Which of a head's triangles are its own hair (see bald-head.ts's
+ * ownHair): its texture read as the look reads it, for the hair's colour
+ * and the skin's.
+ */
+async function ownHairOf(id: string): Promise<{ name: string; flags: Uint8Array } | null> {
+  const character = await loadCharacter(id, true)
+  const head = meshOf(character.scene, 'head')
+  if (!head) return null
+  const name = (head.material as Material).name
+  const geometry = head.geometry
+  const position = geometry.getAttribute('position')
+  const uv = geometry.getAttribute('uv')
+  const index = Array.from(geometry.index!.array as ArrayLike<number>)
+  const points = new Float32Array(position.count * 3)
+  const uvs = new Float32Array(position.count * 2)
+  const p = new Vector3()
+  const spotOf = new Map<string, number>()
+  const spots = new Int32Array(position.count)
+  for (let i = 0; i < position.count; i++) {
+    p.fromBufferAttribute(position, i).applyMatrix4(head.bindMatrix).toArray(points, i * 3)
+    uvs[i * 2] = uv.getX(i)
+    uvs[i * 2 + 1] = uv.getY(i)
+    const key = [p.x, p.y, p.z].map((value) => Math.round(value / SPOT)).join(',')
+    let spot = spotOf.get(key)
+    if (spot === undefined) {
+      spot = spotOf.size
+      spotOf.set(key, spot)
+    }
+    spots[i] = spot
+  }
+  const places = bonePlaces(head)
+  const { height, zone, off } = standingOver(points, fitSkull(zoned, faceFit(zoned, places)!))
+  const eyes = [...places].filter(([bone]) => /[LR]Eye$/.test(bone)).map(([, place]) => place)
+  const neck = bindPlace(
+    head,
+    head.skeleton.bones.findIndex((bone) => /Head$/.test(bone.name)),
+  ).y
+  const texture = character.textures.get(name)!
+  const opacity = meshOf(character.scene, 'opacity')
+  const analysis = analyseBody(
+    texture,
+    NO_BODY,
+    opacity ? (character.textures.get((opacity.material as Material).name) ?? null) : null,
+    headGeometry(head),
+  )
+  const hairy = analysis.hairColor ? analysis.hairMask : null
+  const notSkin = analysis.headSkinMask.map((skin, i) => 1 - Math.min(1, skin + (hairy?.[i] ?? 0)))
+  const [hairShare, garment] = texelShares(index, uvs, texture.width, texture.height, [
+    hairy ?? new Float32Array(notSkin.length),
+    notSkin,
+  ])
+  if (COVERED.includes(id)) return { name, flags: new Uint8Array(index.length / 3) }
+  const flags = ownHair({
+    points,
+    index,
+    spots,
+    spotCount: spotOf.size,
+    shell: shells.get(name) ?? null,
+    height,
+    zone,
+    off,
+    neck,
+    eyeFront: Math.max(...eyes.map((eye) => eye[2]!)),
+    hair: hairy ? hairShare! : null,
+    notSkin: garment!,
+  })
+  return { name, flags }
+}
+
+// Every head's own hair (a character modelled in one piece has no head to make bald).
+const bald = new Map<string, Uint8Array>()
+for (const id of ids) {
+  const own = await ownHairOf(id)
+  if (!own) continue
+  const { name, flags } = own
+  bald.set(name, flags)
+  const taken = flags.reduce((sum, flag) => sum + flag, 0)
+  console.log(`${id}: ${taken} of ${flags.length} triangles its own hair`)
+}
+
+const basis: HairBasis = { skull: { ...noZone, zone }, shells, bald }
 console.log(`skull: ${zone.length} points; shells of ${shells.size} heads`)
 
 /**
@@ -668,7 +798,9 @@ function sameCards(a: Float32Array, b: Float32Array) {
 const styles: (HairStyleEntry & { reach: number })[] = []
 const kept: { id: string; cards: Float32Array }[] = []
 for (const { id, scene } of characters) {
-  const asset = hairAssetOf(id, scene, basis, null)
+  // Its length by the shell it was sculpted in, not the scalp a cap
+  // carries round it (see hairAssetOf).
+  const asset = hairAssetOf(id, scene, { ...basis, bald: new Map() }, null)
   const cards = cardPoints(asset)
   const twin = kept.find((style) => sameCards(style.cards, cards))
   if (twin) {
@@ -698,8 +830,10 @@ const library: StoredHairLibrary = {
     points: Array.from(skull.points, (value) => Math.round(value / POINT_UNIT)),
     normals: Array.from(skull.normals, (value) => Math.round(value / NORMAL_UNIT)),
     zone: Array.from(zone, (value) => Math.round(value / ZONE_UNIT)),
+    triangles: Array.from(skull.triangles),
   },
   shells: Object.fromEntries([...shells].map(([head, flags]) => [head, packFlags(flags)])),
+  bald: Object.fromEntries([...bald].map(([head, flags]) => [head, packFlags(flags)])),
 }
 writeFileSync(out, `${JSON.stringify(library)}\n`)
 console.log(`${styles.length} styles → ${out}`)

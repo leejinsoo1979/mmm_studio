@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test'
-import { dye, hairMask, luminance, type Pixels, similarityMask, toneSkin } from './look-pixels'
+import {
+  byLightness,
+  dye,
+  hairMask,
+  luminance,
+  type Pixels,
+  type Rgb,
+  similarityMask,
+  toneSkin,
+} from './look-pixels'
 
 function image(width: number, height: number, fill: (x: number, y: number) => number[]): Pixels {
   const data = new Uint8ClampedArray(width * height * 4)
@@ -115,5 +124,56 @@ describe('toning skin', () => {
     )
     const [r, , b] = at(toned, 2)
     expect(r! - b!).toBeGreaterThan(15)
+  })
+})
+
+describe('a pass over a texture', () => {
+  // Many texels, few colours, as a character's texture has them.
+  const PALETTE = Array.from({ length: 300 }, (_, i) => [
+    (i * 37) % 256,
+    (i * 91 + 40) % 256,
+    (i * 13 + 90) % 256,
+  ])
+  const texture = image(96, 96, (x, y) => PALETTE[(x * 7 + y * 31 + ((x * y) % 5)) % 300]!)
+  const one = (x: number, y: number) => image(1, 1, () => at(texture, x, y))
+  const skin: Rgb = [200, 150, 120]
+  const hair: Rgb = [70, 45, 30]
+
+  test('gives each texel what it gives that texel’s colour alone', () => {
+    const similar = similarityMask(texture, skin)
+    const haired = hairMask(texture, hair, skin)
+    const toned = { ...texture, data: new Uint8ClampedArray(texture.data) }
+    toneSkin(toned, [110, 70, 50], skin, similar)
+    for (let y = 0; y < texture.height; y += 5) {
+      for (let x = 0; x < texture.width; x += 3) {
+        const i = y * texture.width + x
+        expect(similar[i]).toBe(similarityMask(one(x, y), skin)[0]!)
+        expect(haired[i]).toBe(hairMask(one(x, y), hair, skin)[0]!)
+        const alone = one(x, y)
+        toneSkin(alone, [110, 70, 50], skin, Float32Array.of(similar[i]!))
+        expect(at(toned, x, y)).toEqual(at(alone, 0, 0))
+      }
+    }
+  })
+})
+
+describe('picking a colour by lightness', () => {
+  test('picks what a stable sort by lightness puts there, alike colours in the order given', () => {
+    let seed = 7
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31
+      return seed / 2 ** 31
+    }
+    for (const count of [1, 2, 3, 10, 101, 1000]) {
+      // Few distinct shades, so many share a lightness: told apart by which array each is.
+      const samples = Array.from({ length: count }, (): Rgb => {
+        const shade = Math.floor(random() * 12) * 20
+        return [shade, shade, shade]
+      })
+      const sorted = [...samples].sort((a, b) => luminance(...a) - luminance(...b))
+      for (const at of [0, 0.25, 0.4, 0.5, 0.99]) {
+        expect(byLightness(samples, at)).toBe(sorted[Math.floor(count * at)]!)
+      }
+    }
   })
 })

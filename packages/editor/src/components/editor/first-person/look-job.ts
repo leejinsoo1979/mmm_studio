@@ -1,7 +1,8 @@
+import type { ScalpPaint } from './bald-head'
 import type { BodyBind } from './bare-feet'
 import { connectedFrom } from './face-fill'
 import { runFaceJob } from './face-job'
-import { type FacePaint, hairHued, hasFacePaint, paintFace, shaveHead } from './face-paint'
+import { type FacePaint, hairHued, hasFacePaint, paintFace } from './face-paint'
 import { maskImage } from './face-swap'
 import {
   dressLegs,
@@ -17,6 +18,7 @@ import { forEachTexel, renderFront, tintIris } from './front-render'
 import { bleedHair } from './hair-bleed'
 import type { HeadGeometry } from './head-geometry'
 import {
+  byLightness,
   colorDistance,
   dye,
   type HeadTriangle,
@@ -31,6 +33,7 @@ import {
   toneSkin,
   unpackTriangles,
 } from './look-pixels'
+import { relightBody, type ScalpPainter, scalpPainter } from './scalp-paint'
 
 /**
  * A Rocketbox body's materials: `<code>_head`, `<code>_body` and, on about
@@ -68,7 +71,8 @@ export type LookJob = {
     eyes: string | null
   } | null
   paint: FacePaint
-  bald: boolean
+  /** How a bald head's skin is painted round where its hair was taken out (see bald-head.ts); null for its own hair. */
+  scalp: ScalpPaint | null
   feet: AvatarFeet
   /**
    * Out of shoes, the body mesh with them in its bind pose and the donor
@@ -84,6 +88,15 @@ export type LookJob = {
    */
   target: number[] | null
 }
+
+/** How many bodies the look worker keeps, the page sending each once (see avatar-look.ts). */
+export const BODIES_KEPT = 3
+
+/** A job as the page hands it to the look worker: its body by key, the body itself when the worker hasn't it. */
+export type LookMessage = { job: Omit<LookJob, 'body'>; key: string; body: LookBody | null }
+
+/** The look worker's answer: the look, why it failed, or that it lacks the job's body. */
+export type LookReply = { result?: LookResult; error?: string; missing?: boolean }
 
 /**
  * The textures the look changes, whether the face was left out because its
@@ -140,8 +153,7 @@ function colorWhere(
     samples.push([head.data[p]!, head.data[p + 1]!, head.data[p + 2]!])
   }
   if (samples.length === 0) return fallback
-  samples.sort((a, b) => luminance(...a) - luminance(...b))
-  return samples[Math.floor(samples.length / 2)]!
+  return byLightness(samples, 0.5)
 }
 
 /**
@@ -268,7 +280,7 @@ export function analyseBody(
   const skin = skinColor(head, geometry)
   const skinLum = luminance(...skin)
   // A crown of a colour hair never is (a blue cap, camouflage, a hijab) is
-  // gear, not hair to dye or shave; so is a card's colour that isn't a
+  // gear, not hair to dye or paint over; so is a card's colour that isn't a
   // hair's (the opacity texture's gear, a helmet's visor or reflective
   // strip, outweighing the hair): the crown under the cards is the hair's.
   const crown = crownColor(head, geometry)
@@ -306,11 +318,11 @@ export function analyseBody(
 /**
  * Where a head with hair cards has their hair painted on — its hair shell,
  * which the hairstyle library is built from (see
- * scripts/characters/gen-hair-styles.ts). Unlike `analyseBody`'s mask, which
- * the look tunes for dye and shave, it stays the one the library's shells
- * were fitted to: the cards' colour told from the skin's down the middle of
- * the face (the cheeks and nose), the face below the eyes kept whatever the
- * hair's shade.
+ * scripts/characters/gen-hair-styles.ts). Unlike `analyseBody`'s mask,
+ * which the look tunes for dye and a bald scalp, it stays the one the
+ * library's shells were fitted to: the cards' colour told from the skin's
+ * down the middle of the face (the cheeks and nose), the face below the
+ * eyes kept whatever the hair's shade.
  */
 export function cardHairMask(head: Pixels, opacity: Pixels, geometry: HeadGeometry): Float32Array {
   const skin = colorWhere(
@@ -331,18 +343,18 @@ const copyPixels = (pixels: Pixels): Pixels => ({
   height: pixels.height,
 })
 
-/** The last few heads dyed and shaved, by what they depend on: each holds 16 MB, and a paint slider's drag repeats them. */
+/** The last few heads dyed, by what they depend on: each holds 16 MB, and a paint slider's drag repeats them. */
 const bases = new Map<string, Pixels>()
 const BASES_KEPT = 2
 
 /**
- * A body's head dyed and shaved as a look asks (see `dressBody`), its own
- * copy. `name` names the look's body, dyes and shave.
+ * A body's head toned and dyed as a look asks (see `dressBody`), its own
+ * copy. `name` names the look's body and dyes, and whether it is bald.
  */
 function baseHead(
   analysis: Analysis,
   name: string,
-  { hair, skin, bald, target }: Pick<LookJob, 'hair' | 'skin' | 'bald' | 'target'>,
+  { hair, skin, bald }: Pick<LookJob, 'hair' | 'skin'> & { bald: boolean },
 ): Pixels {
   let base = bases.get(name)
   if (base) {
@@ -350,42 +362,69 @@ function baseHead(
   } else {
     base = copyPixels(analysis.head)
     if (skin) toneSkin(base, hexToRgb(skin), analysis.skin, analysis.headSkinMask)
-    // A shaved head's painted hair goes, not dyed: the shave finds it by its
-    // own colour, and the hair worn over it is dyed on its own.
+    // A bald head's painted hair is painted over, not dyed: the hair worn
+    // over it is dyed on its own.
     if (hair && !bald) dye(base, hexToRgb(hair), analysis.headHairLum, analysis.hairMask)
-    if (bald && target) {
-      shaveHead(base, analysis.geometry, analysis.headSkinMask, target, analysis.hairColor)
-    }
   }
   bases.set(name, base)
   if (bases.size > BASES_KEPT) bases.delete(bases.keys().next().value!)
   return copyPixels(base)
 }
 
+const sameNumbers = (a: ArrayLike<number>, b: ArrayLike<number>) =>
+  a.length === b.length && Array.prototype.every.call(a, (value, i) => value === b[i])
+
+const sameScalp = (a: ScalpPaint, b: ScalpPaint) =>
+  sameNumbers(a.paint, b.paint) &&
+  sameNumbers(a.scalp, b.scalp) &&
+  sameNumbers(a.kept, b.kept) &&
+  sameNumbers(a.taken, b.taken) &&
+  sameNumbers(a.shadow, b.shadow) &&
+  sameNumbers(a.skin, b.skin) &&
+  a.tone.length === b.tone.length &&
+  a.tone.every((list, i) => sameNumbers(list, b.tone[i]!))
+
+/** Each body's scalp painter, and the scalp it paints (a job brings its own copy). */
+const painters = new WeakMap<Analysis, { scalp: ScalpPaint; painter: ScalpPainter }>()
+
+function painterOf(analysis: Analysis, scalp: ScalpPaint): ScalpPainter {
+  let found = painters.get(analysis)
+  if (!found || !sameScalp(found.scalp, scalp)) {
+    const { width, height } = analysis.head
+    found = {
+      scalp,
+      painter: scalpPainter(width, height, scalp, analysis.hairMask, analysis.headSkinMask),
+    }
+    painters.set(analysis, found)
+  }
+  return found.painter
+}
+
 /**
  * A body's textures dressed in a look: the ones it changes, each its own
- * copy. On the head, in order: the skin tone, the hair dye, a shave, the
- * swapped face (onto the skin as dyed, the dyes' masks being the
- * character's own face and not the photo's), the face paint over it all,
- * and the irises last (a face photo's, unless the paint picks one).
- * `photo` is the face's photo, read (null leaves the face out).
+ * copy. On the head, in order: the skin tone, the hair dye (not on a bald
+ * head), the swapped face (onto the skin as dyed, the dyes' masks being the
+ * character's own face and not the photo's), a bald head's skin painted
+ * round the cut to the scalp's tone (read off the forehead as it now is),
+ * the face paint over it all, and the irises last (a face photo's, unless
+ * the paint picks one). `photo` is the face's photo, read (null leaves the
+ * face out).
  */
 export function dressBody(
   analysis: Analysis,
   job: Omit<LookJob, 'body'> & { key: string },
   photo: Pixels | null,
 ): Partial<Record<Part, Pixels>> {
-  const { face, hair, skin, paint, target } = job
-  // The shave, like the rest of the paint, goes by the landmarks: it keeps
-  // the face below the eyes and the brows.
-  const bald = job.bald && target !== null
+  const { face, hair, skin, paint, target, scalp } = job
+  const bald = scalp !== null
   const swap = face && photo && target
   const eyes = paint.eyes ?? face?.eyes ?? null
   const changed: Partial<Record<Part, Pixels>> = {}
   if (swap || hair || skin || bald || eyes || (target && hasFacePaint(paint))) {
-    const base = `${job.key}|${hair}|${skin}|${bald}`
-    let head = baseHead(analysis, base, { hair, skin, bald, target })
-    // A shaved head has no hair left over its face.
+    // A bald head's painted hair isn't dyed: a dye alone needs no new base.
+    const base = `${job.key}|${bald ? null : hair}|${skin}|${bald}`
+    let head = baseHead(analysis, base, { hair, skin, bald })
+    // A bald head has no hair left over its face.
     const hairMask = bald ? null : analysis.hairMask
     if (swap) {
       try {
@@ -407,6 +446,10 @@ export function dressBody(
         console.warn('[look] face swap failed', error)
       }
     }
+    if (scalp) {
+      const painter = painterOf(analysis, scalp)
+      painter.paint(head, painter.tone(head) ?? (skin ? hexToRgb(skin) : analysis.skin))
+    }
     if (target) {
       paintFace(head, analysis.geometry, target, paint, {
         beard: hair ? hexToRgb(hair) : null,
@@ -426,8 +469,11 @@ export function dressBody(
   }
   const feet = feetBodyOf(analysis, job)
   const worn = feet && job.feetDonor && wornFeet(feet, job.feetDonor, job.feet.wear)
-  if (skin || worn) {
+  const shaded = scalp !== null && scalp.shadow.length > 0
+  if (skin || worn || shaded) {
     const body = copyPixels(analysis.body)
+    // Before the tone, so the shadow lit again is toned as the rest.
+    if (shaded) relightBody(body, scalp.shadow)
     const tone = skin ? hexToRgb(skin) : null
     if (feet && worn) {
       dressLegs(body, feet, worn, job.feet, tone)
@@ -497,9 +543,9 @@ function bitmapOf(pixels: Pixels): Promise<ImageBitmap> {
   })
 }
 
-/** The last few bodies' analyses: each holds a few tens of MB. */
+/** The last few bodies' analyses (as many as the worker keeps bodies): each holds a few tens of MB. */
 const analyses = new Map<string, Analysis>()
-const ANALYSES_KEPT = 3
+const ANALYSES_KEPT = BODIES_KEPT
 
 function analysisOf(body: LookBody): Analysis {
   let analysis = analyses.get(body.key)

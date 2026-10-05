@@ -735,23 +735,24 @@ function hangingOn({ spotOf, places, pieceOf }: Surface, ears: readonly Ear[]) {
   return { hangs: Int32Array.from(spotOf, (spot) => pieceHangs[pieceOf[spot]!]!), hanging }
 }
 
-/** A head's ears and what hangs from them (see hangingOn). */
-type Fitted = { ears: Ear[]; hangs: Int32Array; hanging: Hanging[] }
+/** A head's ears and what hangs from them (see hangingOn), and the surface they were found on. */
+type Fitted = { ears: Ear[]; hangs: Int32Array; hanging: Hanging[]; surface: Surface }
 
 const fittedHeads = new WeakMap<BufferGeometry, Fitted>()
 
 /**
- * A head's ears, found on its geometry as loaded the first time they are
- * asked for: they depend on nothing else, and a slider being dragged
- * reshapes the head many times a second.
+ * The ears on a mesh (the head, or the bald surface closing it: see
+ * avatar-hair.ts), found on its geometry as loaded the first time they are
+ * asked for, framed by the head: they depend on nothing else, and a slider
+ * being dragged reshapes the head many times a second.
  */
-function fitted(head: Mesh): Fitted {
-  const geometry = originalGeometry(head)
+function fitted(mesh: Mesh, head: Mesh = mesh): Fitted {
+  const geometry = originalGeometry(mesh)
   const known = fittedHeads.get(geometry)
   if (known) return known
-  const surface = surfaceOf(bindPoints(head), geometry.index?.array ?? null)
+  const surface = surfaceOf(bindPoints(mesh), geometry.index?.array ?? null)
   const ears = earsOn(surface, headFrame(head))
-  const found = { ears, ...hangingOn(surface, ears) }
+  const found = { ears, ...hangingOn(surface, ears), surface }
   fittedHeads.set(geometry, found)
   return found
 }
@@ -769,22 +770,23 @@ export function earsOf(head: Mesh): readonly Ear[] {
   return fitted(head).ears
 }
 
-/**
- * The ear sliders' reshaping of a body whose head mesh is `head`: its ears
- * and what hangs from them. Null when no ear slider is set, or the head has
- * no ears (see hasEars).
- */
-export function earShaper(head: Mesh, shape: FaceShape): Shaper | null {
-  const settings = earSettings(shape)
-  if (!settings) return null
-  const { ears, hangs, hanging } = fitted(head)
-  if (ears.length === 0) return null
+/** The surface a bald head is closed with (see avatar-hair.ts), where it has one. */
+function baldSurfaceOf(head: Mesh): Mesh | null {
+  const found = head.parent?.children.find(
+    (child) => child.userData.follows === head && (child as Mesh).isMesh,
+  )
+  return (found as Mesh | undefined) ?? null
+}
+
+/** The ears' moves for the meshes of the head: each point moved by a mesh's ears it is reached by (see Ear). */
+function earMove(fit: Fitted, settings: EarSettings): PointMove {
+  const { ears, hangs, hanging } = fit
   const hung = hanging.map(({ ear, at }) => {
     const move = new Vector3()
     addEarMove(ear, settings, at, move)
     return move
   })
-  const move: PointMove = (point, i, out) => {
+  return (point, i, out) => {
     const piece = hangs[i]!
     if (piece >= 0) {
       out.copy(hung[piece]!)
@@ -795,5 +797,76 @@ export function earShaper(head: Mesh, shape: FaceShape): Shaper | null {
       if (ear.reached[i]) addEarMove(ear, settings, point, out)
     }
   }
-  return (mesh) => (mesh === head ? move : null)
+}
+
+/**
+ * What is worn over the ears goes as the skin under it: as the nearest point
+ * of the surface they are on (bind units), wholly within WORN_FULL of it,
+ * not at all from WORN_REACH.
+ */
+const WORN_FULL = 0.01
+const WORN_REACH = 0.03
+
+/** A move for what is worn over a surface (see WORN_FULL): each point as the surface's nearest point moves (`move`, by the surface's own points). */
+function wornMove(fit: Fitted, move: PointMove): PointMove {
+  const { places, spotOf } = fit.surface
+  const pointOf = new Int32Array(places.length).fill(-1)
+  spotOf.forEach((spot, i) => {
+    if (pointOf[spot]! < 0) pointOf[spot] = i
+  })
+  const near = grid(places, WORN_REACH)
+  const moves = new Map<number, Vector3>()
+  return (point, _i, out) => {
+    let best = -1
+    let nearest = WORN_REACH
+    near(point, WORN_REACH, (spot) => {
+      const distance = places[spot]!.distanceTo(point)
+      if (distance < nearest) {
+        nearest = distance
+        best = spot
+      }
+    })
+    out.set(0, 0, 0)
+    if (best < 0) return
+    let moved = moves.get(best)
+    if (!moved) {
+      moved = new Vector3()
+      move(places[best]!, pointOf[best]!, moved)
+      moves.set(best, moved)
+    }
+    out.copy(moved).multiplyScalar(1 - smoothstep(WORN_FULL, WORN_REACH, nearest))
+  }
+}
+
+/**
+ * The ear sliders' reshaping of a body whose head mesh is `head`: its ears
+ * and what hangs from them — or, on a head made bald with no ears of its
+ * own under its hair, the bald surface's (the skull's) — and what else is
+ * worn on the head: the bald surface round its ears, by where it lies, and
+ * a borrowed hairstyle (see avatar-hair.ts) as the skin under it, which
+ * would otherwise part from it. Null when no ear slider is set, or there are
+ * no ears (see hasEars).
+ */
+export function earShaper(head: Mesh, shape: FaceShape): Shaper | null {
+  const settings = earSettings(shape)
+  if (!settings) return null
+  const own = fitted(head)
+  const bald = baldSurfaceOf(head)
+  const skull = own.ears.length === 0 && bald ? fitted(bald, head) : null
+  const ears = skull?.ears ?? own.ears
+  if (ears.length === 0) return null
+  const around: PointMove = (point, _i, out) => {
+    out.set(0, 0, 0)
+    for (const ear of ears) addEarMove(ear, settings, point, out)
+  }
+  const ownMove = skull ? null : earMove(own, settings)
+  const skullMove = skull ? earMove(skull, settings) : null
+  let worn: PointMove | null = null
+  return (mesh) => {
+    if (mesh === head) return ownMove ?? around
+    if (mesh === bald) return skullMove ?? around
+    if (mesh.userData.wornOn !== head) return null
+    worn ??= skull ? wornMove(skull, skullMove!) : wornMove(own, ownMove!)
+    return worn
+  }
 }
