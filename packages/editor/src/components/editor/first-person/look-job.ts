@@ -24,7 +24,7 @@ import {
   toneSkin,
   unpackTriangles,
 } from './look-pixels'
-import { type ScalpPainter, scalpPainter } from './scalp-paint'
+import { relightBody, type ScalpPainter, scalpPainter } from './scalp-paint'
 
 /**
  * A Rocketbox body's materials: `<code>_head`, `<code>_body` and, on about
@@ -78,7 +78,7 @@ export type LookJob = {
 }
 
 /** How many bodies the look worker keeps, the page sending each once (see avatar-look.ts). */
-export const BODIES_KEPT = 4
+export const BODIES_KEPT = 3
 
 /** A job as the page hands it to the look worker: its body by key, the body itself when the worker hasn't it. */
 export type LookMessage = { job: Omit<LookJob, 'body'>; key: string; body: LookBody | null }
@@ -363,7 +363,11 @@ const sameNumbers = (a: ArrayLike<number>, b: ArrayLike<number>) =>
 
 const sameScalp = (a: ScalpPaint, b: ScalpPaint) =>
   sameNumbers(a.paint, b.paint) &&
-  sameNumbers(a.swatch, b.swatch) &&
+  sameNumbers(a.scalp, b.scalp) &&
+  sameNumbers(a.kept, b.kept) &&
+  sameNumbers(a.taken, b.taken) &&
+  sameNumbers(a.shadow, b.shadow) &&
+  sameNumbers(a.skin, b.skin) &&
   a.tone.length === b.tone.length &&
   a.tone.every((list, i) => sameNumbers(list, b.tone[i]!))
 
@@ -451,8 +455,11 @@ export function dressBody(
     changed.opacity = opacity
   }
   const shoeless = job.feet.wear !== 'shoes'
-  if (skin || shoeless) {
+  const shaded = scalp !== null && scalp.shadow.length > 0
+  if (skin || shoeless || shaded) {
     const body = copyPixels(analysis.body)
+    // Before the tone, so the shadow lit again is toned as the rest.
+    if (shaded) relightBody(body, scalp.shadow)
     if (skin) toneSkin(body, hexToRgb(skin), analysis.bodySkin, analysis.bodySkinMask)
     // After the tone, so bare feet match the leg; by the face's skin, the
     // body's own being unreliable on masked and covered characters.
@@ -486,9 +493,9 @@ function bitmapOf(pixels: Pixels): Promise<ImageBitmap> {
   })
 }
 
-/** The last few bodies' analyses: each holds a few tens of MB. */
+/** The last few bodies' analyses (as many as the worker keeps bodies): each holds a few tens of MB. */
 const analyses = new Map<string, Analysis>()
-const ANALYSES_KEPT = 3
+const ANALYSES_KEPT = BODIES_KEPT
 
 function analysisOf(body: LookBody): Analysis {
   let analysis = analyses.get(body.key)

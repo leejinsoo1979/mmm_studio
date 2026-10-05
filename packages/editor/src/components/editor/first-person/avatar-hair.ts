@@ -22,15 +22,21 @@ import { avatarUrl } from './avatar-catalog'
 import { headOf, type Shaper } from './avatar-shape'
 import {
   bentSkull,
+  cleanCut,
   cutRings,
+  hairShadow,
   hollowShade,
   keptTriangles,
+  nearEar,
   neckFitted,
   necklineFan,
-  PAINT_RINGS,
   type ScalpPaint,
   scalpPaint,
   scalpTriangles,
+  scalpUvs,
+  smoothNape,
+  spreadWeights,
+  TONE_RINGS,
   vertexNormals,
   withNeckPiece,
 } from './bald-head'
@@ -377,61 +383,34 @@ function fillTexels(
 }
 
 /**
- * Grows a mask by a texel each way (the largest value round each), so a UV
- * island's rim keeps it — into texels `allowed`.
- */
-function grown(
-  mask: Float32Array,
-  allowed: (texel: number) => boolean,
-  width: number,
-  height: number,
-): Float32Array {
-  const out = new Float32Array(mask)
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (!allowed(y * width + x)) continue
-      let most = out[y * width + x]!
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx
-          const ny = y + dy
-          if (nx >= 0 && ny >= 0 && nx < width && ny < height) {
-            most = Math.max(most, mask[ny * width + nx]!)
-          }
-        }
-      }
-      out[y * width + x] = most
-    }
-  }
-  return out
-}
-
-/** A solid triangle's rim grows into texels at least this hair-coloured, or beyond every triangle. */
-const GROW_INTO = 0.5
-
-/**
- * In the donor's hair (see `CapTriangle`), a texel this unlike its skin
- * (see `colorDistance`) starts to be hair, and this unlike is wholly: a
- * hairline's sparse strands over the skin, lighter than the hair, among it.
+ * In the donor's sculpted shell (see `CapTriangle`), a texel this unlike
+ * its skin (see `colorDistance`) starts to be hair, and this unlike is
+ * wholly: a highlight can come near the skin's colour, but not to it.
  */
 const SKIN_NEAR = 0.1
 const SKIN_FAR = 0.2
 
 /**
- * A triangle of the cap on its texture (corners in 0–1 UVs): `solid` on the
- * hair's sculpted shell, `hair` among what a bald head of the donor loses.
+ * The cap's hair, on a 1024 texture: closed over gaps CLOSE texels across
+ * (a sideburn's or a hairline's sparse strands one patch, not specks);
+ * without patches of fewer than SPECK texels (a pore, a mole, a blemish of
+ * the donor's skin); its edge faded over EDGE texels.
  */
-export type CapTriangle = { u: number[]; v: number[]; solid: boolean; hair?: boolean }
+const CLOSE = 3
+const SPECK = 120
+const EDGE = 2
+
+/** A triangle of the cap on its texture (corners in 0–1 UVs): `solid` on the hair's sculpted shell. */
+export type CapTriangle = { u: number[]; v: number[]; solid: boolean }
 
 /**
  * The cap's texture: the donor's head texture with everything but its hair
- * cut away (alpha 0) — the skin round its hairline, which the cap reaches
- * over. A `solid` triangle (the hair's sculpted shell) is hair whatever its
- * colour (a highlight can pass for skin); elsewhere hair is what is nearer
- * the hair's colour than the skin's — the hair painted onto the scalp, the
- * temples, the sideburns — and, in the donor's hair, what isn't plainly
- * skin. Its edge is softened a texel each way, never across a UV island's
- * rim (the cap is drawn blended: see `hairAssetOf`).
+ * cut away (alpha 0), the donor's skin round it and on it never carried
+ * over. Hair is what is nearer the hair's colour than the skin's — the hair
+ * painted onto the scalp, the temples, the sideburns — and, on the sculpted
+ * shell (`solid`), what isn't plainly skin; closed over its gaps, cleared
+ * of specks and faded at its edge, never across a UV island's rim (see
+ * CLOSE; the cap is drawn blended: see `hairAssetOf`).
  */
 export function capPixels(
   head: Pixels,
@@ -439,59 +418,124 @@ export function capPixels(
   skin: Rgb,
   triangles: readonly CapTriangle[],
 ): Pixels {
+  const { width, height, data } = head
   const mask = hairMask(head, hair, skin)
   const skinLum = luminance(...skin)
-  const { data } = head
   const notSkin = (texel: number) =>
     smoothstep(
       SKIN_NEAR,
       SKIN_FAR,
       colorDistance(data[texel * 4]!, data[texel * 4 + 1]!, data[texel * 4 + 2]!, skin, skinLum),
     )
-  const solid = new Float32Array(mask.length)
-  const painted = new Float32Array(mask.length)
   const covered = new Uint8Array(mask.length)
+  const hairy = new Uint8Array(mask.length)
   for (const tri of triangles) {
-    fillTexels(head.width, head.height, tri.u, tri.v, (texel) => {
+    fillTexels(width, height, tri.u, tri.v, (texel) => {
       covered[texel] = 1
-      if (tri.solid) solid[texel] = 1
-      else painted[texel] = tri.hair ? Math.max(mask[texel]!, notSkin(texel)) : mask[texel]!
+      const share = tri.solid ? Math.max(mask[texel]!, notSkin(texel)) : mask[texel]!
+      if (share >= 0.5) hairy[texel] = 1
     })
   }
-  // Not into skin a triangle round the shell shows: that would draw a line of it.
-  const shell = grown(
-    solid,
-    (texel) => !covered[texel] || mask[texel]! >= GROW_INTO,
-    head.width,
-    head.height,
+  const scale = width / 1024
+  const reach = Math.max(1, Math.round(CLOSE * scale))
+  const closed = spread(
+    spread(hairy, covered, width, height, reach, 1),
+    covered,
+    width,
+    height,
+    reach,
+    0,
   )
-  const soft = softened(painted, covered, head.width, head.height)
-  const out: Pixels = {
-    data: new Uint8ClampedArray(head.data),
-    width: head.width,
-    height: head.height,
+  const kept = withoutSpecks(closed, width, height, Math.round(SPECK * scale * scale))
+  const soft = softened(kept, covered, width, height, Math.max(1, Math.round(EDGE * scale)))
+  const out: Pixels = { data: new Uint8ClampedArray(data), width, height }
+  for (let i = 0; i < mask.length; i++) out.data[i * 4 + 3] = Math.round(255 * soft[i]!)
+  return out
+}
+
+/**
+ * A mask grown (`value` 1) or shrunk (`value` 0) by `reach` texels each way
+ * over the texels `covered` holds; texels it doesn't hold neither grow nor
+ * shrink it, so a UV island's rim stays where it is.
+ */
+function spread(
+  mask: Uint8Array,
+  covered: Uint8Array,
+  width: number,
+  height: number,
+  reach: number,
+  value: 0 | 1,
+): Uint8Array {
+  const pass = (from: Uint8Array, along: boolean) => {
+    const out = new Uint8Array(from)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const texel = y * width + x
+        if (!covered[texel] || from[texel] === value) continue
+        for (let d = -reach; d <= reach; d++) {
+          const nx = along ? x + d : x
+          const ny = along ? y : y + d
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
+          const other = ny * width + nx
+          if (covered[other] && from[other] === value) {
+            out[texel] = value
+            break
+          }
+        }
+      }
+    }
+    return out
   }
-  for (let i = 0; i < mask.length; i++) {
-    out.data[i * 4 + 3] = Math.round(255 * Math.max(soft[i]!, shell[i]!))
+  return pass(pass(mask, true), false)
+}
+
+/** A mask without its patches (4-connected) of fewer than `fewest` texels. */
+function withoutSpecks(mask: Uint8Array, width: number, height: number, fewest: number) {
+  const out = new Uint8Array(mask)
+  const seen = new Uint8Array(mask.length)
+  const patch: number[] = []
+  for (let start = 0; start < mask.length; start++) {
+    if (!mask[start] || seen[start]) continue
+    patch.length = 0
+    patch.push(start)
+    seen[start] = 1
+    for (let k = 0; k < patch.length; k++) {
+      const texel = patch[k]!
+      const x = texel % width
+      const neighbours = [
+        x > 0 ? texel - 1 : -1,
+        x < width - 1 ? texel + 1 : -1,
+        texel >= width ? texel - width : -1,
+        texel < width * (height - 1) ? texel + width : -1,
+      ]
+      for (const other of neighbours) {
+        if (other >= 0 && mask[other] && !seen[other]) {
+          seen[other] = 1
+          patch.push(other)
+        }
+      }
+    }
+    if (patch.length < fewest) for (const texel of patch) out[texel] = 0
   }
   return out
 }
 
-/** A mask averaged over each texel and those round it that `covered` holds: only texels it holds change. */
+/** A mask averaged over each texel and those within `reach` round it that `covered` holds: only texels it holds change. */
 function softened(
-  mask: Float32Array,
+  mask: Uint8Array,
   covered: Uint8Array,
   width: number,
   height: number,
+  reach: number,
 ): Float32Array {
-  const out = new Float32Array(mask)
+  const out = Float32Array.from(mask)
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       if (!covered[y * width + x]) continue
       let sum = 0
       let n = 0
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -reach; dy <= reach; dy++) {
+        for (let dx = -reach; dx <= reach; dx++) {
           const nx = x + dx
           const ny = y + dy
           if (nx < 0 || ny < 0 || nx >= width || ny >= height || !covered[ny * width + nx]) continue
@@ -1006,7 +1050,6 @@ export function hairAssetOf(
           u: at.map((i) => uvs[i * 2]!),
           v: at.map((i) => uvs[i * 2 + 1]!),
           solid: !!shell && at.every((i) => shell[i]),
-          hair: own?.[t] === 1,
         }
       })
       cap.pixels = capPixels(
@@ -1053,9 +1096,10 @@ export function hairAssetOf(
 }
 
 /**
- * A head made bald (see bald-head.ts): its kept triangles; the bald
+ * A head made bald (see bald-head.ts): its kept triangles, and its normals
+ * turned to the bald surface's near the cut; the bald
  * surface closing it, in the head mesh's own space, skinned as the head
- * round it and every point on its texture's swatch; the notch the hair hid
+ * round it and showing the texels the hair did; the notch the hair hid
  * in the body's neckline closed (see `collarOf`); the head and the bald
  * surface as one surface (bind pose) for another's hair to stay off; how
  * its skin is painted round the cut; and the heights of the top of its
@@ -1063,6 +1107,7 @@ export function hairAssetOf(
  */
 type BaldHead = {
   index: BufferAttribute
+  normal: BufferAttribute
   scalp: BufferGeometry | null
   collar: BufferGeometry | null
   surface: Surface
@@ -1071,22 +1116,37 @@ type BaldHead = {
   neck: number
 }
 
-/** How far (bind units) the bald surface takes its skinning from the nearest kept point; further, it is the head bone's alone. */
-const SKINNED_AS_SKIN = 0.03
+/**
+ * How far (bind units) from the nearest kept point the bald surface takes
+ * that point's skinning, and down the neck from the nearest point of the
+ * body (its clothes, its neck); the rest of it is skinned as what is round
+ * it (see `spreadWeights`).
+ */
+const SKINNED_AS_SKIN = 0.008
+const SKINNED_AS_BODY = 0.015
 
 /**
  * How far (bind units) under the kept skin and the clothes the bald surface
  * is tucked where it would stand out of them, within TUCK_REACH of them.
  */
-const UNDER_KEPT = 0.0015
+const UNDER_KEPT = 0.0008
 const UNDER_CLOTHES = 0.003
 const TUCK_REACH = 0.015
 
 /** How far (bind units) under the middle of the body's neckline the bald surface reaches. */
 const UNDER_NECKLINE = 0.01
 
-/** How many rings of skin out from the cut are painted (see PAINT_RINGS). */
-const RINGS = PAINT_RINGS.length
+/**
+ * Kept skin and the bald surface this near the cut (bind units) are lit
+ * alike, turning back to their own normals by TURN_BACK: at the cut the
+ * skin's own were smoothed with the hair taken out, and would shade the
+ * two apart.
+ */
+const TURN_FULL = 0.003
+const TURN_BACK = 0.015
+
+/** Kept skin standing this far over the skull, or on an ear, keeps its own normals. */
+const TURN_STANDING = 0.006
 
 const baldHeads = new WeakMap<BufferGeometry, BaldHead | null>()
 
@@ -1105,23 +1165,46 @@ function baldHeadOf(model: Object3D, head: SkinnedMesh, basis: HairBasis): BaldH
   return bald
 }
 
+/** A skinned mesh's bone slots and weights at a point, as pairs, its slots as `slots` maps them. */
+function skinOf(geometry: BufferGeometry, i: number, slots: (slot: number) => number) {
+  const index = geometry.getAttribute('skinIndex')
+  const weight = geometry.getAttribute('skinWeight')
+  const pairs: [number, number][] = []
+  for (let k = 0; k < index.itemSize; k++) {
+    const w = weight.getComponent(i, k)
+    if (w > 0) pairs.push([slots(index.getComponent(i, k)), w])
+  }
+  return pairs
+}
+
 function makeBald(
   model: Object3D,
   head: SkinnedMesh,
   geometry: BufferGeometry,
   basis: HairBasis,
 ): BaldHead | null {
-  const taken = basis.bald.get(ownMaterial(head).name)
+  const own = basis.bald.get(ownMaterial(head).name)
   const fit = faceFit(basis.skull, bonePlaces(head))
   const eyes = eyesOf(head)
   const headBone = head.skeleton.bones.findIndex((bone) => isHeadBone(bone.name))
   const index = indexOf(geometry)
-  if (!(taken?.includes(1) && fit && eyes && headBone >= 0) || taken.length < index.length / 3) {
+  if (!(own?.includes(1) && fit && eyes && headBone >= 0) || own.length < index.length / 3) {
     return null
   }
   const points = bindPoints(head, geometry, 'position')
   const normals = bindPoints(head, geometry, 'normal')
   const count = points.length / 3
+  const places = boneBindPositions(head)
+  const neck = places[headBone * 3 + 1]!
+  const marks = {
+    eyes: [eyes.slice(0, 3), eyes.slice(3, 6)],
+    neck,
+    nape: places[headBone * 3 + 2]!,
+  }
+  const { spots, count: spotCount } = spotsOf(points)
+  const fitted = fitSkull(basis.skull, fit)
+  const { height } = standingOver(points, fitted)
+  const taken = cleanCut({ points, index, spots, spotCount, height }, own, marks)
   const kept = keptTriangles(index, taken)
   const keptPoint = new Uint8Array(count)
   for (const i of kept) keptPoint[i] = 1
@@ -1130,17 +1213,15 @@ function makeBald(
   keptIds.forEach((i, k) => {
     anchors.set(points.subarray(i * 3, i * 3 + 3), k * 3)
   })
-  const neck = boneBindPositions(head)[headBone * 3 + 1]!
-  const marks = { eyes: [eyes.slice(0, 3), eyes.slice(3, 6)], neck }
-  const skull = neckFitted(fitSkull(basis.skull, fit), anchors, neck)
+  const skull = neckFitted(fitted, anchors, neck)
   // Hung before it is bent, so the neck skin kept to either side shapes the piece too.
   const hung = withNeckPiece(skull, basis.skull.triangles, neck)
   const bent = bentSkull({ ...skull, ...hung }, hung.triangles, anchors)
-  const bald = { ...hung, points: bent.points, normals: bent.normals }
+  smoothNape(bent.points, hung.triangles, bent.known, neck, marks.nape)
+  const bald = { ...hung, points: bent.points, normals: vertexNormals(bent.points, hung.triangles) }
   const chosen = scalpTriangles(bald, { points, normals, index: kept }, marks)
 
-  // The bald surface as a mesh beside the head: its points used, skinned
-  // (and coloured, where the head's points are) as the kept point nearest.
+  // The bald surface as a mesh beside the head: its points used.
   const remap = new Map<number, number>()
   const corners: number[] = []
   for (const t of chosen) {
@@ -1173,25 +1254,26 @@ function makeBald(
     UNDER_KEPT,
     TUCK_REACH,
   )
+  const bodyMesh = ownMeshes(model, 'body')[0]
+  const bodyGeometry = bodyMesh && originalGeometry(bodyMesh)
+  const bodySurface = surfaceOf(ownMeshes(model, 'body'))
   const low = olds.map((_, i) => i).filter((i) => scalpPoints[i * 3 + 1]! < neck)
   const lowPoints = new Float32Array(low.length * 3)
   low.forEach((i, k) => {
     lowPoints.set(scalpPoints.subarray(i * 3, i * 3 + 3), k * 3)
   })
-  tuckUnder(lowPoints, surfaceOf(ownMeshes(model, 'body')), UNDER_CLOTHES, TUCK_REACH)
+  tuckUnder(lowPoints, bodySurface, UNDER_CLOTHES, TUCK_REACH)
   low.forEach((i, k) => {
     scalpPoints.set(lowPoints.subarray(k * 3, k * 3 + 3), i * 3)
   })
   // The back of the body's neckline, which long hair may have hidden a
   // notch in, closed with what the body shows round it.
-  const bodyMesh = ownMeshes(model, 'body')[0]
-  const bodyGeometry = bodyMesh && originalGeometry(bodyMesh)
   const fan =
     bodyMesh && bodyGeometry
       ? necklineFan(
           bindPoints(bodyMesh, bodyGeometry, 'position'),
           indexOf(bodyGeometry),
-          boneBindPositions(head).subarray(headBone * 3, headBone * 3 + 3),
+          places.subarray(headBone * 3, headBone * 3 + 3),
         )
       : null
   // Nothing hangs into the clothes below that: seen down the neckline, it
@@ -1203,14 +1285,85 @@ function makeBald(
     }
   }
   const scalpNormals = vertexNormals(scalpPoints, corners)
+  // The kept skin and the bald surface lit alike where they meet: each
+  // turned halfway to the other at the cut, back to its own by TURN_BACK.
+  const found: number[] = []
+  const distances: number[] = []
+  const turned = new Float32Array(normals)
+  const scalpLit = new Float32Array(scalpNormals)
+  {
+    const onCut = new Uint8Array(count)
+    for (let t = 0; t < index.length / 3; t++) {
+      if (taken[t]) for (let k = 0; k < 3; k++) onCut[index[t * 3 + k]!] = 1
+    }
+    const cutIds = keptIds.filter((i) => onCut[i])
+    const cutGrid = new PointGrid(
+      Float32Array.from(
+        cutIds.flatMap((i) => [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!]),
+      ),
+      SKULL_CELL,
+    )
+    const scalpGrid = new PointGrid(scalpPoints, SKULL_CELL)
+    const turnOf = (x: number, y: number, z: number) =>
+      cutGrid.nearest(x, y, z, 1, found, distances, TURN_BACK) === 0
+        ? 0
+        : (1 - smoothstep(TURN_FULL, TURN_BACK, Math.sqrt(distances[0]!))) / 2
+    const turn = (
+      out: Float32Array,
+      own: Float32Array,
+      i: number,
+      other: Float32Array,
+      j: number,
+      share: number,
+    ) => {
+      let length = 0
+      for (let axis = 0; axis < 3; axis++) {
+        const value = own[i * 3 + axis]! + (other[j * 3 + axis]! - own[i * 3 + axis]!) * share
+        out[i * 3 + axis] = value
+        length += value * value
+      }
+      length = Math.sqrt(length) || 1
+      for (let axis = 0; axis < 3; axis++) out[i * 3 + axis]! /= length
+    }
+    for (const i of keptIds) {
+      const [x, y, z] = [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!]
+      if (height[i]! > TURN_STANDING || nearEar(x, y, z, marks)) continue
+      const share = turnOf(x, y, z)
+      if (share <= 0 || scalpGrid.nearest(x, y, z, 1, found, distances) === 0) continue
+      turn(turned, normals, i, scalpNormals, found[0]!, share)
+    }
+    for (let j = 0; j < scalpPoints.length / 3; j++) {
+      const [x, y, z] = [scalpPoints[j * 3]!, scalpPoints[j * 3 + 1]!, scalpPoints[j * 3 + 2]!]
+      if (nearEar(x, y, z, marks)) continue
+      const share = turnOf(x, y, z)
+      if (share <= 0 || keptGrid.nearest(x, y, z, 1, found, distances) === 0) continue
+      const i = keptIds[found[0]!]!
+      if (height[i]! > TURN_STANDING) continue
+      turn(scalpLit, scalpNormals, j, normals, i, share)
+    }
+  }
   const vertices = olds.length
   const aroundPoints = new Float32Array(anchors.length + scalpPoints.length)
   aroundPoints.set(anchors)
   aroundPoints.set(scalpPoints, anchors.length)
   const surfaceAround = { points: aroundPoints, grid: new PointGrid(aroundPoints, SKULL_CELL) }
 
-  const found: number[] = []
-  const distances: number[] = []
+  const uv = geometry.getAttribute('uv')
+  const uvs = new Float32Array(count * 2)
+  for (let i = 0; i < count; i++) {
+    uvs[i * 2] = uv.getX(i)
+    uvs[i * 2 + 1] = uv.getY(i)
+  }
+  const placed = scalpUvs(scalpPoints, corners, {
+    points,
+    uvs,
+    index,
+    triangles: [...taken.keys()].filter((t) => taken[t]),
+  })
+
+  // Skinned as the kept skin and the body where it meets them, and as what
+  // is round it elsewhere: a nape bound to the head alone would shear off
+  // the neck as the head turns.
   const nearest = Array.from({ length: vertices }, (_, i) => {
     const n = keptGrid.nearest(
       scalpPoints[i * 3]!,
@@ -1222,59 +1375,130 @@ function makeBald(
     )
     return n > 0 ? { at: keptIds[found[0]!]!, near: distances[0]! <= SKINNED_AS_SKIN ** 2 } : null
   })
-  const rings = (() => {
-    const { spots, count: spotCount } = spotsOf(points)
-    return { spots, ring: cutRings(index, taken, spots, spotCount, RINGS) }
-  })()
-  const uv = geometry.getAttribute('uv')
-  const uvs = new Float32Array(count * 2)
-  for (let i = 0; i < count; i++) {
-    uvs[i * 2] = uv.getX(i)
-    uvs[i * 2 + 1] = uv.getY(i)
-  }
-  const { zone } = standingOver(points, skull)
-  const paint = scalpPaint(
-    { points, normals, uvs, index },
-    taken,
-    rings.ring,
-    rings.spots,
-    zone,
-    marks,
+  const bodyBones =
+    bodyMesh?.skeleton.bones.map((bone) => {
+      const same = head.skeleton.bones.indexOf(bone)
+      return same >= 0 ? same : head.skeleton.bones.findIndex((b) => b.name === bone.name)
+    }) ?? []
+  const known = nearest.map((from, i) => {
+    if (from?.near) return skinOf(geometry, from.at, (slot) => slot)
+    if (!(bodyGeometry && scalpPoints[i * 3 + 1]! < neck)) return null
+    const n = bodySurface.grid.nearest(
+      scalpPoints[i * 3]!,
+      scalpPoints[i * 3 + 1]!,
+      scalpPoints[i * 3 + 2]!,
+      1,
+      found,
+      distances,
+      SKINNED_AS_BODY,
+    )
+    if (n === 0) return null
+    const pairs = skinOf(bodyGeometry, found[0]!, (slot) => bodyBones[slot] ?? -1)
+    return pairs.every(([bone]) => bone >= 0) ? pairs : null
+  })
+  const skin = spreadWeights(
+    vertices,
+    corners,
+    known,
+    headBone,
+    geometry.getAttribute('skinIndex').itemSize,
   )
+
+  const rings = cutRings(index, taken, spots, spotCount, TONE_RINGS)
+  const { zone } = standingOver(points, skull)
+  const scalpCorners = {
+    uvs: new Float32Array(placed.triangles.length * 2),
+    points: new Float32Array(placed.triangles.length * 3),
+  }
+  placed.triangles.forEach((f, k) => {
+    scalpCorners.uvs.set(placed.uvs.subarray(f * 2, f * 2 + 2), k * 2)
+    const i = placed.from[f]!
+    scalpCorners.points.set(scalpPoints.subarray(i * 3, i * 3 + 3), k * 3)
+  })
+  // What shaded the body: what was taken out of the head, and the cards.
+  const hairPoints: number[] = []
+  for (let t = 0; t < index.length / 3; t++) {
+    if (!taken[t]) continue
+    for (let k = 0; k < 3; k++) {
+      const i = index[t * 3 + k]!
+      hairPoints.push(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!)
+    }
+  }
+  for (const cards of ownMeshes(model, 'opacity')) {
+    const kinds = kindsOf(cards)
+    const cardGeometry = originalGeometry(cards)
+    const cardPoints = bindPoints(cards, cardGeometry, 'position')
+    const cardIndex = indexOf(cardGeometry)
+    for (let t = 0; t < kinds.length; t++) {
+      if (kinds[t] !== HAIR) continue
+      for (let k = 0; k < 3; k++) {
+        const i = cardIndex[t * 3 + k]!
+        hairPoints.push(cardPoints[i * 3]!, cardPoints[i * 3 + 1]!, cardPoints[i * 3 + 2]!)
+      }
+    }
+  }
+  const bodyUv = bodyGeometry?.getAttribute('uv')
+  const shadow =
+    bodyMesh && bodyGeometry && bodyUv
+      ? hairShadow(
+          {
+            points: bindPoints(bodyMesh, bodyGeometry, 'position'),
+            uvs: Float32Array.from({ length: bodyUv.count * 2 }, (_, j) =>
+              bodyUv.getComponent(j >> 1, j & 1),
+            ),
+            index: indexOf(bodyGeometry),
+          },
+          hairPoints,
+          marks,
+        )
+      : new Float32Array()
+  const paint: ScalpPaint = {
+    ...scalpPaint({ points, normals, uvs, index }, taken, rings, spots, zone, marks, scalpCorners),
+    shadow,
+  }
   let scalp: BufferGeometry | null = null
   if (vertices > 0) {
     const shade = hollowShade(scalpPoints, scalpNormals, surfaceAround)
     scalp = new BufferGeometry()
     const unbind = head.bindMatrix.clone().invert()
     const unbindNormal = new Matrix3().getNormalMatrix(unbind)
-    const position = new BufferAttribute(scalpPoints.slice(), 3)
-    const normal = new BufferAttribute(scalpNormals.slice(), 3)
+    const total = placed.from.length
+    const spread = (values: Float32Array) =>
+      Float32Array.from(
+        { length: total * 3 },
+        (_, j) => values[placed.from[Math.floor(j / 3)]! * 3 + (j % 3)]!,
+      )
+    const position = new BufferAttribute(spread(scalpPoints), 3)
+    const normal = new BufferAttribute(spread(scalpLit), 3)
     position.applyMatrix4(unbind)
     normal.applyNormalMatrix(unbindNormal)
     scalp.setAttribute('position', position)
     scalp.setAttribute('normal', normal)
+    scalp.setAttribute('uv', new BufferAttribute(placed.uvs, 2))
     for (const [name, attribute] of Object.entries(geometry.attributes)) {
-      if (name === 'position' || name === 'normal') continue
+      if (name === 'position' || name === 'normal' || name === 'uv') continue
       const size = attribute.itemSize
-      const skinning = name === 'skinIndex' || name === 'skinWeight'
       const values =
-        name === 'skinIndex' ? new Uint16Array(vertices * size) : new Float32Array(vertices * size)
-      for (let i = 0; i < vertices; i++) {
+        name === 'skinIndex' ? new Uint16Array(total * size) : new Float32Array(total * size)
+      for (let f = 0; f < total; f++) {
+        const i = placed.from[f]!
         const from = nearest[i]
         for (let c = 0; c < size; c++) {
-          const at = i * size + c
-          if (name === 'uv') values[at] = paint.swatch[c]!
+          const at = f * size + c
+          if (name === 'skinIndex') values[at] = skin.index[i * size + c]!
+          else if (name === 'skinWeight') values[at] = skin.weight[i * size + c]!
           else if (name === 'color' && c < 3)
             values[at] = (from ? attribute.getComponent(from.at, c) : 1) * shade[i]!
-          else if (skinning && !from?.near)
-            values[at] = c > 0 ? 0 : name === 'skinIndex' ? headBone : 1
           else values[at] = from ? attribute.getComponent(from.at, c) : 0
         }
       }
       scalp.setAttribute(name, new BufferAttribute(values, size))
     }
-    scalp.setIndex(corners)
+    scalp.setIndex(Array.from(placed.triangles))
   }
+
+  const normal = new BufferAttribute(turned, 3)
+  normal.applyNormalMatrix(new Matrix3().getNormalMatrix(head.bindMatrix.clone().invert()))
 
   const surfacePoints = new Float32Array((keptIds.length + olds.length) * 3)
   const surfaceNormals = new Float32Array(surfacePoints.length)
@@ -1291,6 +1515,7 @@ function makeBald(
       geometry.index?.array instanceof Uint16Array ? Uint16Array.from(kept) : kept,
       1,
     ),
+    normal,
     scalp,
     collar: fan && bodyMesh && bodyGeometry ? collarOf(fan, bodyMesh, bodyGeometry) : null,
     surface: {
@@ -1358,7 +1583,7 @@ function baldGeometry(loaded: BufferGeometry, bald: BaldHead): BufferGeometry {
   if (!geometry) {
     geometry = new BufferGeometry()
     for (const [name, attribute] of Object.entries(loaded.attributes)) {
-      geometry.setAttribute(name, attribute)
+      geometry.setAttribute(name, name === 'normal' ? bald.normal : attribute)
     }
     geometry.setIndex(bald.index)
     baldGeometries.set(loaded, geometry)
@@ -1531,13 +1756,21 @@ function freeTexture(texture: Texture) {
   if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) image.close()
 }
 
+/** The textures a material shows. */
+function texturesOf(material: Material): Set<Texture> {
+  const found = new Set<Texture>()
+  for (const value of Object.values(material)) {
+    if ((value as Texture | null)?.isTexture) found.add(value as Texture)
+  }
+  return found
+}
+
 /**
  * Frees the GPU's copies of a material's textures. A wearer still showing
  * them has them uploaded again.
  */
 function releaseTextures(material: Material) {
-  for (const value of Object.values(material))
-    if ((value as Texture | null)?.isTexture) value.dispose()
+  for (const texture of texturesOf(material)) texture.dispose()
 }
 
 /** Each part's pixels as last dyed, and the dye: worn again in it, it shows at once. */
@@ -1623,10 +1856,15 @@ function wearBorrowed(
 
     const material = part.material.clone() as MeshStandardMaterial
     const map = material.map
+    const shared = texturesOf(part.material)
     let dyed: Texture | null = null
     const show = (pixels: Pixels | null) => {
       const next = pixels && map ? textureFrom(pixels, map) : null
+      const old = material.map
       material.map = next ?? map
+      // A copy someone made of the map in its place (a viewer sharpening
+      // it) is freed with it.
+      if (old && old !== material.map && old !== dyed && !shared.has(old)) old.dispose()
       if (dyed) freeTexture(dyed)
       dyed = next
     }
@@ -1658,14 +1896,20 @@ function wearBorrowed(
     }
     dyes.push(dyeTo)
     const mesh = besides(head, geometry, material, `hair:${part.name}`)
-    // The material isn't disposed, nor the asset's textures released: worn
-    // again, its program and pictures are still on the GPU (see
-    // `loadHairAsset`, which releases them once the asset is let go).
+    // Reshaped with what it is worn over (see ear-shape.ts).
+    mesh.userData.wornOn = head
+    // The asset's textures aren't released: worn again, its pictures are
+    // still on the GPU (see `loadHairAsset`, which releases them once the
+    // asset is let go). Copies of them made for this wearing are.
     undo.push(() => {
       off = true
       mesh.removeFromParent()
       geometry.dispose()
       if (dyed) freeTexture(dyed)
+      for (const texture of texturesOf(material)) {
+        if (texture !== dyed && !shared.has(texture)) texture.dispose()
+      }
+      material.dispose()
     })
   }
   return (hex) => {
@@ -1704,6 +1948,16 @@ export function wearHair(model: Object3D, asset: HairAsset | null, basis: HairBa
   hideOwnHair(model, !headwear, undo)
   const dye = asset && bald ? wearBorrowed(model, head, asset, bald.surface, undo) : () => {}
   return { paint: bald?.paint ?? null, dye, takeOff }
+}
+
+/**
+ * Whether a character's own hair can come off for another's (see
+ * `wearHair`): not on a head the library takes no hair off, a garment over
+ * it, where no hairstyle changes anything.
+ */
+export function canChangeHair(model: Object3D, basis: HairBasis): boolean {
+  const head = headOf(model)
+  return !!head && !!basis.bald.get(ownMaterial(head).name)?.includes(1)
 }
 
 /** The side (px) the cap's texture is read at: the head's 2048 is more than hair needs. */

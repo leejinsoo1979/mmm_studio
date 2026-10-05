@@ -140,14 +140,23 @@ describe('a body’s analysis', () => {
 
 describe('a body dressed in a look', () => {
   // The paint with the landmarks is face-paint.test.ts's.
-  /** A bald head's paint: the crown's quad painted (by its corners' rings), the tone read off the cheek's. */
+  /** A bald head's paint: the crown's quad painted wholly, the tone read off the cheek's. */
+  const corner = (u: number, v: number) => [u, v, 1, -1, 0, 1]
   const scalp: ScalpPaint = {
     paint: Float32Array.from([
-      0.1, 0.02, 0.9, 0.9, 0.02, 0.9, 0.9, 0.23, 0.9, 0.1, 0.02, 0.9, 0.9, 0.23, 0.9, 0.1, 0.23,
-      0.9,
+      ...corner(0.1, 0.02),
+      ...corner(0.9, 0.02),
+      ...corner(0.9, 0.23),
+      ...corner(0.1, 0.02),
+      ...corner(0.9, 0.23),
+      ...corner(0.1, 0.23),
     ]),
+    scalp: new Float32Array(),
+    kept: Float32Array.from([0.1, 0.02, 0.9, 0.02, 0.9, 0.23, 0.1, 0.02, 0.9, 0.23, 0.1, 0.23]),
+    taken: new Float32Array(),
     tone: [Float32Array.from([0.1, 0.27, 0.9, 0.27, 0.9, 0.48, 0.1, 0.27, 0.9, 0.48, 0.1, 0.48])],
-    swatch: [0.5, 0.4],
+    skin: new Float32Array(),
+    shadow: new Float32Array(),
   }
   const near = (colour: Rgb, to: Rgb) =>
     colour.forEach((value, c) => {

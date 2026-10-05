@@ -1,17 +1,24 @@
 import { describe, expect, test } from 'bun:test'
 import {
   bentSkull,
+  cleanCut,
   cutRings,
+  hairShadow,
   hollowShade,
   keptTriangles,
   necklineFan,
   type OwnHead,
   ownHair,
-  PAINT_RINGS,
   PAINTED,
   READ,
+  SCALP,
+  SHADED,
   scalpPaint,
   scalpTriangles,
+  scalpUvs,
+  smoothNape,
+  spreadWeights,
+  TONE_RINGS,
   texelShares,
   withNeckPiece,
 } from './bald-head'
@@ -240,7 +247,7 @@ describe('the bald surface', () => {
     const count = skull.points.length / 3
     for (let i = 0; i < count; i++) {
       const y = skull.points[i * 3 + 1]!
-      if (y < -0.03) expect(radiusOf(bent.points, i)).toBeCloseTo(0.105 - 0.0015, 3)
+      if (y < -0.03) expect(radiusOf(bent.points, i)).toBeCloseTo(0.105 - 0.0008, 3)
     }
     // The top pole: back near the skull's own radius.
     expect(radiusOf(bent.points, 0)).toBeGreaterThan(0.0985)
@@ -303,6 +310,7 @@ describe('the bald surface', () => {
           [0.03, 0.02, 0.09],
         ],
         neck: -0.2,
+        nape: 0,
       },
     )
     const centre = (t: number, axis: number) =>
@@ -323,7 +331,7 @@ describe('the bald surface', () => {
 })
 
 describe('painting round the cut', () => {
-  test('paints by ring, reads the tone off the forehead under the cut, and puts the swatch there', () => {
+  test('paints by how far from the cut, reads the tone off the forehead under it, and the skin round it', () => {
     // Facing the front (+z), above the eyes; the first quad taken.
     const head = strip(12, () => ({ y: 0.1 }))
     const normals = new Float32Array(head.points.length)
@@ -333,7 +341,8 @@ describe('painting round the cut', () => {
     )
     const taken = new Uint8Array(24)
     taken[0] = taken[1] = 1
-    const rings = cutRings(head.index, taken, head.spots, head.spotCount, PAINT_RINGS.length)
+    const rings = cutRings(head.index, taken, head.spots, head.spotCount, TONE_RINGS)
+    const scalp = { uvs: Float32Array.from([0, 0, 0.01, 0, 0, 0.01]), points: new Float32Array(9) }
     const painted = scalpPaint(
       { points: head.points, normals, uvs, index: head.index },
       taken,
@@ -346,20 +355,34 @@ describe('painting round the cut', () => {
           [0.04, 0, 0.09],
         ],
         neck: -1,
+        nape: 0,
       },
+      scalp,
     )
-    // Triangles within PAINT_NEAR rings of the cut: quads 1 to 3.
-    expect(painted.paint.length / PAINTED).toBe(6)
-    const amounts = new Set<number>()
-    for (let k = 2; k < painted.paint.length; k += 3)
-      amounts.add(Math.round(painted.paint[k]! * 100))
-    expect([...amounts].sort((a, b) => b - a)).toEqual([90, 70, 45, 25])
-    // The tone: the skin within the painted rings; the rest of the forehead after.
+    // Triangles within the feather of the cut (4.5 cm): quads 1 to 5.
+    expect(painted.paint.length / PAINTED).toBe(10)
+    const amount = (x: number) => {
+      for (let k = 0; k < painted.paint.length; k += PAINTED / 3) {
+        if (Math.abs(painted.paint[k]! - x) < 1e-6) return painted.paint[k + 2]!
+      }
+      return Number.NaN
+    }
+    // Wholly within 1.2 cm of it, then less and less.
+    expect(amount(0.01)).toBe(1)
+    expect(amount(0.02)).toBe(1)
+    expect(amount(0.03)).toBeLessThan(1)
+    expect(amount(0.04)).toBeLessThan(amount(0.03))
+    expect(amount(0.06)).toBe(0)
+    // Its colour the skin's round it, read clear of the cut.
+    const ref = painted.paint[3]!
+    expect(ref).toBeGreaterThanOrEqual(0)
+    expect(painted.skin[ref * 5]!).toBeGreaterThanOrEqual(0.02)
+    // The tone: the skin within the rings near the cut; the rest of the forehead after.
     expect(painted.tone[0]!.length / READ).toBe(2 * 4)
     expect(painted.tone[1]!.length / READ).toBe(2 * 7)
-    // The swatch: on a quad within two rings of the cut, nearest the eyes' middle (x 0.03).
-    expect(painted.swatch[0]).toBeGreaterThan(0.02)
-    expect(painted.swatch[0]).toBeLessThan(0.04)
+    expect(painted.kept.length / READ).toBe(22)
+    expect(painted.taken.length / READ).toBe(2)
+    expect(painted.scalp.length / SCALP).toBe(1)
   })
 
   test('reads how much of what a triangle covers each mask is', () => {
@@ -410,13 +433,14 @@ describe('the neckline closed', () => {
 
 describe('the bald surface shaded by its shape', () => {
   test('darkens a fold, not an open slope', () => {
-    // A flat sheet (y = 0, facing up) with a wall rising beside x = 0.
+    // A flat sheet (y = 0, facing up) with a wall rising beside x = 0.008:
+    // what lies right on the point (the skin it is tucked under) is no fold.
     const around: number[] = []
-    for (let x = -0.02; x <= 0.02001; x += 0.002) {
-      for (let z = -0.02; z <= 0.02001; z += 0.002) around.push(x, 0, z)
+    for (let x = -0.024; x <= 0.02401; x += 0.006) {
+      for (let z = -0.024; z <= 0.02401; z += 0.006) around.push(x, 0, z)
     }
     for (let y = 0.002; y <= 0.02001; y += 0.002) {
-      for (let z = -0.02; z <= 0.02001; z += 0.002) around.push(0.004, y, z)
+      for (let z = -0.02; z <= 0.02001; z += 0.002) around.push(0.008, y, z)
     }
     const points = Float32Array.from(around)
     const grid = new PointGrid(points, 0.02)
@@ -427,5 +451,135 @@ describe('the bald surface shaded by its shape', () => {
     )
     expect(shade[0]!).toBeGreaterThan(0.99)
     expect(shade[1]!).toBeLessThan(0.95)
+  })
+})
+
+describe('the cut cleaned', () => {
+  const marks = {
+    eyes: [
+      [0.5, -1, -1],
+      [0.6, -1, -1],
+    ],
+    neck: -2,
+    nape: 0,
+  }
+
+  test('takes the rim of gear standing off the head, and what that leaves in small pieces', () => {
+    // A brim's edge standing 3 cm off the skull at quads 20–21, the hair cut off at quad 0.
+    const head = strip(30, (c) => (c >= 20 && c <= 22 ? { height: 0.03 } : {}))
+    const taken = new Uint8Array(60)
+    taken[0] = taken[1] = 1
+    const cleaned = cleanCut(head, taken, marks)
+    expect(takenQuads(cleaned)).toEqual([0, 19, 20, 21, 22])
+  })
+
+  test('takes the skin left between the hair taken', () => {
+    const head = strip(30, () => ({}))
+    const taken = new Uint8Array(60)
+    for (const q of [0, 1, 2, 4, 5, 6]) taken[q * 2] = taken[q * 2 + 1] = 1
+    expect(takenQuads(cleanCut(head, taken, marks))).toEqual([0, 1, 2, 3, 4, 5, 6])
+  })
+})
+
+describe('the bald surface on the texture', () => {
+  // The hair taken out: a square in z = 0, its texture coordinates its x and y.
+  const square = {
+    points: Float32Array.from([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]),
+    uvs: Float32Array.from([0, 0, 1, 0, 1, 1, 0, 1]),
+    index: [0, 1, 2, 0, 2, 3],
+    triangles: [0, 1],
+  }
+
+  test('shows the texels the hair did at each point’s nearest place on it', () => {
+    const points = Float32Array.from([0.2, 0.3, 0.05, 0.6, 0.3, -0.05, 0.4, 0.7, 0.02])
+    const placed = scalpUvs(points, [0, 1, 2], square)
+    expect([...placed.from]).toEqual([0, 1, 2])
+    expect(placed.uvs[0]).toBeCloseTo(0.2, 5)
+    expect(placed.uvs[1]).toBeCloseTo(0.3, 5)
+    expect(placed.uvs[4]).toBeCloseTo(0.4, 5)
+    expect(placed.uvs[5]).toBeCloseTo(0.7, 5)
+  })
+
+  test('gives a triangle spanning a seam of the texture corners of its own', () => {
+    // The square's right half far off on the texture.
+    const torn = {
+      points: Float32Array.from([
+        0, 0, 0, 0.5, 0, 0, 0.5, 1, 0, 0, 1, 0, 0.5, 0, 0, 1, 0, 0, 1, 1, 0, 0.5, 1, 0,
+      ]),
+      uvs: Float32Array.from([0, 0, 0.1, 0, 0.1, 0.2, 0, 0.2, 0.8, 0, 0.9, 0, 0.9, 0.2, 0.8, 0.2]),
+      index: [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7],
+      triangles: [0, 1, 2, 3],
+    }
+    const points = Float32Array.from([0.3, 0.5, 0, 0.7, 0.5, 0, 0.4, 0.6, 0])
+    const placed = scalpUvs(points, [0, 1, 2], torn)
+    expect(placed.from.length).toBe(6)
+    const us = [placed.triangles[0]!, placed.triangles[1]!, placed.triangles[2]!].map(
+      (f) => placed.uvs[f * 2]!,
+    )
+    expect(Math.max(...us) - Math.min(...us)).toBeLessThan(0.2)
+  })
+})
+
+describe('the bald surface’s skinning', () => {
+  test('spreads what is known along the surface, blending it between', () => {
+    // A row of 5 points: bone 2 at one end, bone 7 at the other.
+    const triangles = [0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4]
+    const known = [[[2, 1] as const], null, null, null, [[7, 1] as const]]
+    const { index, weight } = spreadWeights(5, triangles, known, 0, 2)
+    expect([index[0], weight[0]]).toEqual([2, 1])
+    const middle = new Map([
+      [index[4]!, weight[4]!],
+      [index[5]!, weight[5]!],
+    ])
+    expect(middle.get(2)).toBeCloseTo(0.5, 2)
+    expect(middle.get(7)).toBeCloseTo(0.5, 2)
+    for (let i = 0; i < 5; i++) expect(weight[i * 2]! + weight[i * 2 + 1]!).toBeCloseTo(1, 5)
+  })
+
+  test('falls back to one bone where nothing is known', () => {
+    const { index, weight } = spreadWeights(3, [0, 1, 2], [null, null, null], 9, 2)
+    expect([index[0], weight[0], weight[1]]).toEqual([9, 1, 0])
+  })
+})
+
+describe('the nape smoothed', () => {
+  test('smooths a ridge round the top of the neck, behind it, but not where the skin is', () => {
+    // A column of points down the back of the neck (z −0.05), one stood out at the top of the neck.
+    const points = new Float32Array(11 * 3)
+    for (let k = 0; k <= 10; k++) points.set([0, -0.05 + k * 0.01, -0.05], k * 3)
+    points[5 * 3 + 2] = -0.07
+    const triangles: number[] = []
+    for (let k = 0; k < 10; k++) triangles.push(k, k + 1, k + 1)
+    const known = new Uint8Array(11)
+    known[0] = 1
+    smoothNape(points, triangles, known, 0, 0)
+    expect(points[5 * 3 + 2]!).toBeGreaterThan(-0.065)
+    expect(points[0 * 3 + 2]!).toBeCloseTo(-0.05, 6)
+  })
+})
+
+describe('the hair’s shadow on the body', () => {
+  test('is the body behind and under the neck near the hair, with the light read beside it', () => {
+    // A strip of body down the back, the hair hanging over its first quads.
+    const body = strip(20, () => ({ y: -0.2, z: -0.1 }))
+    const uvs = Float32Array.from({ length: (body.points.length / 3) * 2 }, (_, j) =>
+      j % 2 === 0 ? body.points[(j / 2) * 3]! : 0.5,
+    )
+    const hair = Float32Array.from([0, -0.2, -0.13, 0.02, -0.2, -0.13])
+    const shadow = hairShadow({ points: body.points, uvs, index: body.index }, hair, {
+      neck: 0,
+      nape: 0,
+    })
+    const triangles = shadow.length / SHADED
+    expect(triangles).toBeGreaterThan(0)
+    expect(triangles).toBeLessThan(40)
+    // Its first corner deep in the shadow, its light read further along.
+    expect(shadow[2]!).toBeGreaterThan(0.8)
+    expect(shadow[3]!).toBeGreaterThan(0.05)
+    // Over the neck, none.
+    expect(
+      hairShadow({ points: body.points, uvs, index: body.index }, hair, { neck: -1, nape: 0 })
+        .length,
+    ).toBe(0)
   })
 })

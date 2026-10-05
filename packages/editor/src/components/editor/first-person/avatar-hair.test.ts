@@ -175,10 +175,18 @@ describe('the cap’s texture', () => {
   const hairRgb = HAIR_COLOUR as [number, number, number]
   const skinRgb = SKIN_COLOUR as [number, number, number]
 
-  test('keeps the sculpted shell whatever its colour', () => {
+  test('keeps the sculpted shell but where it is plainly skin', () => {
     const cap = capPixels(head, hairRgb, skinRgb, whole(true))
     expect(alpha(cap, 3, 8)).toBe(255)
-    expect(alpha(cap, 12, 8)).toBe(255)
+    expect(alpha(cap, 12, 8)).toBe(0)
+  })
+
+  test('keeps a highlight on the shell that is near the skin’s colour, not at it', () => {
+    const HIGHLIGHT = [205, 170, 80]
+    const lit = image(16, 16, (x) => (x < 8 ? HAIR_COLOUR : x < 12 ? HIGHLIGHT : SKIN_COLOUR))
+    const cap = capPixels(lit, hairRgb, skinRgb, whole(true))
+    expect(alpha(cap, 9, 8)).toBe(255)
+    expect(alpha(cap, 15, 8)).toBe(0)
   })
 
   test('round it, keeps what is hair-coloured and cuts the skin away', () => {
@@ -186,64 +194,49 @@ describe('the cap’s texture', () => {
     expect(alpha(cap, 3, 8)).toBe(255)
     expect(alpha(cap, 12, 8)).toBe(0)
   })
-
-  test('grows the shell’s rim a texel into hair or past the triangles, never into skin they show', () => {
-    // Solid over columns 4–5 (hair) or 10–11 (skin) of the texture.
-    const band = (from: number, to: number) => [
-      { u: [from, to, to], v: [0, 0, 1], solid: true },
-      { u: [from, to, from], v: [0, 1, 1], solid: true },
-    ]
-    const hairSide = capPixels(head, hairRgb, skinRgb, band(4 / 16, 6 / 16))
-    expect(alpha(hairSide, 6, 8)).toBe(255)
-    expect(alpha(hairSide, 2, 8)).toBe(0)
-    // Round it nothing: the rim grows a texel over the island's edge.
-    const alone = capPixels(head, hairRgb, skinRgb, band(10 / 16, 12 / 16))
-    expect(alpha(alone, 10, 8)).toBe(255)
-    expect(alpha(alone, 9, 8)).toBe(255)
-    expect(alpha(alone, 8, 8)).toBe(0)
-    // Skin shown round it: cut away.
-    const shown = capPixels(head, hairRgb, skinRgb, [...band(10 / 16, 12 / 16), ...whole(false)])
-    expect(alpha(shown, 10, 8)).toBe(255)
-    expect(alpha(shown, 9, 8)).toBe(0)
-    expect(alpha(shown, 12, 8)).toBe(0)
-  })
 })
 
 describe('the cap’s texture in the donor’s hair', () => {
   const HAIR_COLOUR = [47, 28, 18]
   const SKIN_COLOUR = [210, 150, 116]
-  // Sparse strands over skin at a hairline: nearer the skin's colour than the hair's.
-  const HAIRLINE = [110, 79, 60]
   const alpha = (pixels: Pixels, x: number, y: number) =>
     pixels.data[(y * pixels.width + x) * 4 + 3]!
-  const head = image(16, 16, (x) => (x < 6 ? HAIR_COLOUR : x < 10 ? HAIRLINE : SKIN_COLOUR))
-  const whole = (hair: boolean) => [
-    { u: [0, 1, 1], v: [0, 0, 1], solid: false, hair },
-    { u: [0, 1, 0], v: [0, 1, 1], solid: false, hair },
+  const whole = [
+    { u: [0, 1, 1], v: [0, 0, 1], solid: false },
+    { u: [0, 1, 0], v: [0, 1, 1], solid: false },
   ]
   const hairRgb = HAIR_COLOUR as [number, number, number]
   const skinRgb = SKIN_COLOUR as [number, number, number]
+  const SIZE = 256
 
-  test('keeps what isn’t plainly skin: a hairline’s strands', () => {
-    const cap = capPixels(head, hairRgb, skinRgb, whole(true))
-    expect(alpha(cap, 2, 8)).toBe(255)
-    expect(alpha(cap, 7, 8)).toBe(255)
-    expect(alpha(cap, 14, 8)).toBe(0)
+  test('closes sparse strands into one patch of hair', () => {
+    // Hair to x 100; past it, strands every other column to x 120, then skin.
+    const head = image(SIZE, SIZE, (x) =>
+      x < 100 || (x < 120 && x % 2 === 0) ? HAIR_COLOUR : SKIN_COLOUR,
+    )
+    const cap = capPixels(head, hairRgb, skinRgb, whole)
+    expect(alpha(cap, 50, 128)).toBe(255)
+    // Between two strands, hair too.
+    expect(alpha(cap, 111, 128)).toBe(255)
+    expect(alpha(cap, 200, 128)).toBe(0)
   })
 
-  test('round the hair, cuts them away with the skin', () => {
-    const cap = capPixels(head, hairRgb, skinRgb, whole(false))
-    expect(alpha(cap, 2, 8)).toBe(255)
-    expect(alpha(cap, 7, 8)).toBe(0)
+  test('cuts away specks of hair’s colour on the skin: a mole, a pore', () => {
+    const head = image(SIZE, SIZE, (x, y) =>
+      x < 100 || (x >= 180 && x < 182 && y >= 60 && y < 62) ? HAIR_COLOUR : SKIN_COLOUR,
+    )
+    const cap = capPixels(head, hairRgb, skinRgb, whole)
+    expect(alpha(cap, 50, 128)).toBe(255)
+    expect(alpha(cap, 180, 60)).toBe(0)
   })
 
-  test('softens the cut-out’s edge a texel each way', () => {
-    const cap = capPixels(head, hairRgb, skinRgb, whole(false))
-    const edge = alpha(cap, 5, 8)
+  test('fades the cut-out’s edge', () => {
+    const head = image(SIZE, SIZE, (x) => (x < 100 ? HAIR_COLOUR : SKIN_COLOUR))
+    const cap = capPixels(head, hairRgb, skinRgb, whole)
+    const edge = alpha(cap, 99, 128)
     expect(edge).toBeGreaterThan(0)
     expect(edge).toBeLessThan(255)
-    expect(alpha(cap, 6, 8)).toBeGreaterThan(0)
-    expect(alpha(cap, 6, 8)).toBeLessThan(edge)
+    expect(alpha(cap, 100, 128)).toBeLessThan(edge)
   })
 })
 

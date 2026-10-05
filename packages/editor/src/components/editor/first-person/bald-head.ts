@@ -265,6 +265,77 @@ function piecesOf(
   }
 }
 
+/**
+ * Kept skin standing this far over the skull, no lower than RIM_BELOW under
+ * the eyes and not an ear, is the rim of gear the head mesh models — a
+ * cap's brim, a visor's edge — that the hair's cut left standing off the
+ * bald head.
+ */
+const RIM_STANDING = 0.012
+const RIM_BELOW = 0.02
+
+/** How many rounds kept triangles wholly on the cut are taken in (see `withRimTaken`). */
+const ISLAND_ROUNDS = 2
+
+/**
+ * `taken` with the rim of any gear modelled in the head (see RIM_STANDING)
+ * taken too, the skin left between the hair taken (every corner on the
+ * cut), and what that leaves of the head in small pieces beside it.
+ * `height` is how far each point stands over the skull fitted to the head.
+ */
+export function cleanCut(
+  head: Pick<OwnHead, 'points' | 'index' | 'spots' | 'spotCount' | 'height'>,
+  taken: ArrayLike<number>,
+  marks: HeadMarks,
+): Uint8Array {
+  const { points, index, spots, height } = head
+  const count = index.length / 3
+  const out = Uint8Array.from(taken)
+  const eyeLevel = marks.eyes.reduce((sum, eye) => sum + eye[1]!, 0) / marks.eyes.length
+  const middle = marks.eyes.reduce((sum, eye) => sum + eye[0]!, 0) / marks.eyes.length
+  const eyeFront = Math.max(...marks.eyes.map((eye) => eye[2]!))
+  const rim = (i: number) =>
+    height[i]! > RIM_STANDING &&
+    points[i * 3 + 1]! > eyeLevel - RIM_BELOW &&
+    !(Math.abs(points[i * 3]! - middle) > EAR_SIDE && points[i * 3 + 2]! < eyeFront - EAR_BACK)
+  const added = new Uint8Array(head.spotCount)
+  let any = false
+  for (let t = 0; t < count; t++) {
+    if (out[t] || ![0, 1, 2].some((k) => rim(index[t * 3 + k]!))) continue
+    out[t] = 1
+    any = true
+    for (let k = 0; k < 3; k++) added[spots[index[t * 3 + k]!]!] = 1
+  }
+  // Skin the hair's flood left in between the hair it took — a sideburn
+  // taken square by square — is taken too: kept, it would stand as islands
+  // of the head's own skin in the scalp.
+  for (let round = 0; round < ISLAND_ROUNDS; round++) {
+    const onCut = new Uint8Array(head.spotCount)
+    for (let t = 0; t < count; t++) {
+      if (out[t]) for (let k = 0; k < 3; k++) onCut[spots[index[t * 3 + k]!]!] = 1
+    }
+    let grew = false
+    for (let t = 0; t < count; t++) {
+      if (out[t] || ![0, 1, 2].every((k) => onCut[spots[index[t * 3 + k]!]!])) continue
+      out[t] = 1
+      grew = any = true
+      for (let k = 0; k < 3; k++) added[spots[index[t * 3 + k]!]!] = 1
+    }
+    if (!grew) break
+  }
+  if (!any) return out
+  const kept = piecesOf(index, spots, head.spotCount, (t) => out[t] === 0)
+  const beside = new Set<number>()
+  for (let t = 0; t < count; t++) {
+    if (!out[t] && [0, 1, 2].some((k) => added[spots[index[t * 3 + k]!]!]))
+      beside.add(kept.piece(t))
+  }
+  for (let t = 0; t < count; t++) {
+    if (!out[t] && beside.has(kept.piece(t)) && kept.size(t) < PIECE * kept.largest) out[t] = 1
+  }
+  return out
+}
+
 /** The triangles (corners, flat) of `index` not flagged in `taken`. */
 export function keptTriangles(index: ArrayLike<number>, taken: ArrayLike<number>): Uint32Array {
   const kept: number[] = []
@@ -471,7 +542,7 @@ const BEND_CRANIUM_ZONE = 0.15
  * How far under the head's skin the bald surface lies where it meets it
  * (tucked under the cut's edge), and elsewhere.
  */
-const UNDER_SKIN = 0.0015
+const UNDER_SKIN = 0.0008
 const SINK = 0.0006
 
 /**
@@ -529,6 +600,56 @@ export function bentSkull(skull: Skull, triangles: ArrayLike<number>, anchors: T
     }
   }
   return { points, normals: vertexNormals(points, triangles), known }
+}
+
+/**
+ * The band round the top of the neck (bind units over and under it) and
+ * behind its middle where the bald surface is smoothed: the skull's
+ * occiput curls in under it, and the piece hung below its open bottom
+ * would meet it in a ridge.
+ */
+const NAPE_BAND = 0.05
+const NAPE_FRONT = 0.02
+const SMOOTH_ROUNDS = 20
+/** Taubin's two steps a round: smoothing, then swelling back by a little more, so the surface doesn't shrink. */
+const SMOOTH_IN = 0.5
+const SMOOTH_OUT = -0.53
+
+/**
+ * Smooths the bald surface (`points`, in place; its `triangles`) round
+ * the nape (see NAPE_BAND), but where it meets kept skin (`known`): the
+ * top of the neck at height `neck`, its middle at depth `nape`.
+ */
+export function smoothNape(
+  points: Float32Array,
+  triangles: ArrayLike<number>,
+  known: Uint8Array,
+  neck: number,
+  nape: number,
+) {
+  const count = points.length / 3
+  const neighbours = neighboursOf(triangles, count)
+  const weight = Float32Array.from({ length: count }, (_, i) =>
+    known[i]
+      ? 0
+      : (1 - smoothstep(NAPE_BAND / 2, NAPE_BAND, Math.abs(points[i * 3 + 1]! - neck))) *
+        (1 - smoothstep(nape, nape + NAPE_FRONT, points[i * 3 + 2]!)),
+  )
+  const moved = new Float32Array(points.length)
+  for (let round = 0; round < SMOOTH_ROUNDS * 2; round++) {
+    const step = round % 2 === 0 ? SMOOTH_IN : SMOOTH_OUT
+    for (let i = 0; i < count; i++) {
+      const around = neighbours[i]!
+      for (let axis = 0; axis < 3; axis++) {
+        let mean = 0
+        for (const j of around) mean += points[j * 3 + axis]!
+        mean = around.length > 0 ? mean / around.length : points[i * 3 + axis]!
+        moved[i * 3 + axis] =
+          points[i * 3 + axis]! + step * weight[i]! * (mean - points[i * 3 + axis]!)
+      }
+    }
+    points.set(moved)
+  }
 }
 
 /**
@@ -675,8 +796,8 @@ function rayHit(o: number[], d: number[], points: Triples, a: number, b: number,
 /** The head as it is kept: its points and normals (bind pose) and its kept triangles. */
 export type KeptHead = { points: Triples; normals: Triples; index: ArrayLike<number> }
 
-/** The eyeballs' middles (bind pose), each [x, y, z], and the top of the neck. */
-export type HeadMarks = { eyes: number[][]; neck: number }
+/** The eyeballs' middles (bind pose), each [x, y, z], and the top of the neck: its height and its middle's depth. */
+export type HeadMarks = { eyes: number[][]; neck: number; nape: number }
 
 /**
  * The kept skin hides a stretch of the bald surface when it lies within
@@ -706,6 +827,22 @@ const NECK_BAND = 0.02
 const EAR_TOP = 0.035
 const EAR_BACK = 0.05
 const EAR_POINTS = 8
+
+/** Whether a place (bind pose) is where an ear is (see EAR_SIDE), on a head marked `marks`. */
+export function nearEar(x: number, y: number, z: number, marks: HeadMarks) {
+  const eyeLevel = marks.eyes.reduce((sum, eye) => sum + eye[1]!, 0) / marks.eyes.length
+  const middle = marks.eyes.reduce((sum, eye) => sum + eye[0]!, 0) / marks.eyes.length
+  const eyeFront = Math.max(...marks.eyes.map((eye) => eye[2]!))
+  return (
+    Math.abs(x - middle) > EAR_SIDE &&
+    y > marks.neck - NECK_BAND &&
+    y < eyeLevel + EAR_TOP &&
+    z < eyeFront - EAR_BACK
+  )
+}
+
+/** How far under the top of the neck (bind units) the bald surface keeps behind the neck's middle. */
+const LOW_NECK = 0.04
 
 /** A patch of bald surface this much smaller than the largest is a stray (but the neck's piece). */
 const STRAY = 0.1
@@ -843,15 +980,26 @@ export function scalpTriangles(bald: BaldSkull, kept: KeptHead, marks: HeadMarks
       const i = triangles[t * 3 + k]!
       return points[i * 3 + 1]! < marks.neck && points[i * 3 + 2]! > throatZ
     })
+  // Low down the neck, in front of its middle: the body's neck and
+  // shoulders, never hair.
+  const lowFront = (t: number) =>
+    [0, 1, 2].every((k) => {
+      const i = triangles[t * 3 + k]!
+      return points[i * 3 + 1]! < marks.neck - LOW_NECK && points[i * 3 + 2]! > marks.nape
+    })
   const open = new Uint8Array(points.length / 3)
   for (let t = 0; t < count; t++) {
     const face = [0, 1, 2].every((k) => faceAt(triangles[t * 3 + k]!))
     if (face || throat(t) || skullEar(t) || ownNeck(t) || covered(t)) continue
     for (let k = 0; k < 3; k++) open[triangles[t * 3 + k]!] = 1
   }
+  // The ring tucked under the cut's edge, but not on the throat: down the
+  // front of the neck it would stand out of the kept skin there.
   const chosen: number[] = []
   for (let t = 0; t < count; t++) {
-    if ([0, 1, 2].some((k) => open[triangles[t * 3 + k]!])) chosen.push(t)
+    if ([0, 1, 2].some((k) => open[triangles[t * 3 + k]!]) && !throat(t) && !lowFront(t)) {
+      chosen.push(t)
+    }
   }
   const parent = Int32Array.from({ length: points.length / 3 }, (_, i) => i)
   const find = (a: number): number => {
@@ -882,12 +1030,15 @@ export function scalpTriangles(bald: BaldSkull, kept: KeptHead, marks: HeadMarks
 /**
  * How far round a point (bind units) its hollow is read, from at most this
  * many points, and how much darker the deepest hollow is: the bald surface
- * shows one colour (its swatch), so the folds of an ear and the crease
- * behind it are shaded by their shape alone.
+ * is painted plain skin, so the folds of an ear and the crease behind it
+ * are shaded by their shape alone.
  */
 const HOLLOW_REACH = 0.012
 const HOLLOW_POINTS = 24
 const HOLLOW_DARK = 0.55
+
+/** Points nearer than this (bind units) are no hollow: the skin the bald surface is tucked under at the cut. */
+const HOLLOW_SKIP = 0.004
 
 /**
  * Per point of `points` (normals `normals`), how much light reaches it as
@@ -910,7 +1061,7 @@ export function hollowShade(
     let used = 0
     for (let k = 0; k < n; k++) {
       const distance = Math.sqrt(distances[k]!)
-      if (distance <= 1e-6 || distance > HOLLOW_REACH) continue
+      if (distance <= HOLLOW_SKIP || distance > HOLLOW_REACH) continue
       const j = found[k]!
       const along =
         (around.points[j * 3]! - x) * normals[i * 3]! +
@@ -922,6 +1073,289 @@ export function hollowShade(
     shade[i] = 1 - HOLLOW_DARK * (used > 0 ? rise / used : 0)
   }
   return shade
+}
+
+/** Where on triangle a, b, c (corner offsets ×3 into `points`) a point's nearest place is, as weights of its corners. */
+function nearestOnTriangle(p: readonly number[], points: Triples, a: number, b: number, c: number) {
+  const sub = (from: number, x: number, y: number, z: number) => [
+    x - points[from]!,
+    y - points[from + 1]!,
+    z - points[from + 2]!,
+  ]
+  const dot = (u: number[], v: number[]) => u[0]! * v[0]! + u[1]! * v[1]! + u[2]! * v[2]!
+  const ab = sub(a, points[b]!, points[b + 1]!, points[b + 2]!)
+  const ac = sub(a, points[c]!, points[c + 1]!, points[c + 2]!)
+  const ap = sub(a, p[0]!, p[1]!, p[2]!)
+  const d1 = dot(ab, ap)
+  const d2 = dot(ac, ap)
+  if (d1 <= 0 && d2 <= 0) return [1, 0, 0] as const
+  const bp = sub(b, p[0]!, p[1]!, p[2]!)
+  const d3 = dot(ab, bp)
+  const d4 = dot(ac, bp)
+  if (d3 >= 0 && d4 <= d3) return [0, 1, 0] as const
+  const vc = d1 * d4 - d3 * d2
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+    const v = d1 / (d1 - d3)
+    return [1 - v, v, 0] as const
+  }
+  const cp = sub(c, p[0]!, p[1]!, p[2]!)
+  const d5 = dot(ab, cp)
+  const d6 = dot(ac, cp)
+  if (d6 >= 0 && d5 <= d6) return [0, 0, 1] as const
+  const vb = d5 * d2 - d1 * d6
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+    const w = d2 / (d2 - d6)
+    return [1 - w, 0, w] as const
+  }
+  const va = d3 * d6 - d5 * d4
+  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+    const w = (d4 - d3) / (d4 - d3 + (d5 - d6))
+    return [0, 1 - w, w] as const
+  }
+  const v = vb / (va + vb + vc)
+  const w = vc / (va + vb + vc)
+  return [1 - v - w, v, w] as const
+}
+
+/** A point's weights of triangle a, b, c's corners in its plane (any sign: outside it, some are negative). */
+function weightsInPlane(p: readonly number[], points: Triples, a: number, b: number, c: number) {
+  const e = [0, 1, 2].map((axis) => points[b + axis]! - points[a + axis]!)
+  const f = [0, 1, 2].map((axis) => points[c + axis]! - points[a + axis]!)
+  const g = [0, 1, 2].map((axis) => p[axis]! - points[a + axis]!)
+  const dot = (u: number[], v: number[]) => u[0]! * v[0]! + u[1]! * v[1]! + u[2]! * v[2]!
+  const ee = dot(e, e)
+  const ef = dot(e, f)
+  const ff = dot(f, f)
+  const ge = dot(g, e)
+  const gf = dot(g, f)
+  const denominator = ee * ff - ef * ef
+  if (Math.abs(denominator) < 1e-18) return [1 / 3, 1 / 3, 1 / 3]
+  const v = (ff * ge - ef * gf) / denominator
+  const w = (ee * gf - ef * ge) / denominator
+  return [1 - v - w, v, w]
+}
+
+/** How many of the head's triangles nearest (by their middles) a point of the bald surface are tried for its place on the texture. */
+const UV_TRIED = 16
+
+/**
+ * A triangle of the bald surface whose corners lie on the texture further
+ * apart than TEAR times as far as its triangles' do for their size spans
+ * a seam of it; its corners are placed by one triangle, as far outside it
+ * as EXTRAPOLATE of its corners' weights.
+ */
+const TEAR = 3
+const EXTRAPOLATE = 0.5
+
+/**
+ * The bald surface on the head's texture: each point at its nearest place
+ * on the hair taken out (`source`, its points, texture coordinates and the
+ * triangles taken), so the scalp shows the texels the hair did — painted
+ * the scalp's (see scalp-paint.ts) — and meets the kept skin's texels at
+ * the cut. A triangle that would span a seam of the texture gets corners
+ * of its own (see TEAR). Returns which point of the surface each point is
+ * (`from`), the points' texture coordinates and the triangles.
+ */
+export function scalpUvs(
+  points: Triples,
+  triangles: ArrayLike<number>,
+  source: { points: Triples; uvs: Triples; index: ArrayLike<number>; triangles: readonly number[] },
+) {
+  const count = points.length / 3
+  const middles = new Float32Array(source.triangles.length * 3)
+  source.triangles.forEach((t, j) => {
+    for (let k = 0; k < 3; k++) {
+      for (let axis = 0; axis < 3; axis++) {
+        middles[j * 3 + axis]! += source.points[source.index[t * 3 + k]! * 3 + axis]! / 3
+      }
+    }
+  })
+  const grid = new PointGrid(middles, SKULL_CELL)
+  const found: number[] = []
+  const distances: number[] = []
+  const corner = (t: number, k: number) => source.index[t * 3 + k]! * 3
+  /** The source triangle nearest a place, and the weights of its corners there. */
+  const nearestSource = (p: number[]) => {
+    const tried = grid.nearest(p[0]!, p[1]!, p[2]!, UV_TRIED, found, distances)
+    let best = -1
+    let bestWeights: readonly number[] = [1, 0, 0]
+    let bestDistance = Number.POSITIVE_INFINITY
+    for (let j = 0; j < tried; j++) {
+      const t = source.triangles[found[j]!]!
+      const weights = nearestOnTriangle(p, source.points, corner(t, 0), corner(t, 1), corner(t, 2))
+      let distance = 0
+      for (let axis = 0; axis < 3; axis++) {
+        let at = 0
+        for (let k = 0; k < 3; k++) at += weights[k]! * source.points[corner(t, k) + axis]!
+        distance += (at - p[axis]!) ** 2
+      }
+      if (distance < bestDistance) {
+        bestDistance = distance
+        best = t
+        bestWeights = weights
+      }
+    }
+    return { t: best, weights: bestWeights }
+  }
+  const uvAt = (t: number, weights: readonly number[], out: number[]) => {
+    out[0] = 0
+    out[1] = 0
+    for (let k = 0; k < 3; k++) {
+      const i = source.index[t * 3 + k]!
+      out[0]! += weights[k]! * source.uvs[i * 2]!
+      out[1]! += weights[k]! * source.uvs[i * 2 + 1]!
+    }
+  }
+  const uvs: number[] = []
+  const at = [0, 0]
+  for (let i = 0; i < count; i++) {
+    const { t, weights } = nearestSource([points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!])
+    if (t < 0) uvs.push(0, 0)
+    else {
+      uvAt(t, weights, at)
+      uvs.push(at[0]!, at[1]!)
+    }
+  }
+  // The texture's span for a length on the head, over the hair taken out.
+  const ratios = source.triangles.map((t) => {
+    const [a, b] = [source.index[t * 3]!, source.index[t * 3 + 1]!]
+    const length = Math.hypot(
+      source.points[a * 3]! - source.points[b * 3]!,
+      source.points[a * 3 + 1]! - source.points[b * 3 + 1]!,
+      source.points[a * 3 + 2]! - source.points[b * 3 + 2]!,
+    )
+    const span = Math.hypot(
+      source.uvs[a * 2]! - source.uvs[b * 2]!,
+      source.uvs[a * 2 + 1]! - source.uvs[b * 2 + 1]!,
+    )
+    return length > 0 ? span / length : 0
+  })
+  ratios.sort((a, b) => a - b)
+  const ratio = ratios[ratios.length >> 1] ?? 0
+  const from = Array.from({ length: count }, (_, i) => i)
+  const out = Array.from(triangles)
+  for (let t = 0; t < out.length / 3; t++) {
+    const ids = [out[t * 3]!, out[t * 3 + 1]!, out[t * 3 + 2]!]
+    const torn = [0, 1, 2].some((k) => {
+      const [a, b] = [ids[k]!, ids[(k + 1) % 3]!]
+      const length = Math.hypot(
+        points[a * 3]! - points[b * 3]!,
+        points[a * 3 + 1]! - points[b * 3 + 1]!,
+        points[a * 3 + 2]! - points[b * 3 + 2]!,
+      )
+      const span = Math.hypot(uvs[a * 2]! - uvs[b * 2]!, uvs[a * 2 + 1]! - uvs[b * 2 + 1]!)
+      return span > TEAR * ratio * length
+    })
+    if (!torn) continue
+    const middle = [0, 1, 2].map(
+      (axis) =>
+        (points[ids[0]! * 3 + axis]! + points[ids[1]! * 3 + axis]! + points[ids[2]! * 3 + axis]!) /
+        3,
+    )
+    const { t: by } = nearestSource(middle)
+    if (by < 0) continue
+    for (let k = 0; k < 3; k++) {
+      const i = ids[k]!
+      const weights = weightsInPlane(
+        [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!],
+        source.points,
+        corner(by, 0),
+        corner(by, 1),
+        corner(by, 2),
+      ).map((w) => Math.max(w, -EXTRAPOLATE))
+      const sum = weights[0]! + weights[1]! + weights[2]!
+      uvAt(
+        by,
+        weights.map((w) => w / sum),
+        at,
+      )
+      out[t * 3 + k] = from.length
+      from.push(i)
+      uvs.push(at[0]!, at[1]!)
+    }
+  }
+  return {
+    from: Int32Array.from(from),
+    uvs: Float32Array.from(uvs),
+    triangles: Uint32Array.from(out),
+  }
+}
+
+/** How many rounds at most skin weights are spread over the bald surface from where they are known, and the change a round under which they have settled. */
+const SPREAD_ROUNDS = 120
+const SETTLED = 1e-3
+
+/**
+ * Skin weights for a surface of `count` points (`triangles`): where they
+ * are `known` (per point, bone and weight pairs, or null), those; the rest
+ * spread from them along the surface, each point the mean of its
+ * neighbours, so nothing is bound otherwise than what is round it.
+ * Points nothing known reaches are `fallback`'s alone. Returns the
+ * `influences` heaviest bones per point, their weights summing to one.
+ */
+export function spreadWeights(
+  count: number,
+  triangles: ArrayLike<number>,
+  known: readonly (readonly (readonly [number, number])[] | null)[],
+  fallback: number,
+  influences = 4,
+) {
+  const bones = new Map<number, number>([[fallback, 0]])
+  for (const pairs of known)
+    for (const [bone] of pairs ?? []) if (!bones.has(bone)) bones.set(bone, bones.size)
+  const size = bones.size
+  const values = new Float32Array(count * size)
+  const fixed = new Uint8Array(count)
+  for (let i = 0; i < count; i++) {
+    const pairs = known[i]
+    if (!pairs || pairs.length === 0) {
+      values[i * size] = 1
+      continue
+    }
+    fixed[i] = 1
+    for (const [bone, weight] of pairs) values[i * size + bones.get(bone)!]! += weight
+  }
+  // Neighbours flat, and each point averaged in place over them (its
+  // neighbours' new weights already, where they come first): it settles in
+  // a few dozen rounds.
+  const neighbours = neighboursOf(triangles, count)
+  const start = new Int32Array(count + 1)
+  for (let i = 0; i < count; i++) start[i + 1] = start[i]! + neighbours[i]!.length
+  const around = Int32Array.from(neighbours.flat())
+  const free = Int32Array.from(
+    Array.from({ length: count }, (_, i) => i).filter(
+      (i) => !fixed[i] && start[i + 1]! > start[i]!,
+    ),
+  )
+  for (let round = 0; fixed.includes(1) && round < SPREAD_ROUNDS; round++) {
+    let most = 0
+    for (const i of free) {
+      const n = start[i + 1]! - start[i]!
+      for (let b = 0; b < size; b++) {
+        let sum = 0
+        for (let k = start[i]!; k < start[i + 1]!; k++) sum += values[around[k]! * size + b]!
+        const value = sum / n
+        most = Math.max(most, Math.abs(value - values[i * size + b]!))
+        values[i * size + b] = value
+      }
+    }
+    if (most < SETTLED) break
+  }
+  const names = [...bones.keys()]
+  const index = new Uint16Array(count * influences)
+  const weight = new Float32Array(count * influences)
+  const order = Array.from({ length: size }, (_, b) => b)
+  for (let i = 0; i < count; i++) {
+    order.sort((a, b) => values[i * size + b]! - values[i * size + a]!)
+    let total = 0
+    for (let k = 0; k < Math.min(influences, size); k++) total += values[i * size + order[k]!]!
+    for (let k = 0; k < Math.min(influences, size); k++) {
+      index[i * influences + k] = names[order[k]!]!
+      weight[i * influences + k] =
+        total > 0 ? values[i * size + order[k]!]! / total : k === 0 ? 1 : 0
+    }
+  }
+  return { index, weight }
 }
 
 /** How far (bind units) from the top of the neck a body's open neckline is closed. */
@@ -1019,38 +1453,85 @@ export function necklineFan(points: Triples, index: ArrayLike<number>, neck: Arr
   return { points: fanPoints, body, triangles: fan }
 }
 
-/** How many rings of skin out from the cut are painted to the scalp's tone, and how much each (from the cut out). */
-export const PAINT_RINGS = [0.9, 0.7, 0.45, 0.25, 0.1]
+/** How many rings of skin out from the cut the forehead's tone is read within. */
+export const TONE_RINGS = 5
 
-/** Over the skull's hair zone from here, or this near the cut, the hair's colour left on the skin is painted over too. */
+/**
+ * Kept skin within FULL (bind units) of the cut is painted wholly to the
+ * scalp's colour, fading out to none at FEATHER: by how far it is, not how
+ * many triangles, so the paint's edge follows no triangle's.
+ */
+const FULL = 0.012
+const FEATHER = 0.045
+
+/**
+ * On the face, the paint fades out by FACE_FEATHER instead, takes none of
+ * the hair's colour left on the skin (brows, a beard, lashes), and none of
+ * it reaches below BROWS over the eyes.
+ */
+const FACE_FEATHER = 0.025
+const BROWS = 0.035
+
+/**
+ * The scalp's colour is the skin's round it — the cheek's by a cheek, the
+ * neck's down the nape — read off the head before it is painted, at least
+ * SKIN_OFF_CUT (bind units) from the cut (clear of a hairline's stubble):
+ * wholly within LOCAL_NEAR of that skin, fading to the scalp's one tone
+ * (read off the forehead) at LOCAL_FAR, over the crown.
+ */
+const SKIN_OFF_CUT = 0.012
+const LOCAL_NEAR = 0.02
+const LOCAL_FAR = 0.08
+
+/** Over the skull's hair zone from here, the hair's colour left on the skin is painted over too. */
 const PAINT_ZONE = 0.02
-const PAINT_NEAR = 2
 
 /** Skin facing the front this squarely is the forehead the scalp's tone is read from. */
 const FOREHEAD_FACING = 0.4
 
-/** Numbers per triangle when packed for painting: u, v and how much to paint, per corner. */
-export const PAINTED = 9
+/**
+ * Numbers per triangle when packed for painting, per corner: u, v, how
+ * much to paint, which skin round it its colour is (see `ScalpPaint.skin`;
+ * −1 for none) and how much, and whether the hair's colour left there is
+ * painted over (1) or not (0, the face).
+ */
+export const PAINTED = 18
+
+/** Numbers per triangle of the bald surface packed for painting, per corner: u, v, which skin round it its colour is and how much. */
+export const SCALP = 12
 
 /** Numbers per triangle when packed for reading the tone from: u, v per corner. */
 export const READ = 6
 
-/** How a head's skin is painted round the cut (see scalp-paint.ts). */
+/** Numbers per place of skin read for the paint's colour (see `ScalpPaint.skin`). */
+export const SKIN_REF = 5
+
+/** How a head's skin is painted round the cut, and the bald surface (see scalp-paint.ts). */
 export type ScalpPaint = {
+  /** The body's triangles the hair taken out shaded (SHADED per triangle), to light again (see `hairShadow`). */
+  shadow: Float32Array
   /** Kept triangles to paint (PAINTED per triangle). */
   paint: Float32Array
+  /** The bald surface's triangles on the texture (SCALP per triangle): wholly painted, but where kept skin shows the texels. */
+  scalp: Float32Array
+  /** Every kept triangle on the texture (READ per triangle). */
+  kept: Float32Array
+  /** Every triangle taken on the texture (READ per triangle): painted wholly the scalp's tone, where no kept skin shows the texels. */
+  taken: Float32Array
   /** Triangles to read the scalp's tone from, the forehead under the cut first (READ per triangle). */
   tone: Float32Array[]
-  /** The texel (u, v) the bald surface takes its colour from: painted wholly the scalp's. */
-  swatch: [number, number]
+  /** Where the unpainted skin the paint takes its colour from near the cut is read (SKIN_REF per place: u, v, and x, y, z in the bind pose). */
+  skin: Float32Array
 }
 
 /**
  * How a bald head's skin is painted round the cut (see ScalpPaint): the
- * kept triangles near it, or over the hair zone, each corner by its ring
- * (see PAINT_RINGS); the tone read from the forehead's skin just under the
- * cut, or from all of the forehead; and the swatch, on the forehead by the
- * cut, nearest the face's middle.
+ * kept triangles near it (see FEATHER), over the hair zone, round the back
+ * of the neck or on the ears — wherever hair may be left on the skin — and
+ * the bald surface (`scalp`, its texture coordinates and bind-pose points
+ * per corner); each corner's colour by the unpainted skin nearest it (see
+ * LOCAL_NEAR); and the tone read from the forehead's skin just under the
+ * cut, or from all of the forehead.
  */
 export function scalpPaint(
   head: { points: Triples; normals: Triples; uvs: Triples; index: ArrayLike<number> },
@@ -1059,53 +1540,210 @@ export function scalpPaint(
   spots: Int32Array,
   zone: Float32Array,
   marks: HeadMarks,
-): ScalpPaint {
+  scalp: { uvs: Triples; points: Triples },
+): Omit<ScalpPaint, 'shadow'> {
   const { points, normals, uvs, index } = head
+  const count = points.length / 3
   const eyeLevel = marks.eyes.reduce((sum, eye) => sum + eye[1]!, 0) / marks.eyes.length
   const middle = marks.eyes.reduce((sum, eye) => sum + eye[0]!, 0) / marks.eyes.length
+  const eyeFront = Math.max(...marks.eyes.map((eye) => eye[2]!))
+  const ringOf = (i: number) => rings[spots[i]!]!
+  const used = new Uint8Array(count)
+  for (let t = 0; t < index.length / 3; t++) {
+    if (!taken[t]) for (let k = 0; k < 3; k++) used[index[t * 3 + k]!] = 1
+  }
+  const found: number[] = []
+  const distances: number[] = []
+  const gridOf = (keep: (i: number) => boolean) => {
+    const ids: number[] = []
+    const at: number[] = []
+    for (let i = 0; i < count; i++) {
+      if (!keep(i)) continue
+      ids.push(i)
+      at.push(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!)
+    }
+    return { ids, grid: new PointGrid(at, SKULL_CELL) }
+  }
+  const cut = gridOf((i) => used[i] === 1 && ringOf(i) === 0)
+  const fromCut = Float32Array.from({ length: count }, (_, i) =>
+    used[i] &&
+    cut.grid.nearest(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!, 1, found, distances) >
+      0
+      ? Math.sqrt(distances[0]!)
+      : Number.POSITIVE_INFINITY,
+  )
+  const face = (i: number) =>
+    zone[i]! < FACE_ZONE &&
+    points[i * 3 + 2]! > eyeFront - FACE_DEPTH &&
+    points[i * 3 + 1]! > marks.neck
+  const amountOf = (i: number) =>
+    !face(i)
+      ? 1 - smoothstep(FULL, FEATHER, fromCut[i]!)
+      : points[i * 3 + 1]! < eyeLevel + BROWS
+        ? 0
+        : 1 - smoothstep(FULL, FACE_FEATHER, fromCut[i]!)
+  const ear = (i: number) => nearEar(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!, marks)
+  // Skin of the head itself (not an eyeball, the teeth), but the ears —
+  // redder than skin — and the forehead and the brows: the scalp's tone is
+  // the forehead's own.
+  const spotCount = spots.reduce((most, spot) => Math.max(most, spot + 1), 0)
+  const pieces = piecesOf(index, spots, spotCount, (t) => !taken[t])
+  const onHead = new Uint8Array(count)
+  for (let t = 0; t < index.length / 3; t++) {
+    if (!taken[t] && pieces.size(t) === pieces.largest) {
+      for (let k = 0; k < 3; k++) onHead[index[t * 3 + k]!] = 1
+    }
+  }
+  const bare = gridOf(
+    (i) =>
+      onHead[i] === 1 &&
+      fromCut[i]! >= SKIN_OFF_CUT &&
+      !ear(i) &&
+      !(
+        zone[i]! < FACE_ZONE &&
+        points[i * 3 + 2]! > eyeFront - FACE_DEPTH &&
+        points[i * 3 + 1]! > eyeLevel - RIM_BELOW
+      ),
+  )
+  const refs = new Map<number, number>()
+  const skin: number[] = []
+  /** The unpainted skin nearest a place (as `ScalpPaint.skin` numbers it), and how much its colour it takes. */
+  const local = (x: number, y: number, z: number): [number, number] => {
+    if (bare.grid.nearest(x, y, z, 1, found, distances, LOCAL_FAR) === 0) return [-1, 0]
+    const share = 1 - smoothstep(LOCAL_NEAR, LOCAL_FAR, Math.sqrt(distances[0]!))
+    if (share <= 0) return [-1, 0]
+    const i = bare.ids[found[0]!]!
+    let ref = refs.get(i)
+    if (ref === undefined) {
+      ref = refs.size
+      refs.set(i, ref)
+      skin.push(
+        uvs[i * 2]!,
+        uvs[i * 2 + 1]!,
+        points[i * 3]!,
+        points[i * 3 + 1]!,
+        points[i * 3 + 2]!,
+      )
+    }
+    return [ref, share]
+  }
+  const behindNeck = (i: number) =>
+    points[i * 3 + 1]! < marks.neck && points[i * 3 + 2]! < marks.nape
   const paint: number[] = []
+  const kept: number[] = []
+  const takenUvs: number[] = []
   const nearCut: number[] = []
   const forehead: number[] = []
-  let swatch: [number, number] | null = null
-  let swatchAside = Number.POSITIVE_INFINITY
-  const ringOf = (i: number) => rings[spots[i]!]!
   for (let t = 0; t < index.length / 3; t++) {
-    if (taken[t]) continue
     const corners = [0, 1, 2].map((k) => index[t * 3 + k]!)
-    if (corners.some((i) => zone[i]! >= PAINT_ZONE || ringOf(i) <= PAINT_NEAR)) {
-      for (const i of corners) paint.push(uvs[i * 2]!, uvs[i * 2 + 1]!, PAINT_RINGS[ringOf(i)] ?? 0)
+    const read = corners.flatMap((i) => [uvs[i * 2]!, uvs[i * 2 + 1]!])
+    if (taken[t]) {
+      takenUvs.push(...read)
+      continue
+    }
+    kept.push(...read)
+    if (corners.some((i) => amountOf(i) > 0 || zone[i]! >= PAINT_ZONE || behindNeck(i) || ear(i))) {
+      for (const i of corners) {
+        const [ref, share] = local(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!)
+        paint.push(uvs[i * 2]!, uvs[i * 2 + 1]!, amountOf(i), ref, share, face(i) ? 0 : 1)
+      }
     }
     const front = corners.every(
       (i) => normals[i * 3 + 2]! >= FOREHEAD_FACING && points[i * 3 + 1]! >= eyeLevel,
     )
     if (!front) continue
-    const read = corners.flatMap((i) => [uvs[i * 2]!, uvs[i * 2 + 1]!])
-    if (corners.every((i) => ringOf(i) >= 1 && ringOf(i) <= PAINT_RINGS.length)) {
-      nearCut.push(...read)
-      if (corners.every((i) => ringOf(i) <= PAINT_NEAR)) {
-        const x = corners.reduce((sum, i) => sum + points[i * 3]!, 0) / 3
-        if (Math.abs(x - middle) < swatchAside) {
-          swatchAside = Math.abs(x - middle)
-          swatch = [
-            read[0]! / 3 + read[2]! / 3 + read[4]! / 3,
-            read[1]! / 3 + read[3]! / 3 + read[5]! / 3,
-          ]
-        }
-      }
-    } else if (corners.every((i) => zone[i]! < FACE_ZONE)) {
-      forehead.push(...read)
-    }
+    if (corners.every((i) => ringOf(i) >= 1 && ringOf(i) <= TONE_RINGS)) nearCut.push(...read)
+    else if (corners.every((i) => zone[i]! < FACE_ZONE)) forehead.push(...read)
   }
-  if (!swatch) {
-    const list = nearCut.length > 0 ? nearCut : forehead
-    swatch =
-      list.length > 0
-        ? [(list[0]! + list[2]! + list[4]!) / 3, (list[1]! + list[3]! + list[5]!) / 3]
-        : [0, 0]
+  const packed: number[] = []
+  for (let k = 0; k < scalp.points.length / 3; k++) {
+    const [ref, share] = local(
+      scalp.points[k * 3]!,
+      scalp.points[k * 3 + 1]!,
+      scalp.points[k * 3 + 2]!,
+    )
+    packed.push(scalp.uvs[k * 2]!, scalp.uvs[k * 2 + 1]!, ref, share)
   }
   return {
     paint: Float32Array.from(paint),
+    scalp: Float32Array.from(packed),
+    kept: Float32Array.from(kept),
+    taken: Float32Array.from(takenUvs),
     tone: [Float32Array.from(nearCut), Float32Array.from(forehead)],
-    swatch,
+    skin: Float32Array.from(skin),
   }
+}
+
+/**
+ * Body skin and clothes this near (bind units) the head's own hair, behind
+ * the neck's middle and under its top, lay in the hair's shadow, which the
+ * body's texture has painted on: wholly within SHADOW_FULL, none from
+ * SHADOW_REACH.
+ */
+const SHADOW_FULL = 0.02
+const SHADOW_REACH = 0.06
+
+/** How many points of the body out of the shadow, nearest each in it, its light is read from. */
+export const SHADOW_REFS = 4
+
+/**
+ * Numbers per triangle of the body packed for lighting again, per corner:
+ * u, v, how much it lay in the shadow, and the u, v of SHADOW_REFS points
+ * out of it nearest.
+ */
+export const SHADED = 3 * (3 + 2 * SHADOW_REFS)
+
+/**
+ * The body's triangles the head's own hair (`hair`, its points: what was
+ * taken out of the head and its cards) shaded, packed (see SHADED): with
+ * the hair gone, the shadow painted on the body's texture under it — a
+ * dark hood down the back — is lit again as the body round it is.
+ */
+export function hairShadow(
+  body: { points: Triples; uvs: Triples; index: ArrayLike<number> },
+  hair: Triples,
+  marks: Pick<HeadMarks, 'neck' | 'nape'>,
+): Float32Array {
+  const { points, uvs, index } = body
+  const count = points.length / 3
+  if (hair.length === 0) return new Float32Array()
+  const hairGrid = new PointGrid(hair, SKULL_CELL)
+  const found: number[] = []
+  const distances: number[] = []
+  const shade = Float32Array.from({ length: count }, (_, i) => {
+    const [x, y, z] = [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!]
+    if (y > marks.neck || z > marks.nape) return 0
+    if (hairGrid.nearest(x, y, z, 1, found, distances, SHADOW_REACH) === 0) return 0
+    return 1 - smoothstep(SHADOW_FULL, SHADOW_REACH, Math.sqrt(distances[0]!))
+  })
+  const lit: number[] = []
+  const litIds: number[] = []
+  for (let i = 0; i < count; i++) {
+    if (shade[i]! > 0) continue
+    lit.push(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!)
+    litIds.push(i)
+  }
+  if (litIds.length === 0) return new Float32Array()
+  const litGrid = new PointGrid(lit, SKULL_CELL)
+  const packed: number[] = []
+  for (let t = 0; t < index.length / 3; t++) {
+    const corners = [0, 1, 2].map((k) => index[t * 3 + k]!)
+    if (!corners.some((i) => shade[i]! > 0)) continue
+    for (const i of corners) {
+      packed.push(uvs[i * 2]!, uvs[i * 2 + 1]!, shade[i]!)
+      const n = litGrid.nearest(
+        points[i * 3]!,
+        points[i * 3 + 1]!,
+        points[i * 3 + 2]!,
+        SHADOW_REFS,
+        found,
+        distances,
+      )
+      for (let k = 0; k < SHADOW_REFS; k++) {
+        const j = litIds[found[Math.min(k, n - 1)]!]!
+        packed.push(uvs[j * 2]!, uvs[j * 2 + 1]!)
+      }
+    }
+  }
+  return Float32Array.from(packed)
 }
