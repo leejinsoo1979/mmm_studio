@@ -97,6 +97,8 @@ const look = (key: string, change: Partial<Omit<LookJob, 'body'>>) => ({
   paint: NO_PAINT,
   bald: false,
   feet: SHOD,
+  feetBind: null,
+  feetDonor: null,
   target: null,
   ...change,
 })

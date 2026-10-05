@@ -441,12 +441,12 @@ function girthMove(mesh: SkinnedMesh, carried: (Carried | null)[]): PointMove {
 }
 
 /**
- * The character's own meshes — body, head, and hair and lashes — by their
- * material's name, or a body made all in one (whose material names only
- * the character, like Female_Adult_16's); any other is something worn or
- * carried over them.
+ * The character's own meshes — body, head, hair and lashes, and bare feet
+ * borrowed for it (avatar-feet.ts) — by their material's name, or a body
+ * made all in one (whose material names only the character, like
+ * Female_Adult_16's); any other is something worn or carried over them.
  */
-const OWN_MESH = /_(body|head|opacity)$|^[a-z]+\d+$/
+const OWN_MESH = /_(body|head|opacity|feet)$|^[a-z]+\d+$/
 
 /**
  * Points within this (m) of each other are one: a texture seam splits a

@@ -1,23 +1,32 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   type Material,
   type Mesh,
   type MeshStandardMaterial,
   type Object3D,
+  type SkinnedMesh,
   Source,
   type Texture,
 } from 'three'
 import { type AvatarLook, type AvatarPaint, hasLook } from '../../../store/use-avatar-profile'
 import { applyBodyBones } from './avatar-body'
+import {
+  bindOf,
+  donorFor,
+  feetOn,
+  isFeetCopy,
+  type LoadedDonor,
+  loadFeetDonor,
+  takeOffFeet,
+  wearFeet,
+} from './avatar-feet'
 import { useAvatarHair } from './avatar-hair'
 import { useAvatarShape } from './avatar-shape'
 import { hasBodyShape } from './body-shape'
 import { hasFacePaint, NO_PAINT } from './face-paint'
 import { loadFaceTargets } from './face-targets'
-import { footGeometry } from './feet'
-import { packFeet } from './feet-paint'
 import { SHOD } from './footwear'
 import { headGeometry } from './head-geometry'
 import { type LookBody, type LookJob, type LookResult, type Part, runLookJob } from './look-job'
@@ -26,12 +35,12 @@ import { packTriangles } from './look-pixels'
 type PartMesh = { mesh: Mesh; material: MeshStandardMaterial }
 
 function partOf(material: Material): Part | null {
-  const match = /_(head|body|opacity)$/.exec(material.name)
+  const match = /_(head|body|opacity|feet)$/.exec(material.name)
   return match ? (match[1] as Part) : null
 }
 
 function partMeshes(model: Object3D) {
-  const parts: Record<Part, PartMesh[]> = { head: [], body: [], opacity: [] }
+  const parts: Record<Part, PartMesh[]> = { head: [], body: [], opacity: [], feet: [] }
   model.traverse((object) => {
     const mesh = object as Mesh
     if (!mesh.isMesh || Array.isArray(mesh.material)) return
@@ -75,9 +84,6 @@ function lookBody(parts: Record<Part, PartMesh[]>): Promise<LookBody> | null {
         skin: packTriangles(geometry.skin),
         eyes: geometry.eyes.map(packTriangles),
       },
-      feet:
-        parts.body.map(({ mesh }) => footGeometry(mesh)).find(({ frames }) => frames.length > 0) ??
-        packFeet([], []),
     }))
     found.catch(() => bodies.delete(headMap))
     bodies.set(headMap, found)
@@ -186,13 +192,23 @@ function makeLook(body: object, job: LookJob, signal: AbortSignal): Promise<Look
   })
 }
 
+/** The body mesh with the shoes, which borrowed feet replace (not its copy without them). */
+function shodBody(parts: Record<Part, PartMesh[]>): SkinnedMesh | null {
+  const found = parts.body.find(
+    ({ mesh }) => (mesh as SkinnedMesh).isSkinnedMesh && !isFeetCopy(mesh),
+  )
+  return (found?.mesh as SkinnedMesh | undefined) ?? null
+}
+
 /**
  * Dresses a body in a look: its own copies of the textures the look changes
  * (the dyes, a shave, the swapped face, the face paint, socks or bare feet)
- * on its own copies of the materials. Returns what undoes it (the original materials back,
- * the copies freed), or null when `signal` aborted it first; `retry` when
- * the face or the landmarks it and the paint are placed by couldn't be
- * loaded (the look went on without them) and may load later.
+ * on its own copies of the materials, and borrowed feet in place of its
+ * shoes (see avatar-feet.ts) or its shoes back. Returns what undoes the
+ * dressing (the original materials back, the copies freed), or null when
+ * `signal` aborted it first; `retry` when the face or the landmarks it and
+ * the paint are placed by, or the feet, couldn't be loaded (the look went
+ * on without them) and may load later.
  */
 async function applyLook(
   model: Object3D,
@@ -207,7 +223,8 @@ async function applyLook(
   // The face, the paint and a shave all go by the character's face
   // landmarks.
   const placed = look.face || look.bald || hasFacePaint(look.paint)
-  const [body, target] = await Promise.all([
+  const shod = look.feet.wear !== 'shoes' ? shodBody(parts) : null
+  const [body, target, donor] = await Promise.all([
     gathering,
     placed
       ? loadFaceTargets().then(
@@ -217,6 +234,13 @@ async function applyLook(
             return null
           },
         )
+      : null,
+    shod
+      ? loadFeetDonor(donorFor(avatarId)).catch((error: unknown): LoadedDonor | null => {
+          console.warn('[look] could not load bare feet', error)
+          retry = true
+          return null
+        })
       : null,
   ])
   if (signal.aborted) return null
@@ -229,13 +253,17 @@ async function applyLook(
     paint: look.paint,
     bald: look.bald,
     feet: look.feet,
+    feetBind: shod && donor ? bindOf(shod) : null,
+    feetDonor: donor?.donor ?? null,
     target,
   }
   // Without landmarks only the irises of the paint go on, and no shave:
   // it would take the brows and lashes with the hair (a retry puts it on).
   const painted = target ? hasFacePaint(job.paint) || job.bald : job.paint.eyes
-  const shoeless = job.feet.wear !== 'shoes'
-  if (!(job.hair || job.skin || job.face || painted || shoeless)) return { undo: () => {}, retry }
+  if (!(job.hair || job.skin || job.face || painted || job.feetDonor)) {
+    takeOffFeet(model)
+    return { undo: () => {}, retry }
+  }
   const result = await makeLook(model, job, signal)
   if (!result || signal.aborted) {
     for (const bitmap of Object.values(result?.parts ?? {})) bitmap.close()
@@ -243,10 +271,17 @@ async function applyLook(
   }
   if (result.faceFailed) retry = true
 
+  if (result.feet && shod && donor) {
+    wearFeet(model, shod, result.feet, donor.normalMap, look.feet.wear)
+  } else {
+    takeOffFeet(model)
+  }
+  // Again: wearing the feet adds meshes to dress.
+  const dressed = partMeshes(model)
   const undo: (() => void)[] = []
   for (const part of Object.keys(result.parts) as Part[]) {
     const bitmap = result.parts[part]!
-    const meshes = parts[part]
+    const meshes = dressed[part]
     if (meshes.length === 0) {
       bitmap.close()
       continue
@@ -298,7 +333,8 @@ export function useAvatarLook(
   const hairStyle = look?.hairStyle ?? null
   const hair = look?.hair ?? null
   const worn = useAvatarHair(model, hairStyle, hair)
-  useAvatarShape(model, look, avatarId, worn)
+  const [feet, setFeet] = useState<ReturnType<typeof feetOn>>(null)
+  useAvatarShape(model, look, avatarId, worn, feet)
 
   const body = look?.body
   useEffect(
@@ -315,13 +351,15 @@ export function useAvatarLook(
   const skin = look?.skin ?? null
   const face = look?.face ?? null
   const paint = look?.paint ?? NO_PAINT
-  const feet = look?.feet ?? SHOD
+  const footwear = look?.feet ?? SHOD
   const bald = worn !== null
   useEffect(() => {
-    const look: AvatarPaint = { hair, skin, face, paint, feet, bald }
+    const look: AvatarPaint = { hair, skin, face, paint, feet: footwear, bald }
     if (dressing.current && (dressing.current.model !== model || !hasLook(look))) {
       dressing.current.undo()
+      takeOffFeet(dressing.current.model)
       dressing.current = null
+      setFeet(null)
     }
     if (!hasLook(look)) return
     const controller = new AbortController()
@@ -336,6 +374,7 @@ export function useAvatarLook(
           }
           dressing.current?.undo()
           dressing.current = { model, undo: applied.undo }
+          setFeet(feetOn(model))
           if (applied.retry && attempt < RETRIES) {
             timer = setTimeout(() => dress(attempt + 1), RETRY_AFTER * 2 ** attempt)
           }
@@ -348,11 +387,14 @@ export function useAvatarLook(
       clearTimeout(timer)
     }
     // `worn` isn't read: a new one means new meshes to dress.
-  }, [model, hair, skin, face, paint, feet, bald, avatarId, worn])
+  }, [model, hair, skin, face, paint, footwear, bald, avatarId, worn])
 
   useEffect(
     () => () => {
-      dressing.current?.undo()
+      if (dressing.current) {
+        dressing.current.undo()
+        takeOffFeet(dressing.current.model)
+      }
       dressing.current = null
     },
     [],

@@ -1,8 +1,17 @@
+import type { BodyBind } from './bare-feet'
 import { connectedFrom } from './face-fill'
 import { runFaceJob } from './face-job'
 import { type FacePaint, hairHued, hasFacePaint, paintFace, shaveHead } from './face-paint'
 import { maskImage } from './face-swap'
-import { type FootGeometry, packFeet, paintFeet } from './feet-paint'
+import {
+  dressLegs,
+  type FeetBody,
+  type FeetDonor,
+  type FittedFeet,
+  paintFeet,
+  type WornFeet,
+  wornFeet,
+} from './feet-job'
 import type { AvatarFeet } from './footwear'
 import { forEachTexel, renderFront, tintIris } from './front-render'
 import { bleedHair } from './hair-bleed'
@@ -26,12 +35,10 @@ import {
 /**
  * A Rocketbox body's materials: `<code>_head`, `<code>_body` and, on about
  * half of them, `<code>_opacity` (hair cards and lashes); the rest have
- * their hair, if any, painted on the head.
+ * their hair, if any, painted on the head. `<code>_feet` is borrowed bare
+ * feet's (see feet-job.ts).
  */
-export type Part = 'head' | 'body' | 'opacity'
-
-/** No feet to paint: a body without shoes, or one not measured. */
-const NO_FEET = packFeet([], [])
+export type Part = 'head' | 'body' | 'opacity' | 'feet'
 
 /** A head's geometry packed into flat arrays (see `packTriangles`), to cross to a worker cheaply. */
 export type PackedGeometry = { all: Float32Array; skin: Float32Array; eyes: Float32Array[] }
@@ -44,8 +51,6 @@ export type LookBody = {
   body: ImageBitmap
   opacity: ImageBitmap | null
   geometry: PackedGeometry
-  /** The body texture's feet and lower legs (empty for a body without shoes). */
-  feet: FootGeometry
 }
 
 /** A look to put on a body (see `AvatarPaint`), with the character's face landmarks. */
@@ -66,6 +71,13 @@ export type LookJob = {
   bald: boolean
   feet: AvatarFeet
   /**
+   * Out of shoes, the body mesh with them in its bind pose and the donor
+   * whose bare feet go on in their place (see feet-job.ts); null when shod,
+   * or when either couldn't be had (the shoes stay on).
+   */
+  feetBind: BodyBind | null
+  feetDonor: FeetDonor | null
+  /**
    * The character's face landmarks (packed fractions of its front view):
    * without them (not loaded, or none for this character) the face photo
    * and all the paint but the irises' are left out.
@@ -74,10 +86,15 @@ export type LookJob = {
 }
 
 /**
- * The textures the look changes, and whether the face was left out because
- * its photo couldn't be read (the rest still goes on).
+ * The textures the look changes, whether the face was left out because its
+ * photo couldn't be read (the rest still goes on), and the borrowed feet
+ * to wear (null: the shoes).
  */
-export type LookResult = { parts: Partial<Record<Part, ImageBitmap>>; faceFailed: boolean }
+export type LookResult = {
+  parts: Partial<Record<Part, ImageBitmap>>
+  faceFailed: boolean
+  feet: FittedFeet | null
+}
 
 /** Everything about a body's textures a look needs, worked out once per body. */
 export type Analysis = {
@@ -95,8 +112,6 @@ export type Analysis = {
   /** The skin's usual colour on the head's texture and on the body's. */
   skin: Rgb
   bodySkin: Rgb
-  /** The body texture's feet and lower legs, for socks and bare feet. */
-  feet: FootGeometry
 }
 
 /**
@@ -249,7 +264,6 @@ export function analyseBody(
   body: Pixels,
   opacity: Pixels | null,
   geometry: HeadGeometry,
-  feet: FootGeometry = NO_FEET,
 ): Analysis {
   const skin = skinColor(head, geometry)
   const skinLum = luminance(...skin)
@@ -286,7 +300,6 @@ export function analyseBody(
     headHairLum: maskedLuminance(head, hairOnHead),
     skin,
     bodySkin: meanColor(body, bodySkinMask),
-    feet,
   }
 }
 
@@ -411,16 +424,51 @@ export function dressBody(
     bleedHair(opacity)
     changed.opacity = opacity
   }
-  const shoeless = job.feet.wear !== 'shoes'
-  if (skin || shoeless) {
+  const feet = feetBodyOf(analysis, job)
+  const worn = feet && job.feetDonor && wornFeet(feet, job.feetDonor, job.feet.wear)
+  if (skin || worn) {
     const body = copyPixels(analysis.body)
-    if (skin) toneSkin(body, hexToRgb(skin), analysis.bodySkin, analysis.bodySkinMask)
-    // After the tone, so bare feet match the leg; by the face's skin, the
-    // body's own being unreliable on masked and covered characters.
-    if (shoeless) paintFeet(body, analysis.feet, job.feet, skin ? hexToRgb(skin) : analysis.skin)
+    const tone = skin ? hexToRgb(skin) : null
+    if (feet && worn) {
+      dressLegs(body, feet, worn, job.feet, tone)
+      // After the legs, so bare feet match them as dressed.
+      changed.feet = paintFeet(body, feet, job.feetDonor!, worn, job.feet, tone)
+    } else if (tone) {
+      toneSkin(body, tone, analysis.bodySkin, analysis.bodySkinMask)
+    }
     changed.body = body
   }
   return changed
+}
+
+const feetBodies = new WeakMap<Analysis, FeetBody>()
+
+/**
+ * A body's own texture as its borrowed feet need it, kept with its
+ * analysis: its bind pose crosses with every job out of shoes, but the
+ * first is kept, so what is worked out from it is kept too.
+ */
+function feetBodyOf(analysis: Analysis, job: Pick<LookJob, 'feetBind'>): FeetBody | null {
+  let found = feetBodies.get(analysis)
+  if (!found && job.feetBind) {
+    found = {
+      bind: job.feetBind,
+      texture: analysis.body,
+      face: analysis.skin,
+      bodySkin: analysis.bodySkin,
+      bodySkinMask: analysis.bodySkinMask,
+    }
+    feetBodies.set(analysis, found)
+  }
+  return found ?? null
+}
+
+/** The feet a look puts on a body (see feet-job.ts), as the main thread wears them; null to keep its shoes. */
+function fittedFeet(analysis: Analysis, job: LookJob): FittedFeet | null {
+  const feet = feetBodyOf(analysis, job)
+  const worn: WornFeet | null =
+    feet && job.feetDonor && wornFeet(feet, job.feetDonor, job.feet.wear)
+  return worn ? { key: `${job.body.key}|${worn.kind}`, hidden: worn.hidden, mesh: worn.mesh } : null
 }
 
 /** A canvas to read and write pixels on, wherever this runs. */
@@ -465,7 +513,6 @@ function analysisOf(body: LookBody): Analysis {
         skin: unpackTriangles(body.geometry.skin),
         eyes: body.geometry.eyes.map(unpackTriangles),
       },
-      body.feet,
     )
   }
   analyses.set(body.key, analysis)
@@ -511,8 +558,9 @@ export async function runLookJob(job: LookJob): Promise<LookResult> {
         return null
       })
     : null
-  const changed = dressBody(analysisOf(job.body), { ...job, key: job.body.key }, photo)
+  const analysis = analysisOf(job.body)
+  const changed = dressBody(analysis, { ...job, key: job.body.key }, photo)
   const parts: Partial<Record<Part, ImageBitmap>> = {}
   for (const part of Object.keys(changed) as Part[]) parts[part] = await bitmapOf(changed[part]!)
-  return { parts, faceFailed }
+  return { parts, faceFailed, feet: fittedFeet(analysis, job) }
 }

@@ -518,6 +518,8 @@ describe('a body dressed in a look, placed by its landmarks', () => {
         paint: NO_PAINT,
         bald: false,
         feet: SHOD,
+        feetBind: null,
+        feetDonor: null,
         target: FACE,
         ...change,
       },
@@ -572,6 +574,8 @@ describe('a body dressed in a look, placed by its landmarks', () => {
       face: null,
       paint: NO_PAINT,
       feet: SHOD,
+      feetBind: null,
+      feetDonor: null,
       target: FACE,
     }
     dressBody(analysis, { ...job, bald: true }, null)

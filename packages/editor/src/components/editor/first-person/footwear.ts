@@ -1,7 +1,7 @@
 /**
- * What the character has on its feet: its own shoes, socks (the shoes
- * taken in to the foot's shape and painted as socks, in `color` or a plain
- * default), or bare feet (taken in and painted as skin).
+ * What the character has on its feet: its own shoes, or a barefoot
+ * character's feet borrowed in their place (see bare-feet.ts) — bare, in
+ * its skin, or in socks (in `color`, or a plain default).
  */
 
 export const FOOTWEAR = ['shoes', 'socks', 'bare'] as const

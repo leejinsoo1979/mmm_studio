@@ -22,7 +22,6 @@ import {
   type ShapeField,
 } from './face-shape'
 import { loadFaceTargets } from './face-targets'
-import { feetShaper } from './feet'
 import { type HeadFrame, headFrame, originalGeometry } from './head-geometry'
 
 /**
@@ -425,27 +424,26 @@ type FaceShaping = {
 
 /**
  * Keeps a body shaped by a look: the face (the photo's proportions, the
- * sliders and the sculpted pins), the ears, the build, feet out of their
- * shoes, and the head under a borrowed hairstyle (`hair`, from
- * useAvatarHair). All go in one reshaping, each mesh built from its
- * original once, and a part of the look that stays keeps its shaper (see
- * applyShape). The face waits for the character's landmarks (a download,
- * once); the rest needs none.
+ * sliders and the sculpted pins), the ears, the build, and the head under a
+ * borrowed hairstyle (`hair`, from useAvatarHair). All go in one reshaping,
+ * each mesh built from its original once, and a part of the look that stays
+ * keeps its shaper (see applyShape). The face waits for the character's
+ * landmarks (a download, once); the rest needs none. `feet` are the borrowed
+ * feet worn (see avatar-feet.ts): new ones are new meshes, so the body is
+ * reshaped again, them with it.
  */
 export function useAvatarShape(
   model: Object3D,
-  look: Pick<AvatarLook, 'face' | 'shape' | 'body' | 'feet'> | null | undefined,
+  look: Pick<AvatarLook, 'face' | 'shape' | 'body'> | null | undefined,
   avatarId: string,
   hair: Shaper | null,
+  feet: object | null,
 ) {
   const shape = look?.shape
   const body = look?.body
   const points = look?.face?.points
-  // The shape follows what is worn on the feet, not the socks' colour.
-  const wear = look?.feet?.wear
   const head = useMemo(() => headOf(model), [model])
   const build = useMemo(() => (body ? bodyShaper(body) : null), [body])
-  const footwear = useMemo(() => (wear ? feetShaper({ wear, color: null }) : null), [wear])
   const { earSize, earAngle, earHeight, earPoint } = shape?.sliders ?? {}
   const ears = useMemo(
     () =>
@@ -460,7 +458,7 @@ export function useAvatarShape(
   const faceShaping = useRef<FaceShaping | null>(null)
   useEffect(() => {
     if (!head) return
-    const ready = [hair, build, footwear, ears].filter((shaper) => shaper !== null)
+    const ready = [hair, build, ears].filter((shaper) => shaper !== null)
     let undo: (() => void) | null = null
     let cancelled = false
     const apply = (face: Shaper | null) => {
@@ -495,5 +493,6 @@ export function useAvatarShape(
       cancelled = true
       undo?.()
     }
-  }, [model, head, shape, points, avatarId, hair, build, footwear, ears])
+    // `feet` isn't read: new ones mean new meshes to shape.
+  }, [model, head, shape, points, avatarId, hair, build, ears, feet])
 }
