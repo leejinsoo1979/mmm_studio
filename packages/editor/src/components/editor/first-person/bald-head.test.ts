@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import {
   bentSkull,
   cutRings,
+  hollowShade,
   keptTriangles,
+  necklineFan,
   type OwnHead,
   ownHair,
   PAINT_RINGS,
@@ -261,16 +263,19 @@ describe('the bald surface', () => {
     expect(hung.neckFrom).toBe(points.length / 3)
     expect(added).toBeGreaterThan(5)
     expect(hung.triangles.length).toBeGreaterThan(kept.length)
+    let lowest = 0
     for (let i = hung.neckFrom; i < hung.points.length / 3; i++) {
-      // Behind the neck's middle, 8 cm below the rim, facing out level.
+      // Behind the neck's middle, in rings below the rim down to 8 cm under it, facing out level.
       expect(hung.points[i * 3 + 2]!).toBeLessThan(0.001)
-      expect(hung.points[i * 3 + 1]!).toBeLessThan(-0.12)
+      expect(hung.points[i * 3 + 1]!).toBeLessThan(-0.065)
+      lowest = Math.min(lowest, hung.points[i * 3 + 1]!)
       expect(hung.normals[i * 3 + 1]).toBe(0)
       const out =
         hung.points[i * 3]! * hung.normals[i * 3]! +
         hung.points[i * 3 + 2]! * hung.normals[i * 3 + 2]!
       expect(out).toBeGreaterThan(0)
     }
+    expect(lowest).toBeLessThan(-0.12)
   })
 
   test('closes the head where its skin was taken, not under the skin it keeps nor over its face', () => {
@@ -363,5 +368,64 @@ describe('painting round the cut', () => {
     // Both halves of the square: as much of the left as of the right in each.
     expect(share![0]! + share![1]!).toBeCloseTo(1, 1)
     expect(share![1]!).toBeGreaterThan(share![0]!)
+  })
+})
+
+describe('the neckline closed', () => {
+  // A body's neck hole: a rim round the neck (its top at the origin), and a
+  // ring well below it; `dip` lowers the rim's back middle into a notch.
+  const body = (dip: number) => {
+    const n = 16
+    const points: number[] = []
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2
+      const x = Math.sin(a)
+      const z = Math.cos(a)
+      const back = Math.max(0, -z) ** 4
+      points.push(0.06 * x, -0.05 - dip * back, 0.06 * z)
+    }
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2
+      points.push(0.2 * Math.sin(a), -0.3, 0.2 * Math.cos(a))
+    }
+    const index: number[] = []
+    for (let k = 0; k < n; k++) {
+      const j = (k + 1) % n
+      index.push(k, n + k, j, j, n + k, n + j)
+    }
+    return necklineFan(Float32Array.from(points), index, [0, 0, 0])
+  }
+
+  test('closes an even neckline from inside the neck', () => {
+    const fan = body(0)
+    expect(fan.triangles.length).toBeGreaterThan(0)
+    expect(fan.points[2]).toBeCloseTo(0, 6)
+  })
+
+  test('closes a notch long hair hid level with the back round it', () => {
+    const fan = body(0.08)
+    expect(fan.points[2]!).toBeLessThan(-0.03)
+  })
+})
+
+describe('the bald surface shaded by its shape', () => {
+  test('darkens a fold, not an open slope', () => {
+    // A flat sheet (y = 0, facing up) with a wall rising beside x = 0.
+    const around: number[] = []
+    for (let x = -0.02; x <= 0.02001; x += 0.002) {
+      for (let z = -0.02; z <= 0.02001; z += 0.002) around.push(x, 0, z)
+    }
+    for (let y = 0.002; y <= 0.02001; y += 0.002) {
+      for (let z = -0.02; z <= 0.02001; z += 0.002) around.push(0.004, y, z)
+    }
+    const points = Float32Array.from(around)
+    const grid = new PointGrid(points, 0.02)
+    const shade = hollowShade(
+      Float32Array.from([-0.015, 0, 0, 0.002, 0, 0]),
+      Float32Array.from([0, 1, 0, 0, 1, 0]),
+      { points, grid },
+    )
+    expect(shade[0]!).toBeGreaterThan(0.99)
+    expect(shade[1]!).toBeLessThan(0.95)
   })
 })

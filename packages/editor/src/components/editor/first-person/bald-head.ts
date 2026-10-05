@@ -539,6 +539,9 @@ export function bentSkull(skull: Skull, triangles: ArrayLike<number>, anchors: T
 const NECK_PIECE = 0.08
 const NECK_PIECE_IN = 0.004
 
+/** The piece hung below the neck is this many rings tall, for the kept skin to bend it to (see `bentSkull`). */
+const NECK_RINGS = 4
+
 /** An edge of the skull's open bottom runs round the neck where it climbs less than this for each unit round. */
 const ROUND_NECK = 1.5
 
@@ -585,20 +588,21 @@ export function withNeckPiece(
     const length = Math.hypot(x, z) || 1
     return [x / length, z / length] as const
   }
-  const hung = new Map<number, number>()
-  const hang = (i: number) => {
-    let low = hung.get(i)
+  const hung = new Map<string, number>()
+  const hang = (i: number, ring: number) => {
+    if (ring === 0) return i
+    let low = hung.get(`${i},${ring}`)
     if (low === undefined) {
       low = points.length / 3
       const [ox, oz] = outward(i)
       points.push(
         surface.points[i * 3]! - ox * NECK_PIECE_IN,
-        surface.points[i * 3 + 1]! - NECK_PIECE,
+        surface.points[i * 3 + 1]! - (NECK_PIECE * ring) / NECK_RINGS,
         surface.points[i * 3 + 2]! - oz * NECK_PIECE_IN,
       )
       normals.push(ox, 0, oz)
       zone.push(surface.zone[i]!)
-      hung.set(i, low)
+      hung.set(`${i},${ring}`, low)
     }
     return low
   }
@@ -621,7 +625,11 @@ export function withNeckPiece(
       normals[i * 3 + 2] = oz
     }
     // Wound as the edge's own triangle is, so the piece faces out with it.
-    index.push(to, from, hang(from), to, hang(from), hang(to))
+    for (let ring = 1; ring <= NECK_RINGS; ring++) {
+      const [a, b] = [hang(from, ring - 1), hang(to, ring - 1)]
+      const [c, d] = [hang(from, ring), hang(to, ring)]
+      index.push(b, a, c, b, c, d)
+    }
   }
   return {
     points: Float32Array.from(points),
@@ -871,11 +879,60 @@ export function scalpTriangles(bald: BaldSkull, kept: KeptHead, marks: HeadMarks
   )
 }
 
+/**
+ * How far round a point (bind units) its hollow is read, from at most this
+ * many points, and how much darker the deepest hollow is: the bald surface
+ * shows one colour (its swatch), so the folds of an ear and the crease
+ * behind it are shaded by their shape alone.
+ */
+const HOLLOW_REACH = 0.012
+const HOLLOW_POINTS = 24
+const HOLLOW_DARK = 0.55
+
+/**
+ * Per point of `points` (normals `normals`), how much light reaches it as
+ * the shape round it hollows (1 open or rounded, less in a fold): the mean
+ * rise of the `around` points near it out of its tangent plane.
+ */
+export function hollowShade(
+  points: Triples,
+  normals: Triples,
+  around: { points: Triples; grid: PointGrid },
+): Float32Array {
+  const count = points.length / 3
+  const shade = new Float32Array(count)
+  const found: number[] = []
+  const distances: number[] = []
+  for (let i = 0; i < count; i++) {
+    const [x, y, z] = [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!]
+    const n = around.grid.nearest(x, y, z, HOLLOW_POINTS, found, distances, HOLLOW_REACH)
+    let rise = 0
+    let used = 0
+    for (let k = 0; k < n; k++) {
+      const distance = Math.sqrt(distances[k]!)
+      if (distance <= 1e-6 || distance > HOLLOW_REACH) continue
+      const j = found[k]!
+      const along =
+        (around.points[j * 3]! - x) * normals[i * 3]! +
+        (around.points[j * 3 + 1]! - y) * normals[i * 3 + 1]! +
+        (around.points[j * 3 + 2]! - z) * normals[i * 3 + 2]!
+      rise += Math.max(0, along / distance)
+      used++
+    }
+    shade[i] = 1 - HOLLOW_DARK * (used > 0 ? rise / used : 0)
+  }
+  return shade
+}
+
 /** How far (bind units) from the top of the neck a body's open neckline is closed. */
 const NECKLINE_REACH = 0.2
 
 /** Points of a body this near (bind units) are at one spot (a texture seam splits them). */
 const BODY_SPOT = 1e-4
+
+/** A neckline's open back this uneven (bind units, top to bottom) is a neckline still; this, a notch long hair hid. */
+const NECKLINE_EVEN = 0.02
+const NOTCH = 0.05
 
 /**
  * The back of a body's neckline closed: under long hair a body may be cut
@@ -922,17 +979,27 @@ export function necklineFan(points: Triples, index: ArrayLike<number>, neck: Arr
   const used = new Map<number, number>()
   const fan: number[] = []
   let low = 0
+  let back = 0
+  let top = Number.NEGATIVE_INFINITY
+  let bottom = Number.POSITIVE_INFINITY
   for (const { from, to } of open) {
     for (const spot of [from, to]) {
       if (used.has(spot)) continue
       used.set(spot, used.size + 1)
       low += at(spot, 1)
+      back += at(spot, 2)
+      top = Math.max(top, at(spot, 1))
+      bottom = Math.min(bottom, at(spot, 1))
     }
   }
   if (open.length === 0) {
     return { points: new Float32Array(), body: new Int32Array(), triangles: [] as number[] }
   }
-  const middle = [neck[0]!, low / used.size, neck[2]!]
+  // A notch is closed level with the back round it, so what hangs down the
+  // neck goes in under it; a neckline only a little uneven, from inside the
+  // neck, where it is hidden.
+  const notch = smoothstep(NECKLINE_EVEN, NOTCH, top - bottom)
+  const middle = [neck[0]!, low / used.size, neck[2]! + (back / used.size - neck[2]!) * notch]
   const fanPoints = new Float32Array((used.size + 1) * 3)
   fanPoints.set(middle)
   const body = new Int32Array(used.size + 1).fill(-1)

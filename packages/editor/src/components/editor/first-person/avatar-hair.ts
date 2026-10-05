@@ -23,6 +23,7 @@ import { headOf, type Shaper } from './avatar-shape'
 import {
   bentSkull,
   cutRings,
+  hollowShade,
   keptTriangles,
   neckFitted,
   necklineFan,
@@ -47,12 +48,14 @@ import {
   pushOut,
   SKULL_CELL,
   type Surface,
+  smoothstep,
   standingOver,
   type Triples,
   tuckUnder,
 } from './head-skull'
 import {
   byLightness,
+  colorDistance,
   hairMask,
   luminance,
   maskedLuminance,
@@ -407,20 +410,44 @@ function grown(
 const GROW_INTO = 0.5
 
 /**
+ * In the donor's hair (see `CapTriangle`), a texel this unlike its skin
+ * (see `colorDistance`) starts to be hair, and this unlike is wholly: a
+ * hairline's sparse strands over the skin, lighter than the hair, among it.
+ */
+const SKIN_NEAR = 0.1
+const SKIN_FAR = 0.2
+
+/**
+ * A triangle of the cap on its texture (corners in 0–1 UVs): `solid` on the
+ * hair's sculpted shell, `hair` among what a bald head of the donor loses.
+ */
+export type CapTriangle = { u: number[]; v: number[]; solid: boolean; hair?: boolean }
+
+/**
  * The cap's texture: the donor's head texture with everything but its hair
  * cut away (alpha 0) — the skin round its hairline, which the cap reaches
  * over. A `solid` triangle (the hair's sculpted shell) is hair whatever its
  * colour (a highlight can pass for skin); elsewhere hair is what is nearer
  * the hair's colour than the skin's — the hair painted onto the scalp, the
- * temples, the sideburns.
+ * temples, the sideburns — and, in the donor's hair, what isn't plainly
+ * skin. Its edge is softened a texel each way, never across a UV island's
+ * rim (the cap is drawn blended: see `hairAssetOf`).
  */
 export function capPixels(
   head: Pixels,
   hair: Rgb,
   skin: Rgb,
-  triangles: readonly { u: number[]; v: number[]; solid: boolean }[],
+  triangles: readonly CapTriangle[],
 ): Pixels {
   const mask = hairMask(head, hair, skin)
+  const skinLum = luminance(...skin)
+  const { data } = head
+  const notSkin = (texel: number) =>
+    smoothstep(
+      SKIN_NEAR,
+      SKIN_FAR,
+      colorDistance(data[texel * 4]!, data[texel * 4 + 1]!, data[texel * 4 + 2]!, skin, skinLum),
+    )
   const solid = new Float32Array(mask.length)
   const painted = new Float32Array(mask.length)
   const covered = new Uint8Array(mask.length)
@@ -428,7 +455,7 @@ export function capPixels(
     fillTexels(head.width, head.height, tri.u, tri.v, (texel) => {
       covered[texel] = 1
       if (tri.solid) solid[texel] = 1
-      else painted[texel] = mask[texel]!
+      else painted[texel] = tri.hair ? Math.max(mask[texel]!, notSkin(texel)) : mask[texel]!
     })
   }
   // Not into skin a triangle round the shell shows: that would draw a line of it.
@@ -438,13 +465,42 @@ export function capPixels(
     head.width,
     head.height,
   )
+  const soft = softened(painted, covered, head.width, head.height)
   const out: Pixels = {
     data: new Uint8ClampedArray(head.data),
     width: head.width,
     height: head.height,
   }
   for (let i = 0; i < mask.length; i++) {
-    out.data[i * 4 + 3] = Math.round(255 * Math.max(painted[i]!, shell[i]!))
+    out.data[i * 4 + 3] = Math.round(255 * Math.max(soft[i]!, shell[i]!))
+  }
+  return out
+}
+
+/** A mask averaged over each texel and those round it that `covered` holds: only texels it holds change. */
+function softened(
+  mask: Float32Array,
+  covered: Uint8Array,
+  width: number,
+  height: number,
+): Float32Array {
+  const out = new Float32Array(mask)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (!covered[y * width + x]) continue
+      let sum = 0
+      let n = 0
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height || !covered[ny * width + nx]) continue
+          sum += mask[ny * width + nx]!
+          n++
+        }
+      }
+      out[y * width + x] = sum / n
+    }
   }
   return out
 }
@@ -455,10 +511,7 @@ export function capPixels(
  * Short hair painted onto the scalp is nearer it than the cards' colour,
  * which strands lit through and edge on make lighter. Null for none.
  */
-function paintedHair(
-  head: Pixels,
-  triangles: readonly { u: number[]; v: number[]; solid: boolean }[],
-): Rgb | null {
+function paintedHair(head: Pixels, triangles: readonly CapTriangle[]): Rgb | null {
   const samples: Rgb[] = []
   for (const tri of triangles) {
     if (!tri.solid) continue
@@ -764,9 +817,94 @@ const PUSH_REACH = 0.03
 /** The cards' cut-out, as the characters' own (see avatar-rig.ts). */
 const CARD_ALPHA_TEST = 0.4
 
-/** The cap's cut-out: its hair against the skin cut away round it. */
-const CAP_ALPHA_TEST = 0.5
-const CAP_BLEED_BELOW = Math.round(CAP_ALPHA_TEST * 255)
+/**
+ * The cap is blended over the bald head, its faintest texels (below
+ * CAP_ALPHA_TEST) not drawn. Every texel not wholly hair takes the colour
+ * of the hair round it (see `bleedHair`): a hairline's strands over the
+ * donor's skin, or short hair the skin shows through, are hair-coloured
+ * and as opaque as there is hair, the wearer's own skin showing through
+ * them instead of the donor's.
+ */
+const CAP_ALPHA_TEST = 0.05
+const CAP_BLEED_BELOW = 255
+
+/** A piece of a head's hair this small beside its largest, wholly below the neck, is worn there: a bead, a pendant. */
+const JEWEL = 0.05
+
+/**
+ * Which of a head's own hair triangles (`own`) are jewellery its mesh
+ * models with it (see JEWEL): pieces joined at corners, or at corners at
+ * one spot; `neck` the top of the neck's height (bind pose).
+ */
+function jewellery(
+  own: Uint8Array,
+  index: ArrayLike<number>,
+  points: Triples,
+  spots: Int32Array,
+  spotCount: number,
+  neck: number,
+): Uint8Array {
+  const parent = Int32Array.from({ length: spotCount }, (_, i) => i)
+  const find = (a: number): number => {
+    while (parent[a] !== a) {
+      parent[a] = parent[parent[a]!]!
+      a = parent[a]!
+    }
+    return a
+  }
+  const count = index.length / 3
+  for (let t = 0; t < count; t++) {
+    if (!own[t]) continue
+    const a = find(spots[index[t * 3]!]!)
+    parent[find(spots[index[t * 3 + 1]!]!)] = a
+    parent[find(spots[index[t * 3 + 2]!]!)] = a
+  }
+  const pieces = new Map<number, { size: number; top: number }>()
+  for (let t = 0; t < count; t++) {
+    if (!own[t]) continue
+    const root = find(spots[index[t * 3]!]!)
+    const piece = pieces.get(root) ?? { size: 0, top: Number.NEGATIVE_INFINITY }
+    piece.size++
+    for (let k = 0; k < 3; k++) piece.top = Math.max(piece.top, points[index[t * 3 + k]! * 3 + 1]!)
+    pieces.set(root, piece)
+  }
+  const largest = Math.max(0, ...[...pieces.values()].map((piece) => piece.size))
+  return Uint8Array.from({ length: count }, (_, t) => {
+    const piece = own[t] ? pieces.get(find(spots[index[t * 3]!]!)) : undefined
+    return piece && piece.size < JEWEL * largest && piece.top < neck ? 1 : 0
+  })
+}
+
+/**
+ * Of a cap's triangles, those in pieces (joined at corners, or at corners
+ * at one spot) that hold some of the hair (`onHair`, by spot): what else
+ * the donor's head mesh models on the scalp's zone — a necklace's beads on
+ * its chest — stays the donor's.
+ */
+function joinedToHair(
+  triangles: readonly number[],
+  index: ArrayLike<number>,
+  spots: Int32Array,
+  spotCount: number,
+  onHair: Uint8Array,
+): number[] {
+  const parent = Int32Array.from({ length: spotCount }, (_, i) => i)
+  const find = (a: number): number => {
+    while (parent[a] !== a) {
+      parent[a] = parent[parent[a]!]!
+      a = parent[a]!
+    }
+    return a
+  }
+  for (const t of triangles) {
+    const a = find(spots[index[t * 3]!]!)
+    parent[find(spots[index[t * 3 + 1]!]!)] = a
+    parent[find(spots[index[t * 3 + 2]!]!)] = a
+  }
+  const hairy = new Uint8Array(spotCount)
+  for (let spot = 0; spot < spotCount; spot++) if (onHair[spot]) hairy[find(spot)] = 1
+  return triangles.filter((t) => hairy[find(spots[index[t * 3]!]!)])
+}
 
 /**
  * A hairstyle from a donor's loaded scene: the cap (its head's triangles
@@ -801,10 +939,19 @@ export function hairAssetOf(
   const { spots, count: spotCount } = spotsOf(points)
   const onHair = new Uint8Array(spotCount)
   const capTriangles: number[] = []
-  for (let t = 0; shell && t < index.length / 3; t++) {
+  const neck =
+    boneBindPositions(head)[head.skeleton.bones.findIndex((b) => isHeadBone(b.name)) * 3 + 1]
+  const worn =
+    own && neck !== undefined ? jewellery(own, index, points, spots, spotCount, neck) : null
+  for (let t = 0; (own || shell) && t < index.length / 3; t++) {
     const corners = [0, 1, 2].map((k) => index[t * 3 + k]!)
-    const hairy = own ? own[t] === 1 : corners.some((i) => shell[i])
-    if (hairy && corners.every(clearOfFace)) {
+    // What a bald head of the donor loses is all its hair, to its hairline
+    // (the face is never among it), but for what it wears below its neck.
+    if (
+      own
+        ? own[t] === 1 && !worn?.[t]
+        : corners.some((i) => shell![i]) && corners.every(clearOfFace)
+    ) {
       capTriangles.push(t)
       for (const i of corners) onHair[spots[i]!] = 1
     }
@@ -815,15 +962,17 @@ export function hairAssetOf(
     const round = corners.some((i) => onHair[spots[i]!]) && corners.every(clearOfFace)
     if (round || corners.every((i) => zone[i]! >= CAP_SCALP)) capTriangles.push(t)
   }
+  const capped = joinedToHair(capTriangles, index, spots, spotCount, onHair)
   const opacity = ownMeshes(scene, 'opacity')[0]
   const parts: HairPart[] = []
   const opacityMaterial = opacity && ownMaterial(opacity)
   const hair = pixels?.opacity ? meanColor(pixels.opacity) : null
-  if (capTriangles.length > 0) {
+  if (capped.length > 0) {
     const material = ownMaterial(head).clone()
     material.name = `${id}:hair-cap`
     Object.assign(material, {
-      transparent: false,
+      transparent: true,
+      depthWrite: true,
       alphaTest: CAP_ALPHA_TEST,
       side: FrontSide,
       // Where the cap lies on the wearer's own scalp, it is drawn over it.
@@ -833,7 +982,7 @@ export function hairAssetOf(
     })
     const cap: HairPart = {
       name: 'cap',
-      geometry: subset(head, geometry, capTriangles, true),
+      geometry: subset(head, geometry, capped, true),
       material,
       pixels: null,
       dyeMask: null,
@@ -851,12 +1000,13 @@ export function hairAssetOf(
     const cheeks = [...places].filter(([name]) => /Cheek$/.test(name)).map(([, place]) => place)
     const skin = pixels && skinTone(pixels.head, uvs, points, cheeks)
     if (pixels && hair && skin) {
-      const triangles = capTriangles.map((t) => {
+      const triangles = capped.map((t): CapTriangle => {
         const at = [0, 1, 2].map((k) => index[t * 3 + k]!)
         return {
           u: at.map((i) => uvs[i * 2]!),
           v: at.map((i) => uvs[i * 2 + 1]!),
-          solid: at.every((i) => shell![i]),
+          solid: !!shell && at.every((i) => shell[i]),
+          hair: own?.[t] === 1,
         }
       })
       cap.pixels = capPixels(
@@ -983,8 +1133,10 @@ function makeBald(
   const neck = boneBindPositions(head)[headBone * 3 + 1]!
   const marks = { eyes: [eyes.slice(0, 3), eyes.slice(3, 6)], neck }
   const skull = neckFitted(fitSkull(basis.skull, fit), anchors, neck)
-  const bent = bentSkull(skull, basis.skull.triangles, anchors)
-  const bald = withNeckPiece({ ...bent, zone: skull.zone }, basis.skull.triangles, neck)
+  // Hung before it is bent, so the neck skin kept to either side shapes the piece too.
+  const hung = withNeckPiece(skull, basis.skull.triangles, neck)
+  const bent = bentSkull({ ...skull, ...hung }, hung.triangles, anchors)
+  const bald = { ...hung, points: bent.points, normals: bent.normals }
   const chosen = scalpTriangles(bald, { points, normals, index: kept }, marks)
 
   // The bald surface as a mesh beside the head: its points used, skinned
@@ -1052,6 +1204,10 @@ function makeBald(
   }
   const scalpNormals = vertexNormals(scalpPoints, corners)
   const vertices = olds.length
+  const aroundPoints = new Float32Array(anchors.length + scalpPoints.length)
+  aroundPoints.set(anchors)
+  aroundPoints.set(scalpPoints, anchors.length)
+  const surfaceAround = { points: aroundPoints, grid: new PointGrid(aroundPoints, SKULL_CELL) }
 
   const found: number[] = []
   const distances: number[] = []
@@ -1087,6 +1243,7 @@ function makeBald(
   )
   let scalp: BufferGeometry | null = null
   if (vertices > 0) {
+    const shade = hollowShade(scalpPoints, scalpNormals, surfaceAround)
     scalp = new BufferGeometry()
     const unbind = head.bindMatrix.clone().invert()
     const unbindNormal = new Matrix3().getNormalMatrix(unbind)
@@ -1107,6 +1264,8 @@ function makeBald(
         for (let c = 0; c < size; c++) {
           const at = i * size + c
           if (name === 'uv') values[at] = paint.swatch[c]!
+          else if (name === 'color' && c < 3)
+            values[at] = (from ? attribute.getComponent(from.at, c) : 1) * shade[i]!
           else if (skinning && !from?.near)
             values[at] = c > 0 ? 0 : name === 'skinIndex' ? headBone : 1
           else values[at] = from ? attribute.getComponent(from.at, c) : 0
@@ -1227,6 +1386,8 @@ function goBald(model: Object3D, head: SkinnedMesh, bald: BaldHead, undo: (() =>
   }
   const scalp = bald.scalp && besides(head, bald.scalp, head.material as Material, 'hair:scalp')
   if (scalp) {
+    // Coarser than the head, it would shade itself in facets.
+    scalp.castShadow = false
     // Before the head, which `headOf` finds as the last.
     const siblings = scalp.parent!.children
     siblings.splice(siblings.indexOf(scalp), 1)

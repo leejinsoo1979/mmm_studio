@@ -209,6 +209,44 @@ describe('the cap’s texture', () => {
   })
 })
 
+describe('the cap’s texture in the donor’s hair', () => {
+  const HAIR_COLOUR = [47, 28, 18]
+  const SKIN_COLOUR = [210, 150, 116]
+  // Sparse strands over skin at a hairline: nearer the skin's colour than the hair's.
+  const HAIRLINE = [110, 79, 60]
+  const alpha = (pixels: Pixels, x: number, y: number) =>
+    pixels.data[(y * pixels.width + x) * 4 + 3]!
+  const head = image(16, 16, (x) => (x < 6 ? HAIR_COLOUR : x < 10 ? HAIRLINE : SKIN_COLOUR))
+  const whole = (hair: boolean) => [
+    { u: [0, 1, 1], v: [0, 0, 1], solid: false, hair },
+    { u: [0, 1, 0], v: [0, 1, 1], solid: false, hair },
+  ]
+  const hairRgb = HAIR_COLOUR as [number, number, number]
+  const skinRgb = SKIN_COLOUR as [number, number, number]
+
+  test('keeps what isn’t plainly skin: a hairline’s strands', () => {
+    const cap = capPixels(head, hairRgb, skinRgb, whole(true))
+    expect(alpha(cap, 2, 8)).toBe(255)
+    expect(alpha(cap, 7, 8)).toBe(255)
+    expect(alpha(cap, 14, 8)).toBe(0)
+  })
+
+  test('round the hair, cuts them away with the skin', () => {
+    const cap = capPixels(head, hairRgb, skinRgb, whole(false))
+    expect(alpha(cap, 2, 8)).toBe(255)
+    expect(alpha(cap, 7, 8)).toBe(0)
+  })
+
+  test('softens the cut-out’s edge a texel each way', () => {
+    const cap = capPixels(head, hairRgb, skinRgb, whole(false))
+    const edge = alpha(cap, 5, 8)
+    expect(edge).toBeGreaterThan(0)
+    expect(edge).toBeLessThan(255)
+    expect(alpha(cap, 6, 8)).toBeGreaterThan(0)
+    expect(alpha(cap, 6, 8)).toBeLessThan(edge)
+  })
+})
+
 describe('a hairstyle as saved', () => {
   test('is a known avatar’s id or BALD; anything else keeps the character’s own', () => {
     expect(readHairStyle(BALD)).toBe(BALD)
