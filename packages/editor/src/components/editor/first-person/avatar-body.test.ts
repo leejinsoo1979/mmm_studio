@@ -210,31 +210,45 @@ function crouch(body: ReturnType<typeof standing>, angle: number) {
 }
 
 describe('a build’s lengths', () => {
-  test('lengthen the legs along the thigh and the shin, raising the body off its feet', () => {
+  test('lengthen the legs along the thigh and the shin, the body as tall as it was', () => {
     const body = standing()
-    const [{ calf, foot }] = body.legs as [(typeof body.legs)[number]]
+    const [{ thigh, calf, foot }] = body.legs as [(typeof body.legs)[number]]
     const [calfAt, footAt] = [calf.position.clone(), foot.position.clone()]
-    const [feet, head] = [heightOf(foot), heightOf(body.head)]
+    const [hips, feet, head] = [heightOf(thigh), heightOf(foot), heightOf(body.head)]
     const build = { height: 0, sliders: { legLength: 1 } }
     const longer = lengthScale(build, 'legLength')
     applyBodyBones(body.model, build)
     expect(longer).toBeGreaterThan(1.05)
     expect(calf.position.toArray()).toEqual(calfAt.multiplyScalar(longer).toArray())
     expect(foot.position.toArray()).toEqual(footAt.multiplyScalar(longer).toArray())
-    expect(heightOf(foot)).toBeCloseTo(feet, 9)
-    expect(heightOf(body.head) - head).toBeCloseTo((longer - 1) * LEGS * 0.01, 9)
+    // Raised on its longer legs, then drawn smaller by as much: the feet on
+    // the floor, the head about where it stood, the legs more of the height.
+    const size = body.model.scale.y
+    expect(size).toBeLessThan(1)
+    expect(heightOf(foot)).toBeCloseTo(feet * size, 9)
+    expect(heightOf(body.head)).toBeCloseTo((head + (longer - 1) * LEGS * 0.01) * size, 9)
+    expect(Math.abs(heightOf(body.head) - head)).toBeLessThan(0.01 * head)
+    expect((heightOf(thigh) - heightOf(foot)) / heightOf(body.head)).toBeGreaterThan(
+      (hips - feet) / head,
+    )
   })
 
-  test('shorten them as far the other way, the feet still on the floor', () => {
+  test('shorten them as far the other way, the feet still on the floor and the head up', () => {
     const body = standing()
-    const [{ foot }] = body.legs as [(typeof body.legs)[number]]
-    const [feet, head] = [heightOf(foot), heightOf(body.head)]
+    const [{ thigh, foot }] = body.legs as [(typeof body.legs)[number]]
+    const [hips, feet, head] = [heightOf(thigh), heightOf(foot), heightOf(body.head)]
     const build = { height: 0, sliders: { legLength: -1 } }
     applyBodyBones(body.model, build)
-    expect(heightOf(foot)).toBeCloseTo(feet, 9)
-    expect(head - heightOf(body.head)).toBeCloseTo(
-      (1 - lengthScale(build, 'legLength')) * LEGS * 0.01,
+    const size = body.model.scale.y
+    expect(size).toBeGreaterThan(1)
+    expect(heightOf(foot)).toBeCloseTo(feet * size, 9)
+    expect(heightOf(body.head)).toBeCloseTo(
+      (head - (1 - lengthScale(build, 'legLength')) * LEGS * 0.01) * size,
       9,
+    )
+    expect(Math.abs(heightOf(body.head) - head)).toBeLessThan(0.01 * head)
+    expect((heightOf(thigh) - heightOf(foot)) / heightOf(body.head)).toBeLessThan(
+      (hips - feet) / head,
     )
   })
 
@@ -257,7 +271,7 @@ describe('a build’s lengths', () => {
     }
   })
 
-  test('lengthen the torso along the spine, raising the neck and the head but not the legs', () => {
+  test('lengthen the torso along the spine, the legs a smaller share of the same height', () => {
     const body = standing()
     const [{ thigh, foot }] = body.legs as [(typeof body.legs)[number]]
     const before = [body.spine1, body.spine2, body.neck].map((bone) => bone.position.clone())
@@ -269,9 +283,12 @@ describe('a build’s lengths', () => {
     ;[body.spine1, body.spine2, body.neck].forEach((bone, k) => {
       expect(bone.position.toArray()).toEqual(before[k]!.clone().multiplyScalar(longer).toArray())
     })
-    expect(heightOf(thigh)).toBeCloseTo(hips, 9)
-    expect(heightOf(foot)).toBeCloseTo(feet, 9)
-    expect(heightOf(body.head) - head).toBeCloseTo((longer - 1) * SPINE * 0.01, 9)
+    const size = body.model.scale.y
+    expect(size).toBeLessThan(1)
+    expect(heightOf(thigh)).toBeCloseTo(hips * size, 9)
+    expect(heightOf(foot)).toBeCloseTo(feet * size, 9)
+    expect(heightOf(body.head)).toBeCloseTo((head + (longer - 1) * SPINE * 0.01) * size, 9)
+    expect(Math.abs(heightOf(body.head) - head)).toBeLessThan(0.01 * head)
   })
 
   test('are put back exactly', () => {
@@ -295,22 +312,33 @@ describe('a build’s lengths', () => {
     expect(vectors.map((vector) => vector.toArray())).toEqual(before)
   })
 
-  test('scale the strides by the legs, and the height by the legs and the torso', () => {
+  test('leave the height to the height slider, and scale the strides by the legs as drawn', () => {
     const plain = { height: 0, sliders: {} }
-    const legs = { height: 0, sliders: { legLength: 1 } }
-    const torso = { height: 0, sliders: { torsoLength: 1 } }
     expect(bodyStrideScale(plain)).toBe(1)
     expect(bodyHeightScale(plain)).toBe(1)
-    expect(bodyStrideScale(legs)).toBeCloseTo(lengthScale(legs, 'legLength'), 9)
-    expect(bodyStrideScale(torso)).toBe(1)
-    // The legs are about half the body's height, the spine about a quarter.
-    expect(bodyHeightScale(legs) - 1).toBeCloseTo((bodyStrideScale(legs) - 1) / 2, 1)
-    expect(bodyHeightScale(torso)).toBeGreaterThan(1.02)
-    expect(bodyHeightScale(torso)).toBeLessThan(bodyHeightScale(legs))
-    const tall = { height: 1, sliders: { legLength: -1 } }
-    expect(bodyStrideScale(tall)).toBeCloseTo(
-      bodyStrideScale({ height: 1, sliders: {} }) * lengthScale(tall, 'legLength'),
-      9,
-    )
+    for (const sliders of [
+      { legLength: 1 },
+      { torsoLength: 1 },
+      { legLength: -1, torsoLength: 0.5 },
+    ]) {
+      expect(bodyHeightScale({ height: 0, sliders })).toBe(1)
+      expect(bodyHeightScale({ height: 0.7, sliders })).toBe(
+        bodyHeightScale({ height: 0.7, sliders: {} }),
+      )
+    }
+    // Longer legs stride further, though not by all their length, the rest
+    // of the body drawn smaller; a longer torso, on shorter legs, less far.
+    const legs = { height: 0, sliders: { legLength: 1 } }
+    expect(bodyStrideScale(legs)).toBeGreaterThan(1.03)
+    expect(bodyStrideScale(legs)).toBeLessThan(lengthScale(legs, 'legLength'))
+    expect(bodyStrideScale({ height: 0, sliders: { torsoLength: 1 } })).toBeLessThan(1)
+    for (const build of [legs, { height: 1, sliders: { legLength: -1, torsoLength: 0.4 } }]) {
+      const body = standing()
+      applyBodyBones(body.model, build)
+      expect(bodyStrideScale(build)).toBeCloseTo(
+        body.model.scale.y * lengthScale(build, 'legLength'),
+        9,
+      )
+    }
   })
 })

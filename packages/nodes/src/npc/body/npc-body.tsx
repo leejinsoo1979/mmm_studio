@@ -3,6 +3,7 @@
 import {
   advanceGaitPhase,
   bodyHeightScale,
+  bodyStrideScale,
   type EmoteCue,
   EmoteLayer,
   GAITS,
@@ -99,13 +100,17 @@ function isSpeaking(id: string, pose: NpcPose | undefined, now: number) {
 
 function useNpcLook(node: NpcNode) {
   const look = useMemo(() => readAvatarLook(node.look), [node.look])
-  return { look, heightScale: bodyHeightScale(look.body) }
+  return {
+    look,
+    heightScale: bodyHeightScale(look.body),
+    strideScale: bodyStrideScale(look.body),
+  }
 }
 
 /** Where it was placed, in the first frame of its idle: no animating in build mode. */
 function StaticBody({ node }: { node: NpcNode }) {
-  const { look, heightScale } = useNpcLook(node)
-  const { avatar, model, clips } = useAvatarBody(node.avatar, heightScale)
+  const { look, strideScale } = useNpcLook(node)
+  const { avatar, model, clips } = useAvatarBody(node.avatar, strideScale)
   useAvatarLook(model, look, avatar.id)
   useUnpickable(model)
 
@@ -130,8 +135,8 @@ const eye = new Vector3()
 const lookAt = new Vector3()
 
 function LiveBody({ node }: { node: NpcNode }) {
-  const { look, heightScale } = useNpcLook(node)
-  const { avatar, model, clips, gaitSet } = useAvatarBody(node.avatar, heightScale)
+  const { look, heightScale, strideScale } = useNpcLook(node)
+  const { avatar, model, clips, gaitSet } = useAvatarBody(node.avatar, strideScale)
   useAvatarLook(model, look, avatar.id)
   useUnpickable(model)
   const [emoted, setEmoted] = useState(false)

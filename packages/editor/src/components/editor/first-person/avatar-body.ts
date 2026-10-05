@@ -42,25 +42,32 @@ const HEIGHT_GROWTH = 0.12
 const LEGS_OF_HEIGHT = 0.46
 const TORSO_OF_HEIGHT = 0.26
 
-const heightGrowth = (body: BodyShape) => 1 + HEIGHT_GROWTH * body.height
-
 /**
  * How many times its own height a build makes the body stand, sole to
- * crown — its height, and its legs' and torso's lengths: what anything
- * placed by its size (a name over its head) scales by.
+ * crown: the height slider's alone. The legs' and torso's lengths share
+ * that height out differently instead of adding to it: longer legs, the
+ * rest of the body a little smaller.
  */
-export const bodyHeightScale = (body: BodyShape) =>
-  heightGrowth(body) *
-  (1 +
-    LEGS_OF_HEIGHT * (lengthScale(body, 'legLength') - 1) +
-    TORSO_OF_HEIGHT * (lengthScale(body, 'torsoLength') - 1))
+export const bodyHeightScale = (body: BodyShape) => 1 + HEIGHT_GROWTH * body.height
 
 /**
- * How many times its own size a build makes the body's legs — its height,
- * and their length: what its strides scale by, so its feet don't slide.
+ * How many times their own height the legs' and torso's lengths alone
+ * would make the body stand: what the whole body is scaled back down (or
+ * up) by to stand at its height.
  */
-export const bodyStrideScale = (body: BodyShape) =>
-  heightGrowth(body) * lengthScale(body, 'legLength')
+const proportionScale = (body: BodyShape) =>
+  1 +
+  LEGS_OF_HEIGHT * (lengthScale(body, 'legLength') - 1) +
+  TORSO_OF_HEIGHT * (lengthScale(body, 'torsoLength') - 1)
+
+/** How many times its own size the whole body is drawn: its height over its proportions. */
+const sizeScale = (body: BodyShape) => bodyHeightScale(body) / proportionScale(body)
+
+/**
+ * How many times its own size a build makes the body's legs — the body's
+ * size and their length: what its strides scale by, so its feet don't slide.
+ */
+export const bodyStrideScale = (body: BodyShape) => sizeScale(body) * lengthScale(body, 'legLength')
 
 /** How far (as a share of the collarbone) a build moves the arms out, or in for narrow shoulders. */
 function shoulderShift(body: BodyShape) {
@@ -146,7 +153,8 @@ function standOnLegs(model: Object3D, mesh: SkinnedMesh, body: BodyShape): (() =
  * torso's lengths (the joints at the ends of their bones moved out along
  * them, the geometry between stretched by bodyShaper, and the body raised
  * to keep its feet down) and the height (the whole body scaled from its
- * feet, so they stay on the ground). The clips animate only the bones'
+ * feet, so they stay on the ground, by as much as makes it stand at its
+ * height whatever its proportions). The clips animate only the bones'
  * turns and the hips' place, so none of this is overwritten as the body
  * moves. Returns what puts them back.
  */
@@ -167,9 +175,8 @@ export function applyBodyBones(model: Object3D, body: BodyShape): () => void {
     if (reach !== 1) undo.push(setFor(bone.position, bone.position.clone().multiplyScalar(reach)))
   }
   if (mesh) undo.push(...standOnLegs(model, mesh, body))
-  if (body.height !== 0) {
-    undo.push(setFor(model.scale, model.scale.clone().multiplyScalar(heightGrowth(body))))
-  }
+  const size = sizeScale(body)
+  if (size !== 1) undo.push(setFor(model.scale, model.scale.clone().multiplyScalar(size)))
   return () => {
     for (const step of undo) step()
   }
