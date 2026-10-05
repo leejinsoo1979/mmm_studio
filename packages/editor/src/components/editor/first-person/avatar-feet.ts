@@ -262,6 +262,9 @@ function feetGeometry(body: SkinnedMesh, mesh: FeetMesh) {
   return geometry
 }
 
+/** Rocketbox skin's roughness (its bodies' metal-roughness maps hold about this over skin). */
+const SKIN_ROUGHNESS = 0.8
+
 /**
  * The feet's own material: the body's (so they catch the light as its
  * skin does), named as a look's part (`…_feet`, which the look dresses
@@ -285,6 +288,13 @@ function feetMaterial(body: SkinnedMesh, normalMap: Texture | null, wear: Footwe
     if (slot in material) material[slot] = null
   }
   material.normalMap = wear === 'bare' ? normalMap : null
+  // Without its map the body's factors (glTF's default, fully metallic)
+  // would turn skin to dark bronze: Rocketbox skin is dielectric and matte.
+  material.metalness = 0
+  material.roughness = SKIN_ROUGHNESS
+  // The body's vertex colours are its own; the feet have none, and a
+  // missing colour attribute reads as black.
+  material.vertexColors = false
   return material
 }
 
