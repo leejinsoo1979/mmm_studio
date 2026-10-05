@@ -2,159 +2,136 @@
 
 import {
   type AvatarFeet,
-  avatarGender,
-  BODY_SLIDER_GROUPS,
-  BODY_SLIDERS,
+  type AvatarLook,
   type BodyShape,
-  type BodySliderGroup,
   type BodySliderId,
   DEFAULT_BODY_SHAPE,
   type Footwear,
   hasBodyShape,
+  SHOD,
 } from '@pascal-app/editor'
-import { useState } from 'react'
-import { counterpartAvatar, isChild } from './avatar-counterpart'
 import { BipolarSlider, PanelSection, ResetButton, Segmented, SwatchGrid } from './studio-controls'
-import {
-  BODY_GROUP_LABELS,
-  BODY_SLIDER_TEXT,
-  GENDER_LABELS,
-  HEIGHT_TEXT,
-  SOCK_SWATCHES,
-} from './studio-data'
+import { BODY_SLIDER_TEXT, HEIGHT_TEXT, SOCK_SWATCHES } from './studio-data'
+import { BODY_CATEGORIES, type BodyCategory } from './studio-layout'
 
-const GENDER_OPTIONS = (['male', 'female'] as const).map((id) => ({ id, label: GENDER_LABELS[id] }))
-const AGE_OPTIONS = [
-  { id: 'adult', label: '성인' },
-  { id: 'child', label: '어린이' },
-] as const
-const GROUP_OPTIONS = BODY_SLIDER_GROUPS.map((id) => ({ id, label: BODY_GROUP_LABELS[id] }))
 const FOOTWEAR_OPTIONS: readonly { id: Footwear; label: string }[] = [
   { id: 'shoes', label: '신발' },
   { id: 'socks', label: '양말' },
   { id: 'bare', label: '맨발' },
 ]
 
+const categoryOf = (id: BodyCategory) => BODY_CATEGORIES.find((entry) => entry.id === id)!
+
 /**
- * The body, the Sims' and inZOI's way: sex and age switch the character to
- * its nearest counterpart in the library (the rest of the look stays), the
- * height scales the whole body and the sliders reshape it part by part.
- * The feet can come out of their shoes, in socks or bare.
+ * The body, a category at a time (the Sims' and inZOI's way): 체격 (키 scales
+ * the whole body), 상체, 팔, 하체 (legs and their length) and 발 (out of the
+ * shoes, in socks or bare). Sex and age are in 기본 정보.
  */
-export function BodyPanel({
-  avatar,
+export function BodyBody({
+  category,
   body,
   feet,
-  onAvatar,
   onFeet,
   onPreview,
   onCommit,
 }: {
-  avatar: string
+  category: BodyCategory
   body: BodyShape
   feet: AvatarFeet
-  onAvatar: (avatar: string) => void
   onFeet: (feet: AvatarFeet) => void
   onPreview: (body: BodyShape) => void
   onCommit: (body: BodyShape) => void
 }) {
-  const [group, setGroup] = useState<BodySliderGroup>('build')
-  const gender = avatarGender(avatar)
-  const child = isChild(avatar)
+  if (category === 'feet') {
+    return (
+      <div className="flex flex-col gap-5">
+        <PanelSection title="신발">
+          <Segmented
+            onPick={(wear) => onFeet({ ...feet, wear })}
+            options={FOOTWEAR_OPTIONS}
+            value={feet.wear}
+          />
+        </PanelSection>
+        {feet.wear === 'socks' && (
+          <PanelSection title="양말 색">
+            <SwatchGrid
+              onPick={(color) => onFeet({ ...feet, color })}
+              original="기본 흰색"
+              swatches={SOCK_SWATCHES}
+              value={feet.color}
+            />
+          </PanelSection>
+        )}
+      </div>
+    )
+  }
+
   const withSlider = (id: BodySliderId, value: number): BodyShape => {
     const sliders = { ...body.sliders }
     if (value === 0) delete sliders[id]
     else sliders[id] = value
     return { ...body, sliders }
   }
-  const inGroup = BODY_SLIDERS.filter((slider) => slider.group === group)
-  const groupChanged = inGroup.some(({ id }) => body.sliders[id])
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-2 gap-3">
-          <PanelSection title="성별">
-            <Segmented
-              onPick={(next) => onAvatar(counterpartAvatar(avatar, next, child))}
-              options={GENDER_OPTIONS}
-              value={gender}
-            />
-          </PanelSection>
-          <PanelSection title="연령">
-            <Segmented
-              onPick={(next) => onAvatar(counterpartAvatar(avatar, gender, next === 'child'))}
-              options={AGE_OPTIONS}
-              value={child ? 'child' : 'adult'}
-            />
-          </PanelSection>
-        </div>
-        <p className="text-[11px] text-neutral-400 leading-4">
-          가장 닮은 캐릭터로 바뀌고, 꾸민 얼굴·머리·체형은 그대로 따라가요
-        </p>
-      </div>
+      {category === 'build' && (
+        <BipolarSlider
+          onCommit={(height) => onCommit({ ...body, height })}
+          onPreview={(height) => onPreview({ ...body, height })}
+          text={HEIGHT_TEXT}
+          value={body.height}
+        />
+      )}
+      {categoryOf(category).sliders.map((id) => (
+        <BipolarSlider
+          key={id}
+          onCommit={(value) => onCommit(withSlider(id, value))}
+          onPreview={(value) => onPreview(withSlider(id, value))}
+          text={BODY_SLIDER_TEXT[id]}
+          value={body.sliders[id] ?? 0}
+        />
+      ))}
+    </div>
+  )
+}
 
-      <BipolarSlider
-        onCommit={(height) => onCommit({ ...body, height })}
-        onPreview={(height) => onPreview({ ...body, height })}
-        text={HEIGHT_TEXT}
-        value={body.height}
+/** The 몸 panel's resets: the category shown, and the whole body (feet included). */
+export function BodyFooter({
+  category,
+  body,
+  feet,
+  onReset,
+}: {
+  category: BodyCategory
+  body: BodyShape
+  feet: AvatarFeet
+  onReset: (patch: Partial<AvatarLook>) => void
+}) {
+  const entry = categoryOf(category)
+  const feetChanged = feet.wear !== SHOD.wear || feet.color !== SHOD.color
+  const changed =
+    category === 'feet'
+      ? feetChanged
+      : (category === 'build' && body.height !== 0) ||
+        entry.sliders.some((id) => (body.sliders[id] ?? 0) !== 0)
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      <ResetButton
+        disabled={!changed}
+        label={`${entry.label} 되돌리기`}
+        onClick={() => {
+          if (category === 'feet') return onReset({ feet: SHOD })
+          const sliders = { ...body.sliders }
+          for (const id of entry.sliders) delete sliders[id]
+          onReset({ body: { ...body, sliders, height: category === 'build' ? 0 : body.height } })
+        }}
       />
-
-      <PanelSection title="부위별 체형">
-        <Segmented
-          marked={(id) =>
-            BODY_SLIDERS.some((slider) => slider.group === id && body.sliders[slider.id])
-          }
-          onPick={setGroup}
-          options={GROUP_OPTIONS}
-          value={group}
-        />
-        <div className="flex flex-col gap-4 pt-1">
-          {inGroup.map(({ id }) => (
-            <BipolarSlider
-              key={id}
-              onCommit={(value) => onCommit(withSlider(id, value))}
-              onPreview={(value) => onPreview(withSlider(id, value))}
-              text={BODY_SLIDER_TEXT[id]}
-              value={body.sliders[id] ?? 0}
-            />
-          ))}
-        </div>
-      </PanelSection>
-
-      <PanelSection title="발">
-        <Segmented
-          onPick={(wear) => onFeet({ ...feet, wear })}
-          options={FOOTWEAR_OPTIONS}
-          value={feet.wear}
-        />
-        {feet.wear === 'socks' && (
-          <SwatchGrid
-            onPick={(color) => onFeet({ ...feet, color })}
-            original="기본 흰색"
-            swatches={SOCK_SWATCHES}
-            value={feet.color}
-          />
-        )}
-      </PanelSection>
-
-      <div className="grid grid-cols-2 gap-2">
-        <ResetButton
-          disabled={!groupChanged}
-          label={`${BODY_GROUP_LABELS[group]} 되돌리기`}
-          onClick={() => {
-            const sliders = { ...body.sliders }
-            for (const { id } of inGroup) delete sliders[id]
-            onCommit({ ...body, sliders })
-          }}
-        />
-        <ResetButton
-          disabled={!hasBodyShape(body)}
-          label="전체 되돌리기"
-          onClick={() => onCommit(DEFAULT_BODY_SHAPE)}
-        />
-      </div>
+      <ResetButton
+        disabled={!hasBodyShape(body) && !feetChanged}
+        label="전체 되돌리기"
+        onClick={() => onReset({ body: DEFAULT_BODY_SHAPE, feet: SHOD })}
+      />
     </div>
   )
 }

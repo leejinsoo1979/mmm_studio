@@ -42,7 +42,7 @@ const LOOK: AvatarLook = {
   ...NO_LOOK,
   face: FACE,
   skin: '#C68D63',
-  shape: { fit: 0.4, sliders: { eyeSize: 0.9 } },
+  shape: { fit: 0.4, sliders: { eyeSize: 0.9 }, pins: { 4: [0, 0, 0.02], 152: [0, 0.01, 0] } },
   hairStyle: 'Female_Adult_04',
   paint: { ...NO_PAINT, eyes: '#3E6AA8', lips: '#B3202E' },
 }
@@ -58,6 +58,10 @@ describe('a random look', () => {
       expect(look.shape.fit).toBe(0.4)
       expect(look.paint.eyes).toBe('#3E6AA8')
     }
+  })
+
+  test('replaces the sculpted face: its pins cleared', () => {
+    for (const look of draws('Female_Adult_07')) expect(look.shape.pins).toEqual({})
   })
 
   test('keeps its sliders and height within half their reach, and is a valid look', () => {

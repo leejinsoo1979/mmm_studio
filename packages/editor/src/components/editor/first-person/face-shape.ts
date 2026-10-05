@@ -1,4 +1,11 @@
-import { FACE_PARTS, facePointOf, type Point, unpackPoints } from './face-points'
+import { type FacePins, hasPins, pinsField, readFacePins } from './face-pins'
+import {
+  FACE_PARTS,
+  FACE_POINT_INDICES,
+  facePointOf,
+  type Point,
+  unpackPoints,
+} from './face-points'
 
 /**
  * A face's shape, as a displacement of the head's front view (head-geometry
@@ -56,15 +63,17 @@ export type FaceSliderId = (typeof FACE_SLIDERS)[number]['id']
 
 /**
  * The player's face shape: how much of their photo's proportions the head
- * takes on (`fit`, 0–1; it has none without a photo), and each slider's
- * setting (−1–1, 0 or missing leaving that part as it is).
+ * takes on (`fit`, 0–1; it has none without a photo), each slider's
+ * setting (−1–1, 0 or missing leaving that part as it is), and the pins
+ * the face was sculpted with (face-pins.ts), on top of both.
  */
 export type FaceShape = {
   fit: number
   sliders: Partial<Record<FaceSliderId, number>>
+  pins: FacePins
 }
 
-export const DEFAULT_FACE_SHAPE: FaceShape = { fit: 1, sliders: {} }
+export const DEFAULT_FACE_SHAPE: FaceShape = { fit: 1, sliders: {}, pins: {} }
 
 const SLIDER_IDS = new Set<string>(FACE_SLIDERS.map((slider) => slider.id))
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value))
@@ -86,11 +95,15 @@ export function readFaceShape(value: unknown): FaceShape {
     typeof shape.fit === 'number' && Number.isFinite(shape.fit)
       ? clamp(shape.fit, 0, 1)
       : DEFAULT_FACE_SHAPE.fit
-  return { fit, sliders }
+  return { fit, sliders, pins: readFacePins(shape.pins) }
 }
 
 export const hasSliders = (shape: FaceShape | null | undefined) =>
   Boolean(shape && Object.values(shape.sliders).some((setting) => setting !== 0))
+
+/** Whether a shape changes the face without a photo: a slider set, or a pin pulling. */
+export const hasFaceShape = (shape: FaceShape | null | undefined) =>
+  Boolean(shape && (hasSliders(shape) || hasPins(shape.pins)))
 
 const centroid = (points: readonly Point[]): Point => {
   let x = 0
@@ -498,7 +511,7 @@ function mirrors(target: readonly Point[], middle: number): number[] {
     let best = 0
     let bestDistance = Number.POSITIVE_INFINITY
     target.forEach(([ox, oy], j) => {
-      const d = Math.hypot(2 * middle - x - ox, y - oy)
+      const d = (2 * middle - x - ox) ** 2 + (y - oy) ** 2
       if (d < bestDistance) {
         bestDistance = d
         best = j
@@ -603,7 +616,29 @@ const ROUND_THE_EYES = new Set<FaceSliderId>([
   'cheekbones',
 ])
 
-/** The shape's field, or null when it changes nothing. */
+/**
+ * The landmarks of the lids and the brows: pins on them shape the skin
+ * over the eyeballs, which stay under it (as ROUND_THE_EYES' sliders do).
+ */
+const ROUND_THE_EYES_LANDMARKS = new Set(
+  [...FACE_PARTS.brows, ...FACE_PARTS.rightEye, ...FACE_PARTS.leftEye].map(
+    (i) => FACE_POINT_INDICES[i]!,
+  ),
+)
+
+const withoutRoundTheEyes = (pins: FacePins): FacePins =>
+  Object.fromEntries(
+    Object.entries(pins).filter(([landmark]) => !ROUND_THE_EYES_LANDMARKS.has(Number(landmark))),
+  )
+
+/**
+ * The shape's field, or null when it changes nothing: the photo's
+ * proportions and the sliders' brushes added up, then the pins, which pull
+ * the landmarks from where those left them, at the place they moved the
+ * skin to. One move after the other can't fold the skin where neither does
+ * alone (added, they can: a pin pulling into skin a slider squeezes), and
+ * a pinned landmark lands where it is pinned however the sliders are set.
+ */
 export function faceShapeField(
   targetFlat: readonly number[],
   shape: FaceShape,
@@ -615,17 +650,27 @@ export function faceShapeField(
   const brushList = active.size
     ? faceBrushes(target).filter((brush) => active.has(brush.slider))
     : []
-  const pulls: { at: Point; offset: Point }[] = []
+  // The photo's pulls laid out flat (the field is worked out for thousands
+  // of points per reshape): where each is, and its offset.
+  const pulls: number[] = []
   if (photo && shape.fit > 0) {
     const gain = shape.fit * PHOTO_GAIN
     photoResiduals(photo, targetFlat).forEach((offset, i) => {
-      if (offset) pulls.push({ at: target[i]!, offset: [offset[0] * gain, offset[1] * gain] })
+      if (offset) pulls.push(target[i]![0], target[i]![1], offset[0] * gain, offset[1] * gain)
     })
   }
-  if (brushList.length === 0 && pulls.length === 0) return null
   const e = distance(target[FACE_PARTS.rightIris[0]!]!, target[FACE_PARTS.leftIris[0]!]!)
   const reach = 1 / (PULL_REACH * e) ** 2
   const cutoff = (3 * PULL_REACH * e) ** 2
+  // Past the pulls' reach round all of them the photo moves nothing.
+  const margin = Math.sqrt(cutoff)
+  let [left, right, top, bottom] = [Infinity, -Infinity, Infinity, -Infinity]
+  for (let k = 0; k < pulls.length; k += 4) {
+    left = Math.min(left, pulls[k]! - margin)
+    right = Math.max(right, pulls[k]! + margin)
+    top = Math.min(top, pulls[k + 1]! - margin)
+    bottom = Math.max(bottom, pulls[k + 1]! + margin)
+  }
 
   const fieldOf =
     (used: readonly Brush[]): ShapeField =>
@@ -634,24 +679,50 @@ export function faceShapeField(
       out[1] = 0
       out[2] = 0
       for (const brush of used) addBrush(brush, active.get(brush.slider)!, x, y, out)
-      if (pulls.length === 0) return
+      if (x <= left || x >= right || y <= top || y >= bottom) return
       // The photo's offsets, spread smoothly between its points (a weighted
       // average), dying away past the face where none are near.
       let total = STAY
       let dx = 0
       let dy = 0
-      for (const { at, offset } of pulls) {
-        const d2 = (x - at[0]) ** 2 + (y - at[1]) ** 2
+      for (let k = 0; k < pulls.length; k += 4) {
+        const d2 = (x - pulls[k]!) ** 2 + (y - pulls[k + 1]!) ** 2
         if (d2 > cutoff) continue
         const weight = Math.exp(-d2 * reach)
         total += weight
-        dx += weight * offset[0]
-        dy += weight * offset[1]
+        dx += weight * pulls[k + 2]!
+        dy += weight * pulls[k + 3]!
       }
       out[0]! += dx / total
       out[1]! += dy / total
     }
-  return Object.assign(fieldOf(brushList), {
-    eyeballs: fieldOf(brushList.filter((brush) => !ROUND_THE_EYES.has(brush.slider))),
+  const shaped = brushList.length > 0 || pulls.length > 0
+  const field = fieldOf(brushList)
+  let landmarks = targetFlat
+  if (shaped && hasPins(shape.pins)) {
+    const out = [0, 0, 0]
+    landmarks = target.flatMap(([x, y]) => {
+      field(x, y, out)
+      return [x + out[0]!, y + out[1]!]
+    })
+  }
+  const pinned = pinsField(shape.pins, landmarks)
+  if (!(shaped || pinned)) return null
+  const extra = [0, 0, 0]
+  const withPins = (first: ShapeField, pins: ShapeField | null): ShapeField =>
+    pins
+      ? (x, y, out) => {
+          first(x, y, out)
+          pins(x + out[0]!, y + out[1]!, extra)
+          out[0]! += extra[0]!
+          out[1]! += extra[1]!
+          out[2]! += extra[2]!
+        }
+      : first
+  return Object.assign(withPins(field, pinned), {
+    eyeballs: withPins(
+      fieldOf(brushList.filter((brush) => !ROUND_THE_EYES.has(brush.slider))),
+      pinned && pinsField(withoutRoundTheEyes(shape.pins), landmarks),
+    ),
   })
 }

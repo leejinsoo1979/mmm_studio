@@ -284,4 +284,65 @@ export const HAIR_LENGTH_LABELS: Record<HairStyleEntry['length'], string> = {
   long: '긴 머리',
 }
 
+/** Each hairstyle's name in the gallery, by the avatar whose hair it is. */
+export const HAIR_STYLE_NAMES: Readonly<Record<string, string>> = {
+  Female_Adult_04: '넘긴 올림머리',
+  Female_Adult_11: '낮은 쪽머리',
+  Female_Adult_17: '똥머리',
+  Female_Adult_13: '픽시컷',
+  Business_Female_01: '곱슬 숏컷',
+  Female_Adult_07: '뒤로 묶은 번',
+  Female_Adult_09: '뒤로 넘긴 묶음',
+  Female_Adult_05: '단발 보브',
+  Female_Adult_14: '사이드 뱅 보브',
+  Business_Female_03: '레이어드 단발',
+  Female_Party_02: '볼륨 곱슬',
+  Business_Female_02: '어깨 레이어드',
+  Female_Party_01: '굵은 웨이브',
+  Business_Female_04: '단정한 포니테일',
+  Female_Adult_01: '하이 포니테일',
+  Female_Adult_02: '긴 묶음머리',
+  Female_Adult_03: '사이드 뱅 생머리',
+  Sports_Female_02: '스포티 포니테일',
+  Female_Adult_12: '앞머리 로우 포니',
+  Female_Adult_08: '긴 생머리',
+  Female_Adult_15: '긴 웨이브',
+  Male_Adult_07: '짧은 스파이크',
+  Male_Adult_08: '크루컷',
+  Business_Male_02: '단정한 옆가르마',
+  Male_Adult_05: '헝클어진 숏컷',
+  Male_Adult_03: '짧게 친 머리',
+  Business_Male_03: '댄디컷',
+  Male_Adult_04: '아프로',
+  Business_Male_01: '볼륨 가르마',
+  Male_Adult_01: '내린 앞머리',
+  Male_Adult_10: '세운 앞머리',
+  Male_Adult_06: '부스스한 숏컷',
+  Male_Adult_02: '넘긴 웨이브',
+  Sports_Male_03: '곱슬 장발',
+  Male_Adult_09: '꽁지머리',
+}
+
+/**
+ * The gallery's sections, short to long, each style with its name: its
+ * own, or failing one its length's, numbered.
+ */
+export function hairSections(
+  styles: readonly HairStyleEntry[],
+): { length: HairStyleEntry['length']; label: string; styles: { id: string; name: string }[] }[] {
+  return (['short', 'medium', 'long'] as const)
+    .map((length) => {
+      const own = styles.filter((style) => style.length === length)
+      return {
+        length,
+        label: HAIR_LENGTH_LABELS[length],
+        styles: own.map((style, index) => ({
+          id: style.id,
+          name: HAIR_STYLE_NAMES[style.id] ?? `${HAIR_LENGTH_LABELS[length]} ${index + 1}`,
+        })),
+      }
+    })
+    .filter((section) => section.styles.length > 0)
+}
+
 export const GENDER_LABELS: Record<AvatarGender, string> = { male: '남성', female: '여성' }

@@ -6,10 +6,11 @@ import {
 } from '@pascal-app/editor'
 
 /**
- * What a participant document carries of its player's look: all of it but
- * the face photo and its landmarks (tens of kB, and the same for as long as
- * the face is), which live in their own document, `faces/{uid}`, fetched
- * once per `photoId` rather than with every pose report.
+ * What a participant document carries of its player's look: all of it,
+ * the face's sculpted pins too, but the face photo and its landmarks (tens
+ * of kB, and the same for as long as the face is), which live in their own
+ * document, `faces/{uid}`, fetched once per `photoId` rather than with
+ * every pose report.
  */
 export type SharedLook = Omit<AvatarLook, 'face'> & {
   face: (Omit<AvatarFace, 'photo' | 'points'> & { photoId: string }) | null
@@ -36,12 +37,20 @@ export function toSharedLook(look: AvatarLook): SharedLook {
 }
 
 /**
+ * The most a shared look may take as JSON (characters): an NPC's look
+ * limit. Every slider and pin set, as far as they go, comes to under 12 KB.
+ */
+export const MAX_SHARED_LOOK = 16_384
+
+/**
  * Another player's look from their participant document, with their face
  * (photo and landmarks) once it has been fetched (until then, the look
- * without the face).
+ * without the face). A document past MAX_SHARED_LOOK is no look: someone
+ * else's client wrote it, and a look can't grow that big.
  */
 export function fromSharedLook(value: unknown, face: SharedFace | null): AvatarLook | null {
   if (!value || typeof value !== 'object') return null
+  if (JSON.stringify(value).length > MAX_SHARED_LOOK) return null
   const shared = value as Partial<SharedLook>
   const look = readAvatarLook({
     ...shared,

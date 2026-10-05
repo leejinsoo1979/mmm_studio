@@ -3,16 +3,25 @@
 import {
   type AvatarLook,
   bodyHeightScale,
-  type EmoteCue,
   EmoteLayer,
   findAvatar,
   useAvatarBody,
   useAvatarLook,
   useEmoteClips,
+  useFaceTarget,
 } from '@pascal-app/editor'
 import { ContactShadows } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Suspense, useEffect, useMemo, useRef } from 'react'
+import {
+  type PointerEvent as ReactPointerEvent,
+  Suspense,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   AnimationMixer,
   BufferGeometry,
@@ -36,21 +45,46 @@ import {
   Vector4,
 } from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
-import { type HeadSpan, headFraming, headSpan, type Stage } from './head-frame'
+import {
+  createHandleBoard,
+  dragHandle,
+  dropHandle,
+  FaceHandles,
+  grabHandle,
+  type HandleBoard,
+  HandleProjector,
+  handleKey,
+  hitHandle,
+  hoverHandle,
+  setHandleState,
+} from './face-handles'
+import { type HeadFraming, type HeadSpan, headFraming, headSpan } from './head-frame'
+import { DRAG_THRESHOLD, pointerMove, snapTurn, viewTurn } from './sculpt-gesture'
+import type {
+  CameraFocus,
+  StageInsets,
+  StagePose,
+  StageView,
+  StudioFilterId,
+  StudioStageApi,
+  StudioStageProps,
+} from './stage-contract'
+import { type CaptureRig, captureAiShot, captureSnapshot, placeCamera } from './studio-capture'
+import { grainDataUrl, overlayBackground, overlayBlend, STUDIO_FILTER } from './studio-filters'
+import { StudioPose } from './studio-pose'
 
-export type CameraFocus = 'full' | 'upper' | 'hair' | 'face'
+type HeadFocus = 'hair' | 'face' | 'eyes' | 'mouth'
 
 /**
- * Framing per focus, as fractions of the body's height: where the camera
- * looks and how much of the body the view holds top to bottom. The face
- * and hair are framed by the head itself (head-frame.ts); their entries are
- * only for until the body has loaded.
+ * Framing per focus until the body has loaded, as fractions of its height:
+ * where the camera looks and how much of the body the view holds top to
+ * bottom. Once it has, the face and hair are framed by the head itself.
  */
-const FRAMING: Record<CameraFocus, { look: number; span: number }> = {
-  full: { look: 0.47, span: 1.55 },
-  upper: { look: 0.76, span: 0.66 },
+const FRAMING: Record<HeadFocus, { look: number; span: number }> = {
   hair: { look: 0.88, span: 0.4 },
   face: { look: 0.9, span: 0.22 },
+  eyes: { look: 0.92, span: 0.12 },
+  mouth: { look: 0.87, span: 0.12 },
 }
 
 /**
@@ -63,32 +97,68 @@ const LENS: Record<CameraFocus, { fov: number; zoom: [number, number] }> = {
   upper: { fov: 28, zoom: [0.55, 1.6] },
   hair: { fov: 27, zoom: [0.6, 1.5] },
   face: { fov: 25, zoom: [0.6, 1.4] },
+  eyes: { fov: 25, zoom: [0.6, 1.8] },
+  mouth: { fov: 25, zoom: [0.6, 1.8] },
+  legs: { fov: 28, zoom: [0.55, 1.6] },
+  feet: { fov: 28, zoom: [0.55, 1.6] },
 }
 
-/** The share of the room between the bars the face (crown to chin) fills, and the head with its hair. */
+/** The share of the free room's height the face (crown to chin) fills, and the head with its hair. */
 const FACE_FILL = 0.8
 const HAIR_FILL = 0.85
 /** How far below the chin the hair view reaches, in head heights: to the shoulders, where long hair falls. */
 const HAIR_DROP = 0.75
-/** How far (CSS px) the top bar and the camera controls reach in over the stage. */
-const TOP_BAR = 72
-const BOTTOM_BAR = 76
+/** The whole body's share of the free room, and how wide it is for its tallest height (arms down). */
+const FULL_FILL = 0.92
+const FULL_ASPECT = 0.3
+/** The upper body: from the crown down this share of the body's height, its share of the room and its width for that. */
+const UPPER_REACH = 0.62
+const UPPER_FILL = 0.9
+const UPPER_ASPECT = 0.5
+
+/**
+ * Closer in on the face, in eyes-to-chin heights from the eyes: the eyes
+ * and brows up to the forehead, and the nose and mouth down past the chin;
+ * each as wide as the face for its height.
+ */
+const EYES_BAND = { above: 0.5, below: 0.4 }
+const MOUTH_BAND = { above: 0.15, below: 1.1 }
+const FEATURE_FILL = 0.85
+const FEATURE_ASPECT = 1.3
+/** The legs: from a little above the hips (a share of the body's height) to the floor, and how wide they stand. */
+const LEGS_ABOVE_HIPS = 0.06
+const LEGS_FILL = 0.92
+const LEGS_ASPECT = 0.5
+/** The feet: from just under the knees (a share of the hips' height) to the floor. */
+const SHINS = 0.55
+const FEET_FILL = 0.85
+const FEET_ASPECT = 0.7
+/** How far under the floor the legs' and feet's views reach, so the soles don't sit on the edge. */
+const UNDER_FLOOR = 0.03
 
 /** A Rocketbox body stands about 1.95 of its hip height tall. */
 const HEIGHT_PER_HIP = 1.95
+const HIPS_BONE = /Pelvis$/
 /**
  * How many times its own height the tallest look makes a body: the whole
  * body is framed for that, so it fits at any height and the 키 slider
  * shows as the body growing or shrinking on the stage.
  */
 const TALLEST = bodyHeightScale({ height: 1, sliders: {} })
-/** How far above what it looks at the camera stands, as a share of its distance: it looks a little down. */
-const LOOK_DOWN = 0.04
 /** How long (s) the camera takes, about, to ease from one framing to the next. */
 const EASE_TIME = 0.45
-
-/** Where the camera aims and how much it sees there: shared with the lights, which follow it. */
-type View = { x: number; y: number; half: number }
+/** How near its framing (a share of what it sees) the camera is once it has settled there. */
+const SETTLED = 0.04
+/** How quickly (per second) the turntable eases to its turn. */
+const TURN_RESPONSE = 17
+/** How far (radians) the turntable turns per CSS px dragged, and per arrow key. */
+const TURN_PER_PIXEL = 0.012
+const TURN_STEP = Math.PI / 12
+/** How much one wheel notch's delta (px) zooms, and one +/− key press. */
+const WHEEL_ZOOM = 0.001
+const KEY_ZOOM = 1.15
+/** The most pixels the canvas's drawing buffer holds: a full-bleed stage at dpr 2 could be 5120 × 2880. */
+const MOST_PIXELS = 8.3e6
 
 /** A value easing towards its target as a critically damped spring does: out of rest and into the target, never past it. */
 type Spring = { value: number; speed: number }
@@ -106,91 +176,196 @@ function ease(state: Spring, target: number, delta: number) {
   state.value = target + (off + pull) * decay
 }
 
-const toRadians = (degrees: number) => (degrees * Math.PI) / 180
-
 /** The head with the hair below it to the shoulders. */
+const HEAD_FOCUS: ReadonlySet<CameraFocus> = new Set<HeadFocus>(['hair', 'face', 'eyes', 'mouth'])
+
 const withHair = (span: HeadSpan): HeadSpan => ({
   ...span,
   bottom: span.bottom - (span.top - span.bottom) * HAIR_DROP,
 })
 
+/** The canvas's pixel ratio: the screen's, at most 2, and less on a stage so big its buffer would pass MOST_PIXELS. */
+function cappedDpr(width: number, height: number): number {
+  const device = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1
+  return Math.max(1, Math.min(device, 2, Math.sqrt(MOST_PIXELS / Math.max(1, width * height))))
+}
+
 /**
- * Eases the camera to the focus's framing, straight in front of the body.
- * The face, hair and upper body go by where the head (and the hair or hat
- * over it) is in `model` each frame, so they stay framed whatever the
- * look's height, the head's size, the hairstyle or the clip — by `stature`
- * (the body's own height) times `scale` (the look's) until it has loaded.
- * The whole body goes by the tallest it can be. The aim, the view's size
- * and the lens all ease together, so a new step glides there.
+ * What the stage's parts share, mutable so a frame can read it without a
+ * render: the latest props, the turntable and zoom, the camera's aim and
+ * what the capture needs.
  */
-function CameraRig({
-  focus,
-  zoom,
-  stature,
-  scale,
-  model,
-  view,
-}: {
+type StageState = {
   focus: CameraFocus
-  zoom: number
-  stature: number
+  insets: StageInsets
+  pose: StagePose
+  cue: StudioStageProps['cue']
+  /** The look's height scale. */
   scale: number
+  zoom: number
+  /** The turntable's turn asked for (radians), and the avatar's turn as it eases there. */
+  yaw: number
+  turned: number
+  /** The side 45° and 측면 last turned to, and the view last told. */
+  sign: 1 | -1
+  told: StageView
+  /** The camera's aim, which the lights follow; the framing held while a handle is. */
+  view: HeadFraming
+  held: HeadFraming | null
   model: { current: Object3D | null }
-  view: View
-}) {
-  const camera = useThree((state) => state.camera) as PerspectiveCamera
-  const size = useThree((state) => state.size)
+  board: HandleBoard
+  rig: CaptureRig
+}
+
+const clampZoom = (focus: CameraFocus, zoom: number) => {
+  const [low, high] = LENS[focus].zoom
+  return Math.min(high, Math.max(low, zoom))
+}
+
+/** Where the camera aims, and how much it sees, for a focus: centred in the free room. */
+function framingFor(
+  state: StageState,
+  size: { width: number; height: number },
+  stature: number,
+): HeadFraming {
+  const { focus, insets } = state
+  const stage = { width: size.width, height: size.height, insets }
+  const zoom = clampZoom(focus, state.zoom)
+  const height = stature * state.scale
+  if (focus === 'full') {
+    return headFraming({ top: stature * TALLEST, bottom: 0, x: 0 }, stage, FULL_FILL, {
+      aspect: FULL_ASPECT,
+      zoom,
+    })
+  }
+  if (focus === 'legs' || focus === 'feet') {
+    const hips = state.model.current ? hipsHeight(state.model.current) : null
+    const hipY = hips ?? height / HEIGHT_PER_HIP
+    return focus === 'legs'
+      ? headFraming(
+          { top: hipY + LEGS_ABOVE_HIPS * height, bottom: -UNDER_FLOOR, x: 0 },
+          stage,
+          LEGS_FILL,
+          { aspect: LEGS_ASPECT, zoom },
+        )
+      : headFraming({ top: hipY * SHINS, bottom: -UNDER_FLOOR, x: 0 }, stage, FEET_FILL, {
+          aspect: FEET_ASPECT,
+          zoom,
+        })
+  }
+  const head = state.model.current ? headSpan(state.model.current) : null
+  if (focus === 'upper') {
+    const top = head?.top ?? height
+    return headFraming(
+      { top, bottom: top - UPPER_REACH * height, x: head?.x ?? 0 },
+      stage,
+      UPPER_FILL,
+      { aspect: UPPER_ASPECT, zoom },
+    )
+  }
+  if (!head) {
+    const { look, span } = FRAMING[focus as HeadFocus]
+    return headFraming(
+      { top: height * (look + span / 2), bottom: height * (look - span / 2), x: 0 },
+      stage,
+      1,
+      { zoom },
+    )
+  }
+  if ((focus === 'eyes' || focus === 'mouth') && head.eyes !== undefined) {
+    const { above, below } = focus === 'eyes' ? EYES_BAND : MOUTH_BAND
+    const reach = head.eyes - head.bottom
+    return headFraming(
+      {
+        top: head.eyes + above * reach,
+        bottom: head.eyes - below * reach,
+        x: head.x,
+        front: head.front,
+      },
+      stage,
+      FEATURE_FILL,
+      { aspect: FEATURE_ASPECT, zoom },
+    )
+  }
+  return focus === 'hair'
+    ? headFraming(withHair(head), stage, HAIR_FILL, { zoom })
+    : headFraming(head, stage, FACE_FILL, { zoom })
+}
+
+const hipsBones = new WeakMap<Object3D, Object3D | null>()
+
+/** How high the hips stand now (world), or null for a body without them. */
+function hipsHeight(model: Object3D): number | null {
+  let hips = hipsBones.get(model)
+  if (hips === undefined) {
+    hips = null
+    model.traverse((object) => {
+      if (!hips && HIPS_BONE.test(object.name)) hips = object
+    })
+    hipsBones.set(model, hips)
+  }
+  if (!hips) return null
+  hips.updateWorldMatrix(true, false)
+  return point.setFromMatrixPosition(hips.matrixWorld).y
+}
+
+const point = new Vector3()
+
+/**
+ * Eases the camera to the focus's framing, straight in front of the body
+ * and centred in the room the studio's chrome leaves. The face, hair and
+ * upper body go by where the head (and the hair or hat over it) is each
+ * frame, so they stay framed whatever the look's height, the head's size,
+ * the hairstyle or the clip; the whole body by the tallest it can be. The
+ * aim, the view's size and the lens all ease together, so a new focus or
+ * the panel opening glides there. While a handle is held the framing
+ * stays put, so the face doesn't slide from under the pointer.
+ */
+function CameraRig({ state, stature }: { state: StageState; stature: number }) {
+  const camera = useThree((three) => three.camera) as PerspectiveCamera
+  const size = useThree((three) => three.size)
   const springs = useMemo(
-    () => ({ x: spring(), y: spring(), half: spring(), fov: spring(), started: false }),
-    [],
+    () => ({
+      x: spring(),
+      y: spring(),
+      half: spring(),
+      fov: spring(),
+      started: false,
+      focus: state.focus,
+    }),
+    [state],
   )
   useFrame((_, delta) => {
-    const stage: Stage = {
-      width: size.width,
-      height: size.height,
-      top: TOP_BAR,
-      bottom: BOTTOM_BAR,
+    const target = state.board.drag && state.held ? state.held : framingFor(state, size, stature)
+    state.held = target
+    const fov = LENS[state.focus].fov
+    if (springs.focus !== state.focus) {
+      springs.focus = state.focus
+      state.board.settling = true
     }
-    const head = focus !== 'full' && model.current ? headSpan(model.current) : null
-    let target: View
-    if ((focus === 'face' || focus === 'hair') && head) {
-      target =
-        focus === 'face'
-          ? headFraming(head, stage, FACE_FILL)
-          : headFraming(withHair(head), stage, HAIR_FILL)
-    } else {
-      const height = focus === 'full' ? stature * TALLEST : (head?.top ?? stature * scale)
-      const { look, span } = FRAMING[focus]
-      target = { x: 0, y: height * look, half: (height * span) / 2 }
-    }
-    const lens = LENS[focus]
-    const zoomed = target.half * Math.min(lens.zoom[1], Math.max(lens.zoom[0], zoom))
-
     if (springs.started) {
       const step = Math.min(delta, 0.1)
       ease(springs.x, target.x, step)
       ease(springs.y, target.y, step)
-      ease(springs.half, zoomed, step)
-      ease(springs.fov, lens.fov, step)
+      ease(springs.half, target.half, step)
+      ease(springs.fov, fov, step)
     } else {
       springs.started = true
       springs.x.value = target.x
       springs.y.value = target.y
-      springs.half.value = zoomed
-      springs.fov.value = lens.fov
+      springs.half.value = target.half
+      springs.fov.value = fov
     }
-
-    view.x = springs.x.value
-    view.y = springs.y.value
-    view.half = springs.half.value
-    const fov = springs.fov.value
-    if (Math.abs(camera.fov - fov) > 1e-4) {
-      camera.fov = fov
-      camera.updateProjectionMatrix()
-    }
-    const distance = view.half / Math.tan(toRadians(fov) / 2)
-    camera.position.set(view.x, view.y + distance * LOOK_DOWN, distance)
-    camera.lookAt(view.x, view.y, 0)
+    if (
+      state.board.settling &&
+      Math.abs(springs.half.value - target.half) < SETTLED * target.half &&
+      Math.hypot(springs.x.value - target.x, springs.y.value - target.y) < SETTLED * target.half
+    )
+      state.board.settling = false
+    state.view.x = springs.x.value
+    state.view.y = springs.y.value
+    state.view.half = springs.half.value
+    placeCamera(camera, state.view, springs.fov.value)
   })
   return null
 }
@@ -210,10 +385,11 @@ const SHADOW_MAP = 1024
  * A portrait's three-point rig, following the camera's aim: a warm key
  * high to the right whose soft shadow models the face, a cool fill low to
  * the left, and a rim light with a kicker behind, which outline the hair
- * against the backdrop. The key's shadow camera closes in on what the
- * view holds, so a close-up's shadows are as fine as the whole body's.
+ * against the dark backdrop. The key's shadow camera closes in on what the
+ * view holds, so a close-up's shadows are as fine as the whole body's. The
+ * capture aims it at its own shot the same way.
  */
-function StudioLights({ view }: { view: View }) {
+function StudioLights({ state }: { state: StageState }) {
   const lights = useMemo(() => {
     const key = new DirectionalLight('#fff0df', 2.6)
     key.castShadow = true
@@ -221,8 +397,8 @@ function StudioLights({ view }: { view: View }) {
     key.shadow.bias = -0.0003
     key.shadow.normalBias = 0.012
     const fill = new DirectionalLight('#dbe6ff', 0.55)
-    const rim = new DirectionalLight('#eef4ff', 2.4)
-    const kick = new DirectionalLight('#fff3e6', 1.1)
+    const rim = new DirectionalLight('#eef4ff', 3)
+    const kick = new DirectionalLight('#fff3e6', 1.4)
     return [
       { light: key, from: KEY_FROM },
       { light: fill, from: FILL_FROM },
@@ -230,26 +406,34 @@ function StudioLights({ view }: { view: View }) {
       { light: kick, from: KICK_FROM },
     ]
   }, [])
-  useFrame(() => {
-    for (const { light, from } of lights) {
-      light.target.position.set(view.x, view.y, 0)
-      light.position.copy(light.target.position).addScaledVector(from, LIGHT_DISTANCE)
-      light.target.updateMatrixWorld()
-    }
-    const { shadow } = lights[0]!.light
-    const reach = Math.max(view.half * 1.5, 0.3)
-    const camera = shadow.camera
-    if (Math.abs(camera.right - reach) > 1e-4) {
-      camera.left = -reach
-      camera.right = reach
-      camera.top = reach
-      camera.bottom = -reach
-      camera.near = LIGHT_DISTANCE - 3
-      camera.far = LIGHT_DISTANCE + 3
-      camera.updateProjectionMatrix()
-      shadow.radius = Math.min(8, Math.max(1.5, (PENUMBRA * SHADOW_MAP) / (2 * reach)))
-    }
-  })
+  const aim = useCallback(
+    (view: HeadFraming) => {
+      for (const { light, from } of lights) {
+        light.target.position.set(view.x, view.y, 0)
+        light.position.copy(light.target.position).addScaledVector(from, LIGHT_DISTANCE)
+        light.updateMatrixWorld()
+        light.target.updateMatrixWorld()
+      }
+      const { shadow } = lights[0]!.light
+      const reach = Math.max(view.half * 1.5, 0.3)
+      const camera = shadow.camera
+      if (Math.abs(camera.right - reach) > 1e-4) {
+        camera.left = -reach
+        camera.right = reach
+        camera.top = reach
+        camera.bottom = -reach
+        camera.near = LIGHT_DISTANCE - 3
+        camera.far = LIGHT_DISTANCE + 3
+        camera.updateProjectionMatrix()
+        shadow.radius = Math.min(8, Math.max(1.5, (PENUMBRA * SHADOW_MAP) / (2 * reach)))
+      }
+    },
+    [lights],
+  )
+  useEffect(() => {
+    state.rig.aimLights = aim
+  }, [state, aim])
+  useFrame(() => aim(state.view))
   return (
     <>
       {lights.map(({ light }) => (
@@ -263,7 +447,7 @@ function StudioLights({ view }: { view: View }) {
 }
 
 /** How bright the studio's surroundings light and show in the character (the lights above do the modelling). */
-const ENVIRONMENT_INTENSITY = 0.45
+const ENVIRONMENT_INTENSITY = 0.35
 
 /** Soft image-based light from a studio room, made here (no picture to download). */
 function StudioEnvironment() {
@@ -286,61 +470,59 @@ function StudioEnvironment() {
 }
 
 /**
- * The backdrop: the page's own gradient (character-studio.tsx's), drawn
- * where the stage is so the canvas can be opaque — which alpha to coverage
- * needs, or the hair's edges would let the page show through — without a
- * seam beside it; deepened a little round the stage's sides and floor so
- * the lit character stands out.
+ * The backdrop: a dark studio, lightest behind the character (the free
+ * room's middle) and falling off to near black at the edges, with a faint
+ * glow on the floor round the platform. It works in the view's own uv, so
+ * any render size draws the same picture; a snapshot of part of the view
+ * (`window`) draws its part of it.
  */
 const BACKDROP_VERTEX = /* glsl */ `
+varying vec2 vUv;
+
 void main() {
+  vUv = position.xy * 0.5 + 0.5;
   gl_Position = vec4(position.xy, 1.0, 1.0);
 }
 `
 
 const BACKDROP_FRAGMENT = /* glsl */ `
-uniform vec2 buffer;
-uniform vec4 rect;
-uniform vec2 page;
+uniform vec4 window;
+uniform float aspect;
+uniform vec2 centre;
+uniform vec4 floorGlow;
+varying vec2 vUv;
 
-const vec3 CENTRE = vec3(1.0);
-const vec3 MIDDLE = vec3(241.0, 244.0, 248.0) / 255.0;
-const vec3 EDGE = vec3(221.0, 228.0, 236.0) / 255.0;
-const vec3 SHADE = vec3(0.72, 0.77, 0.84);
+const vec3 CENTRE = vec3(42.0, 46.0, 53.0) / 255.0;
+const vec3 MIDDLE = vec3(20.0, 22.0, 26.0) / 255.0;
+const vec3 EDGE = vec3(7.0, 8.0, 10.0) / 255.0;
+const vec3 FLOOR = vec3(29.0, 34.0, 41.0) / 255.0;
 
 float noise(vec2 at) {
   return fract(52.9829189 * fract(dot(at, vec2(0.06711056, 0.00583715))));
 }
 
 void main() {
-  vec2 css = vec2(
-    rect.x + gl_FragCoord.x / buffer.x * rect.z,
-    rect.y + (1.0 - gl_FragCoord.y / buffer.y) * rect.w
-  );
-  // radial-gradient(ellipse at 62% 42%, …): an ellipse shaped as its
-  // closest sides, grown to its farthest corner.
-  vec2 centre = page * vec2(0.62, 0.42);
-  vec2 closest = max(min(centre, page - centre), vec2(1.0));
-  vec2 farthest = max(centre, page - centre);
-  float t = length((css - centre) / (closest * length(farthest / closest)));
-  vec3 colour = t < 0.38
-    ? mix(CENTRE, MIDDLE, t / 0.38)
-    : mix(MIDDLE, EDGE, clamp((t - 0.38) / 0.62, 0.0, 1.0));
-
-  vec2 local = (css - rect.xy) / rect.zw;
-  float round = length((local - vec2(0.5, 0.42)) * vec2(1.0, 1.15));
-  float shade = smoothstep(0.42, 0.95, round) * 0.22;
-  // Faded out towards the stage's left side, where the page goes on.
-  shade *= rect.x > 0.5 ? smoothstep(0.0, 160.0, css.x - rect.x) : 1.0;
-  colour = mix(colour, colour * SHADE, shade);
-
+  vec2 uv = window.xy + vUv * window.zw;
+  // An ellipse 1.3 times as wide as it is tall, in the view's heights.
+  float t = length((uv - centre) * vec2(aspect / 1.3, 1.0)) / 0.75;
+  vec3 colour = t < 0.55
+    ? mix(CENTRE, MIDDLE, t / 0.55)
+    : mix(MIDDLE, EDGE, clamp((t - 0.55) / 0.45, 0.0, 1.0));
+  vec2 floorAt = (uv - floorGlow.xy) * vec2(aspect, 1.0) / max(floorGlow.zw * 1.6, vec2(1e-4));
+  colour = mix(colour, FLOOR, (1.0 - smoothstep(0.0, 1.0, length(floorAt))) * 0.25);
   gl_FragColor = vec4(colour + (noise(gl_FragCoord.xy) - 0.5) / 255.0, 1.0);
 }
 `
 
-function Backdrop() {
-  const gl = useThree((state) => state.gl)
-  const size = useThree((state) => state.size)
+/** The platform's radius (m), which the floor glow spreads round. */
+const PLATFORM_RADIUS = 0.95
+
+const origin = new Vector3()
+const rim = new Vector3()
+
+function Backdrop({ state }: { state: StageState }) {
+  const size = useThree((three) => three.size)
+  const camera = useThree((three) => three.camera)
   const mesh = useMemo(() => {
     const geometry = new BufferGeometry()
     geometry.setAttribute(
@@ -351,9 +533,10 @@ function Backdrop() {
       vertexShader: BACKDROP_VERTEX,
       fragmentShader: BACKDROP_FRAGMENT,
       uniforms: {
-        buffer: { value: new Vector2(1, 1) },
-        rect: { value: new Vector4(0, 0, 1, 1) },
-        page: { value: new Vector2(1, 1) },
+        window: { value: new Vector4(0, 0, 1, 1) },
+        aspect: { value: 1 },
+        centre: { value: new Vector2(0.5, 0.5) },
+        floorGlow: { value: new Vector4(0.5, -1, 0, 0) },
       },
       depthTest: false,
       depthWrite: false,
@@ -363,18 +546,40 @@ function Backdrop() {
     backdrop.renderOrder = -1000
     return backdrop
   }, [])
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const { rig } = state
+    rig.backdrop = mesh
+    rig.setBackdropWindow = (x, y, width, height) =>
+      mesh.material.uniforms.window!.value.set(x, y, width, height)
+    return () => {
+      if (rig.backdrop === mesh) rig.backdrop = null
       mesh.geometry.dispose()
       mesh.material.dispose()
-    },
-    [mesh],
-  )
-  useFrame(() => {
+    }
+  }, [mesh, state])
+  const started = useRef(false)
+  useFrame((_, delta) => {
     const { uniforms } = mesh.material
-    uniforms.buffer!.value.set(gl.domElement.width, gl.domElement.height)
-    uniforms.rect!.value.set(size.left, size.top, size.width, size.height)
-    uniforms.page!.value.set(window.innerWidth, window.innerHeight)
+    const { width, height } = size
+    const { insets } = state
+    const freeWidth = Math.max(1, width - insets.left - insets.right)
+    const freeHeight = Math.max(1, height - insets.top - insets.bottom)
+    const cx = (insets.left + freeWidth / 2) / width
+    const cy = 1 - (insets.top + freeHeight / 2) / height
+    const centre = uniforms.centre!.value as Vector2
+    const step = started.current ? 1 - Math.exp((-2 / EASE_TIME) * Math.min(delta, 0.1)) : 1
+    started.current = true
+    centre.x += (cx - centre.x) * step
+    centre.y += (cy - centre.y) * step
+    uniforms.aspect!.value = width / Math.max(1, height)
+    origin.set(0, 0, 0).project(camera)
+    const ox = origin.x * 0.5 + 0.5
+    const oy = origin.y * 0.5 + 0.5
+    rim.set(PLATFORM_RADIUS, 0, 0).project(camera)
+    const rx = Math.abs(rim.x * 0.5 + 0.5 - ox) * uniforms.aspect!.value
+    rim.set(0, 0, PLATFORM_RADIUS).project(camera)
+    const ry = Math.abs(rim.y * 0.5 + 0.5 - oy)
+    ;(uniforms.floorGlow!.value as Vector4).set(ox, oy, rx, ry)
   })
   return <primitive object={mesh} />
 }
@@ -558,74 +763,64 @@ function keepOwnership(model: Object3D, anisotropy: number) {
 }
 
 /**
- * The character, idling (or held still on the idle's first frame) or playing
- * `cue`; its model is put in `shown` for the camera to frame.
+ * The character: idling, playing the emote being previewed, or holding
+ * still facing the camera (studio-pose.ts); its model is put in the
+ * state for the camera and the handles to go by, and it turns with the
+ * turntable.
  */
 function StudioAvatar({
   avatarId,
   look,
-  cue,
-  still,
-  yaw,
-  shown,
+  state,
   onCueEnd,
 }: {
   avatarId: string
   look: AvatarLook
-  cue: EmoteCue | null
-  still: boolean
-  yaw: { current: number }
-  shown: { current: Object3D | null }
+  state: StageState
   onCueEnd: () => void
 }) {
   const { avatar, model, clips } = useAvatarBody(avatarId)
-  const anisotropy = useThree((state) => state.gl.capabilities.getMaxAnisotropy())
+  const anisotropy = useThree((three) => three.gl.capabilities.getMaxAnisotropy())
+  const camera = useThree((three) => three.camera)
   // Before the look sees the body (its effects run after this render).
   useMemo(() => takeOwnership(model, anisotropy), [model, anisotropy])
   useAvatarLook(model, look, avatar.id)
   useEffect(() => {
+    const shown = state.model
     shown.current = model
     return () => {
       if (shown.current === model) shown.current = null
     }
-  }, [model, shown])
+  }, [model, state])
   const emoteClips = useEmoteClips(avatar, true)
   const groupRef = useRef<Group>(null)
-  const cueRef = useRef(cue)
-  cueRef.current = cue
   const endRef = useRef(onCueEnd)
   endRef.current = onCueEnd
-  const stillRef = useRef(still)
-  stillRef.current = still
 
   const mixer = useMemo(() => new AnimationMixer(model), [model])
   const layer = useMemo(() => new EmoteLayer(mixer), [mixer])
+  const pose = useMemo(() => new StudioPose(model, mixer, layer), [model, mixer, layer])
   useEffect(() => layer.setClips(emoteClips), [layer, emoteClips])
   useEffect(() => {
-    const idle = clips.find((clip) => clip.name === 'idle')
-    if (!idle) return
-    mixer.clipAction(idle).play()
-    return () => {
-      mixer.stopAllAction()
-    }
-  }, [clips, mixer])
+    pose.setIdle(clips.find((clip) => clip.name === 'idle') ?? null)
+    return () => pose.dispose()
+  }, [clips, pose])
 
   useFrame((_, delta) => {
     keepOwnership(model, anisotropy)
-    const weight = layer.update(cueRef.current, false, delta)
-    const idle = clips.find((clip) => clip.name === 'idle')
-    // A face being shaped holds still, unless an emote is being previewed.
-    const held = stillRef.current && weight === 0
-    if (idle) {
-      const action = mixer.clipAction(idle)
-      action.setEffectiveWeight(1 - weight)
-      if (held) action.time = 0
+    const group = groupRef.current
+    if (group) {
+      group.rotation.y += (state.yaw - group.rotation.y) * (1 - Math.exp(-TURN_RESPONSE * delta))
+      state.turned = group.rotation.y
     }
-    if (cueRef.current && layer.finished(cueRef.current)) endRef.current()
-    mixer.update(held ? 0 : delta)
-    if (groupRef.current) {
-      groupRef.current.rotation.y += (yaw.current - groupRef.current.rotation.y) * 0.25
-    }
+    const live = state.pose === 'live'
+    const finished = pose.update(delta, {
+      still: !live || state.board.drag !== null,
+      cue: live ? state.cue : null,
+      camera: camera.position,
+      yaw: state.turned,
+    })
+    if (finished) endRef.current()
   })
 
   return (
@@ -635,96 +830,509 @@ function StudioAvatar({
   )
 }
 
-/** A soft white disc the character stands on, ringed in light blue. */
-function Platform() {
+/** A dark disc the character stands on, ringed in steel blue. */
+function Platform({ state }: { state: StageState }) {
+  const ref = useRef<Group>(null)
+  useEffect(() => {
+    const { rig } = state
+    rig.platform = ref.current
+    return () => {
+      rig.platform = null
+    }
+  }, [state])
   return (
-    <group rotation-x={-Math.PI / 2}>
+    <group ref={ref} rotation-x={-Math.PI / 2}>
       <mesh receiveShadow>
-        <circleGeometry args={[0.95, 96]} />
-        <meshStandardMaterial color="#f8f9fb" roughness={0.9} />
+        <circleGeometry args={[PLATFORM_RADIUS, 96]} />
+        <meshStandardMaterial color="#16191e" roughness={0.55} />
       </mesh>
       <mesh position-z={0.001}>
-        <ringGeometry args={[0.95, 0.975, 128]} />
-        <meshBasicMaterial color="#bcd6f2" toneMapped={false} />
+        <ringGeometry args={[PLATFORM_RADIUS, 0.975, 128]} />
+        <meshBasicMaterial color="#5b8fb9" opacity={0.55} toneMapped={false} transparent />
       </mesh>
       <mesh position-z={0.0005}>
         <ringGeometry args={[1.05, 1.9, 128]} />
-        <meshBasicMaterial color="#ffffff" opacity={0.35} toneMapped={false} transparent />
+        <meshBasicMaterial color="#ffffff" opacity={0.05} toneMapped={false} transparent />
       </mesh>
     </group>
   )
 }
 
+/** The soft shadow under the feet: shown for the whole and upper body (and kept for the AI's whole-body shot). */
+function FloorShadow({ state, shown }: { state: StageState; shown: boolean }) {
+  const ref = useRef<Group>(null)
+  useEffect(() => {
+    const { rig } = state
+    rig.contact = ref.current
+    return () => {
+      rig.contact = null
+    }
+  }, [state])
+  return (
+    <group ref={ref} visible={shown}>
+      <ContactShadows
+        blur={2.4}
+        color="#000"
+        far={1.2}
+        opacity={0.6}
+        position={[0, 0.003, 0]}
+        resolution={512}
+        scale={2.6}
+      />
+    </group>
+  )
+}
+
+/** Hands the capture the renderer, the scene and the live camera. */
+function RigBridge({ state }: { state: StageState }) {
+  const gl = useThree((three) => three.gl)
+  const scene = useThree((three) => three.scene)
+  const camera = useThree((three) => three.camera)
+  const size = useThree((three) => three.size)
+  useEffect(() => {
+    const { rig } = state
+    rig.gl = gl
+    rig.scene = scene
+    rig.camera = camera as PerspectiveCamera
+    rig.size = { width: size.width, height: size.height }
+  }, [state, gl, scene, camera, size.width, size.height])
+  return null
+}
+
 /**
- * The studio's 3D view: the character on a lit turntable, idling or playing
- * the emote being previewed, framed by `focus`. Dragging turns it (via
- * `yaw`), the wheel zooms.
+ * Draws the frame, last: the handles' projector runs after the pose (at
+ * priority 1), and a frame callback with a priority takes the drawing over
+ * from the canvas.
+ */
+function FrameRender() {
+  useFrame(({ gl, scene, camera }) => gl.render(scene, camera), 2)
+  return null
+}
+
+/** The filter's overlays over the canvas (not over the handles or the chrome), centred on the free room. */
+function FilterOverlays({
+  filter,
+  insets,
+  box,
+}: {
+  filter: StudioFilterId
+  insets: StageInsets
+  box: { width: number; height: number }
+}) {
+  const { overlays } = STUDIO_FILTER[filter]
+  if (overlays.length === 0) return null
+  const freeWidth = Math.max(1, box.width - insets.left - insets.right)
+  const freeHeight = Math.max(1, box.height - insets.top - insets.bottom)
+  const centre = {
+    width: box.width,
+    height: box.height,
+    cx: insets.left + freeWidth / 2,
+    cy: insets.top + freeHeight / 2,
+  }
+  const grain = overlays.some((overlay) => overlay.kind === 'grain') ? grainDataUrl() : null
+  return (
+    <>
+      {overlays.map((overlay) => (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          key={`${filter}-${overlay.kind}`}
+          style={{
+            background: overlayBackground(overlay, centre, grain),
+            mixBlendMode: overlayBlend(overlay),
+            opacity: overlay.kind === 'grain' ? overlay.opacity : undefined,
+          }}
+        />
+      ))}
+    </>
+  )
+}
+
+/** A gesture on the stage: turning the turntable, dragging a handle, or pinching to zoom. */
+type Gesture =
+  | { kind: 'turn'; pointerId: number; x: number; yaw: number; moved: boolean }
+  | { kind: 'sculpt'; pointerId: number; x: number; y: number }
+  | { kind: 'pinch'; distance: number; zoom: number }
+
+/** The camera's lens when the canvas starts (the rig eases it from there). */
+const CAMERA = { fov: LENS.full.fov, near: 0.05, far: 50, position: [0, 1, 4] as const }
+
+/**
+ * The studio's 3D stage, full-bleed under the studio's chrome: the
+ * character on a lit turntable, framed by `focus` in the free room the
+ * chrome leaves (`insets`), idling or held still, with the face's handles
+ * over it when `sculpt` is on, and the photo filter. It owns every gesture
+ * on the stage (turning, zooming, sculpting, its keys); it never changes
+ * the look, only tells of sculpting through `onSculpt`.
  */
 export function StudioStage({
+  ref,
   avatarId,
   look,
-  cue,
   focus,
-  zoom,
-  yaw,
+  insets,
+  pose,
+  cue,
   onCueEnd,
-}: {
-  avatarId: string
-  look: AvatarLook
-  cue: EmoteCue | null
-  focus: CameraFocus
-  zoom: number
-  yaw: { current: number }
-  onCueEnd: () => void
-}) {
+  filter,
+  sculpt,
+  onSculpt,
+  onHandleHover,
+  onViewChange,
+}: StudioStageProps) {
   const stature = findAvatar(avatarId).hip * HEIGHT_PER_HIP
-  const model = useRef<Object3D | null>(null)
-  const view = useMemo<View>(() => ({ x: 0, y: 1, half: 1 }), [])
+  const [board] = useState(createHandleBoard)
+  // Made once; the props are copied in below on every render.
+  const [state] = useState<StageState>(() => ({
+    focus,
+    insets,
+    pose,
+    cue,
+    scale: 1,
+    zoom: 1,
+    yaw: 0,
+    turned: 0,
+    sign: 1,
+    told: 'front',
+    view: { x: 0, y: 1, half: 1 },
+    held: null,
+    model: { current: null },
+    board,
+    rig: {
+      gl: null,
+      scene: null,
+      camera: null,
+      size: { width: 1, height: 1 },
+      view: { x: 0, y: 1, half: 1 },
+      aimLights: () => {},
+      setBackdropWindow: () => {},
+      backdrop: null,
+      platform: null,
+      contact: null,
+    },
+  }))
+  state.rig.view = state.view
+  if (state.focus !== focus) state.zoom = 1
+  state.focus = focus
+  state.insets = insets
+  state.pose = pose
+  state.cue = cue
+  state.scale = bodyHeightScale(look.body)
+  const target = useFaceTarget(avatarId)
+  board.sculpt = sculpt
+  board.target = target
+
+  const callbacks = useRef({ onSculpt, onHandleHover, onViewChange })
+  callbacks.current = { onSculpt, onHandleHover, onViewChange }
+  board.onSculpt = (event) => callbacks.current.onSculpt(event)
+  board.onHover = (handle) => callbacks.current.onHandleHover(handle)
+
+  const tell = useCallback(
+    (view: StageView) => {
+      if (state.told === view) return
+      state.told = view
+      callbacks.current.onViewChange(view)
+    },
+    [state],
+  )
+  const setView = useCallback(
+    (view: Exclude<StageView, 'free'>) => {
+      const next = viewTurn(view, state.told, state.yaw, state.sign)
+      state.yaw = next.yaw
+      state.sign = next.sign
+      tell(view)
+    },
+    [state, tell],
+  )
+  const frame = useCallback(() => {
+    state.zoom = 1
+  }, [state])
+
+  useImperativeHandle(
+    ref,
+    (): StudioStageApi => ({
+      setView,
+      frame,
+      capture: (request) => {
+        const model = state.model.current
+        if (!(model && state.rig.gl)) {
+          return Promise.reject(new Error('capture: the character has not loaded'))
+        }
+        try {
+          return request.kind === 'ai'
+            ? captureAiShot(state.rig, request.framing, model, stature, state.scale)
+            : captureSnapshot(state.rig, request.filter, state.insets)
+        } catch (error) {
+          return Promise.reject(error)
+        }
+      },
+    }),
+    [setView, frame, state, stature],
+  )
+
+  // A handle in hand is put back when the handles go (another tab, the UI
+  // hidden), the character changes or the stage closes.
+  useEffect(() => {
+    if (!sculpt) dropHandle(board, false)
+  }, [sculpt, board])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new character lets go of the old face's handle
+  useEffect(() => () => dropHandle(board, false), [board, avatarId])
+
+  const container = useRef<HTMLDivElement>(null)
+  const [box, setBox] = useState({ width: 1, height: 1 })
+  const [dpr, setDpr] = useState(() =>
+    typeof window === 'undefined' ? 1 : cappedDpr(window.innerWidth, window.innerHeight),
+  )
+  useEffect(() => {
+    const element = container.current
+    if (!element) return
+    const observer = new ResizeObserver(() => {
+      const { width, height } = element.getBoundingClientRect()
+      setBox({ width, height })
+      setDpr(cappedDpr(width, height))
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  const gesture = useRef<Gesture | null>(null)
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
+  const setCursor = (cursor: string) => {
+    if (container.current) container.current.style.cursor = cursor
+  }
+  const local = (event: { clientX: number; clientY: number }) => {
+    const rect = container.current!.getBoundingClientRect()
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top }
+  }
+  const finishTurn = (moved: boolean) => {
+    setHandleState(board, { turning: false })
+    if (!moved) return
+    const rest = snapTurn(state.yaw)
+    state.yaw = rest.yaw
+    tell(rest.view)
+  }
+  /** Ends the gesture under way: a sculpt kept (`commit`) or put back, a turn come to rest. */
+  const endGesture = (commit: boolean) => {
+    const current = gesture.current
+    gesture.current = null
+    if (current?.kind === 'sculpt') dropHandle(board, commit)
+    else if (current?.kind === 'turn') finishTurn(current.moved)
+    setCursor('grab')
+  }
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    const element = event.currentTarget
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    element.setPointerCapture(event.pointerId)
+    if (pointers.current.size >= 2) {
+      endGesture(false)
+      const [a, b] = [...pointers.current.values()]
+      gesture.current = {
+        kind: 'pinch',
+        distance: Math.max(1, Math.hypot(a!.x - b!.x, a!.y - b!.y)),
+        zoom: state.zoom,
+      }
+      return
+    }
+    const at = local(event)
+    const hit = hitHandle(board, at, event.pointerType)
+    if (hit && grabHandle(board, hit, { ...at, id: event.pointerId })) {
+      gesture.current = {
+        kind: 'sculpt',
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+      }
+      hoverHandle(board, null)
+      setCursor('grabbing')
+      return
+    }
+    gesture.current = {
+      kind: 'turn',
+      pointerId: event.pointerId,
+      x: event.clientX,
+      yaw: state.yaw,
+      moved: false,
+    }
+    hoverHandle(board, null)
+    setHandleState(board, { turning: true })
+    setCursor('grabbing')
+  }
+
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (pointers.current.has(event.pointerId)) {
+      pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    }
+    const current = gesture.current
+    if (current?.kind === 'pinch') {
+      const [a, b] = [...pointers.current.values()]
+      if (a && b) {
+        const distance = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y))
+        state.zoom = clampZoom(state.focus, (current.zoom * current.distance) / distance)
+      }
+      return
+    }
+    if (current?.kind === 'sculpt' && current.pointerId === event.pointerId) {
+      const drag = board.drag
+      if (!drag) return
+      const dx = event.clientX - current.x
+      const dy = event.clientY - current.y
+      if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+      const depth = event.altKey || Boolean(board.sculpt?.depth)
+      dragHandle(board, pointerMove(dx, dy, depth), { x: drag.x + dx, y: drag.y + dy })
+      return
+    }
+    if (current?.kind === 'turn' && current.pointerId === event.pointerId) {
+      const dx = event.clientX - current.x
+      if (Math.abs(dx) > DRAG_THRESHOLD) current.moved = true
+      state.yaw = current.yaw + dx * TURN_PER_PIXEL
+      return
+    }
+    if (!current && event.pointerType !== 'touch') {
+      const hit = hitHandle(board, local(event), event.pointerType)
+      hoverHandle(board, hit)
+      setCursor(hit ? 'pointer' : 'grab')
+    }
+  }
+
+  const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    pointers.current.delete(event.pointerId)
+    const current = gesture.current
+    if (current?.kind === 'pinch') {
+      if (pointers.current.size < 2) gesture.current = null
+      return
+    }
+    if (current && current.pointerId === event.pointerId) endGesture(true)
+  }
+
+  const onPointerGone = (event: ReactPointerEvent<HTMLDivElement>) => {
+    pointers.current.delete(event.pointerId)
+    const current = gesture.current
+    if (current?.kind === 'pinch') {
+      if (pointers.current.size < 2) gesture.current = null
+      return
+    }
+    if (current && current.pointerId === event.pointerId) endGesture(false)
+  }
+
+  // The wheel zooms (and a trackpad's pinch, which comes as a wheel with
+  // Ctrl, must not zoom the page): a listener that may prevent the default.
+  useEffect(() => {
+    const element = container.current
+    if (!element) return
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      state.zoom = clampZoom(state.focus, state.zoom * Math.exp(event.deltaY * WHEEL_ZOOM))
+    }
+    element.addEventListener('wheel', onWheel, { passive: false })
+    return () => element.removeEventListener('wheel', onWheel)
+  }, [state])
+
+  // The stage's keys and the handles' (studio-wide keys are the studio's):
+  // listened for before anything else gets them, and kept from the rest
+  // once used.
+  useEffect(() => {
+    const used = (event: KeyboardEvent) => {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+    }
+    const onKey = (event: KeyboardEvent) => {
+      const root = container.current
+      if (!root) return
+      if (event.key === 'Escape' && gesture.current?.kind === 'sculpt') {
+        const { pointerId } = gesture.current
+        gesture.current = null
+        dropHandle(board, false)
+        if (root.hasPointerCapture(pointerId)) root.releasePointerCapture(pointerId)
+        root.style.cursor = 'grab'
+        used(event)
+        return
+      }
+      const target = event.target as Node | null
+      if (!(target && root.contains(target))) return
+      if (target !== root) {
+        if (handleKey(board, event)) used(event)
+        return
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      switch (event.key) {
+        case 'ArrowLeft':
+        case 'ArrowRight': {
+          state.yaw += event.key === 'ArrowRight' ? TURN_STEP : -TURN_STEP
+          const rest = snapTurn(state.yaw)
+          state.yaw = rest.yaw
+          tell(rest.view)
+          break
+        }
+        case '+':
+        case '=':
+          state.zoom = clampZoom(state.focus, state.zoom / KEY_ZOOM)
+          break
+        case '-':
+        case '_':
+          state.zoom = clampZoom(state.focus, state.zoom * KEY_ZOOM)
+          break
+        case 'Home':
+          setView('front')
+          break
+        default:
+          return
+      }
+      used(event)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [board, state, tell, setView])
+
+  const css = STUDIO_FILTER[filter].css
   return (
-    <Canvas
-      camera={{ fov: LENS[focus].fov, near: 0.05, far: 50, position: [0, 1, 4] }}
-      dpr={[1, 2]}
-      gl={{ antialias: true, powerPreference: 'high-performance' }}
-      onCreated={({ gl }) => {
-        gl.toneMapping = NeutralToneMapping
-        gl.toneMappingExposure = 1
+    <div
+      aria-label="캐릭터 미리보기. 화살표로 돌리고, +와 -로 확대해요"
+      aria-roledescription="캐릭터 무대"
+      className="absolute inset-0 cursor-grab touch-none outline-none focus-visible:outline-2 focus-visible:outline-sky-400 focus-visible:outline-offset-[-4px]"
+      onDoubleClick={(event) => {
+        if (!hitHandle(board, local(event), 'mouse')) frame()
       }}
-      shadows="percentage"
+      onLostPointerCapture={onPointerGone}
+      onPointerCancel={onPointerGone}
+      onPointerDown={onPointerDown}
+      onPointerLeave={() => {
+        if (!gesture.current) hoverHandle(board, null)
+      }}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      ref={container}
+      role="application"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: an application widget, one tab stop: its keys turn and zoom the stage
+      tabIndex={0}
     >
-      <Backdrop />
-      <StudioEnvironment />
-      <StudioLights view={view} />
-      <Platform />
-      {(focus === 'full' || focus === 'upper') && (
-        <ContactShadows
-          blur={2.4}
-          color="#1b2533"
-          far={1.2}
-          opacity={0.5}
-          position={[0, 0.003, 0]}
-          resolution={512}
-          scale={2.6}
-        />
-      )}
-      <Suspense fallback={null}>
-        <StudioAvatar
-          avatarId={avatarId}
-          cue={cue}
-          look={look}
-          onCueEnd={onCueEnd}
-          shown={model}
-          still={focus === 'face' || focus === 'hair'}
-          yaw={yaw}
-        />
-      </Suspense>
-      <CameraRig
-        focus={focus}
-        model={model}
-        scale={bodyHeightScale(look.body)}
-        stature={stature}
-        view={view}
-        zoom={zoom}
-      />
-    </Canvas>
+      <Canvas
+        camera={CAMERA}
+        dpr={dpr}
+        gl={{ antialias: true, powerPreference: 'high-performance' }}
+        onCreated={({ gl }) => {
+          gl.toneMapping = NeutralToneMapping
+          gl.toneMappingExposure = 1
+        }}
+        shadows="percentage"
+        style={css === 'none' ? undefined : { filter: css }}
+      >
+        <Backdrop state={state} />
+        <StudioEnvironment />
+        <StudioLights state={state} />
+        <Platform state={state} />
+        <FloorShadow shown={!HEAD_FOCUS.has(focus)} state={state} />
+        <Suspense fallback={null}>
+          <StudioAvatar avatarId={avatarId} look={look} onCueEnd={onCueEnd} state={state} />
+        </Suspense>
+        <CameraRig state={state} stature={stature} />
+        <HandleProjector board={board} model={state.model} />
+        <RigBridge state={state} />
+        <FrameRender />
+      </Canvas>
+      <FilterOverlays box={box} filter={filter} insets={insets} />
+      <FaceHandles board={board} sculpt={sculpt} />
+    </div>
   )
 }

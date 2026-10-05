@@ -43,6 +43,7 @@ export {
   type TwoBoneSolution,
 } from './components/editor/first-person/avatar-reach'
 export { useAvatarBody } from './components/editor/first-person/avatar-rig'
+export { headOf } from './components/editor/first-person/avatar-shape'
 export {
   BODY_SLIDER_GROUPS,
   BODY_SLIDERS,
@@ -67,6 +68,20 @@ export {
   isEmoteId,
   keyLabel,
 } from './components/editor/first-person/emotes'
+export { type FaceAnchor, faceAnchors } from './components/editor/first-person/face-anchors'
+export {
+  applyFaceDrag,
+  EAR_DRAG_UNIT,
+  FACE_HANDLE,
+  FACE_HANDLES,
+  type FaceDrag,
+  type FaceHandle,
+  type FaceHandleId,
+  type FaceRegion,
+  faceRegionOf,
+  regionChanged,
+  resetFaceRegion,
+} from './components/editor/first-person/face-handles'
 export {
   BEARD_STYLES,
   type BeardStyle,
@@ -74,6 +89,13 @@ export {
   hasFacePaint,
   NO_PAINT,
 } from './components/editor/first-person/face-paint'
+export {
+  type FacePin,
+  type FacePins,
+  hasPins,
+  MAX_PIN,
+  readFacePins,
+} from './components/editor/first-person/face-pins'
 export {
   FACE_PARTS,
   FACE_POINT_COUNT,
@@ -86,13 +108,16 @@ export {
   DEFAULT_FACE_SHAPE,
   FACE_SLIDER_GROUPS,
   FACE_SLIDERS,
+  type FaceField,
   type FaceShape,
   type FaceSliderGroup,
   type FaceSliderId,
+  faceShapeField,
+  hasFaceShape,
   hasSliders,
   readFaceShape,
 } from './components/editor/first-person/face-shape'
-export { loadFaceTargets } from './components/editor/first-person/face-targets'
+export { loadFaceTargets, useFaceTarget } from './components/editor/first-person/face-targets'
 export {
   type AvatarFeet,
   FOOTWEAR,
@@ -105,6 +130,7 @@ export {
   type HairStyleEntry,
   loadHairStyles,
 } from './components/editor/first-person/hair-styles'
+export { type HeadFrame, headFrame } from './components/editor/first-person/head-geometry'
 // Gait blending and presence smoothing, for bodies driven outside the player
 // controller (NPCs in `@pascal-app/nodes`).
 export {
@@ -555,10 +581,12 @@ export {
   DEFAULT_FACE_LIGHT,
   default as useAvatarProfile,
   hasLook,
+  MAX_CHARACTER_NAME,
   NO_LOOK,
   paintOf,
   readAvatarFace,
   readAvatarLook,
+  readCharacterName,
   useAvatarEmote,
 } from './store/use-avatar-profile'
 export { type CommandAction, useCommandRegistry } from './store/use-command-registry'

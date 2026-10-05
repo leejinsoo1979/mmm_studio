@@ -22,7 +22,7 @@ import { isFacePoints } from '../components/editor/first-person/face-points'
 import {
   DEFAULT_FACE_SHAPE,
   type FaceShape,
-  hasSliders,
+  hasFaceShape,
   readFaceShape,
 } from '../components/editor/first-person/face-shape'
 import { type AvatarFeet, readAvatarFeet, SHOD } from '../components/editor/first-person/footwear'
@@ -76,8 +76,8 @@ export const DEFAULT_FACE_LIGHT = 0.5
 
 /**
  * The player's changes to their character: hair and skin dyes (hex), a face
- * photo, the face's shape (the photo's proportions, the sliders), the
- * build, the hairstyle, and what is painted on the face.
+ * photo, the face's shape (the photo's proportions, the sliders, the
+ * sculpted pins), the build, the hairstyle, and what is painted on the face.
  */
 export type AvatarLook = {
   hair: string | null
@@ -152,16 +152,28 @@ export const hasLook = (look: AvatarPaint | null | undefined): look is AvatarPai
 /** Whether a look changes the character at all. */
 export const changesCharacter = (look: AvatarLook) =>
   hasLook(paintOf(look)) ||
-  hasSliders(look.shape) ||
+  hasFaceShape(look.shape) ||
   hasBodyShape(look.body) ||
   look.hairStyle !== null
+
+/** The longest name a player gives their character (in characters). */
+export const MAX_CHARACTER_NAME = 16
+
+/** A character's name as kept: trimmed, at most MAX_CHARACTER_NAME long ('' when it isn't one). */
+export const readCharacterName = (value: unknown): string =>
+  typeof value === 'string'
+    ? Array.from(value.trim()).slice(0, MAX_CHARACTER_NAME).join('').trim()
+    : ''
 
 type AvatarProfileState = {
   look: AvatarLook
   /** Emote keys, by `KeyboardEvent.code`. */
   keys: Record<string, EmoteId>
+  /** What the player calls their character ('' for none). */
+  name: string
   setLook: (look: AvatarLook) => void
   setKeys: (keys: Record<string, EmoteId>) => void
+  setName: (name: string) => void
 }
 
 /** The player's own character setup, kept in this browser (the body itself is useWalkthroughView's). */
@@ -170,8 +182,10 @@ const useAvatarProfile = create<AvatarProfileState>()(
     (set) => ({
       look: NO_LOOK,
       keys: DEFAULT_EMOTE_KEYS,
+      name: '',
       setLook: (look) => set({ look }),
       setKeys: (keys) => set({ keys }),
+      setName: (name) => set({ name: readCharacterName(name) }),
     }),
     {
       name: 'mmm-avatar-profile',
@@ -182,7 +196,12 @@ const useAvatarProfile = create<AvatarProfileState>()(
         const keys = Object.fromEntries(
           Object.entries(saved.keys ?? current.keys).filter(([, emote]) => isEmoteId(emote)),
         ) as Record<string, EmoteId>
-        return { ...current, look: readAvatarLook(saved.look), keys }
+        return {
+          ...current,
+          look: readAvatarLook(saved.look),
+          keys,
+          name: readCharacterName(saved.name),
+        }
       },
     },
   ),

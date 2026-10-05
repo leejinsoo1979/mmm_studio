@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import {
   Bone,
   BufferGeometry,
@@ -11,8 +12,23 @@ import {
   Vector3,
 } from 'three'
 import { faceShaper } from './avatar-shape'
-import { FACE_PARTS, FACE_POINT_COUNT, facePointOf, type Point, packPoints } from './face-points'
-import { faceShapeField, hasSliders, photoResiduals, readFaceShape } from './face-shape'
+import { FACE_HANDLE } from './face-handles'
+import { MAX_PIN, pinsField, sculpt } from './face-pins'
+import {
+  FACE_PARTS,
+  FACE_POINT_COUNT,
+  facePointOf,
+  type Point,
+  packPoints,
+  unpackPoints,
+} from './face-points'
+import {
+  faceShapeField,
+  hasFaceShape,
+  hasSliders,
+  photoResiduals,
+  readFaceShape,
+} from './face-shape'
 import type { HeadFrame } from './head-geometry'
 
 /**
@@ -122,7 +138,11 @@ const at = (landmark: number) => featurePoints()[facePointOf(landmark)]!
 
 /** A slider's move at a place on the featured face. */
 function moveAt(slider: string, setting: number, [x, y]: Point) {
-  const field = faceShapeField(featured, { fit: 1, sliders: { [slider]: setting } }, null)!
+  const field = faceShapeField(
+    featured,
+    { fit: 1, sliders: { [slider]: setting }, pins: {} },
+    null,
+  )!
   const out = [0, 0, 0]
   field(x, y, out)
   return out
@@ -138,16 +158,54 @@ function framed(points: Point[], scale: number, angle: number, shift: Point): Po
   ])
 }
 
+/** Real characters' landmarks, as the app downloads them. */
+const REAL: Record<string, number[]> = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../../../../../apps/editor/public/characters/rocketbox/face-points.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+).avatars
+
 describe('a face shape as saved', () => {
   test('keeps known sliders in range, drops the rest', () => {
     const shape = readFaceShape({
       fit: 3,
       sliders: { eyeSize: 2, noseWidth: -0.4, wings: 1, jawWidth: 'x' },
     })
-    expect(shape).toEqual({ fit: 1, sliders: { eyeSize: 1, noseWidth: -0.4 } })
-    expect(readFaceShape(null)).toEqual({ fit: 1, sliders: {} })
+    expect(shape).toEqual({ fit: 1, sliders: { eyeSize: 1, noseWidth: -0.4 }, pins: {} })
+    expect(readFaceShape(null)).toEqual({ fit: 1, sliders: {}, pins: {} })
     expect(hasSliders(shape)).toBe(true)
     expect(hasSliders(readFaceShape({ sliders: { eyeSize: 0 } }))).toBe(false)
+  })
+
+  test('reads the pins: irises and unknown landmarks dropped, the rest kept in range', () => {
+    const shape = readFaceShape({
+      fit: 1,
+      sliders: {},
+      pins: { 4: [0.01, -0.02, 0.005], 468: [0.01, 0, 0], 999: [0.01, 0, 0], 152: [0.3, 0.4, 0] },
+    })
+    expect(shape.pins).toEqual({ 4: [0.01, -0.02, 0.005], 152: [0.6 * MAX_PIN, 0.8 * MAX_PIN, 0] })
+    expect(readFaceShape(JSON.parse(JSON.stringify(shape)))).toEqual(shape)
+    for (const junk of [undefined, null, 'pins', [[0, 0, 0.01]]]) {
+      expect(readFaceShape({ fit: 0.5, sliders: { eyeSize: 0.2 }, pins: junk }).pins).toEqual({})
+    }
+  })
+
+  test('an older save, from before pins, loads as it was with none', () => {
+    const old = { fit: 0.6, sliders: { eyeSize: 0.4, jawWidth: -0.25 } }
+    expect(readFaceShape(old)).toEqual({ ...old, pins: {} })
+  })
+
+  test('pins alone shape the face; the sliders alone are still the sliders', () => {
+    const pinned = { fit: 1, sliders: {}, pins: { 4: [0, 0, 0.01] as [number, number, number] } }
+    expect(hasFaceShape(pinned)).toBe(true)
+    expect(hasSliders(pinned)).toBe(false)
+    expect(hasFaceShape({ ...pinned, pins: { 4: [0, 0, 0] } })).toBe(false)
+    expect(hasFaceShape({ fit: 1, sliders: { eyeSize: 0.2 }, pins: {} })).toBe(true)
+    expect(hasFaceShape(null)).toBe(false)
   })
 })
 
@@ -182,20 +240,20 @@ describe('a photo’s face against the character’s', () => {
 
 describe('the shape’s field', () => {
   test('nothing to do: no field', () => {
-    expect(faceShapeField(target, { fit: 1, sliders: {} }, null)).toBeNull()
-    expect(faceShapeField(target, { fit: 0, sliders: {} }, target)).toBeNull()
+    expect(faceShapeField(target, { fit: 1, sliders: {}, pins: {} }, null)).toBeNull()
+    expect(faceShapeField(target, { fit: 0, sliders: {}, pins: {} }, target)).toBeNull()
     expect(
-      faceShapeField(target, { fit: 1, sliders: { jawAngle: 0, upperLip: 0 } }, null),
+      faceShapeField(target, { fit: 1, sliders: { jawAngle: 0, upperLip: 0 }, pins: {} }, null),
     ).toBeNull()
   })
 
   test('the ears are no brush’s: their sliders leave the face field be', () => {
     const sliders = { earSize: 1, earAngle: -1, earHeight: 1, earPoint: 1 }
-    expect(faceShapeField(target, { fit: 1, sliders }, null)).toBeNull()
+    expect(faceShapeField(target, { fit: 1, sliders, pins: {} }, null)).toBeNull()
   })
 
   test('the eyes set wider apart move out, each its own way, and the chin stays', () => {
-    const field = faceShapeField(target, { fit: 1, sliders: { eyeSpacing: 1 } }, null)!
+    const field = faceShapeField(target, { fit: 1, sliders: { eyeSpacing: 1 }, pins: {} }, null)!
     const out = [0, 0, 0]
     field(0.38, 0.46, out)
     expect(out[0]).toBeLessThan(0)
@@ -206,7 +264,7 @@ describe('the shape’s field', () => {
   })
 
   test('a higher nose comes out of the face; far from the face nothing moves', () => {
-    const field = faceShapeField(target, { fit: 1, sliders: { noseHeight: 1 } }, null)!
+    const field = faceShapeField(target, { fit: 1, sliders: { noseHeight: 1 }, pins: {} }, null)!
     // Down the bridge, from its top to the tip.
     const [top, tip] = [6, 4].map((landmark) => facePoints()[facePointOf(landmark)]!)
     const out = [0, 0, 0]
@@ -220,12 +278,111 @@ describe('the shape’s field', () => {
     const points = facePoints()
     const jaw = facePointOf(172)
     points[jaw] = [0.5 + (points[jaw]![0] - 0.5) * 0.8, points[jaw]![1]]
-    const field = faceShapeField(target, { fit: 1, sliders: {} }, packPoints(points))!
+    const field = faceShapeField(target, { fit: 1, sliders: {}, pins: {} }, packPoints(points))!
     const at = facePoints()[jaw]!
     const out = [0, 0, 0]
     field(at[0], at[1], out)
     // The image's left jaw, pulled towards the middle.
     expect(out[0]).toBeGreaterThan(0)
+  })
+})
+
+describe('the shape’s field with pins', () => {
+  const CHARACTER = REAL.Male_Adult_02!
+  const points = unpackPoints(CHARACTER)
+  const at = (landmark: number) => points[facePointOf(landmark)]!
+  const sampled: Point[] = [
+    at(4),
+    at(152),
+    at(61),
+    at(116),
+    at(159),
+    [0.5, 0.5],
+    [0.35, 0.62],
+    [0.6, 0.35],
+    [0.1, 0.1],
+  ]
+
+  test('pins alone make a field, which puts a lone pin’s landmark where it is pinned', () => {
+    const pins = { 4: [0.004, -0.006, 0.012] as [number, number, number] }
+    const field = faceShapeField(CHARACTER, { fit: 1, sliders: {}, pins }, null)!
+    expect(field).not.toBeNull()
+    const out = [0, 0, 0]
+    field(...at(4), out)
+    for (let k = 0; k < 3; k++) expect(out[k]).toBeCloseTo(pins[4][k]!, 9)
+  })
+
+  test('with sliders: the pins pull the landmarks where the sliders left them', () => {
+    const pins = sculpt(
+      {},
+      4,
+      [0.004, -0.006, 0.012],
+      { radius: 0.05, falloff: 'smooth', symmetric: true },
+      CHARACTER,
+    )
+    const sliders = { noseLength: 0.6, faceWidth: -0.4, mouthWidth: 0.5 }
+    const both = faceShapeField(CHARACTER, { fit: 1, sliders, pins }, null)!
+    const slid = faceShapeField(CHARACTER, { fit: 1, sliders, pins: {} }, null)!
+    const shaped = points.flatMap(([x, y]) => {
+      const out = [0, 0, 0]
+      slid(x, y, out)
+      return [x + out[0]!, y + out[1]!]
+    })
+    const pinned = pinsField(pins, shaped)!
+    const [out, first, then] = [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ]
+    for (const [x, y] of sampled) {
+      both(x, y, out)
+      slid(x, y, first)
+      pinned(x + first[0]!, y + first[1]!, then)
+      for (let k = 0; k < 3; k++) expect(out[k]).toBeCloseTo(first[k]! + then[k]!, 12)
+    }
+    // A lone pin's landmark lands where it is pinned, however the sliders are set.
+    const lone = { 4: [0.004, -0.006, 0.012] as [number, number, number] }
+    const field = faceShapeField(CHARACTER, { fit: 1, sliders, pins: lone }, null)!
+    field(...at(4), out)
+    slid(...at(4), first)
+    for (let k = 0; k < 3; k++) expect(out[k]! - first[k]!).toBeCloseTo(lone[4][k]!, 6)
+  })
+
+  test('with a photo too: it is the photo’s and the sliders’ field, then the pins', () => {
+    const photo = REAL.Female_Adult_03!
+    const pins = { 152: [0, 0.01, 0.005] as [number, number, number] }
+    const field = faceShapeField(CHARACTER, { fit: 0.8, sliders: {}, pins }, photo)!
+    const photoOnly = faceShapeField(CHARACTER, { fit: 0.8, sliders: {}, pins: {} }, photo)!
+    const out = [0, 0, 0]
+    const first = [0, 0, 0]
+    field(...at(152), out)
+    photoOnly(...at(152), first)
+    for (let k = 0; k < 3; k++) expect(out[k]! - first[k]!).toBeCloseTo(pins[152][k]!, 6)
+  })
+
+  test('pulling the upper lid up barely moves the eyeball under it', () => {
+    const lid = FACE_HANDLE['eye-upper-r']
+    if (lid.kind !== 'landmark') throw new Error('a landmark handle')
+    for (const id of ['Male_Adult_02', 'Female_Adult_03', 'Female_Child_01']) {
+      const target = REAL[id]!
+      const pins = sculpt(
+        {},
+        lid.landmark,
+        [0, -0.03, 0],
+        { radius: lid.radius, falloff: 'smooth', symmetric: true },
+        target,
+      )
+      const field = faceShapeField(target, { fit: 1, sliders: {}, pins }, null)!
+      const [x, y] = unpackPoints(target)[FACE_PARTS.rightIris[0]!]!
+      const [skin, eyeball] = [
+        [0, 0, 0],
+        [0, 0, 0],
+      ]
+      field(...unpackPoints(target)[facePointOf(lid.landmark)]!, skin)
+      field.eyeballs(x, y, eyeball)
+      expect(skin[1]).toBeLessThan(-0.025)
+      expect(Math.hypot(eyeball[0]!, eyeball[1]!, eyeball[2]!)).toBeLessThan(0.2 * 0.03)
+    }
   })
 })
 
@@ -267,7 +424,11 @@ describe('the finer sliders', () => {
   test('the lid slides round the eyeball: in as it opens, out as it closes; the eyeball stays', () => {
     expect(moveAt('eyeOpen', 1, at(159))[2]).toBeLessThan(0)
     expect(moveAt('eyeOpen', -1, at(159))[2]).toBeGreaterThan(0)
-    const field = faceShapeField(featured, { fit: 1, sliders: { eyeOpen: 1, eyeSize: 1 } }, null)!
+    const field = faceShapeField(
+      featured,
+      { fit: 1, sliders: { eyeOpen: 1, eyeSize: 1 }, pins: {} },
+      null,
+    )!
     const [lids, eyeballs] = [
       [0, 0, 0],
       [0, 0, 0],
@@ -389,7 +550,11 @@ describe('the eyeballs, under the field', () => {
   /** Every point's move under a slider, with where it was. */
   function moved(slider: string, setting: number) {
     const { mesh, eyeCount } = head()
-    const field = faceShapeField(featured, { fit: 1, sliders: { [slider]: setting } }, null)!
+    const field = faceShapeField(
+      featured,
+      { fit: 1, sliders: { [slider]: setting }, pins: {} },
+      null,
+    )!
     const move = faceShaper(field, FRAME)(mesh)!
     const position = mesh.geometry.getAttribute('position')
     const points = Array.from({ length: position.count }, (_, i) => {

@@ -197,19 +197,19 @@ function CameraCapture({
           </p>
         )}
       </div>
-      <p className="text-center text-[11px] text-neutral-500">
+      <p className="text-center text-[11px] text-white/50">
         얼굴을 점선 안에 맞추고, 밝은 곳에서 정면을 바라봐 주세요
       </p>
       <div className="flex gap-2">
         <button
-          className="flex-1 rounded-xl border border-neutral-200 bg-white py-2 text-[13px] text-neutral-600 hover:bg-neutral-50"
+          className="flex-1 rounded-xl border border-white/10 bg-white/5 py-2 text-[13px] text-white/70 hover:bg-white/10"
           onClick={onClose}
           type="button"
         >
           취소
         </button>
         <button
-          className="flex flex-[2] items-center justify-center gap-1.5 rounded-xl bg-sky-500 py-2 font-semibold text-[13px] text-white hover:bg-sky-600 disabled:opacity-40"
+          className="flex flex-[2] items-center justify-center gap-1.5 rounded-xl bg-sky-400 py-2 font-semibold text-[13px] text-neutral-950 hover:bg-sky-300 disabled:opacity-40"
           disabled={Boolean(error)}
           onClick={take}
           type="button"
@@ -250,11 +250,11 @@ function MarkFeatures({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="rounded-xl bg-amber-50 px-3 py-2 text-[12px] text-amber-800 leading-5">
+      <div className="rounded-xl bg-amber-400/10 px-3 py-2 text-[12px] text-amber-200 leading-5">
         {note ?? '사진에서 얼굴을 찾지 못했어요. 눈과 입을 직접 알려 주세요.'}
       </div>
-      <div className="flex items-center gap-2 rounded-xl bg-sky-500 px-3 py-2 text-[12px] text-white shadow-[0_4px_12px_rgba(14,165,233,0.35)]">
-        <span className="grid size-5 shrink-0 place-items-center rounded-full bg-white font-bold text-[11px] text-sky-600">
+      <div className="flex items-center gap-2 rounded-xl bg-sky-400 px-3 py-2 text-[12px] text-neutral-950 shadow-[0_4px_12px_rgba(56,189,248,0.3)]">
+        <span className="grid size-5 shrink-0 place-items-center rounded-full bg-neutral-950 font-bold text-[11px] text-sky-300">
           {Math.min(3, step + 1)}
         </span>
         <span className="flex-1">
@@ -298,7 +298,7 @@ function MarkFeatures({
       </div>
       <div className="flex gap-2">
         <button
-          className="flex flex-1 items-center justify-center gap-1 rounded-xl border border-neutral-200 bg-white py-2 text-[12px] text-neutral-600 hover:bg-neutral-50 disabled:opacity-40"
+          className="flex flex-1 items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/5 py-2 text-[12px] text-white/70 hover:bg-white/10 disabled:opacity-40"
           disabled={marks.length === 0}
           onClick={() => setMarks([])}
           type="button"
@@ -306,7 +306,7 @@ function MarkFeatures({
           <RotateCcw className="size-3.5" /> 다시 누르기
         </button>
         <button
-          className="flex-1 rounded-xl border border-neutral-200 bg-white py-2 text-[12px] text-neutral-600 hover:bg-neutral-50"
+          className="flex-1 rounded-xl border border-white/10 bg-white/5 py-2 text-[12px] text-white/70 hover:bg-white/10"
           onClick={onCancel}
           type="button"
         >
@@ -469,9 +469,9 @@ export function FaceEditor({
 
   if (covered) {
     return (
-      <p className="flex items-start gap-2 rounded-2xl bg-amber-50 p-4 text-[12px] text-amber-800 leading-5">
+      <p className="flex items-start gap-2 rounded-2xl bg-amber-400/10 p-4 text-[12px] text-amber-200 leading-5">
         <TriangleAlert className="mt-0.5 size-4 shrink-0" />이 캐릭터는 얼굴이 가려져 있어서 얼굴을
-        입힐 수 없어요. 캐릭터 단계에서 다른 캐릭터를 골라 주세요.
+        입힐 수 없어요. 프리셋에서 다른 캐릭터를 골라 주세요.
       </p>
     )
   }
@@ -487,10 +487,10 @@ export function FaceEditor({
 
   if (status.kind === 'reading') {
     return (
-      <div className="flex flex-col items-center gap-3 rounded-2xl bg-sky-50/70 px-4 py-10 text-center">
-        <Loader2 className="size-7 animate-spin text-sky-500" />
-        <p className="font-medium text-[13px] text-neutral-700">{status.step}</p>
-        <p className="text-[11px] text-neutral-400">처음에는 인식 도구를 불러오느라 조금 걸려요</p>
+      <div className="flex flex-col items-center gap-3 rounded-2xl bg-white/[0.04] px-4 py-10 text-center">
+        <Loader2 className="size-7 animate-spin text-sky-400" />
+        <p className="font-medium text-[13px] text-white/85">{status.step}</p>
+        <p className="text-[11px] text-white/45">처음에는 인식 도구를 불러오느라 조금 걸려요</p>
       </div>
     )
   }
@@ -531,7 +531,7 @@ export function FaceEditor({
       <div className="flex flex-col gap-3">
         {picker}
         <button
-          className="group flex flex-col items-center gap-3 rounded-2xl border-2 border-sky-200 border-dashed bg-sky-50/60 px-4 py-7 text-center transition hover:border-sky-400 hover:bg-sky-50"
+          className="group flex flex-col items-center gap-3 rounded-2xl border-2 border-sky-400/40 border-dashed bg-sky-400/[0.06] px-4 py-7 text-center outline-none transition hover:border-sky-400 hover:bg-sky-400/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400"
           onClick={() => fileRef.current?.click()}
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
@@ -540,29 +540,27 @@ export function FaceEditor({
           }}
           type="button"
         >
-          <span className="grid size-12 place-items-center rounded-full bg-white text-sky-500 shadow-sm transition group-hover:scale-105">
+          <span className="grid size-12 place-items-center rounded-full bg-white/10 text-sky-300 transition group-hover:scale-105">
             <ImagePlus className="size-6" />
           </span>
-          <span className="font-semibold text-[14px] text-neutral-800">얼굴 사진 올리기</span>
-          <span className="text-[12px] text-neutral-500 leading-5">
+          <span className="font-semibold text-[14px] text-white">얼굴 사진 올리기</span>
+          <span className="text-[12px] text-white/55 leading-5">
             사진을 끌어다 놓거나 눌러서 고르세요
           </span>
         </button>
         <button
-          className="flex items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white py-2.5 text-[13px] text-neutral-700 transition hover:bg-neutral-50"
+          className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 py-2.5 text-[13px] text-white/80 transition hover:bg-white/10"
           onClick={() => setStatus({ kind: 'camera' })}
           type="button"
         >
           <Camera className="size-4" /> 카메라로 찍기
         </button>
-        {error && <p className="text-[12px] text-rose-500">{error}</p>}
-        <ul className="space-y-1 rounded-xl bg-neutral-50 p-3 text-[12px] text-neutral-500 leading-5">
-          <li>· 정면을 보고 찍은, 밝고 고른 빛의 사진이 가장 자연스러워요</li>
-          <li>· 얼굴의 눈·코·입·턱선을 찾아 캐릭터 얼굴에 하나하나 맞춰 입혀요</li>
-          <li>
-            · 사진은 이 브라우저에서 처리돼요. 얼굴 부분만 잘라 저장하고, 같은 공간에 함께 있는
-            사람들에게 내 캐릭터의 얼굴로 보여요
-          </li>
+        {error && <p className="text-[12px] text-rose-400">{error}</p>}
+        <ul className="list-disc space-y-1 rounded-xl bg-white/[0.04] py-3 pr-3 pl-7 text-[12px] text-white/55 leading-5 marker:text-white/30">
+          <li>정면을 보고 찍은, 밝고 고른 빛의 사진이 가장 자연스러워요</li>
+          <li>얼굴의 눈·코·입·턱선을 찾아 캐릭터 얼굴에 하나하나 맞춰 입혀요</li>
+          <li>사진은 이 브라우저에서 처리되고, 얼굴 부분만 잘라 저장해요</li>
+          <li>같은 공간에 함께 있는 사람들에게 내 캐릭터의 얼굴로 보여요</li>
         </ul>
       </div>
     )
@@ -570,7 +568,7 @@ export function FaceEditor({
 
   const set = (patch: Partial<AvatarFace>) => onCommit({ face: { ...face, ...patch } })
   const skinFromPhoto = colors && look.skin?.toLowerCase() === colors.skin.toLowerCase()
-  // An iris colour picked in 메이크업 covers the photo's: using the photo's
+  // An iris colour picked in 렌즈 covers the photo's: using the photo's
   // takes that one off, so the choice shows.
   const photoIris = Boolean(face.eyes && !look.paint.eyes)
 
@@ -578,24 +576,24 @@ export function FaceEditor({
     <div className="flex flex-col gap-4">
       {picker}
       <div className="flex gap-3">
-        <div className="relative size-24 shrink-0 overflow-hidden rounded-2xl bg-neutral-100 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
+        <div className="relative size-24 shrink-0 overflow-hidden rounded-2xl bg-white/5 ring-1 ring-white/10">
           <img alt="" className="h-full w-full object-cover" src={face.photo} />
-          <span className="absolute right-1.5 bottom-1.5 grid size-5 place-items-center rounded-full bg-sky-500 text-white shadow">
+          <span className="absolute right-1.5 bottom-1.5 grid size-5 place-items-center rounded-full bg-sky-400 text-neutral-950 shadow">
             <ScanFace className="size-3" />
           </span>
         </div>
         <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
-          <p className="flex items-center gap-1 font-semibold text-[13px] text-neutral-800">
-            <Check className="size-4 text-sky-500" strokeWidth={3} /> 내 얼굴을 입혔어요
+          <p className="flex items-center gap-1 font-semibold text-[13px] text-white">
+            <Check className="size-4 text-sky-400" strokeWidth={3} /> 내 얼굴을 입혔어요
           </p>
-          <p className="text-[11px] text-neutral-500 leading-4">
-            사진 속 얼굴형을 분석해 캐릭터 얼굴을 다시 빚고, 피부와 이어지게 입혔어요
+          <p className="text-[11px] text-white/55 leading-4">
+            사진 속 얼굴형에 맞춰 캐릭터 얼굴을 다시 빚고, 피부와 이어지게 입혔어요
           </p>
         </div>
       </div>
 
       {pose && (
-        <p className="flex items-start gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-[11px] text-amber-800 leading-4">
+        <p className="flex items-start gap-1.5 rounded-xl bg-amber-400/10 px-3 py-2 text-[11px] text-amber-200 leading-4">
           <TriangleAlert className="mt-px size-3.5 shrink-0" /> {pose}
         </p>
       )}
@@ -617,16 +615,16 @@ export function FaceEditor({
       />
 
       {colors && (
-        <div className="flex flex-col gap-2 rounded-2xl bg-neutral-50 p-3">
+        <div className="flex flex-col gap-2 rounded-2xl bg-white/[0.04] p-3 ring-1 ring-white/10">
           <div className="flex items-center gap-2">
             <span
-              className="size-6 shrink-0 rounded-full ring-1 ring-black/10"
+              className="size-6 shrink-0 rounded-full ring-1 ring-white/15"
               style={{ background: colors.skin }}
             />
-            <span className="flex-1 text-[12px] text-neutral-700">피부색</span>
+            <span className="flex-1 text-[12px] text-white/80">피부색</span>
             {skinFromPhoto ? (
               <button
-                className="flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[11px] text-neutral-600 shadow-sm hover:text-neutral-900"
+                className="flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-[11px] text-white/75 hover:bg-white/15 hover:text-white"
                 onClick={() => onCommit({ skin: null })}
                 type="button"
               >
@@ -634,7 +632,7 @@ export function FaceEditor({
               </button>
             ) : (
               <button
-                className="rounded-full bg-sky-500 px-2.5 py-1 font-medium text-[11px] text-white hover:bg-sky-600"
+                className="rounded-full bg-sky-400 px-2.5 py-1 font-medium text-[11px] text-neutral-950 hover:bg-sky-300"
                 onClick={() => onCommit({ skin: colors.skin })}
                 type="button"
               >
@@ -645,25 +643,23 @@ export function FaceEditor({
           {colors.eyes && (
             <div className="flex items-center gap-2">
               <span
-                className="size-6 shrink-0 rounded-full ring-1 ring-black/10"
+                className="size-6 shrink-0 rounded-full ring-1 ring-white/15"
                 style={{
                   background: `radial-gradient(circle, #111 0 28%, ${colors.eyes} 30% 100%)`,
                 }}
               />
-              <span className="flex flex-1 flex-col text-[12px] text-neutral-700">
+              <span className="flex flex-1 flex-col text-[12px] text-white/80">
                 눈동자 색
                 {look.paint.eyes && (
-                  <span className="text-[10px] text-neutral-400">
-                    메이크업에서 고른 색이 보여요
-                  </span>
+                  <span className="text-[10px] text-white/45">렌즈에서 고른 색이 보여요</span>
                 )}
               </span>
               <button
                 className={cn(
                   'rounded-full px-2.5 py-1 font-medium text-[11px]',
                   photoIris
-                    ? 'bg-white text-neutral-600 shadow-sm hover:text-neutral-900'
-                    : 'bg-sky-500 text-white hover:bg-sky-600',
+                    ? 'bg-white/10 text-white/75 hover:bg-white/15 hover:text-white'
+                    : 'bg-sky-400 text-neutral-950 hover:bg-sky-300',
                 )}
                 onClick={() =>
                   photoIris
@@ -682,25 +678,25 @@ export function FaceEditor({
         </div>
       )}
 
-      {error && <p className="text-[12px] text-rose-500">{error}</p>}
+      {error && <p className="text-[12px] text-rose-400">{error}</p>}
 
       <div className="grid grid-cols-3 gap-2">
         <button
-          className="flex flex-col items-center gap-1 rounded-xl border border-neutral-200 bg-white py-2 text-[11px] text-neutral-600 transition hover:bg-neutral-50"
+          className="flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-white/5 py-2 text-[11px] text-white/70 transition hover:bg-white/10"
           onClick={() => fileRef.current?.click()}
           type="button"
         >
           <ImagePlus className="size-4" /> 다른 사진
         </button>
         <button
-          className="flex flex-col items-center gap-1 rounded-xl border border-neutral-200 bg-white py-2 text-[11px] text-neutral-600 transition hover:bg-neutral-50"
+          className="flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-white/5 py-2 text-[11px] text-white/70 transition hover:bg-white/10"
           onClick={() => setStatus({ kind: 'camera' })}
           type="button"
         >
           <Camera className="size-4" /> 다시 찍기
         </button>
         <button
-          className="flex flex-col items-center gap-1 rounded-xl border border-neutral-200 bg-white py-2 text-[11px] text-rose-500 transition hover:bg-rose-50"
+          className="flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-white/5 py-2 text-[11px] text-rose-400 transition hover:bg-rose-500/10"
           // The skin tone taken from the photo goes with it.
           onClick={() => onCommit(skinFromPhoto ? { face: null, skin: null } : { face: null })}
           type="button"

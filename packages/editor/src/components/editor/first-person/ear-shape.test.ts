@@ -138,7 +138,7 @@ function addEarring(parts: Parts, side: number) {
 
 const pointsOf = (mesh: Mesh) => [...mesh.geometry.getAttribute('position').array]
 const placeOf = (mesh: Mesh, i: number) => new Vector3().fromArray(pointsOf(mesh), i * 3)
-const shaped = (sliders: FaceShape['sliders']): FaceShape => ({ fit: 1, sliders })
+const shaped = (sliders: FaceShape['sliders']): FaceShape => ({ fit: 1, sliders, pins: {} })
 const earsOf = (mesh: Mesh) => findEars(pointsOf(mesh), mesh.geometry.index!.array, headFrame(mesh))
 
 /** Every point's move under a shape: the ear shaper's, for the head. */

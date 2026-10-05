@@ -124,12 +124,13 @@ function randomHairColour(random: Random): string | null {
 }
 
 /**
- * A random look for the 무작위 button: the face and body sliders, height,
- * a hairstyle of the character's sex (sometimes its own, which is null as
- * the gallery saves it, never its own id; the one it has while the library
- * is unavailable), hair colour and face paint. The base character, the
- * face photo (and how closely the head follows it) and the skin stay, as
- * the player chose those deliberately.
+ * A random look for the 무작위 button: the face and body sliders (a random
+ * face replaces the sculpted one, its pins cleared), height, a hairstyle of
+ * the character's sex (sometimes its own, which is null as the gallery
+ * saves it, never its own id; the one it has while the library is
+ * unavailable), hair colour and face paint. The base character, the face
+ * photo (and how closely the head follows it) and the skin stay, as the
+ * player chose those deliberately.
  */
 export function randomLook(
   look: AvatarLook,
@@ -137,7 +138,7 @@ export function randomLook(
   styles: readonly HairStyleEntry[] | null,
   random: Random = Math.random,
 ): AvatarLook {
-  const shape: FaceShape = { ...look.shape, sliders: settings(FACE_SLIDERS, random) }
+  const shape: FaceShape = { ...look.shape, sliders: settings(FACE_SLIDERS, random), pins: {} }
   const body: BodyShape = { height: setting(random), sliders: settings(BODY_SLIDERS, random) }
   const gender = avatarGender(avatar)
   const ofSex = styles?.filter((style) => style.gender === gender && style.id !== avatar) ?? []

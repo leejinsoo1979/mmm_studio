@@ -161,17 +161,27 @@ const smoothstep = (t: number) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t)
 
 /** How closely landmarks sit round skin point `i`: the distance to its third-nearest. */
 function spacing(points: readonly Point[], i: number): number {
-  const nearest = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY]
+  let first = Number.POSITIVE_INFINITY
+  let second = Number.POSITIVE_INFINITY
+  let third = Number.POSITIVE_INFINITY
   const [x, y] = points[i]!
   for (const j of SKIN) {
     if (j === i) continue
-    const d = Math.hypot(points[j]![0] - x, points[j]![1] - y)
-    if (d < nearest[2]!) {
-      nearest[2] = d
-      nearest.sort((a, b) => a - b)
+    const point = points[j]!
+    const d2 = (point[0] - x) ** 2 + (point[1] - y) ** 2
+    if (d2 >= third) continue
+    if (d2 < first) {
+      third = second
+      second = first
+      first = d2
+    } else if (d2 < second) {
+      third = second
+      second = d2
+    } else {
+      third = d2
     }
   }
-  return nearest[2]!
+  return Math.sqrt(third)
 }
 
 /**
@@ -193,40 +203,12 @@ function pulls(pins: FacePins, points: readonly Point[]): Pull[] {
       const stronger = list[j]!
       const give = smoothstep((stronger.length - pull.length) / (YIELD * stronger.length))
       if (give === 0) continue
-      const apart = Math.hypot(stronger.x - pull.x, stronger.y - pull.y)
+      const apart = Math.sqrt((stronger.x - pull.x) ** 2 + (stronger.y - pull.y) ** 2)
       pull.reach = Math.min(pull.reach, apart / give)
     }
     pull.reach = Math.max(pull.reach, DRAG * Math.hypot(pull.pin[0], pull.pin[1]))
   })
   return list
-}
-
-/**
- * How the skin at (x, y) moves at time `t` of the flow, into `out`: the
- * pulls blended by their kernels, each centred where its landmark has slid
- * to by then, against the face staying put — which counts for nothing
- * where a pull is at full weight, and for everything where none reaches.
- */
-function velocity(list: readonly Pull[], x: number, y: number, t: number, out: number[]) {
-  let dx = 0
-  let dy = 0
-  let dz = 0
-  let total = 0
-  let stay = 1
-  for (const { x: px, y: py, pin, reach } of list) {
-    const d2 = (x - px - t * pin[0]) ** 2 + (y - py - t * pin[1]) ** 2
-    if (d2 >= reach * reach) continue
-    const weight = wendland(Math.sqrt(d2) / reach)
-    dx += weight * pin[0]
-    dy += weight * pin[1]
-    dz += weight * pin[2]
-    total += weight
-    stay *= 1 - weight
-  }
-  const all = total + stay
-  out[0] = dx / all
-  out[1] = dy / all
-  out[2] = dz / all
 }
 
 /**
@@ -249,27 +231,80 @@ function velocity(list: readonly Pull[], x: number, y: number, t: number, out: n
 export function pinsField(pins: FacePins, target: readonly number[]): ShapeField | null {
   const list = pulls(pins, unpackPoints(target))
   if (list.length === 0) return null
-  // Skin further than this from every landmark never comes within a pull's reach.
+  // The pulls laid out flat: the field is followed a dozen steps for each
+  // of thousands of points per reshape, every time a drag moves.
+  const xs = Float64Array.from(list, (pull) => pull.x)
+  const ys = Float64Array.from(list, (pull) => pull.y)
+  const dxs = Float64Array.from(list, (pull) => pull.pin[0])
+  const dys = Float64Array.from(list, (pull) => pull.pin[1])
+  const dzs = Float64Array.from(list, (pull) => pull.pin[2])
+  const reaches = Float64Array.from(list, (pull) => pull.reach)
+  // Skin further than this from a pull's landmark never comes within its
+  // reach: the pull's centre slides by its pin, the skin by the longest.
   const longest = Math.max(...list.map(({ pin }) => Math.hypot(pin[0], pin[1])))
-  const margin = (pull: Pull) => pull.reach + Math.hypot(pull.pin[0], pull.pin[1]) + longest
-  const left = Math.min(...list.map((pull) => pull.x - margin(pull)))
-  const right = Math.max(...list.map((pull) => pull.x + margin(pull)))
-  const top = Math.min(...list.map((pull) => pull.y - margin(pull)))
-  const bottom = Math.max(...list.map((pull) => pull.y + margin(pull)))
+  const margins = list.map((pull) => pull.reach + Math.hypot(pull.pin[0], pull.pin[1]) + longest)
+  const left = Math.min(...list.map((pull, k) => pull.x - margins[k]!))
+  const right = Math.max(...list.map((pull, k) => pull.x + margins[k]!))
+  const top = Math.min(...list.map((pull, k) => pull.y - margins[k]!))
+  const bottom = Math.max(...list.map((pull, k) => pull.y + margins[k]!))
   const step = 1 / FLOW_STEPS
+  const near = new Int32Array(list.length)
+  let nearCount = 0
   const move = [0, 0, 0]
+
+  /**
+   * How the skin at (x, y) moves at time `t` of the flow, into `move`: the
+   * pulls blended by their kernels, each centred where its landmark has
+   * slid to by then, against the face staying put — which counts for
+   * nothing where a pull is at full weight, and for everything where none
+   * reaches.
+   */
+  const velocity = (x: number, y: number, t: number) => {
+    let dx = 0
+    let dy = 0
+    let dz = 0
+    let total = 0
+    let stay = 1
+    for (let k = 0; k < nearCount; k++) {
+      const j = near[k]!
+      const ex = x - xs[j]! - t * dxs[j]!
+      const ey = y - ys[j]! - t * dys[j]!
+      const d2 = ex * ex + ey * ey
+      const reach = reaches[j]!
+      if (d2 >= reach * reach) continue
+      const weight = wendland(Math.sqrt(d2) / reach)
+      dx += weight * dxs[j]!
+      dy += weight * dys[j]!
+      dz += weight * dzs[j]!
+      total += weight
+      stay *= 1 - weight
+    }
+    const all = total + stay
+    move[0] = dx / all
+    move[1] = dy / all
+    move[2] = dz / all
+  }
 
   return (x, y, out) => {
     out[0] = 0
     out[1] = 0
     out[2] = 0
     if (x <= left || x >= right || y <= top || y >= bottom) return
+    // The rest add nothing anywhere along this skin's way (a sculpted face
+    // has hundreds of pins, few of them near any one place).
+    nearCount = 0
+    for (let j = 0; j < list.length; j++) {
+      const ex = x - xs[j]!
+      const ey = y - ys[j]!
+      if (ex * ex + ey * ey < margins[j]! * margins[j]!) near[nearCount++] = j
+    }
+    if (nearCount === 0) return
     let px = x
     let py = y
     for (let k = 0; k < FLOW_STEPS; k++) {
       const t = k * step
-      velocity(list, px, py, t, move)
-      velocity(list, px + 0.5 * step * move[0]!, py + 0.5 * step * move[1]!, t + 0.5 * step, move)
+      velocity(px, py, t)
+      velocity(px + 0.5 * step * move[0]!, py + 0.5 * step * move[1]!, t + 0.5 * step)
       px += step * move[0]!
       py += step * move[1]!
       out[2]! += step * move[2]!

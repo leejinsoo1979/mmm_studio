@@ -1,3 +1,6 @@
+'use client'
+
+import { useEffect, useState } from 'react'
 import { FACE_POINT_COUNT } from './face-points'
 
 /**
@@ -13,6 +16,9 @@ type FaceTargets = Record<string, number[]>
 
 let targets: Promise<FaceTargets> | null = null
 
+/** The targets once downloaded, so a hook can give them at once. */
+let loaded: FaceTargets | null = null
+
 export function loadFaceTargets(): Promise<FaceTargets> {
   targets ??= fetch(FACE_TARGETS_URL)
     .then((response) => {
@@ -21,6 +27,7 @@ export function loadFaceTargets(): Promise<FaceTargets> {
     })
     .then((file) => {
       if (file.count !== FACE_POINT_COUNT) throw new Error('face points: out of date')
+      loaded = file.avatars
       return file.avatars
     })
     .catch((error: unknown) => {
@@ -29,4 +36,27 @@ export function loadFaceTargets(): Promise<FaceTargets> {
       throw error
     })
   return targets
+}
+
+/**
+ * A character's face landmarks (packed front-view points): undefined while
+ * they load (or couldn't be), null when the character has none (its face is
+ * covered). The same array for as long as the character stays.
+ */
+export function useFaceTarget(avatarId: string): readonly number[] | null | undefined {
+  const [, setReady] = useState(loaded !== null)
+  useEffect(() => {
+    if (loaded) return
+    let live = true
+    loadFaceTargets().then(
+      () => {
+        if (live) setReady(true)
+      },
+      (error: unknown) => console.warn('[look] could not load the face landmarks', error),
+    )
+    return () => {
+      live = false
+    }
+  }, [])
+  return loaded ? (loaded[avatarId] ?? null) : undefined
 }

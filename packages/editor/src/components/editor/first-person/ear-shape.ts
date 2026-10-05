@@ -764,6 +764,11 @@ export function hasEars(head: Mesh): boolean {
   return fitted(head).ears.length > 0
 }
 
+/** A head's ears in its bind pose: none, or both, the image's left first (found once per head). */
+export function earsOf(head: Mesh): readonly Ear[] {
+  return fitted(head).ears
+}
+
 /**
  * The ear sliders' reshaping of a body whose head mesh is `head`: its ears
  * and what hangs from them. Null when no ear slider is set, or the head has

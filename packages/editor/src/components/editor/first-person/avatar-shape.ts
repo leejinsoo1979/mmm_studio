@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import {
   BufferAttribute,
   type BufferGeometry,
@@ -14,7 +14,13 @@ import {
 import type { AvatarLook } from '../../../store/use-avatar-profile'
 import { bodyShaper } from './body-shape'
 import { earShaper } from './ear-shape'
-import { faceShapeField, hasSliders, type ShapeField } from './face-shape'
+import {
+  DEFAULT_FACE_SHAPE,
+  type FaceShape,
+  faceShapeField,
+  hasFaceShape,
+  type ShapeField,
+} from './face-shape'
 import { loadFaceTargets } from './face-targets'
 import { feetShaper } from './feet'
 import { type HeadFrame, headFrame, originalGeometry } from './head-geometry'
@@ -49,16 +55,30 @@ const IRIS_SHARE = 0.35
 /** An eyeball in the bind pose: its middle, and how far it reaches across the face from it. */
 type Eyeball = { middle: Vector3; radius: number }
 
+/** A mesh's eyeballs, and per vertex which of them it is on (−1 for none). */
+type Eyeballs = { eyeOf: Int32Array; eyeballs: Eyeball[] }
+
+/** Each mesh's eyeballs, found once: a drag reshapes the body many times a second. */
+const eyeballsByGeometry = new WeakMap<BufferGeometry, Eyeballs | null>()
+
 /**
  * A mesh's eyeballs: per vertex, which of them it is on (−1 for none, by
  * the bone it is most skinned to), or null when it has none.
  */
-function eyeballsOf(mesh: Mesh): { eyeOf: Int32Array; eyeballs: Eyeball[] } | null {
+export function eyeballsOf(mesh: Mesh): Eyeballs | null {
+  const geometry = originalGeometry(mesh)
+  const known = eyeballsByGeometry.get(geometry)
+  if (known !== undefined) return known
+  const found = findEyeballs(mesh, geometry)
+  eyeballsByGeometry.set(geometry, found)
+  return found
+}
+
+function findEyeballs(mesh: Mesh, geometry: BufferGeometry): Eyeballs | null {
   const skinned = mesh as SkinnedMesh
   if (!skinned.isSkinnedMesh) return null
   const bones = skinned.skeleton.bones.map((bone) => EYE_BONE.test(bone.name))
   if (!bones.includes(true)) return null
-  const geometry = originalGeometry(mesh)
   const position = geometry.getAttribute('position')
   const joints = geometry.getAttribute('skinIndex')
   const weights = geometry.getAttribute('skinWeight')
@@ -139,7 +159,11 @@ function eyeballMove({ middle, radius }: Eyeball, move: PointMove) {
 function fieldMove(field: ShapeField, frame: HeadFrame): PointMove {
   const { left, top, size, neck, front } = frame
   const depth = Math.max(front - neck.z, 1e-6)
-  const out = [0, 0, 0]
+  // The field is the front view's, so a point and the one a step deeper
+  // share its value: the last few are kept, as the normals' steps (across,
+  // down, deeper) come right after their point and the field can be costly.
+  const kept = Array.from({ length: 3 }, () => ({ x: Number.NaN, y: Number.NaN, out: [0, 0, 0] }))
+  let next = 0
   return (point, _index, move) => {
     const t = ((point.z - neck.z) / depth - DEPTH_FROM) / (DEPTH_TO - DEPTH_FROM)
     if (t <= 0) {
@@ -147,7 +171,22 @@ function fieldMove(field: ShapeField, frame: HeadFrame): PointMove {
       return
     }
     const reach = t >= 1 ? 1 : t * t * (3 - 2 * t)
-    field((point.x - left) / size, (top - point.y) / size, out)
+    const x = (point.x - left) / size
+    const y = (top - point.y) / size
+    let value = kept[0]!
+    let found = value.x === x && value.y === y
+    for (let k = 1; k < kept.length && !found; k++) {
+      value = kept[k]!
+      found = value.x === x && value.y === y
+    }
+    if (!found) {
+      value = kept[next]!
+      next = (next + 1) % kept.length
+      field(x, y, value.out)
+      value.x = x
+      value.y = y
+    }
+    const { out } = value
     move.set(out[0]! * size, -out[1]! * size, out[2]! * size).multiplyScalar(reach)
   }
 }
@@ -180,28 +219,58 @@ export function faceShaper(
 /** Finite-difference step for the normals, as a share of the front view. */
 const STEP = 0.002
 
-const part = new Vector3()
+/**
+ * A shaper's moves of a mesh's points, 12 per point (bind pose): the move,
+ * then how it changes per unit step across, up and deeper (for the
+ * normals).
+ */
+type Moves = Float32Array
 
-/** The moves summed. */
-function summed(moves: readonly PointMove[]): PointMove {
-  if (moves.length === 1) return moves[0]!
-  return (point, index, move) => {
-    move.set(0, 0, 0)
-    for (const each of moves) {
-      each(point, index, part)
-      move.add(part)
+/** A mesh's moves under a shaper, or null when it moves nothing there. */
+function movesOf(mesh: Mesh, original: BufferGeometry, move: PointMove, step: number) {
+  const position = original.getAttribute('position')
+  if (!position) return null
+  const skinned = mesh as SkinnedMesh
+  const toBind = skinned.isSkinnedMesh ? skinned.bindMatrix : null
+  const moves: Moves = new Float32Array(position.count * 12)
+  const point = new Vector3()
+  const shifted = new Vector3()
+  const displacement = new Vector3()
+  const around = new Vector3()
+  let any = false
+  for (let i = 0; i < position.count; i++) {
+    point.fromBufferAttribute(position, i)
+    if (toBind) point.applyMatrix4(toBind)
+    move(point, i, displacement)
+    // Where a shaper moves nothing it changes too little to turn a normal
+    // (each fades out smoothly): its stretch there is left at none.
+    if (displacement.lengthSq() === 0) continue
+    any = true
+    const at = i * 12
+    moves[at] = displacement.x
+    moves[at + 1] = displacement.y
+    moves[at + 2] = displacement.z
+    for (let axis = 0; axis < 3; axis++) {
+      shifted.copy(point).setComponent(axis, point.getComponent(axis) + step)
+      move(shifted, i, around)
+      const column = at + 3 + axis * 3
+      moves[column] = (around.x - displacement.x) / step
+      moves[column + 1] = (around.y - displacement.y) / step
+      moves[column + 2] = (around.z - displacement.z) / step
     }
   }
+  return any ? moves : null
 }
 
 /**
- * A mesh's geometry reshaped: each point moved (worked out in the bind
- * pose, where the head's front view is framed and the bones stand), its
- * normal turned the way the surface round it turned. Positions and normals
- * come out as plain floats: the loaded ones are quantized to the mesh's
- * bounds, which a point moved out past would wrap round.
+ * A mesh's geometry reshaped by the shapers' moves added up: each point
+ * moved (worked out in the bind pose, where the head's front view is framed
+ * and the bones stand), its normal turned the way the surface round it
+ * turned. Positions and normals come out as plain floats: the loaded ones
+ * are quantized to the mesh's bounds, which a point moved out past would
+ * wrap round.
  */
-function reshaped(mesh: Mesh, original: BufferGeometry, move: PointMove, step: number) {
+function reshaped(mesh: Mesh, original: BufferGeometry, parts: readonly Moves[]) {
   const skinned = mesh as SkinnedMesh
   const position = original.getAttribute('position')
   const normal = original.getAttribute('normal')
@@ -215,41 +284,44 @@ function reshaped(mesh: Mesh, original: BufferGeometry, move: PointMove, step: n
   const positions = new Float32Array(position.count * 3)
   const normals = normal ? new Float32Array(normal.count * 3) : null
   const point = new Vector3()
-  const shifted = new Vector3()
   const displacement = new Vector3()
-  const around = new Vector3()
   const n = new Vector3()
   const jacobian = new Matrix3()
-  const columns = [new Vector3(), new Vector3(), new Vector3()]
+  // The surface's stretch round a point, d(point + move)/d(point), by rows.
+  const stretch = new Float64Array(9)
   let moved = false
   for (let i = 0; i < position.count; i++) {
-    point.fromBufferAttribute(position, i)
     if (normals) n.fromBufferAttribute(normal!, i).toArray(normals, i * 3)
-    if (toBind) point.applyMatrix4(toBind)
-    move(point, i, displacement)
+    displacement.set(0, 0, 0)
+    for (const moves of parts) {
+      displacement.x += moves[i * 12]!
+      displacement.y += moves[i * 12 + 1]!
+      displacement.z += moves[i * 12 + 2]!
+    }
     if (displacement.lengthSq() === 0) {
       point.fromBufferAttribute(position, i).toArray(positions, i * 3)
       continue
     }
     moved = true
     if (normals) {
-      // The surface's stretch round the point: d(point + move)/d(point).
-      for (let axis = 0; axis < 3; axis++) {
-        shifted.copy(point).setComponent(axis, point.getComponent(axis) + step)
-        move(shifted, i, around)
-        columns[axis]!.copy(around).sub(displacement).divideScalar(step)
-        columns[axis]!.setComponent(axis, columns[axis]!.getComponent(axis) + 1)
+      stretch.fill(0)
+      for (const moves of parts) {
+        for (let axis = 0; axis < 3; axis++) {
+          for (let row = 0; row < 3; row++) {
+            stretch[row * 3 + axis]! += moves[i * 12 + 3 + axis * 3 + row]!
+          }
+        }
       }
       jacobian.set(
-        columns[0]!.x,
-        columns[1]!.x,
-        columns[2]!.x,
-        columns[0]!.y,
-        columns[1]!.y,
-        columns[2]!.y,
-        columns[0]!.z,
-        columns[1]!.z,
-        columns[2]!.z,
+        1 + stretch[0]!,
+        stretch[1]!,
+        stretch[2]!,
+        stretch[3]!,
+        1 + stretch[4]!,
+        stretch[5]!,
+        stretch[6]!,
+        stretch[7]!,
+        1 + stretch[8]!,
       )
       if (jacobian.determinant() > 1e-6) {
         if (normalToBind) n.applyMatrix3(normalToBind)
@@ -282,23 +354,49 @@ export function headOf(model: Object3D): Mesh | null {
   return head
 }
 
+/** A mesh's moves under each shaper it was last reshaped by (see applyShape). */
+type KeptMoves = { original: BufferGeometry; byShaper: Map<Shaper, Moves | null> }
+
+/**
+ * The body reshaped last and its meshes' moves under each shaper: a slider
+ * or a sculpting drag reshapes it many times a second, one shaper changing
+ * while the rest stay as they were. Only that one body's are kept.
+ */
+let kept: { model: WeakRef<Object3D>; meshes: WeakMap<Mesh, KeptMoves> } | null = null
+
 /**
  * Reshapes a body by some shapers together (the face, the ears, the
  * build), each mesh getting its own reshaped geometry (a body's clones
- * share theirs). Returns what puts the originals back.
+ * share theirs). A shaper is worked out once per mesh for as long as the
+ * same shaper keeps reshaping the same body, so pass the same one while
+ * its part of the look stays. Returns what puts the originals back.
  */
 export function applyShape(model: Object3D, shapers: readonly Shaper[]): () => void {
   const head = headOf(model)
   if (!head || shapers.length === 0) return () => {}
   const step = STEP * headFrame(head).size
+  if (kept?.model.deref() !== model) kept = { model: new WeakRef(model), meshes: new WeakMap() }
+  const meshes = kept.meshes
   const undo: (() => void)[] = []
   model.traverse((object) => {
     const mesh = object as Mesh
     if (!mesh.isMesh) return
-    const moves = shapers.map((shaper) => shaper(mesh)).filter((move) => move !== null)
-    if (moves.length === 0) return
     const original = originalGeometry(mesh)
-    const geometry = reshaped(mesh, original, summed(moves), step)
+    const known = meshes.get(mesh)
+    const before = known?.original === original ? known.byShaper : null
+    const byShaper = new Map<Shaper, Moves | null>()
+    for (const shaper of shapers) {
+      let moves = before?.get(shaper)
+      if (moves === undefined) {
+        const move = shaper(mesh)
+        moves = move ? movesOf(mesh, original, move, step) : null
+      }
+      byShaper.set(shaper, moves)
+    }
+    meshes.set(mesh, { original, byShaper })
+    const parts = [...byShaper.values()].filter((moves) => moves !== null)
+    if (parts.length === 0) return
+    const geometry = reshaped(mesh, original, parts)
     if (!geometry) return
     mesh.userData.shapeOriginal = original
     mesh.geometry = geometry
@@ -316,12 +414,23 @@ export function applyShape(model: Object3D, shapers: readonly Shaper[]): () => v
   }
 }
 
+/** The face's shaper last made for a body, and what it was made from. */
+type FaceShaping = {
+  head: Mesh
+  shape: FaceShape
+  points: readonly number[] | undefined
+  avatarId: string
+  shaper: Shaper | null
+}
+
 /**
- * Keeps a body shaped by a look: the face (the photo's proportions and the
- * sliders), the ears, the build, feet out of their shoes, and the head
- * under a borrowed hairstyle (`hair`, from useAvatarHair). All go in one
- * reshaping, each mesh built from its original once. The face waits for the
- * character's landmarks (a download, once); the rest needs none.
+ * Keeps a body shaped by a look: the face (the photo's proportions, the
+ * sliders and the sculpted pins), the ears, the build, feet out of their
+ * shoes, and the head under a borrowed hairstyle (`hair`, from
+ * useAvatarHair). All go in one reshaping, each mesh built from its
+ * original once, and a part of the look that stays keeps its shaper (see
+ * applyShape). The face waits for the character's landmarks (a download,
+ * once); the rest needs none.
  */
 export function useAvatarShape(
   model: Object3D,
@@ -334,39 +443,57 @@ export function useAvatarShape(
   const points = look?.face?.points
   // The shape follows what is worn on the feet, not the socks' colour.
   const wear = look?.feet?.wear
+  const head = useMemo(() => headOf(model), [model])
+  const build = useMemo(() => (body ? bodyShaper(body) : null), [body])
+  const footwear = useMemo(() => (wear ? feetShaper({ wear, color: null }) : null), [wear])
+  const { earSize, earAngle, earHeight, earPoint } = shape?.sliders ?? {}
+  const ears = useMemo(
+    () =>
+      head
+        ? earShaper(head, {
+            ...DEFAULT_FACE_SHAPE,
+            sliders: { earSize, earAngle, earHeight, earPoint },
+          })
+        : null,
+    [head, earSize, earAngle, earHeight, earPoint],
+  )
+  const faceShaping = useRef<FaceShaping | null>(null)
   useEffect(() => {
-    const head = headOf(model)
     if (!head) return
-    const ready: Shaper[] = []
-    if (hair) ready.push(hair)
-    const build = body ? bodyShaper(body) : null
-    if (build) ready.push(build)
-    const footwear = wear ? feetShaper({ wear, color: null }) : null
-    if (footwear) ready.push(footwear)
-    const ears = shape ? earShaper(head, shape) : null
-    if (ears) ready.push(ears)
+    const ready = [hair, build, footwear, ears].filter((shaper) => shaper !== null)
     let undo: (() => void) | null = null
     let cancelled = false
-    const apply = (shapers: Shaper[]) => {
+    const apply = (face: Shaper | null) => {
+      const shapers = face ? [face, ...ready] : ready
       if (!cancelled && shapers.length > 0) undo = applyShape(model, shapers)
     }
-    if (!(shape && (hasSliders(shape) || (points && shape.fit > 0)))) {
-      apply(ready)
+    const known = faceShaping.current
+    if (!(shape && (hasFaceShape(shape) || (points && shape.fit > 0)))) {
+      apply(null)
+    } else if (
+      known?.head === head &&
+      known.shape === shape &&
+      known.points === points &&
+      known.avatarId === avatarId
+    ) {
+      apply(known.shaper)
     } else {
       loadFaceTargets()
         .then((targets) => {
           const target = targets[avatarId]
           const field = target ? faceShapeField(target, shape, points ?? null) : null
-          apply(field ? [faceShaper(field, headFrame(head)), ...ready] : ready)
+          const shaper = field ? faceShaper(field, headFrame(head)) : null
+          faceShaping.current = { head, shape, points, avatarId, shaper }
+          apply(shaper)
         })
         .catch((error: unknown) => {
           console.warn('[look] could not shape the face', error)
-          apply(ready)
+          apply(null)
         })
     }
     return () => {
       cancelled = true
       undo?.()
     }
-  }, [model, shape, body, points, wear, avatarId, hair])
+  }, [model, head, shape, points, avatarId, hair, build, footwear, ears])
 }
