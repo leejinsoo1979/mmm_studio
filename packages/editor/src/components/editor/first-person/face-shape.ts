@@ -136,7 +136,9 @@ function brushes(
   const brush: Brush = {
     slider,
     above: options.radius[1],
-    inner: 0.35,
+    // A long fade: the steeper it is, the more the sparse head mesh creases
+    // along it, and the reshaped normals make the crease show.
+    inner: 0.15,
     pivot: options.centre,
     move: [0, 0, 0],
     scale: [0, 0],
@@ -229,19 +231,19 @@ function faceBrushes(points: readonly Point[]): Brush[] {
     }),
     ...brushes('chinDepth', middle, {
       centre: chin,
-      radius: [0.55 * e, 0.5 * e],
+      radius: [0.7 * e, 0.62 * e],
       move: [0, 0, 0.22 * e],
     }),
     ...brushes(
       'cheekbones',
       middle,
-      { centre: p(116), radius: [0.5 * e, 0.45 * e], move: [outward * 0.12 * e, 0, 0.1 * e] },
+      { centre: p(116), radius: [0.62 * e, 0.55 * e], move: [outward * 0.12 * e, 0, 0.1 * e] },
       true,
     ),
     ...brushes(
       'cheeks',
       middle,
-      { centre: p(205), radius: [0.45 * e, 0.45 * e], move: [outward * 0.08 * e, 0, 0.14 * e] },
+      { centre: p(205), radius: [0.58 * e, 0.55 * e], move: [outward * 0.08 * e, 0, 0.14 * e] },
       true,
     ),
     ...brushes('forehead', middle, {
@@ -344,7 +346,7 @@ function faceBrushes(points: readonly Point[]): Brush[] {
     ...brushes(
       'browHeight',
       middle,
-      { centre: browCentre, radius: [0.55 * e, 0.2 * e], move: [0, -0.12 * e, 0] },
+      { centre: browCentre, radius: [0.6 * e, 0.2 * e], above: 0.35 * e, move: [0, -0.12 * e, 0] },
       true,
     ),
     ...brushes(
@@ -396,7 +398,7 @@ function faceBrushes(points: readonly Point[]): Brush[] {
     }),
     ...brushes('noseHeight', middle, {
       centre: mid(p(6), noseTip),
-      radius: [0.22 * e, Math.abs(noseTip[1] - p(6)[1]) * 0.85],
+      radius: [0.3 * e, Math.abs(noseTip[1] - p(6)[1]) * 0.95],
       move: [0, 0, 0.2 * e],
     }),
     ...brushes('noseTip', middle, {
@@ -448,7 +450,7 @@ function faceBrushes(points: readonly Point[]): Brush[] {
     ...brushes(
       'mouthCorners',
       middle,
-      { centre: p(61), radius: [0.22 * e, 0.22 * e], move: [0, -0.08 * e, 0] },
+      { centre: p(61), radius: [0.3 * e, 0.28 * e], move: [0, -0.08 * e, 0] },
       true,
     ),
   ]
