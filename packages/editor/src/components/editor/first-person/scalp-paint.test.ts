@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { type ScalpPaint, SHADED } from './bald-head'
 import type { Pixels, Rgb } from './look-pixels'
-import { relightBody, scalpPainter } from './scalp-paint'
+import { relightBody, scalpPainter, skinGrain } from './scalp-paint'
 
 const SIZE = 16
 
@@ -119,7 +119,7 @@ describe('painting the bald surface', () => {
     paintScalp(
       head,
       {
-        scalp: band(0, 0.5, [-1, 0], [-1, 0]),
+        scalp: band(0, 0.5, [-1, 0, 0, 0.1, 0], [-1, 0, 0, 0, 0]),
         kept: Float32Array.from([0, 0.5, 0.25, 0.5, 0.25, 1, 0, 0.5, 0.25, 1, 0, 1]),
       },
       TONE,
@@ -203,5 +203,40 @@ describe('the body lit again under the hair taken off', () => {
     const body = image((x) => (x < 16 ? SHADED_SHIRT : STRAP), SIDE)
     relightBody(body, leftQuarter)
     expect(at(body, 5, 30)).toEqual(SHADED_SHIRT)
+  })
+})
+
+describe('the bald surface’s grain', () => {
+  test('is skin’s: a little lighter or darker from place to place, evenly over all', () => {
+    let sum = 0
+    let most = 0
+    const count = 4000
+    for (let i = 0; i < count; i++) {
+      const g = skinGrain((i % 20) * 0.007, Math.floor(i / 20) * 0.003, 0.05)
+      sum += g
+      most = Math.max(most, Math.abs(g - 1))
+    }
+    expect(sum / count).toBeCloseTo(1, 1)
+    expect(most).toBeGreaterThan(0.01)
+    expect(most).toBeLessThan(0.15)
+  })
+
+  test('changes smoothly through space, so no texel or seam of the texture shows in it', () => {
+    for (let i = 0; i < 200; i++) {
+      const [x, y, z] = [i * 0.0013, 0.8 + i * 0.0007, -i * 0.0011]
+      expect(Math.abs(skinGrain(x, y, z) - skinGrain(x + 1e-5, y, z))).toBeLessThan(0.002)
+    }
+  })
+
+  test('grains the bald surface by where it is, not by its texels', () => {
+    const plan = (y: number) => ({ scalp: band(0, 1, [-1, 0, 0, y, 0], [-1, 0, 0.05, y, 0.05]) })
+    const shades = [0.8, 0.9].map((y) => {
+      const head = image(() => HAIR)
+      paintScalp(head, plan(y), TONE)
+      return at(head, 8, 8)
+    })
+    // The same texel, elsewhere on the head: another shade of the tone.
+    expect(shades[0]).not.toEqual(shades[1])
+    for (const shade of shades) expect(near(shade, TONE, 0.15)).toBe(true)
   })
 })

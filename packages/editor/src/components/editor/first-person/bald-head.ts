@@ -5,10 +5,12 @@ import { PointGrid, SKULL_CELL, type Skull, smoothstep, type Triples } from './h
  * A character wearing any hair but its own is made bald first, cleanly:
  * its head's own hair — the triangles of its head mesh the hair's volume
  * is sculpted into, or painted onto over the cranium — is taken out, and
- * the hole closed with the bald skull every head shares (see head-skull.ts)
- * fitted to it and bent to meet the skin it keeps. Its face, ears and neck
- * stay its own; the skin round the cut is painted to the scalp's tone (see
- * scalp-paint.ts), and another's hair goes on over it all like a wig.
+ * the hole closed with a real bald cranium on the skull every head shares
+ * (see hair-styles.ts), fitted to its face and its own cranium (see
+ * head-skull.ts's `craniumFit`) and bent to meet the skin it keeps. Its
+ * face, ears and neck stay its own; the skin round the cut is painted to
+ * the scalp's tone (see scalp-paint.ts), and another's hair goes on over
+ * it all like a wig.
  *
  * Which triangles are the hair is worked out once per head, offline, from
  * its texture as well as its shape (`ownHair`, run by
@@ -428,94 +430,106 @@ export type BaldSkull = {
 }
 
 /**
- * The skull's neck is fitted to a head's in slices this tall, read up to
- * NECK_READ above the top of the neck, and fitted fully from NECK_FADE
- * under it, fading out to the top: the skull's occiput stays its own.
+ * The bald surface's neck is fitted to a head's by its kept points from
+ * NECK_UNDER under the top of the neck to NECK_READ over it, each matched
+ * to the surface's points in the same slice (NECK_SLICE tall). Its axis is
+ * the middle of the surface's neck from NECK_UNDER to NECK_AXIS under the
+ * top. It is fitted fully from NECK_LOW under the top, fading out to the
+ * surface's own shape NECK_RISE over it — up under the occiput, so the
+ * skull's man's neck narrows to a woman's or a child's along a long, even
+ * curve, not in a fold where they meet.
  */
 const NECK_SLICE = 0.01
+const NECK_UNDER = 0.05
 const NECK_READ = 0.03
-const NECK_FADE = 0.04
+const NECK_AXIS = 0.02
+const NECK_LOW = 0.03
+const NECK_RISE = 0.06
 
 /**
- * A kept point fits the skull's neck at the skull's point round its slice
+ * A kept point fits the neck at the surface's point round its slice
  * nearest it in angle, no further round than this (radians), and only where
- * the two are this alike (a collar, a chin are not the neck); a slice is
- * fitted by FEWEST_FITTING of them at least, else as the nearest that is.
+ * the two are this alike (a collar, a chin are not the neck); the neck is
+ * fitted by FEWEST_FITTING of them at least.
  */
 const NECK_ANGLE = 0.4
 const NECK_LIKE: readonly [number, number] = [0.6, 1.4]
-const FEWEST_FITTING = 3
+const FEWEST_FITTING = 6
 
 /**
- * The fitted skull with its neck made as thick as a head's (`anchors`, its
- * kept points; `neck`, the top of its neck), slice by slice round each
- * slice's middle: a woman's or a child's neck is thinner than the skull's
- * man's, and under long hair there is none of its own to bend the skull to.
- * Each slice is scaled by the middle ratio of its kept points' distance from
- * the middle to the skull's at their angle.
+ * Round the neck from its back to its sides the surface is fitted; in
+ * front, turned from the neck's axis to the front by more than this (the
+ * cosine of the angle off straight back, NECK_FRONT[0] to [1]), it fades
+ * out: the jaw and the throat are the head's own skin.
  */
-export function neckFitted(skull: Skull, anchors: Triples, neck: number): Skull {
-  const count = skull.points.length / 3
-  const top = neck + NECK_READ
+const NECK_FRONT: readonly [number, number] = [0.2, 0.7]
+
+/**
+ * The bald surface (`points`, the skull fitted to a head with the piece
+ * hung below its neck) with its neck made as thick as the head's — its
+ * kept points `anchors`, the top of its neck at height `neck` — scaled
+ * towards the neck's axis by the middle ratio of the kept points' distance
+ * from it to the surface's at their angle: a woman's or a child's neck is
+ * thinner than the skull's man's, and under long hair there is none of its
+ * own to bend the surface to. One ratio for all the neck: read slice by
+ * slice, a few points each, it would ripple.
+ */
+export function neckFitted(points: Triples, anchors: Triples, neck: number): Float32Array {
+  const count = points.length / 3
+  const out = Float32Array.from(points)
+  const low = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY]
+  const high = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY]
   const sliceOf = (y: number) => Math.round(y / NECK_SLICE)
-  const slices = new Map<number, { x: number; z: number; points: number[] }>()
+  const slices = new Map<number, number[]>()
   for (let i = 0; i < count; i++) {
-    const y = skull.points[i * 3 + 1]!
-    if (y > top) continue
-    const slice = slices.get(sliceOf(y)) ?? { x: 0, z: 0, points: [] }
-    slice.x += skull.points[i * 3]!
-    slice.z += skull.points[i * 3 + 2]!
-    slice.points.push(i)
+    const y = points[i * 3 + 1]!
+    if (y < neck - NECK_UNDER || y > neck + NECK_READ) continue
+    const slice = slices.get(sliceOf(y)) ?? []
+    slice.push(i)
     slices.set(sliceOf(y), slice)
+    if (y > neck - NECK_AXIS) continue
+    for (const [k, axis] of [0, 2].entries()) {
+      low[k] = Math.min(low[k]!, points[i * 3 + axis]!)
+      high[k] = Math.max(high[k]!, points[i * 3 + axis]!)
+    }
   }
-  for (const slice of slices.values()) {
-    slice.x /= slice.points.length
-    slice.z /= slice.points.length
-  }
-  const ratios = new Map<number, number[]>()
+  if (!(low[0]! < high[0]!)) return out
+  const middle = [(low[0]! + high[0]!) / 2, (low[1]! + high[1]!) / 2]
+  const round = (x: number, z: number) => Math.atan2(x - middle[0]!, z - middle[1]!)
+  const ratios: number[] = []
   for (let j = 0; j < anchors.length / 3; j++) {
-    const y = anchors[j * 3 + 1]!
-    const slice = y <= top ? slices.get(sliceOf(y)) : undefined
+    const slice = slices.get(sliceOf(anchors[j * 3 + 1]!))
     if (!slice) continue
-    const ax = anchors[j * 3]! - slice.x
-    const az = anchors[j * 3 + 2]! - slice.z
-    const angle = Math.atan2(ax, az)
+    const angle = round(anchors[j * 3]!, anchors[j * 3 + 2]!)
     let nearest = NECK_ANGLE
     let radius = 0
-    for (const i of slice.points) {
-      const sx = skull.points[i * 3]! - slice.x
-      const sz = skull.points[i * 3 + 2]! - slice.z
-      let apart = Math.abs(Math.atan2(sx, sz) - angle)
+    for (const i of slice) {
+      let apart = Math.abs(round(points[i * 3]!, points[i * 3 + 2]!) - angle)
       if (apart > Math.PI) apart = 2 * Math.PI - apart
       if (apart < nearest) {
         nearest = apart
-        radius = Math.hypot(sx, sz)
+        radius = Math.hypot(points[i * 3]! - middle[0]!, points[i * 3 + 2]! - middle[1]!)
       }
     }
-    const ratio = radius > 0 ? Math.hypot(ax, az) / radius : 0
-    if (ratio < NECK_LIKE[0] || ratio > NECK_LIKE[1]) continue
-    const list = ratios.get(sliceOf(y)) ?? []
-    list.push(ratio)
-    ratios.set(sliceOf(y), list)
+    const ratio =
+      radius > 0
+        ? Math.hypot(anchors[j * 3]! - middle[0]!, anchors[j * 3 + 2]! - middle[1]!) / radius
+        : 0
+    if (ratio >= NECK_LIKE[0] && ratio <= NECK_LIKE[1]) ratios.push(ratio)
   }
-  const scales = new Map<number, number>()
-  for (const [key, list] of ratios) {
-    if (list.length >= FEWEST_FITTING)
-      scales.set(key, list.sort((a, b) => a - b)[list.length >> 1]!)
+  if (ratios.length < FEWEST_FITTING) return out
+  const scale = ratios.sort((a, b) => a - b)[ratios.length >> 1]!
+  for (let i = 0; i < count; i++) {
+    const y = points[i * 3 + 1]!
+    if (y >= neck + NECK_RISE) continue
+    const x = points[i * 3]! - middle[0]!
+    const z = points[i * 3 + 2]! - middle[1]!
+    const back = 1 - smoothstep(NECK_FRONT[0], NECK_FRONT[1], z / (Math.hypot(x, z) || 1))
+    const k = 1 + (scale - 1) * (1 - smoothstep(neck - NECK_LOW, neck + NECK_RISE, y)) * back
+    out[i * 3] = middle[0]! + x * k
+    out[i * 3 + 2] = middle[1]! + z * k
   }
-  if (scales.size === 0) return skull
-  const fitted = [...scales.keys()]
-  const points = new Float32Array(skull.points)
-  for (const [key, slice] of slices) {
-    const nearest = fitted.reduce((a, b) => (Math.abs(b - key) < Math.abs(a - key) ? b : a))
-    const scale = scales.get(nearest)!
-    for (const i of slice.points) {
-      const k = 1 + (scale - 1) * (1 - smoothstep(neck - NECK_FADE, neck, skull.points[i * 3 + 1]!))
-      points[i * 3] = slice.x + (skull.points[i * 3]! - slice.x) * k
-      points[i * 3 + 2] = slice.z + (skull.points[i * 3 + 2]! - slice.z) * k
-    }
-  }
-  return { ...skull, points, grid: new PointGrid(points, SKULL_CELL) }
+  return out
 }
 
 /**
@@ -532,11 +546,14 @@ const BEND_ROUNDS = 200
  * How much of a bend each round carries on over the cranium: it fades back
  * to the skull there, where nothing the head kept says how it lies, but is
  * carried on whole round the face and down the neck (where the skull's
- * man's shape fits a head worst), between the two zones.
+ * man's shape fits a head worst), between the two zones — and under the
+ * occiput, from BEND_NAPE over the top of the neck down: faded there, the
+ * nape would stand off the kept neck under it in a ledge along the cut.
  */
 const BEND_KEPT = 0.9
 const BEND_FACE_ZONE = 0.03
 const BEND_CRANIUM_ZONE = 0.15
+const BEND_NAPE: readonly [number, number] = [0.02, 0.05]
 
 /**
  * How far under the head's skin the bald surface lies where it meets it
@@ -547,11 +564,17 @@ const SINK = 0.0006
 
 /**
  * The fitted skull (`skull`, its `triangles`) bent to meet a head's kept
- * skin (`anchors`, its points): each skull point beside the skin goes to
- * it, and the rest as far as those round them, the bend fading back to the
- * skull over the cranium (see BEND_*); all of it a little under the skin.
+ * skin (`anchors`, its points; the top of its neck at height `neck`): each
+ * skull point beside the skin goes to it, and the rest as far as those
+ * round them, the bend fading back to the skull over the cranium (see
+ * BEND_*); all of it a little under the skin.
  */
-export function bentSkull(skull: Skull, triangles: ArrayLike<number>, anchors: Triples) {
+export function bentSkull(
+  skull: Skull,
+  triangles: ArrayLike<number>,
+  anchors: Triples,
+  neck: number,
+) {
   const count = skull.points.length / 3
   const neighbours = neighboursOf(triangles, count)
   const grid = new PointGrid(anchors, SKULL_CELL)
@@ -575,12 +598,12 @@ export function bentSkull(skull: Skull, triangles: ArrayLike<number>, anchors: T
       offset[i] = along
     }
   }
-  const keep = Float32Array.from(
-    { length: count },
-    (_, i) =>
-      BEND_KEPT +
-      (1 - BEND_KEPT) * (1 - smoothstep(BEND_FACE_ZONE, BEND_CRANIUM_ZONE, skull.zone[i]!)),
-  )
+  const keep = Float32Array.from({ length: count }, (_, i) => {
+    const cranium =
+      smoothstep(BEND_FACE_ZONE, BEND_CRANIUM_ZONE, skull.zone[i]!) *
+      smoothstep(neck + BEND_NAPE[0], neck + BEND_NAPE[1], skull.points[i * 3 + 1]!)
+    return 1 - (1 - BEND_KEPT) * cranium
+  })
   for (let round = 0; round < BEND_ROUNDS; round++) {
     const next = new Float32Array(offset)
     for (let i = 0; i < count; i++) {
@@ -604,21 +627,26 @@ export function bentSkull(skull: Skull, triangles: ArrayLike<number>, anchors: T
 
 /**
  * The band round the top of the neck (bind units over and under it) and
- * behind its middle where the bald surface is smoothed: the skull's
- * occiput curls in under it, and the piece hung below its open bottom
- * would meet it in a ridge.
+ * behind its middle where the bald surface is faired: the skull's head
+ * mesh ends under the occiput in a lip, the piece hung below it meets it in
+ * a ridge, and the neck narrowed to the head's and bent to its skin folds
+ * there.
  */
-const NAPE_BAND = 0.05
-const NAPE_FRONT = 0.02
-const SMOOTH_ROUNDS = 20
-/** Taubin's two steps a round: smoothing, then swelling back by a little more, so the surface doesn't shrink. */
-const SMOOTH_IN = 0.5
-const SMOOTH_OUT = -0.53
+const NAPE_BAND = 0.07
+const NAPE_FRONT = 0.04
+/**
+ * Fairing takes out what bends unevenly — a fold, a ridge, a step — and
+ * leaves an even curve be, the neck's round or the occiput's: each round
+ * moves a point against the change in how its neighbours bend round it (its
+ * Laplacian's), by FAIR_STEP of it (under a half, or it would not settle).
+ */
+const FAIR_ROUNDS = 80
+const FAIR_STEP = 0.25
 
 /**
- * Smooths the bald surface (`points`, in place; its `triangles`) round
- * the nape (see NAPE_BAND), but where it meets kept skin (`known`): the
- * top of the neck at height `neck`, its middle at depth `nape`.
+ * Fairs the bald surface (`points`, in place; its `triangles`) round the
+ * nape (see NAPE_BAND), but where it meets kept skin (`known`): the top of
+ * the neck at height `neck`, its middle at depth `nape`.
  */
 export function smoothNape(
   points: Float32Array,
@@ -635,20 +663,26 @@ export function smoothNape(
       : (1 - smoothstep(NAPE_BAND / 2, NAPE_BAND, Math.abs(points[i * 3 + 1]! - neck))) *
         (1 - smoothstep(nape, nape + NAPE_FRONT, points[i * 3 + 2]!)),
   )
-  const moved = new Float32Array(points.length)
-  for (let round = 0; round < SMOOTH_ROUNDS * 2; round++) {
-    const step = round % 2 === 0 ? SMOOTH_IN : SMOOTH_OUT
+  const laplacian = (of: Float32Array, out: Float32Array) => {
     for (let i = 0; i < count; i++) {
       const around = neighbours[i]!
       for (let axis = 0; axis < 3; axis++) {
         let mean = 0
-        for (const j of around) mean += points[j * 3 + axis]!
-        mean = around.length > 0 ? mean / around.length : points[i * 3 + axis]!
-        moved[i * 3 + axis] =
-          points[i * 3 + axis]! + step * weight[i]! * (mean - points[i * 3 + axis]!)
+        for (const j of around) mean += of[j * 3 + axis]!
+        out[i * 3 + axis] = around.length > 0 ? mean / around.length - of[i * 3 + axis]! : 0
       }
     }
-    points.set(moved)
+  }
+  const bend = new Float32Array(points.length)
+  const change = new Float32Array(points.length)
+  for (let round = 0; round < FAIR_ROUNDS; round++) {
+    laplacian(points, bend)
+    laplacian(bend, change)
+    for (let i = 0; i < count; i++) {
+      for (let axis = 0; axis < 3; axis++) {
+        points[i * 3 + axis]! -= FAIR_STEP * weight[i]! * change[i * 3 + axis]!
+      }
+    }
   }
 }
 
@@ -1503,8 +1537,8 @@ const FOREHEAD_FACING = 0.4
  */
 export const PAINTED = 18
 
-/** Numbers per triangle of the bald surface packed for painting, per corner: u, v, which skin round it its colour is and how much. */
-export const SCALP = 12
+/** Numbers per triangle of the bald surface packed for painting, per corner: u, v, which skin round it its colour is and how much, and where it is (x, y, z in the bind pose). */
+export const SCALP = 21
 
 /** Numbers per triangle when packed for reading the tone from: u, v per corner. */
 export const READ = 6
@@ -1668,7 +1702,15 @@ export function scalpPaint(
       scalp.points[k * 3 + 1]!,
       scalp.points[k * 3 + 2]!,
     )
-    packed.push(scalp.uvs[k * 2]!, scalp.uvs[k * 2 + 1]!, ref, share)
+    packed.push(
+      scalp.uvs[k * 2]!,
+      scalp.uvs[k * 2 + 1]!,
+      ref,
+      share,
+      scalp.points[k * 3]!,
+      scalp.points[k * 3 + 1]!,
+      scalp.points[k * 3 + 2]!,
+    )
   }
   return {
     paint: Float32Array.from(paint),

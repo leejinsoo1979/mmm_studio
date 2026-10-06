@@ -6,6 +6,7 @@ import {
   hairShadow,
   hollowShade,
   keptTriangles,
+  neckFitted,
   necklineFan,
   type OwnHead,
   ownHair,
@@ -243,7 +244,8 @@ describe('the bald surface', () => {
     const { skull, triangles } = skullBall()
     const below = ball(0.105, 48, 64)
     const anchors = below.points.filter((_, j) => below.points[j - (j % 3) + 1]! < -0.02)
-    const bent = bentSkull(skull, triangles, anchors)
+    // The top of the neck far under the ball: all of it is the cranium.
+    const bent = bentSkull(skull, triangles, anchors, -1)
     const count = skull.points.length / 3
     for (let i = 0; i < count; i++) {
       const y = skull.points[i * 3 + 1]!
@@ -342,7 +344,10 @@ describe('painting round the cut', () => {
     const taken = new Uint8Array(24)
     taken[0] = taken[1] = 1
     const rings = cutRings(head.index, taken, head.spots, head.spotCount, TONE_RINGS)
-    const scalp = { uvs: Float32Array.from([0, 0, 0.01, 0, 0, 0.01]), points: new Float32Array(9) }
+    const scalp = {
+      uvs: Float32Array.from([0, 0, 0.01, 0, 0, 0.01]),
+      points: Float32Array.from([0, 0.1, 0, 0.01, 0.1, 0, 0, 0.11, 0]),
+    }
     const painted = scalpPaint(
       { points: head.points, normals, uvs, index: head.index },
       taken,
@@ -383,6 +388,10 @@ describe('painting round the cut', () => {
     expect(painted.kept.length / READ).toBe(22)
     expect(painted.taken.length / READ).toBe(2)
     expect(painted.scalp.length / SCALP).toBe(1)
+    // Each corner of the bald surface where it is, for its grain.
+    expect([...painted.scalp.slice(SCALP / 3 + 4, SCALP / 3 + 7)]).toEqual(
+      [0.01, 0.1, 0].map(Math.fround),
+    )
   })
 
   test('reads how much of what a triangle covers each mask is', () => {
@@ -580,5 +589,89 @@ describe('the hair’s shadow on the body', () => {
       hairShadow({ points: body.points, uvs, index: body.index }, hair, { neck: -1, nape: 0 })
         .length,
     ).toBe(0)
+  })
+})
+
+/** A tube round the y axis (radius per height `radius(y)`), rows 1 cm apart from y = 0.1 down to -0.1, its middle at z = 0. */
+function tube(radius: (y: number) => number, columns = 24) {
+  const points: number[] = []
+  const rows = 21
+  for (let r = 0; r < rows; r++) {
+    const y = 0.1 - r * 0.01
+    for (let c = 0; c < columns; c++) {
+      const angle = (2 * Math.PI * c) / columns
+      points.push(radius(y) * Math.sin(angle), y, radius(y) * Math.cos(angle))
+    }
+  }
+  const triangles: number[] = []
+  for (let r = 0; r < rows - 1; r++) {
+    for (let c = 0; c < columns; c++) {
+      const [a, b] = [r * columns + c, r * columns + ((c + 1) % columns)]
+      triangles.push(a, a + columns, b + columns, a, b + columns, b)
+    }
+  }
+  return { points: Float32Array.from(points), triangles }
+}
+
+const radiusAt = (points: Float32Array, i: number) => Math.hypot(points[i * 3]!, points[i * 3 + 2]!)
+
+describe('the neck fitted', () => {
+  // A man's neck 6 cm round; the head keeps a neck of 4.5 cm.
+  const neck = 0
+  const surface = tube(() => 0.06)
+  const kept = tube(() => 0.045)
+  const anchors = kept.points.filter((_, j) => Math.abs(kept.points[j - (j % 3) + 1]!) <= 0.04)
+  const fitted = neckFitted(surface.points, anchors, neck)
+  const column = (y: number, front: boolean) => {
+    for (let i = 0; i < surface.points.length / 3; i++) {
+      const at = surface.points.subarray(i * 3, i * 3 + 3)
+      if (Math.abs(at[1]! - y) < 1e-6 && Math.abs(at[0]!) < 1e-6 && at[2]! > 0 === front) return i
+    }
+    return -1
+  }
+
+  test('narrows the back of the neck to the head’s, fully under the top of the neck', () => {
+    expect(radiusAt(fitted, column(-0.05, false))).toBeCloseTo(0.045, 3)
+  })
+
+  test('leaves the front, the throat, and the occiput above it be', () => {
+    expect(radiusAt(fitted, column(-0.05, true))).toBeCloseTo(0.06, 4)
+    expect(radiusAt(fitted, column(0.07, false))).toBeCloseTo(0.06, 4)
+  })
+
+  test('narrows it along an even curve, never back out on the way down', () => {
+    let last = Number.POSITIVE_INFINITY
+    for (let y = 0.1; y >= -0.1 - 1e-9; y -= 0.01) {
+      const r = radiusAt(fitted, column(Math.round(y * 100) / 100, false))
+      expect(r).toBeLessThanOrEqual(last + 1e-6)
+      last = r
+    }
+  })
+
+  test('is left be where too little of the head’s neck is kept to fit it by', () => {
+    expect([...neckFitted(surface.points, anchors.slice(0, 9), neck)]).toEqual([...surface.points])
+  })
+})
+
+describe('the nape faired', () => {
+  test('keeps an even round, a neck’s: fairing takes out folds, not curves', () => {
+    const { points, triangles } = tube(() => 0.05)
+    const before = Float32Array.from(points)
+    smoothNape(points, triangles, new Uint8Array(points.length / 3), 0, 0.1)
+    for (let i = 0; i < points.length / 3; i++) {
+      // Not the open rims, which have neighbours to one side only.
+      if (Math.abs(before[i * 3 + 1]!) > 0.08) continue
+      // Within a millimetre.
+      expect(Math.abs(radiusAt(points, i) - 0.05)).toBeLessThan(0.001)
+    }
+  })
+
+  test('takes out a fold round the neck', () => {
+    // A ring at the top of the neck pulled in a centimetre: a fold.
+    const { points, triangles } = tube((y) => (Math.abs(y) < 0.005 ? 0.04 : 0.05))
+    smoothNape(points, triangles, new Uint8Array(points.length / 3), 0, 0.1)
+    for (let i = 0; i < points.length / 3; i++) {
+      if (Math.abs(points[i * 3 + 1]!) < 0.005) expect(radiusAt(points, i)).toBeGreaterThan(0.047)
+    }
   })
 })

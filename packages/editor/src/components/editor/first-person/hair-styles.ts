@@ -30,8 +30,10 @@ export type HairStyleEntry = {
  * (bind pose, in its own units: see head-skull.ts), each point's share of
  * hair (0 on the face and ears, 1 where nearly every character's hair
  * volume stands out of the skull), the face bones it is fitted to a
- * character by, and its triangles (which close a bald head: see
- * bald-head.ts).
+ * character by, and its triangles. The skull is one bald man's; the bald
+ * surface closing a head (see bald-head.ts) is the cranium of the other
+ * bald heads with its face bones, on its triangles: its points and their
+ * normals `bald`, `baldNormals`.
  */
 export type SkullData = {
   bones: Record<string, [number, number, number]>
@@ -39,11 +41,14 @@ export type SkullData = {
   normals: Float32Array
   zone: Float32Array
   triangles: Uint32Array
+  bald: Float32Array
+  baldNormals: Float32Array
 }
 
 /**
  * The skull as the file stores it, in whole numbers: points in POINT_UNIT,
- * normals in NORMAL_UNIT, zone shares in ZONE_UNIT.
+ * normals in NORMAL_UNIT, zone shares in ZONE_UNIT (the bald cranium's as
+ * its points and normals).
  */
 export type StoredSkull = {
   bones: Record<string, [number, number, number]>
@@ -51,6 +56,8 @@ export type StoredSkull = {
   normals: number[]
   zone: number[]
   triangles: number[]
+  bald: number[]
+  baldNormals: number[]
 }
 
 export const POINT_UNIT = 1e-4
@@ -66,6 +73,8 @@ const readSkull = (stored: StoredSkull): SkullData => ({
   normals: scaled(stored.normals, NORMAL_UNIT),
   zone: scaled(stored.zone, ZONE_UNIT),
   triangles: Uint32Array.from(stored.triangles),
+  bald: scaled(stored.bald, POINT_UNIT),
+  baldNormals: scaled(stored.baldNormals, NORMAL_UNIT),
 })
 
 /** Flags (1 or 0 each) packed eight to a byte, first in the lowest bit, as base64. */

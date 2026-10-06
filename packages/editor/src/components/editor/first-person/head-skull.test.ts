@@ -3,9 +3,13 @@ import type { SkullData } from './hair-styles'
 import {
   type AxisFit,
   composeFits,
+  craniumFit,
   faceFit,
   fitAxes,
+  fitBald,
   invertFit,
+  keepStandoff,
+  ontoSurface,
   PointGrid,
   pushOut,
   type Surface,
@@ -104,6 +108,8 @@ describe('fitting axis by axis', () => {
       normals: new Float32Array(),
       zone: new Float32Array(),
       triangles: new Uint32Array(),
+      bald: new Float32Array(),
+      baldNormals: new Float32Array(),
     }
     const moved = new Map(
       Object.entries(bones).map(([name, place]) => [
@@ -135,5 +141,95 @@ describe('keeping hair off the wearer', () => {
     const points = Float32Array.from([0, 0.05, 0])
     pushOut(points, surface, 0.003, 0.03)
     expect(points[1]).toBeCloseTo(0.05, 6)
+  })
+})
+
+/** A ball as the shared skull, all of it cranium, its bald cranium a smaller ball. */
+function skullData(radius = 0.1, bald = 0.09): SkullData {
+  const skull = sphere(radius, 1200)
+  const cranium = sphere(bald, 1200)
+  return {
+    bones: {},
+    points: skull.points,
+    normals: skull.normals,
+    zone: new Float32Array(1200).fill(1),
+    triangles: new Uint32Array(),
+    bald: cranium.points,
+    baldNormals: cranium.normals,
+  }
+}
+
+const SAME: AxisFit = { scale: [1, 1, 1], shift: [0, 0, 0] }
+/** The eyes at the front of the ball: their middle x, level y, front z. */
+const EYES: [number, number, number] = [0, 0, 0.1]
+
+describe('fitting the bald cranium to a head', () => {
+  test('puts the bald cranium, not the skull, where the fit says', () => {
+    const fitted = fitBald(skullData(), { scale: [2, 2, 2], shift: [0, 1, 0] })
+    expect(Math.hypot(fitted.points[0]!, fitted.points[1]! - 1, fitted.points[2]!)).toBeCloseTo(
+      0.18,
+      5,
+    )
+  })
+
+  test('takes a bald head’s scalp, smaller or larger, as its cranium', () => {
+    const data = skullData(0.1, 0.1)
+    for (const size of [0.095, 0.104]) {
+      const fit = craniumFit(data, SAME, sphere(size, 2000).points, EYES)
+      // Out to the sides from the eyes' middle: the scalp's own size.
+      expect(fit.scale[0]).toBeCloseTo(size / 0.1, 2)
+    }
+  })
+
+  test('keeps the face where it is', () => {
+    const fit = craniumFit(skullData(0.1, 0.1), SAME, sphere(0.095, 2000).points, EYES)
+    for (let axis = 0; axis < 3; axis++) {
+      expect(EYES[axis]! * fit.scale[axis]! + fit.shift[axis]!).toBeCloseTo(EYES[axis]!, 9)
+    }
+  })
+
+  test('under hair, is no bigger than the hair lying flattest allows, and never grows', () => {
+    const data = skullData(0.1, 0.1)
+    // Hair from flat on the scalp to 2 cm off it: the cranium stays.
+    const thick = sphere(0.1, 2000).points.map((value, j) => value * (1 + (j % 7) * 0.03))
+    expect(craniumFit(data, SAME, thick, EYES).scale[0]).toBeCloseTo(1, 6)
+    // A third of it 5 mm inside the cranium: the cranium is smaller.
+    const inside = sphere(0.1, 2000).points.map((value, j) =>
+      Math.floor(j / 3) % 3 === 0 ? value * 0.95 : value * (1 + (j % 7) * 0.03),
+    )
+    expect(craniumFit(data, SAME, inside, EYES).scale[0]).toBeCloseTo(0.95, 2)
+  })
+
+  test('without enough of the head over the cranium, leaves the fit be', () => {
+    expect(craniumFit(skullData(), SAME, [0, 0, 0.5], EYES)).toEqual(SAME)
+  })
+})
+
+describe('carrying shapes onto heads', () => {
+  const ball = sphere(0.1, 1200)
+  const surface = surfaceOf(ball.points, ball.normals)
+
+  test('moves points onto a surface facing as they do, within reach', () => {
+    const out = ontoSurface(
+      [0, 0.105, 0, 0, 0, 0.15, 0.104, 0, 0],
+      [0, 1, 0, 0, 0, 1, -1, 0, 0],
+      surface,
+      0.02,
+      0.9,
+    )
+    expect(out[1]).toBeCloseTo(0.1, 3)
+    // Too far off, or facing the other way (another shape's fold): left be.
+    expect(out[5]).toBeCloseTo(0.15, 6)
+    expect(out[6]).toBeCloseTo(0.104, 6)
+  })
+
+  test('puts hair back as far over the wearer as it stood over the donor, near the head', () => {
+    const points = Float32Array.from([0, 0.1, 0, 0.13, 0, 0, 0, 0, 0.098])
+    keepStandoff(points, [0.004, 0.05, 0.003], surface, 0.01, 0.03, 0.015)
+    expect(points[1]).toBeCloseTo(0.104, 3)
+    // Hair hanging free stays where it was carried.
+    expect(points[3]).toBeCloseTo(0.13, 6)
+    // Hair sunk into a larger head comes back out to its height.
+    expect(points[8]).toBeCloseTo(0.103, 3)
   })
 })

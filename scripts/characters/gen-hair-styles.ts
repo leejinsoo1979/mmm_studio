@@ -24,7 +24,7 @@
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import sharp from 'sharp'
-import { type Material, type Mesh, type Object3D, type SkinnedMesh, Vector3 } from 'three'
+import { type Material, Matrix3, type Mesh, type Object3D, type SkinnedMesh, Vector3 } from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { avatarGender } from '../../packages/editor/src/components/editor/first-person/avatar-catalog'
@@ -36,6 +36,7 @@ import {
 import {
   ownHair,
   texelShares,
+  vertexNormals,
 } from '../../packages/editor/src/components/editor/first-person/bald-head'
 import {
   type HairStyleEntry,
@@ -51,7 +52,11 @@ import {
   faceFit,
   fitSkull,
   invertFit,
+  ontoSurface,
   PointGrid,
+  SKULL_CELL,
+  type Surface,
+  smoothstep,
   standingOver,
 } from '../../packages/editor/src/components/editor/first-person/head-skull'
 import {
@@ -102,6 +107,22 @@ const COVERED = [
 
 /** A bald man (shaved; Construction_Male_02 shares his head) whose skull is the smallest of the bald ones. */
 const SKULL_AVATAR = 'Business_Male_07'
+
+/**
+ * The bald heads the bald surface's cranium is made of (see
+ * bald-head.ts): the skull's own siblings — one template, its face bones —
+ * with no hair modelled. The skull's is a big head with a flat back: theirs
+ * is a little smaller, its occiput rounder, standing out behind the ears.
+ * Each skull point is carried onto each of them along its normal, within
+ * BALD_REACH where their surface faces as it does (BALD_FACING: not onto an
+ * ear), wholly where the zone is BALD_ZONE[1] or more and not at all under
+ * BALD_ZONE[0] — the face and the ears stay the skull's — and the moves
+ * averaged.
+ */
+const BALD_CRANIA = ['Male_Adult_14', 'Medical_Male_03', 'Business_Male_04']
+const BALD_REACH = 0.02
+const BALD_FACING = 0.9
+const BALD_ZONE: readonly [number, number] = [0.05, 0.25]
 
 /** A shell standing this far out of the skull carries hair volume there. */
 const SHELL = 0.005
@@ -478,7 +499,12 @@ const ids = ROCKETBOX_AVATARS.map((avatar) => avatar.id).sort((a, b) => {
 })
 const skullHead = meshOf((await loadCharacter(SKULL_AVATAR, false)).scene, 'head')!
 const skull = skullOf(skullHead)
-const noZone: SkullData = { ...skull, zone: new Float32Array(skull.points.length / 3) }
+const noZone: SkullData = {
+  ...skull,
+  zone: new Float32Array(skull.points.length / 3),
+  bald: skull.points,
+  baldNormals: skull.normals,
+}
 const bare: HairBasis = { skull: noZone, shells: new Map(), bald: new Map() }
 
 // The card-haired heads' shells, and every head with a shell, by its
@@ -743,7 +769,55 @@ for (const id of ids) {
   console.log(`${id}: ${taken} of ${flags.length} triangles its own hair`)
 }
 
-const basis: HairBasis = { skull: { ...noZone, zone }, shells, bald }
+/** A head's surface: its points and their normals, in the bind pose. */
+function surfaceOfHead(head: SkinnedMesh): Surface {
+  const position = head.geometry.getAttribute('position')
+  const normal = head.geometry.getAttribute('normal')
+  const turn = new Matrix3().getNormalMatrix(head.bindMatrix)
+  const points = new Float32Array(position.count * 3)
+  const normals = new Float32Array(position.count * 3)
+  for (let i = 0; i < position.count; i++) {
+    new Vector3().fromBufferAttribute(position, i).applyMatrix4(head.bindMatrix).toArray(points, i * 3)
+    new Vector3()
+      .fromBufferAttribute(normal, i)
+      .applyMatrix3(turn)
+      .normalize()
+      .toArray(normals, i * 3)
+  }
+  return { points, normals, grid: new PointGrid(points, SKULL_CELL) }
+}
+
+// The bald cranium (see BALD_CRANIA), in the skull's own frame.
+const moves = new Float32Array(skull.points.length)
+const carried = new Float32Array(skull.points.length / 3)
+for (const id of BALD_CRANIA) {
+  const head = meshOf((await loadCharacter(id, false)).scene, 'head')!
+  const fit = faceFit(noZone, bonePlaces(head))!
+  const fitted = fitSkull(noZone, fit)
+  const onto = ontoSurface(fitted.points, fitted.normals, surfaceOfHead(head), BALD_REACH, BALD_FACING)
+  for (let i = 0; i < carried.length; i++) {
+    let moved = false
+    for (let axis = 0; axis < 3; axis++) {
+      const move = (onto[i * 3 + axis]! - fitted.points[i * 3 + axis]!) / fit.scale[axis]!
+      if (move !== 0) moved = true
+      moves[i * 3 + axis]! += move
+    }
+    if (moved) carried[i]!++
+  }
+}
+const baldPoints = Float32Array.from(skull.points, (value, k) => {
+  const i = Math.floor(k / 3)
+  return carried[i]
+    ? value + (smoothstep(BALD_ZONE[0], BALD_ZONE[1], zone[i]!) * moves[k]!) / carried[i]!
+    : value
+})
+const baldNormals = vertexNormals(baldPoints, skull.triangles)
+
+const basis: HairBasis = {
+  skull: { ...noZone, zone, bald: baldPoints, baldNormals },
+  shells,
+  bald,
+}
 console.log(`skull: ${zone.length} points; shells of ${shells.size} heads`)
 
 /**
@@ -831,6 +905,8 @@ const library: StoredHairLibrary = {
     normals: Array.from(skull.normals, (value) => Math.round(value / NORMAL_UNIT)),
     zone: Array.from(zone, (value) => Math.round(value / ZONE_UNIT)),
     triangles: Array.from(skull.triangles),
+    bald: Array.from(baldPoints, (value) => Math.round(value / POINT_UNIT)),
+    baldNormals: Array.from(baldNormals, (value) => Math.round(value / NORMAL_UNIT)),
   },
   shells: Object.fromEntries([...shells].map(([head, flags]) => [head, packFlags(flags)])),
   bald: Object.fromEntries([...bald].map(([head, flags]) => [head, packFlags(flags)])),

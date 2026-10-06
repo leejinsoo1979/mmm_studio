@@ -47,9 +47,12 @@ import { loadedGeometry, originalGeometry } from './head-geometry'
 import {
   type AxisFit,
   composeFits,
+  craniumFit,
   faceFit,
+  fitBald,
   fitSkull,
   invertFit,
+  keepStandoff,
   PointGrid,
   pushOut,
   SKULL_CELL,
@@ -725,6 +728,26 @@ function eyesOf(mesh: SkinnedMesh): number[] | null {
   return left && right ? [...left, ...right] : null
 }
 
+/**
+ * How the shared skull fits a head's cranium (see head-skull.ts's
+ * `craniumFit`), from its face bones' fit, its own points (bind pose) and
+ * its eyes: null without them.
+ */
+function craniumOf(
+  basis: HairBasis,
+  fit: AxisFit | null,
+  points: Triples,
+  eyes: number[] | null,
+): AxisFit | null {
+  if (!(fit && eyes)) return null
+  const middle = [
+    (eyes[0]! + eyes[3]!) / 2,
+    (eyes[1]! + eyes[4]!) / 2,
+    Math.max(eyes[2]!, eyes[5]!),
+  ]
+  return craniumFit(basis.skull, fit, points, middle as [number, number, number])
+}
+
 const kindsCache = new WeakMap<BufferGeometry, Uint8Array>()
 
 /** What each triangle of an opacity mesh is (see `cardKinds`), worked out once per geometry. */
@@ -823,12 +846,14 @@ export type HairPart = {
   bleedBelow: number
   /** How far (bind units) it is kept off the wearer's head and body. */
   clearance: number
+  /** How far each of its points stood over the donor's bald cranium (bind units; see `keepStandoff`). */
+  standoff: Float32Array
 }
 
 /**
  * A hairstyle ready to put on anyone (see `wearHair`): the donor's hair,
  * its bones' names (the face's named as the head) and bind places by skin
- * slot, and how the shared skull fits the donor.
+ * slot, and how the shared skull fits the donor's cranium.
  */
 export type HairAsset = {
   id: string
@@ -857,6 +882,18 @@ const CARD_CLEARANCE = 0.003
 
 /** Deeper (bind units) into the wearer than this, a point is left be by `pushOut`. */
 const PUSH_REACH = 0.03
+
+/**
+ * Hair carried onto a wearer stands as far over its bald head as it stood
+ * over the donor's cranium (see head-skull.ts's `keepStandoff`): wholly
+ * within STANDOFF_NEAR of it, not at all from STANDOFF_FAR, moved no more
+ * than STANDOFF_REACH. The bald surface is the wearer's own head, not the
+ * skull the hair is carried by: carried by that alone, a cap would stand
+ * off a smaller head, or sink into a larger one.
+ */
+const STANDOFF_NEAR = 0.01
+const STANDOFF_FAR = 0.03
+const STANDOFF_REACH = 0.015
 
 /** The cards' cut-out, as the characters' own (see avatar-rig.ts). */
 const CARD_ALPHA_TEST = 0.4
@@ -970,6 +1007,10 @@ export function hairAssetOf(
   const skull = fitSkull(basis.skull, fit)
   const geometry = originalGeometry(head)
   const points = bindPoints(head, geometry, 'position')
+  const cranium = craniumOf(basis, fit, points, eyesOf(head)) ?? fit
+  const bald = fitBald(basis.skull, cranium)
+  const standoffOf = (part: BufferGeometry) =>
+    standingOver(part.getAttribute('position').array as Float32Array, bald).height
   const count = points.length / 3
   const { zone, off } = standingOver(points, skull)
   const shell = shellOf(head, basis)
@@ -1024,15 +1065,17 @@ export function hairAssetOf(
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
     })
+    const capGeometry = subset(head, geometry, capped, true)
     const cap: HairPart = {
       name: 'cap',
-      geometry: subset(head, geometry, capped, true),
+      geometry: capGeometry,
       material,
       pixels: null,
       dyeMask: null,
       lum: 0,
       bleedBelow: CAP_BLEED_BELOW,
       clearance: CAP_CLEARANCE,
+      standoff: standoffOf(capGeometry),
     }
     const uv = geometry.getAttribute('uv')
     const uvs = new Float32Array(count * 2)
@@ -1073,15 +1116,17 @@ export function hairAssetOf(
       const material = opacityMaterial.clone()
       material.name = `${id}:hair-cards`
       Object.assign(material, { transparent: false, alphaTest: CARD_ALPHA_TEST, depthWrite: true })
+      const cardGeometry = subset(opacity, originalGeometry(opacity), hairTriangles, true)
       parts.push({
         name: 'cards',
-        geometry: subset(opacity, originalGeometry(opacity), hairTriangles, true),
+        geometry: cardGeometry,
         material,
         pixels: pixels?.opacity ?? null,
         dyeMask: null,
         lum: hair ? luminance(...hair) : 0,
         bleedBelow: BLEED_BELOW,
         clearance: CARD_CLEARANCE,
+        standoff: standoffOf(cardGeometry),
       })
     }
   }
@@ -1090,7 +1135,7 @@ export function hairAssetOf(
     parts,
     bones: hairBoneNames(head),
     anchors: boneBindPositions(head),
-    fit,
+    fit: cranium,
     basis,
   }
 }
@@ -1114,16 +1159,30 @@ type BaldHead = {
   paint: ScalpPaint
   top: number
   neck: number
+  /** How the shared skull fits the head's cranium: another's hair is carried onto the bald head by it. */
+  fit: AxisFit
 }
 
 /**
- * How far (bind units) from the nearest kept point the bald surface takes
- * that point's skinning, and down the neck from the nearest point of the
- * body (its clothes, its neck); the rest of it is skinned as what is round
- * it (see `spreadWeights`).
+ * How far (bind units) from the nearest point of the head as loaded (see
+ * SKIN_HEIGHT) the bald surface takes that point's skinning, and down the
+ * neck from the nearest point of the body (its clothes, its neck); the rest
+ * of it is skinned as what is round it (see `spreadWeights`).
  */
-const SKINNED_AS_SKIN = 0.008
+const SKINNED_AS_HEAD = 0.02
 const SKINNED_AS_BODY = 0.015
+
+/** This far (bind units) over the top of the neck and higher, the cranium moves with the head alone, as every head's own does. */
+const CRANIUM_RIGID = 0.03
+
+/**
+ * Of the head as loaded over the top of its neck, only its points standing
+ * less than this (bind units) over the skull lend their skinning: its
+ * skin, and hair painted on, not long hair's volume, which its maker may
+ * have bound to the neck and the back to swing with them. (Down the neck
+ * the skull's man's neck says nothing of how far they stand.)
+ */
+const SKIN_HEIGHT = 0.01
 
 /**
  * How far (bind units) under the kept skin and the clothes the bald surface
@@ -1147,6 +1206,10 @@ const CARD_SAMPLES = [
 /** How far down the neck (bind units, from its top) and how near the body the bald surface gives way to the body. */
 const LOW_NECK = 0.04
 const ON_BODY = 0.01
+
+/** Low down the neck, the bald surface this near the kept skin's points (bind units: they are far apart there), and this far from the cut, lies under it. */
+const UNDER_SKIN = 0.02
+const OFF_CUT = 0.015
 
 /** How far (bind units) under the middle of the body's neckline the bald surface reaches. */
 const UNDER_NECKLINE = 0.01
@@ -1217,9 +1280,10 @@ function makeBald(
     nape: places[headBone * 3 + 2]!,
   }
   const { spots, count: spotCount } = spotsOf(points)
-  const fitted = fitSkull(basis.skull, fit)
-  const { height } = standingOver(points, fitted)
+  const { height } = standingOver(points, fitSkull(basis.skull, fit))
   const taken = cleanCut({ points, index, spots, spotCount, height }, own, marks)
+  const cranium = craniumOf(basis, fit, points, eyes)!
+  const fitted = fitBald(basis.skull, cranium)
   const kept = keptTriangles(index, taken)
   const keptPoint = new Uint8Array(count)
   for (const i of kept) keptPoint[i] = 1
@@ -1228,10 +1292,17 @@ function makeBald(
   keptIds.forEach((i, k) => {
     anchors.set(points.subarray(i * 3, i * 3 + 3), k * 3)
   })
-  const skull = neckFitted(fitted, anchors, neck)
-  // Hung before it is bent, so the neck skin kept to either side shapes the piece too.
-  const hung = withNeckPiece(skull, basis.skull.triangles, neck)
-  const bent = bentSkull({ ...skull, ...hung }, hung.triangles, anchors)
+  // Hung before its neck is fitted and it is bent, so the neck skin kept to
+  // either side shapes the piece too.
+  const hung = withNeckPiece(fitted, basis.skull.triangles, neck)
+  const necked = neckFitted(hung.points, anchors, neck)
+  const skull = {
+    ...hung,
+    points: necked,
+    normals: vertexNormals(necked, hung.triangles),
+    grid: new PointGrid(necked, SKULL_CELL),
+  }
+  const bent = bentSkull(skull, hung.triangles, anchors, neck)
   smoothNape(bent.points, hung.triangles, bent.known, neck, marks.nape)
   const bald = { ...hung, points: bent.points, normals: vertexNormals(bent.points, hung.triangles) }
   const chosen = scalpTriangles(bald, { points, normals, index: kept }, marks)
@@ -1271,6 +1342,18 @@ function makeBald(
     UNDER_KEPT,
     TUCK_REACH,
   )
+  // The kept skin along the cut.
+  const onCut = new Uint8Array(count)
+  for (let t = 0; t < index.length / 3; t++) {
+    if (taken[t]) for (let k = 0; k < 3; k++) onCut[index[t * 3 + k]!] = 1
+  }
+  const cutIds = keptIds.filter((i) => onCut[i])
+  const cutGrid = new PointGrid(
+    Float32Array.from(
+      cutIds.flatMap((i) => [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!]),
+    ),
+    SKULL_CELL,
+  )
   const bodyMesh = ownMeshes(model, 'body')[0]
   const bodyGeometry = bodyMesh && originalGeometry(bodyMesh)
   const bodySurface = surfaceOf(ownMeshes(model, 'body'))
@@ -1303,25 +1386,31 @@ function makeBald(
   }
   // Low down the neck where the body's own skin or collar is, the body
   // shows: what of the bald surface reaches there would stand out of it.
+  // So does the head's own neck skin away from the cut: tucked under the
+  // skin's points, the bald surface would still poke through the skin's
+  // flat triangles between them.
   {
+    const near = (grid: PointGrid, i: number, within: number) =>
+      grid.nearest(
+        scalpPoints[i * 3]!,
+        scalpPoints[i * 3 + 1]!,
+        scalpPoints[i * 3 + 2]!,
+        1,
+        found,
+        distances,
+        within,
+      ) > 0 && distances[0]! <= within ** 2
     const kept: number[] = []
     for (let t = 0; t < corners.length; t += 3) {
-      const onBody = [0, 1, 2].every((k) => {
+      const hidden = [0, 1, 2].every((k) => {
         const i = corners[t + k]!
         return (
           scalpPoints[i * 3 + 1]! < neck - LOW_NECK &&
-          bodySurface.grid.nearest(
-            scalpPoints[i * 3]!,
-            scalpPoints[i * 3 + 1]!,
-            scalpPoints[i * 3 + 2]!,
-            1,
-            found,
-            distances,
-            ON_BODY,
-          ) > 0
+          (near(bodySurface.grid, i, ON_BODY) ||
+            (near(keptGrid, i, UNDER_SKIN) && !near(cutGrid, i, OFF_CUT)))
         )
       })
-      if (!onBody) kept.push(corners[t]!, corners[t + 1]!, corners[t + 2]!)
+      if (!hidden) kept.push(corners[t]!, corners[t + 1]!, corners[t + 2]!)
     }
     corners.length = 0
     corners.push(...kept)
@@ -1332,17 +1421,6 @@ function makeBald(
   const turned = new Float32Array(normals)
   const scalpLit = new Float32Array(scalpNormals)
   {
-    const onCut = new Uint8Array(count)
-    for (let t = 0; t < index.length / 3; t++) {
-      if (taken[t]) for (let k = 0; k < 3; k++) onCut[index[t * 3 + k]!] = 1
-    }
-    const cutIds = keptIds.filter((i) => onCut[i])
-    const cutGrid = new PointGrid(
-      Float32Array.from(
-        cutIds.flatMap((i) => [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!]),
-      ),
-      SKULL_CELL,
-    )
     const scalpGrid = new PointGrid(scalpPoints, SKULL_CELL)
     const turnOf = (x: number, y: number, z: number) =>
       cutGrid.nearest(x, y, z, 1, found, distances, TURN_BACK) === 0
@@ -1401,9 +1479,13 @@ function makeBald(
     triangles: [...taken.keys()].filter((t) => taken[t]),
   })
 
-  // Skinned as the kept skin and the body where it meets them, and as what
-  // is round it elsewhere: a nape bound to the head alone would shear off
-  // the neck as the head turns.
+  // Skinned as the head was where its hair was: the cranium with the head
+  // alone (see CRANIUM_RIGID), the nape with the head mesh's own weights,
+  // running from the head down to the spine as its maker painted them (see
+  // SKIN_HEIGHT), and as the body further down. Spread from the few places
+  // the kept skin and the body meet it, the spine's weight reached up over
+  // the occiput and the nape folded as the head turned. The face's bones
+  // count as the head: a nape doesn't move with the jaw or a brow.
   const nearest = Array.from({ length: vertices }, (_, i) => {
     const n = keptGrid.nearest(
       scalpPoints[i * 3]!,
@@ -1413,15 +1495,42 @@ function makeBald(
       found,
       distances,
     )
-    return n > 0 ? { at: keptIds[found[0]!]!, near: distances[0]! <= SKINNED_AS_SKIN ** 2 } : null
+    return n > 0 ? { at: keptIds[found[0]!]! } : null
+  })
+  const onSkull = [...height.keys()].filter(
+    (i) => height[i]! < SKIN_HEIGHT || points[i * 3 + 1]! < neck,
+  )
+  const headGrid = new PointGrid(
+    Float32Array.from(
+      onSkull.flatMap((i) => [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!]),
+    ),
+    SKULL_CELL,
+  )
+  const headBoneOf = head.skeleton.bones.map((bone, slot) => {
+    for (let up = bone.parent; up; up = up.parent) {
+      if (up === head.skeleton.bones[headBone]) return headBone
+    }
+    return slot
   })
   const bodyBones =
     bodyMesh?.skeleton.bones.map((bone) => {
       const same = head.skeleton.bones.indexOf(bone)
       return same >= 0 ? same : head.skeleton.bones.findIndex((b) => b.name === bone.name)
     }) ?? []
-  const known = nearest.map((from, i) => {
-    if (from?.near) return skinOf(geometry, from.at, (slot) => slot)
+  const known = Array.from({ length: vertices }, (_, i): [number, number][] | null => {
+    if (scalpPoints[i * 3 + 1]! >= neck + CRANIUM_RIGID) return [[headBone, 1]]
+    const onHead = headGrid.nearest(
+      scalpPoints[i * 3]!,
+      scalpPoints[i * 3 + 1]!,
+      scalpPoints[i * 3 + 2]!,
+      1,
+      found,
+      distances,
+      SKINNED_AS_HEAD,
+    )
+    if (onHead > 0 && distances[0]! <= SKINNED_AS_HEAD ** 2) {
+      return skinOf(geometry, onSkull[found[0]!]!, (slot) => headBoneOf[slot] ?? slot)
+    }
     if (!(bodyGeometry && scalpPoints[i * 3 + 1]! < neck)) return null
     const n = bodySurface.grid.nearest(
       scalpPoints[i * 3]!,
@@ -1445,7 +1554,7 @@ function makeBald(
   )
 
   const rings = cutRings(index, taken, spots, spotCount, TONE_RINGS)
-  const { zone } = standingOver(points, skull)
+  const { zone } = standingOver(points, fitted)
   const scalpCorners = {
     uvs: new Float32Array(placed.triangles.length * 2),
     points: new Float32Array(placed.triangles.length * 3),
@@ -1571,6 +1680,7 @@ function makeBald(
     paint,
     top,
     neck,
+    fit: cranium,
   }
 }
 
@@ -1881,20 +1991,20 @@ function dyeAhead(asset: HairAsset, hex: string): Promise<unknown> {
 /**
  * Puts a hairstyle on a character (steps to undo it into `undo`): each part
  * carried from the donor's bind pose into the wearer's, on the wearer's
- * skeleton, kept off its head (`headSurface`: bald, where it could be made
- * so) and body. Returns what dyes it (`null` for its own colour).
+ * skeleton, from the donor's cranium to the wearer's bald head (`bald`),
+ * kept off it and the body. Returns what dyes it (`null` for its own colour).
  */
 function wearBorrowed(
   model: Object3D,
   head: SkinnedMesh,
   asset: HairAsset,
-  headSurface: Surface,
+  bald: Pick<BaldHead, 'surface' | 'fit'>,
   undo: (() => void)[],
 ): (hex: string | null) => void {
-  const fit = faceFit(asset.basis.skull, bonePlaces(head))
-  if (!fit) return () => {}
-  const carry = composeFits(fit, invertFit(asset.fit))
-  const surface = surfaceOf([], [headSurface, surfaceOf(ownMeshes(model, 'body'))])
+  // From the donor's cranium to the wearer's: the hair sits on the bald head
+  // as it sat on the donor's.
+  const carry = composeFits(bald.fit, invertFit(asset.fit))
+  const surface = surfaceOf([], [bald.surface, surfaceOf(ownMeshes(model, 'body'))])
 
   const names = head.skeleton.bones.map((bone) => bone.name)
   const headIndex = names.findIndex(isHeadBone)
@@ -1923,6 +2033,7 @@ function wearBorrowed(
       { from, to },
       carry.scale,
     )
+    keepStandoff(carried, part.standoff, bald.surface, STANDOFF_NEAR, STANDOFF_FAR, STANDOFF_REACH)
     pushOut(carried, surface, part.clearance, PUSH_REACH)
     const normal = geometry.getAttribute('normal')
     for (let i = 0; i < normal.count; i++) {
@@ -2031,7 +2142,7 @@ export function wearHair(model: Object3D, asset: HairAsset | null, basis: HairBa
   if (bald) goBald(model, head, bald, undo)
   const headwear = !!bald && !!asset && hideHeadwear(model, bald.top, bald.neck, undo)
   hideOwnHair(model, !headwear, undo)
-  const dye = asset && bald ? wearBorrowed(model, head, asset, bald.surface, undo) : () => {}
+  const dye = asset && bald ? wearBorrowed(model, head, asset, bald, undo) : () => {}
   return { paint: bald?.paint ?? null, dye, takeOff }
 }
 

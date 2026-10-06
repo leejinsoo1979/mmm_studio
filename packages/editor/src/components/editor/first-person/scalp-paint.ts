@@ -10,7 +10,8 @@ import { byLightness, luminance, type Pixels, type Rgb } from './look-pixels'
  * colour left on the skin. The bald surface shows the texels the hair did,
  * painted wholly, plain. Near the skin kept, both take its colour — the
  * cheek's by a cheek, the neck's down the nape — and the forehead's tone
- * further off. And the body's texture, lit again where the hair shaded it.
+ * further off — grained as skin is. And the body's texture, lit again
+ * where the hair shaded it.
  */
 
 /** Texels round a painted triangle (px) painted with it, so no seam shows at a UV island's rim. */
@@ -55,6 +56,51 @@ const grain = (x: number, y: number) =>
   1 +
   GRAIN_FINE * (2 * hash(x, y, 3) - 1) +
   GRAIN_COARSE * (2 * hash(Math.floor(x / GRAIN_CELL), Math.floor(y / GRAIN_CELL), 5) - 1)
+
+/**
+ * The bald surface's grain, by where it is (bind units), not by its
+ * texels, which lie along the hair's strands and would streak it: a fine
+ * grain SKIN_FINE_CELL across, as the forehead's skin strays texel by texel
+ * from the skin round it (about 7% of its lightness, over a few
+ * millimetres), and a faint mottle SKIN_MOTTLE_CELL across. Without it the
+ * scalp is one flat tone beside a face that isn't: rubber, not skin.
+ */
+const SKIN_FINE_CELL = 0.004
+const SKIN_FINE = 0.05
+const SKIN_MOTTLE_CELL = 0.02
+const SKIN_MOTTLE = 0.06
+
+/** A steady pseudo-random number in [-1, 1] for a cell of space. */
+function cellHash(x: number, y: number, z: number, seed: number) {
+  const s = Math.sin(x * 127.1 + y * 311.7 + z * 191.3 + seed * 74.7) * 43758.5453
+  return 2 * (s - Math.floor(s)) - 1
+}
+
+/** Noise in [-1, 1] smooth through space, cells `cell` across. */
+function valueNoise(x: number, y: number, z: number, cell: number, seed: number) {
+  const fx = x / cell
+  const fy = y / cell
+  const fz = z / cell
+  const [ix, iy, iz] = [Math.floor(fx), Math.floor(fy), Math.floor(fz)]
+  const ease = (t: number) => t * t * (3 - 2 * t)
+  const [tx, ty, tz] = [ease(fx - ix), ease(fy - iy), ease(fz - iz)]
+  let sum = 0
+  for (let dz = 0; dz <= 1; dz++) {
+    for (let dy = 0; dy <= 1; dy++) {
+      for (let dx = 0; dx <= 1; dx++) {
+        const w = (dx ? tx : 1 - tx) * (dy ? ty : 1 - ty) * (dz ? tz : 1 - tz)
+        sum += w * cellHash(ix + dx, iy + dy, iz + dz, seed)
+      }
+    }
+  }
+  return sum
+}
+
+/** How much lighter or darker skin is at a place on the bald surface (see SKIN_FINE_CELL). */
+export const skinGrain = (x: number, y: number, z: number) =>
+  1 +
+  SKIN_FINE * valueNoise(x, y, z, SKIN_FINE_CELL, 7) +
+  SKIN_MOTTLE * valueNoise(x, y, z, SKIN_MOTTLE_CELL, 11)
 
 /** Calls `visit` with each texel of `head` a packed triangle covers (corners' u, v at `at`, `stride` apart). */
 function eachTexel(
@@ -168,8 +214,8 @@ export function scalpPainter(
   }
   for (let t = 0; t < scalpCount; t++) {
     for (let k = 0; k < 3; k++) {
-      cornerRef[(paintCount + t) * 3 + k] = scalp[t * SCALP + k * 4 + 2]!
-      cornerShare[(paintCount + t) * 3 + k] = scalp[t * SCALP + k * 4 + 3]!
+      cornerRef[(paintCount + t) * 3 + k] = scalp[t * SCALP + k * 7 + 2]!
+      cornerShare[(paintCount + t) * 3 + k] = scalp[t * SCALP + k * 7 + 3]!
     }
   }
 
@@ -208,7 +254,7 @@ export function scalpPainter(
     )
   }
   for (let t = 0; t < scalpCount; t++) {
-    eachTexel(size, scalp, t, SCALP, 4, (texel, w0, w1) => {
+    eachTexel(size, scalp, t, SCALP, 7, (texel, w0, w1) => {
       if (shown[texel] || amount[texel]! >= 1) return
       amount[texel] = 1
       owner[texel] = paintCount + t
@@ -257,12 +303,21 @@ export function scalpPainter(
   for (let texel = 0; texel < amount.length; texel++) if (amount[texel]! > 0) painted.push(texel)
   const texels = Int32Array.from(painted)
   const weights = Float32Array.from(texels, (texel) => Math.min(1, amount[texel]!))
-  // The bald surface shows the hair's texels, laid out along its strands:
-  // grained, they would streak. Only the kept skin is.
+  // The kept skin grained by its texels; the bald surface, whose texels lie
+  // along the hair's strands, by where they are.
   const shades = Float32Array.from(texels, (texel) => {
-    if (owner[texel]! < 0 || owner[texel]! >= paintCount) return 1
-    const x = texel % width
-    return grain(x, (texel - x) / width)
+    const t = owner[texel]!
+    if (t < 0) return 1
+    if (t < paintCount) {
+      const x = texel % width
+      return grain(x, (texel - x) / width)
+    }
+    const at = (t - paintCount) * SCALP
+    const w = [first[texel]!, second[texel]!, 1 - first[texel]! - second[texel]!]
+    const place = [4, 5, 6].map((c) =>
+      w.reduce((sum, wk, k) => sum + wk * scalp[at + k * 7 + c]!, 0),
+    )
+    return skinGrain(place[0]!, place[1]!, place[2]!)
   })
   const owners = Int32Array.from(texels, (texel) => owner[texel]!)
   const firsts = Float32Array.from(texels, (texel) => first[texel]!)

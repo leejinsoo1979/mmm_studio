@@ -168,21 +168,30 @@ export const SKULL_CELL = 0.02
 
 /** The shared skull in a character's bind pose, by the fit of its face bones (see `faceFit`). */
 export function fitSkull(data: SkullData, fit: AxisFit): Skull {
-  const count = data.points.length / 3
+  return fitted(data.points, data.normals, data.zone, fit)
+}
+
+/** The bald cranium on the shared skull's triangles (see `SkullData`) in a character's bind pose, by a fit. */
+export function fitBald(data: SkullData, fit: AxisFit): Skull {
+  return fitted(data.bald, data.baldNormals, data.zone, fit)
+}
+
+function fitted(from: Float32Array, turned: Float32Array, zone: Float32Array, fit: AxisFit): Skull {
+  const count = from.length / 3
   const points = new Float32Array(count * 3)
   const normals = new Float32Array(count * 3)
   for (let i = 0; i < count; i++) {
     let length = 0
     for (let axis = 0; axis < 3; axis++) {
-      points[i * 3 + axis] = data.points[i * 3 + axis]! * fit.scale[axis]! + fit.shift[axis]!
+      points[i * 3 + axis] = from[i * 3 + axis]! * fit.scale[axis]! + fit.shift[axis]!
       // A normal turns by the inverse of a stretch.
-      normals[i * 3 + axis] = data.normals[i * 3 + axis]! / fit.scale[axis]!
+      normals[i * 3 + axis] = turned[i * 3 + axis]! / fit.scale[axis]!
       length += normals[i * 3 + axis]! ** 2
     }
     length = Math.sqrt(length) || 1
     for (let axis = 0; axis < 3; axis++) normals[i * 3 + axis]! /= length
   }
-  return { points, normals, zone: data.zone, grid: new PointGrid(points, SKULL_CELL) }
+  return { points, normals, zone, grid: new PointGrid(points, SKULL_CELL) }
 }
 
 /**
@@ -207,6 +216,77 @@ export function faceFit(
 
 /** A fit on fewer face bones than this is not trusted. */
 const FEWEST_FACE_BONES = 8
+
+/**
+ * A head's own points over the cranium (at least CRANIUM_ZONE) whose
+ * nearest point of the bald cranium faces along an axis (at least FACING)
+ * say how big its cranium is that way. Where they lie within TIGHT of each
+ * other (from LOW to HIGH) they are the scalp itself — a bald head, or hair
+ * painted on — and the cranium is as big as their middle; where hair is
+ * modelled over it, it is no bigger than the lowest tenth of them (LOW)
+ * allow: the scalp is under the hair. Never more than REACH bigger or
+ * smaller; too few of them (EVIDENCE) say nothing.
+ */
+const CRANIUM_ZONE = 0.3
+const FACING = 0.85
+const LOW = 0.1
+const HIGH = 0.9
+const TIGHT = 0.005
+const REACH = 0.1
+const EVIDENCE = 8
+
+const quantile = (values: number[], at: number) => {
+  const sorted = [...values].sort((a, b) => a - b)
+  return sorted[Math.round(at * (sorted.length - 1))]!
+}
+
+/**
+ * The bald cranium's fit (`fit`, by the face bones) to a head's own: the
+ * face stays where `fit` puts it — the scale is about `eyes` (their middle
+ * x, level y and front z) — and the cranium is scaled on each axis to the
+ * head's own points (`points`, bind pose; see CRANIUM_ZONE).
+ */
+export function craniumFit(
+  data: SkullData,
+  fit: AxisFit,
+  points: Triples,
+  eyes: readonly [number, number, number],
+): AxisFit {
+  const skull = fitBald(data, fit)
+  const heights: number[][] = [[], [], []]
+  // Per point, the scale that would take the cranium to it: its height
+  // along the axis over its distance from the eyes along it.
+  const ratios: number[][] = [[], [], []]
+  const count = points.length / 3
+  for (let i = 0; i < count; i++) {
+    const x = points[i * 3]!
+    const y = points[i * 3 + 1]!
+    const z = points[i * 3 + 2]!
+    const nearest = standOver(skull, skull.zone, x, y, z, stand)
+    if (nearest < 0 || stand[4]! < CRANIUM_ZONE) continue
+    // Out to the sides, up, or back.
+    const facing = [Math.abs(stand[1]!), stand[2]!, -stand[3]!]
+    const axis = facing.findIndex((value) => value >= FACING)
+    if (axis < 0) continue
+    const arm = Math.abs(skull.points[nearest * 3 + axis]! - eyes[axis]!)
+    if (arm <= 0) continue
+    heights[axis]!.push(stand[0]!)
+    ratios[axis]!.push((stand[0]! * facing[axis]!) / arm)
+  }
+  const scale = [0, 1, 2].map((axis) => {
+    const along = heights[axis]!
+    if (along.length < EVIDENCE) return 1
+    const tight = quantile(along, HIGH) - quantile(along, LOW) < TIGHT
+    const by = ratios[axis]!
+    const out = tight ? quantile(by, 0.5) : Math.min(0, quantile(by, LOW))
+    return 1 + Math.max(-REACH, Math.min(REACH, out))
+  }) as AxisFit['scale']
+  const about: AxisFit = {
+    scale,
+    shift: [0, 1, 2].map((axis) => eyes[axis]! * (1 - scale[axis]!)) as AxisFit['shift'],
+  }
+  return composeFits(about, fit)
+}
 
 /** Neighbours a point's place on a surface is averaged over, so it doesn't jump from one to the next. */
 const NEIGHBOURS = 4
@@ -331,6 +411,68 @@ export function tuckUnder(points: Float32Array, surface: Surface, depth: number,
     points[i * 3 + 1] = y - stand[2]! * sink
     points[i * 3 + 2] = z - stand[3]! * sink
   }
+}
+
+/**
+ * Points (in place) put back as far over a surface as they stood over
+ * another (`standoff`, bind units, per point): hair carried from a donor's
+ * head keeps its height over the wearer's. Wholly where it stood within
+ * `near` of the donor's head, not at all from `far` (hair hanging free
+ * keeps its place), and only where the surface is within `reach` of where
+ * it should be.
+ */
+export function keepStandoff(
+  points: Float32Array,
+  standoff: ArrayLike<number>,
+  surface: Surface,
+  near: number,
+  far: number,
+  reach: number,
+) {
+  for (let i = 0; i < points.length / 3; i++) {
+    const share = 1 - smoothstep(near, far, standoff[i]!)
+    if (share <= 0) continue
+    const x = points[i * 3]!
+    const y = points[i * 3 + 1]!
+    const z = points[i * 3 + 2]!
+    if (standOver(surface, null, x, y, z, stand, far + reach) < 0) continue
+    const move = (standoff[i]! - stand[0]!) * share
+    if (Math.abs(move) > reach) continue
+    points[i * 3] = x + stand[1]! * move
+    points[i * 3 + 1] = y + stand[2]! * move
+    points[i * 3 + 2] = z + stand[3]! * move
+  }
+}
+
+/**
+ * Points (with their normals) moved onto a surface along its normal (a
+ * copy), each within `reach` (bind units) of it where the surface there
+ * faces as the point does (at least `agree`, the cosine between them): not
+ * onto another shape's ear or fold. The rest stay where they are.
+ */
+export function ontoSurface(
+  points: Triples,
+  normals: Triples,
+  surface: Surface,
+  reach: number,
+  agree: number,
+): Float32Array {
+  const out = Float32Array.from(points)
+  for (let i = 0; i < out.length / 3; i++) {
+    const x = out[i * 3]!
+    const y = out[i * 3 + 1]!
+    const z = out[i * 3 + 2]!
+    if (standOver(surface, null, x, y, z, stand, reach) < 0 || Math.abs(stand[0]!) > reach) continue
+    const facing =
+      stand[1]! * normals[i * 3]! +
+      stand[2]! * normals[i * 3 + 1]! +
+      stand[3]! * normals[i * 3 + 2]!
+    if (facing < agree) continue
+    out[i * 3] = x - stand[1]! * stand[0]!
+    out[i * 3 + 1] = y - stand[2]! * stand[0]!
+    out[i * 3 + 2] = z - stand[3]! * stand[0]!
+  }
+  return out
 }
 
 export const smoothstep = (from: number, to: number, x: number) => {
