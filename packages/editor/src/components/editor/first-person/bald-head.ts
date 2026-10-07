@@ -1992,10 +1992,19 @@ export function scalpPaint(
     return { ids, grid: new PointGrid(at, SKULL_CELL) }
   }
   const cut = gridOf((i) => used[i] === 1 && ringOf(i) === 0)
+  // How far each kept point is from the cut, as far as anything reaches
+  // (FEATHER); past it, as good as anywhere.
   const fromCut = Float32Array.from({ length: count }, (_, i) =>
     used[i] &&
-    cut.grid.nearest(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!, 1, found, distances) >
-      0
+    cut.grid.nearest(
+      points[i * 3]!,
+      points[i * 3 + 1]!,
+      points[i * 3 + 2]!,
+      1,
+      found,
+      distances,
+      FEATHER,
+    ) > 0
       ? Math.sqrt(distances[0]!)
       : Number.POSITIVE_INFINITY,
   )
@@ -2026,7 +2035,7 @@ export function scalpPaint(
     for (let k = 0; k < scalpCount; k++) {
       const [x, y, z] = [scalp.points[k * 3]!, scalp.points[k * 3 + 1]!, scalp.points[k * 3 + 2]!]
       closed[count + k] =
-        cut.grid.nearest(x, y, z, 1, found, distances) > 0
+        cut.grid.nearest(x, y, z, 1, found, distances, 2 * HAIRLINE_CLOSE) > 0
           ? Math.min(Math.sqrt(distances[0]!), 2 * HAIRLINE_CLOSE)
           : 2 * HAIRLINE_CLOSE
       ids.push(count + k)
@@ -2116,6 +2125,8 @@ export function scalpPaint(
   const behindNeck = (i: number) =>
     points[i * 3 + 1]! < marks.neck && points[i * 3 + 2]! < marks.nape
   const paint: number[] = []
+  // Each point's skin round it, once: it is a corner of several triangles.
+  const localOf = new Map<number, [number, number]>()
   const kept: number[] = []
   const takenUvs: number[] = []
   const nearCut: number[] = []
@@ -2130,7 +2141,9 @@ export function scalpPaint(
     kept.push(...read)
     if (corners.some((i) => amountOf(i) > 0 || zone[i]! >= PAINT_ZONE || behindNeck(i) || ear(i))) {
       for (const i of corners) {
-        const [ref, share] = local(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!)
+        if (!localOf.has(i))
+          localOf.set(i, local(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!))
+        const [ref, share] = localOf.get(i)!
         paint.push(
           uvs[i * 2]!,
           uvs[i * 2 + 1]!,
