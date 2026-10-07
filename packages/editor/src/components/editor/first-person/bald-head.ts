@@ -827,8 +827,20 @@ export function withNeckPiece(
   }
 }
 
-/** Where along a ray (from `o`, unit `d`) it meets triangle a, b, c of `points` (corner offsets ×3), or NaN. */
-function rayHit(o: number[], d: number[], points: Triples, a: number, b: number, c: number) {
+/**
+ * Where along a ray (from `o`, unit `d`) it meets triangle a, b, c of
+ * `points` (corner offsets ×3), or NaN; the weights of b and c there into
+ * `weights` when given.
+ */
+function rayHit(
+  o: number[],
+  d: number[],
+  points: Triples,
+  a: number,
+  b: number,
+  c: number,
+  weights?: number[],
+) {
   const e1 = [
     points[b]! - points[a]!,
     points[b + 1]! - points[a + 1]!,
@@ -856,6 +868,10 @@ function rayHit(o: number[], d: number[], points: Triples, a: number, b: number,
   ]
   const v = (d[0]! * q[0]! + d[1]! * q[1]! + d[2]! * q[2]!) / det
   if (v < 0 || u + v > 1) return Number.NaN
+  if (weights) {
+    weights[0] = u
+    weights[1] = v
+  }
   return (e2[0]! * q[0]! + e2[1]! * q[1]! + e2[2]! * q[2]!) / det
 }
 
@@ -1187,6 +1203,19 @@ function weightsInPlane(p: readonly number[], points: Triples, a: number, b: num
 const UV_TRIED = 16
 
 /**
+ * A point of the bald surface is placed on the hair taken out where the
+ * line from the middle of the head through it meets it, no further than
+ * RADIAL_REACH (bind units) off: the hair's shell stands round the head,
+ * so neighbouring points stay neighbours. Its nearest place instead would
+ * crowd all the bald surface under a hem of the hair onto its edge — a
+ * line of texels, a band of patches round the back of the head. The
+ * triangles a line may meet are looked up by its direction, in cells of
+ * RADIAL_CELLS round and half as many up.
+ */
+const RADIAL_REACH = 0.12
+const RADIAL_CELLS = 48
+
+/**
  * A triangle of the bald surface whose corners lie on the texture further
  * apart than TEAR times as far as its triangles' do for their size spans
  * a seam of it; its corners are placed by one triangle, as far outside it
@@ -1194,6 +1223,52 @@ const UV_TRIED = 16
  */
 const TEAR = 3
 const EXTRAPOLATE = 0.5
+
+/** Some triangles of a mesh (`triangles` of `index`) by the directions they lie in from `centre` (see RADIAL_CELLS). */
+function directionCells(
+  mesh: { points: Triples; index: ArrayLike<number>; triangles: readonly number[] },
+  centre: readonly number[],
+) {
+  const across = RADIAL_CELLS
+  const up = RADIAL_CELLS / 2
+  const cells = Array.from({ length: across * up }, () => [] as number[])
+  const cellOf = (d: readonly number[]) => {
+    const round = Math.atan2(d[0]!, d[2]!)
+    const rise = Math.asin(Math.max(-1, Math.min(1, d[1]!)))
+    return [
+      Math.min(across - 1, Math.floor(((round + Math.PI) / (2 * Math.PI)) * across)),
+      Math.min(up - 1, Math.floor(((rise + Math.PI / 2) / Math.PI) * up)),
+    ] as const
+  }
+  for (const t of mesh.triangles) {
+    const at = [0, 1, 2].map((k) => {
+      const i = mesh.index[t * 3 + k]! * 3
+      const d = [0, 1, 2].map((axis) => mesh.points[i + axis]! - centre[axis]!)
+      const length = Math.hypot(d[0]!, d[1]!, d[2]!) || 1
+      return cellOf(d.map((value) => value / length))
+    })
+    const rounds = at.map(([round]) => round)
+    let [from, to] = [Math.min(...rounds), Math.max(...rounds)]
+    // Across the back, where the angle wraps round.
+    if (to - from > across / 2) {
+      const behind = rounds.map((round) => (round < across / 2 ? round + across : round))
+      ;[from, to] = [Math.min(...behind), Math.max(...behind)]
+    }
+    const rises = at.map(([, rise]) => rise)
+    for (let round = from - 1; round <= to + 1; round++) {
+      for (let rise = Math.min(...rises) - 1; rise <= Math.max(...rises) + 1; rise++) {
+        if (rise < 0 || rise >= up) continue
+        cells[(((round % across) + across) % across) * up + rise]!.push(t)
+      }
+    }
+  }
+  return {
+    at: (d: readonly number[]) => {
+      const [round, rise] = cellOf(d)
+      return cells[round * up + rise]!
+    },
+  }
+}
 
 /**
  * The bald surface on the head's texture: each point at its nearest place
@@ -1204,13 +1279,16 @@ const EXTRAPOLATE = 0.5
  * of its own (see TEAR). Returns which point of the surface each point is
  * (`from`), the points' texture coordinates and the triangles. Points
  * whose place is `fixed` (`has`) keep it: the bald surface under kept
- * skin shows that skin's texels.
+ * skin shows that skin's texels. Given the middle of the head (`centre`),
+ * each point is placed where the line from it through the point meets the
+ * hair (see RADIAL_REACH), at its nearest place where none does.
  */
 export function scalpUvs(
   points: Triples,
   triangles: ArrayLike<number>,
   source: { points: Triples; uvs: Triples; index: ArrayLike<number>; triangles: readonly number[] },
   fixed?: { uvs: Triples; has: ArrayLike<number> },
+  centre?: readonly number[],
 ) {
   const count = points.length / 3
   const middles = new Float32Array(source.triangles.length * 3)
@@ -1257,6 +1335,47 @@ export function scalpUvs(
       out[1]! += weights[k]! * source.uvs[i * 2 + 1]!
     }
   }
+  const cells = centre ? directionCells(source, centre) : null
+  const hit = [0, 0]
+  /** The source triangle the line from the centre through a place meets nearest it, and its corners' weights there. */
+  const radialSource = (p: number[]) => {
+    if (!(centre && cells)) return null
+    const d = [p[0]! - centre[0]!, p[1]! - centre[1]!, p[2]! - centre[2]!]
+    const length = Math.hypot(d[0]!, d[1]!, d[2]!) || 1
+    for (let axis = 0; axis < 3; axis++) d[axis]! /= length
+    let best = -1
+    let bestWeights: number[] = [1, 0, 0]
+    let bestAlong = RADIAL_REACH
+    for (const t of cells.at(d)) {
+      const along = rayHit(p, d, source.points, corner(t, 0), corner(t, 1), corner(t, 2), hit)
+      if (!(Math.abs(along) <= bestAlong)) continue
+      bestAlong = Math.abs(along)
+      best = t
+      bestWeights = [1 - hit[0]! - hit[1]!, hit[0]!, hit[1]!]
+    }
+    return best < 0 ? null : { t: best, weights: bestWeights }
+  }
+  /** A place moved along the line from the centre onto the plane of source triangle `t` (where there is one). */
+  const alongToPlane = (p: number[], t: number) => {
+    if (!centre) return p
+    const [a, b, c] = [corner(t, 0), corner(t, 1), corner(t, 2)]
+    const e = [0, 1, 2].map((axis) => source.points[b + axis]! - source.points[a + axis]!)
+    const f = [0, 1, 2].map((axis) => source.points[c + axis]! - source.points[a + axis]!)
+    const n = [
+      e[1]! * f[2]! - e[2]! * f[1]!,
+      e[2]! * f[0]! - e[0]! * f[2]!,
+      e[0]! * f[1]! - e[1]! * f[0]!,
+    ]
+    const d = [0, 1, 2].map((axis) => p[axis]! - centre[axis]!)
+    const facing = n[0]! * d[0]! + n[1]! * d[1]! + n[2]! * d[2]!
+    if (Math.abs(facing) < 1e-12) return p
+    const along =
+      ((source.points[a]! - p[0]!) * n[0]! +
+        (source.points[a + 1]! - p[1]!) * n[1]! +
+        (source.points[a + 2]! - p[2]!) * n[2]!) /
+      facing
+    return [0, 1, 2].map((axis) => p[axis]! + d[axis]! * along)
+  }
   const uvs: number[] = []
   const at = [0, 0]
   for (let i = 0; i < count; i++) {
@@ -1264,7 +1383,8 @@ export function scalpUvs(
       uvs.push(fixed.uvs[i * 2]!, fixed.uvs[i * 2 + 1]!)
       continue
     }
-    const { t, weights } = nearestSource([points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!])
+    const p = [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!]
+    const { t, weights } = radialSource(p) ?? nearestSource(p)
     if (t < 0) uvs.push(0, 0)
     else {
       uvAt(t, weights, at)
@@ -1307,12 +1427,12 @@ export function scalpUvs(
         (points[ids[0]! * 3 + axis]! + points[ids[1]! * 3 + axis]! + points[ids[2]! * 3 + axis]!) /
         3,
     )
-    const { t: by } = nearestSource(middle)
+    const { t: by } = radialSource(middle) ?? nearestSource(middle)
     if (by < 0) continue
     for (let k = 0; k < 3; k++) {
       const i = ids[k]!
       const weights = weightsInPlane(
-        [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!],
+        alongToPlane([points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!], by),
         source.points,
         corner(by, 0),
         corner(by, 1),

@@ -547,6 +547,26 @@ describe('the bald surface on the texture', () => {
     expect(Math.max(...us) - Math.min(...us)).toBeLessThan(0.2)
   })
 
+  test('places each point where the line from the middle of the head through it meets the hair', () => {
+    // The hair 5 cm out in front of the middle (z = 0.05), 10 cm across.
+    const shell = {
+      points: Float32Array.from([
+        -0.05, -0.05, 0.05, 0.05, -0.05, 0.05, 0.05, 0.05, 0.05, -0.05, 0.05, 0.05,
+      ]),
+      uvs: Float32Array.from([0, 0, 1, 0, 1, 1, 0, 1]),
+      index: [0, 1, 2, 0, 2, 3],
+      triangles: [0, 1],
+    }
+    const points = Float32Array.from([0.01, 0, 0.02, -0.01, 0.01, 0.025, 0, -0.01, 0.025])
+    const placed = scalpUvs(points, [0, 1, 2], shell, undefined, [0, 0, 0])
+    expect(placed.uvs[0]).toBeCloseTo(0.75, 5)
+    expect(placed.uvs[1]).toBeCloseTo(0.5, 5)
+    expect(placed.uvs[2]).toBeCloseTo(0.3, 5)
+    expect(placed.uvs[3]).toBeCloseTo(0.7, 5)
+    // Its nearest place instead, without the middle.
+    expect(scalpUvs(points, [0, 1, 2], shell).uvs[0]).toBeCloseTo(0.6, 5)
+  })
+
   test('keeps the places it is given', () => {
     const points = Float32Array.from([0.2, 0.3, 0, 0.6, 0.3, 0, 0.4, 0.7, 0])
     const placed = scalpUvs(points, [0, 1, 2], square, {

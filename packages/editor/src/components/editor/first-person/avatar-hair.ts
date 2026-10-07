@@ -1547,6 +1547,8 @@ function makeBald(
     corners,
     { points, uvs, index, triangles: [...taken.keys()].filter((t) => taken[t]) },
     { uvs: fixedUvs, has: Uint8Array.from(under.triangle, (t) => (t >= 0 ? 1 : 0)) },
+    // The middle of the head, over the top of the neck.
+    [(eyes[0]! + eyes[3]!) / 2, neck, marks.nape],
   )
 
   // Skinned as the head was where its hair was: the cranium with the head
