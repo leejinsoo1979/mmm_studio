@@ -8,7 +8,7 @@ import {
   unpackPoints,
 } from './face-points'
 import { delaunay, flattenLighting, polygonMask, seamlessClone, warpTriangles } from './face-warp'
-import { bakeFront, type FrontImage } from './front-render'
+import { bakeFront, type FrontImage, forEachTexel } from './front-render'
 import {
   byLightness,
   colorDistance,
@@ -387,4 +387,108 @@ export function swapFace(
 ) {
   const { image, weight } = composeFace(front, hair, warp, photo, blend)
   bakeFront(head, skin, { image, depth: front.depth }, weight)
+}
+
+/**
+ * Where on the front view the forehead's colour is read, under the swapped
+ * face's top (× the brows' height over the eyes, above the brows; across
+ * BAND_ACROSS of the brows' span), and where the skin above takes it on:
+ * none from CARRY_FROM over the brows, wholly from CARRY_TO over the top
+ * of the face (see faceRegion), over the face's width (FACE_SIDES × half
+ * its width at the eyes) and facing the front (CARRY_FACING).
+ */
+const BAND: readonly [number, number] = [0.05, 0.45]
+const BAND_ACROSS = 0.8
+const CARRY_FROM = 0.3
+const CARRY_TO = 0.2
+const FACE_SIDES: readonly [number, number] = [0.75, 1.15]
+const CARRY_FACING: readonly [number, number] = [0.1, 0.5]
+
+/** The forehead's shift in colour is never more than this (a share either way). */
+const CARRY_MOST = 0.35
+
+/** Forehead texels read for its shift fewer than this say nothing. */
+const LEAST_BAND = 50
+
+/**
+ * A bald head's forehead runs on up into its scalp, so the swapped face
+ * can't end at the top of its forehead: blended in with the character's
+ * skin round it (see composeFace), the photo's own light — a face lit
+ * brighter in the middle than at its rim — leaves its forehead a pale
+ * patch under a darker band and a scalp of the skin's colour. The skin
+ * above the face takes on the face's shift in colour instead (in place, on
+ * `head` as swapped, `before` as it was): as much as the swap shifted the
+ * forehead's middle (see BAND), fading in up to the top of the face.
+ * `target` is the character's face landmarks, `triangles` its head's.
+ * Returns that shift (per channel, a factor), or null where too little of
+ * the forehead shows to read it.
+ */
+export function carryFaceTone(
+  head: Pixels,
+  before: Pixels,
+  triangles: readonly HeadTriangle[],
+  target: readonly number[],
+): Rgb | null {
+  const points = unpackPoints(target)
+  const brows = FACE_PARTS.brows.map((i) => points[i]!)
+  const browTop = Math.min(...brows.map(([, y]) => y))
+  const browXs = brows.map(([x]) => x)
+  const [browLeft, browRight] = [Math.min(...browXs), Math.max(...browXs)]
+  const middle = (browLeft + browRight) / 2
+  const eyes = [...FACE_PARTS.leftEye, ...FACE_PARTS.rightEye].map((i) => points[i]!)
+  const eyeLevel = eyes.reduce((sum, [, y]) => sum + y, 0) / eyes.length
+  const browHeight = Math.max(1e-6, eyeLevel - browTop)
+  const outline = FACE_PARTS.oval.map((i) => points[i]!)
+  const halfWidth =
+    (Math.max(...outline.map(([x]) => x)) - Math.min(...outline.map(([x]) => x))) / 2
+  // The top of the swapped face (see faceRegion).
+  const top = browTop - browHeight * 0.9
+  const at = (tri: HeadTriangle, w0: number, w1: number, w2: number) =>
+    [
+      tri.x[0]! * w0 + tri.x[1]! * w1 + tri.x[2]! * w2,
+      tri.y[0]! * w0 + tri.y[1]! * w1 + tri.y[2]! * w2,
+      tri.n[0]! * w0 + tri.n[1]! * w1 + tri.n[2]! * w2,
+    ] as const
+  const now: Rgb[] = []
+  const was: Rgb[] = []
+  const reach = ((browRight - browLeft) / 2) * BAND_ACROSS
+  forEachTexel(
+    head,
+    triangles,
+    () => true,
+    (texel, tri, w0, w1, w2) => {
+      const [x, y, n] = at(tri, w0, w1, w2)
+      if (n < CARRY_FACING[1] || Math.abs(x - middle) > reach) return
+      if (y > browTop - BAND[0] * browHeight || y < browTop - BAND[1] * browHeight) return
+      const p = texel * 4
+      now.push([head.data[p]!, head.data[p + 1]!, head.data[p + 2]!])
+      was.push([before.data[p]!, before.data[p + 1]!, before.data[p + 2]!])
+    },
+  )
+  if (now.length < LEAST_BAND) return null
+  const after = byLightness(now, 0.5)
+  const own = byLightness(was, 0.5)
+  const shift = [0, 1, 2].map((c) =>
+    Math.min(1 + CARRY_MOST, Math.max(1 - CARRY_MOST, after[c]! / Math.max(1, own[c]!))),
+  ) as Rgb
+  forEachTexel(
+    head,
+    triangles,
+    () => true,
+    (texel, tri, w0, w1, w2) => {
+      const [x, y, n] = at(tri, w0, w1, w2)
+      const w =
+        smoothstep(browTop - CARRY_FROM * browHeight, top - CARRY_TO * browHeight, y) *
+        (1 -
+          smoothstep(FACE_SIDES[0] * halfWidth, FACE_SIDES[1] * halfWidth, Math.abs(x - middle))) *
+        smoothstep(CARRY_FACING[0], CARRY_FACING[1], n)
+      if (w <= 0) return
+      const p = texel * 4
+      for (let c = 0; c < 3; c++) {
+        head.data[p + c] =
+          head.data[p + c]! + (before.data[p + c]! * shift[c]! - head.data[p + c]!) * w
+      }
+    },
+  )
+  return shift
 }

@@ -6,9 +6,11 @@ import type { HeadGeometry } from './head-geometry'
 import { analyseBody, dressBody, type LookJob, sameLookJob } from './look-job'
 import {
   type HeadTriangle,
+  hexToRgb,
   type Pixels,
   packTriangles,
   type Rgb,
+  toneSkin,
   unpackTriangles,
 } from './look-pixels'
 
@@ -195,6 +197,26 @@ describe('a body dressed in a look', () => {
     const own = dressBody(analysis, look('dyed', { hair: '#c03020' }), null).head!
     const [r, g] = rows(own, 0.02, 0.2)
     expect(r).toBeGreaterThan(g * 2)
+  })
+
+  test('a bald head’s scalp is toned as its face is, though the skin under its hairline takes the tone partly', () => {
+    // The forehead under the hairline, shaded by the hair over it: barely
+    // the skin's colour, so the tone takes there only in part.
+    const SHADED: Rgb = [150, 105, 85]
+    const { pixels, geometry } = head(SKIN)
+    for (let y = Math.floor(0.25 * SIZE); y < 0.33 * SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) pixels.data.set(SHADED, (y * SIZE + x) * 4)
+    }
+    const shaded = {
+      ...scalp,
+      tone: [Float32Array.from([0.1, 0.26, 0.9, 0.26, 0.9, 0.31, 0.1, 0.26, 0.9, 0.31, 0.1, 0.31])],
+    }
+    const analysis = analyseBody(pixels, body(), null, geometry)
+    const dressed = dressBody(analysis, look('toned', { scalp: shaded, skin: '#8a5a3c' }), null)
+      .head!
+    const toned: Pixels = { data: new Uint8ClampedArray([...SHADED, 255]), width: 1, height: 1 }
+    toneSkin(toned, hexToRgb('#8a5a3c'), analysis.skin, Float32Array.of(1))
+    near(rows(dressed, 0.04, 0.2), [toned.data[0]!, toned.data[1]!, toned.data[2]!])
   })
 
   test('an iris colour goes on without a face photo or landmarks', () => {

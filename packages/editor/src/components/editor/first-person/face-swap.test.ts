@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { FACE_PARTS, FACE_POINT_COUNT, type Point, packPoints } from './face-points'
-import { composeFace, FRONT, photoFace, warpFace } from './face-swap'
+import { carryFaceTone, composeFace, FRONT, photoFace, warpFace } from './face-swap'
 import type { FrontImage } from './front-render'
-import { luminance, type Pixels, type Rgb } from './look-pixels'
+import { type HeadTriangle, luminance, type Pixels, type Rgb } from './look-pixels'
 
 /**
  * A face's points (fractions of the image): outline, brows, eyes, nose,
@@ -178,5 +178,61 @@ describe('face swap', () => {
     const full = at(composeFace(front, hair, warp, face, 1).image, 0.36, 0.62)
     expect(near(none, at(face.image, 0.36, 0.62), 4)).toBe(true)
     for (let c = 0; c < 3; c++) expect(half[c]).toBeCloseTo((none[c]! + full[c]!) / 2, -1)
+  })
+})
+
+describe('a swapped face on a bald head', () => {
+  /** A head texture showing the front view one to one (128 px), facing the front. */
+  const SIDE = 128
+  const flat: HeadTriangle[] = [
+    [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+    ],
+    [
+      [0, 0],
+      [1, 1],
+      [0, 1],
+    ],
+  ].map((corners) => ({
+    u: corners.map(([u]) => u!),
+    v: corners.map(([, v]) => v!),
+    x: corners.map(([x]) => x!),
+    y: corners.map(([, y]) => y!),
+    z: [0, 0, 0],
+    n: [1, 1, 1],
+  }))
+  const skin = (): Pixels => {
+    const data = new Uint8ClampedArray(SIDE * SIDE * 4)
+    for (let i = 0; i < SIDE * SIDE; i++) data.set([...SKIN, 255], i * 4)
+    return { data, width: SIDE, height: SIDE }
+  }
+  const texel = (image: Pixels, x: number, y: number): Rgb => {
+    const p = (Math.floor(y * SIDE) * SIDE + Math.floor(x * SIDE)) * 4
+    return [image.data[p]!, image.data[p + 1]!, image.data[p + 2]!]
+  }
+
+  test('carries the face’s colour on up the forehead, but not down the face nor out past its sides', () => {
+    const before = skin()
+    // The photo's face, lit brighter than the skin round it, up to the top of its forehead.
+    const head = skin()
+    for (let y = Math.floor(0.33 * SIDE); y < SIDE; y++) {
+      for (let x = 0; x < SIDE; x++) {
+        if (inEllipse((x + 0.5) / SIDE, (y + 0.5) / SIDE, 0.5, 0.58, 0.34, 0.4)) {
+          head.data.set(
+            SKIN.map((c) => c * 1.1),
+            (y * SIDE + x) * 4,
+          )
+        }
+      }
+    }
+    const shift = carryFaceTone(head, before, flat, packPoints(facePoints()))!
+    for (const c of shift) expect(c).toBeCloseTo(1.1, 2)
+    // Over the forehead, the face's colour; down the face, as swapped.
+    expect(near(texel(head, 0.5, 0.2), SKIN.map((c) => c * 1.1) as Rgb, 2)).toBe(true)
+    expect(near(texel(head, 0.5, 0.6), SKIN.map((c) => c * 1.1) as Rgb, 2)).toBe(true)
+    // Past the face's sides (by the ears), the skin's own.
+    expect(texel(head, 0.04, 0.2)).toEqual(SKIN)
   })
 })

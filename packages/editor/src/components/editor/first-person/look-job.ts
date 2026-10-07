@@ -3,7 +3,7 @@ import type { BodyBind } from './bare-feet'
 import { connectedFrom } from './face-fill'
 import { runFaceJob } from './face-job'
 import { type FacePaint, hairHued, hasFacePaint, paintFace } from './face-paint'
-import { maskImage } from './face-swap'
+import { carryFaceTone, maskImage } from './face-swap'
 import {
   dressLegs,
   type FeetBody,
@@ -426,6 +426,28 @@ const sameScalp = (a: ScalpPaint, b: ScalpPaint) =>
   a.tone.length === b.tone.length &&
   a.tone.every((list, i) => sameNumbers(list, b.tone[i]!))
 
+/**
+ * A bald head's scalp's tone: its forehead's (see ScalpPainter's `tone`) as
+ * the character's skin is, toned as its face is to the look's `skin` and
+ * shifted as its forehead was by a face photo (`carried`). Read off the
+ * head as toned, it would be off: the skin under a hairline, shaded by the
+ * hair painted over it, takes the tone only partly.
+ */
+function scalpTone(
+  analysis: Analysis,
+  painter: ScalpPainter,
+  skin: string | null,
+  carried: Rgb | null,
+): Rgb {
+  let tone = painter.tone(analysis.head) ?? analysis.skin
+  if (skin) {
+    const pixel: Pixels = { data: new Uint8ClampedArray([...tone, 255]), width: 1, height: 1 }
+    toneSkin(pixel, hexToRgb(skin), analysis.skin, Float32Array.of(1))
+    tone = [pixel.data[0]!, pixel.data[1]!, pixel.data[2]!]
+  }
+  return carried ? (tone.map((value, c) => Math.min(255, value * carried[c]!)) as Rgb) : tone
+}
+
 /** Each body's scalp painter, and the scalp it paints (a job brings its own copy). */
 const painters = new WeakMap<Analysis, { scalp: ScalpPaint; painter: ScalpPainter }>()
 
@@ -446,9 +468,9 @@ function painterOf(analysis: Analysis, scalp: ScalpPaint): ScalpPainter {
  * A body's textures dressed in a look: the ones it changes, each its own
  * copy. On the head, in order: the skin tone, the hair dye (not on a bald
  * head), the swapped face (onto the skin as dyed, the dyes' masks being the
- * character's own face and not the photo's), a bald head's skin painted
- * round the cut to the scalp's tone (read off the forehead as it now is),
- * the face paint over it all, and the irises last (a face photo's, unless
+ * character's own face and not the photo's) and, on a bald head, its
+ * colour carried on up the forehead, a bald head's skin painted round the
+ * cut to the scalp's tone (see `scalpTone`), the face paint over it all, and the irises last (a face photo's, unless
  * the paint picks one). `photo` is the face's photo, read (null leaves the
  * face out).
  */
@@ -468,7 +490,12 @@ export function dressBody(
     let head = baseHead(analysis, base, { hair, skin, bald })
     // A bald head has no hair left over its face.
     const hairMask = bald ? null : analysis.hairMask
+    // How the face's photo shifted the forehead's colour (see carryFaceTone).
+    let carried: Rgb | null = null
     if (swap) {
+      // A bald head's forehead runs on into the scalp: the face's colour
+      // goes on up it, from the head as it was.
+      const unswapped = bald ? copyPixels(head) : null
       try {
         head = runFaceJob({
           head,
@@ -483,6 +510,7 @@ export function dressBody(
           blend: face.blend,
           light: face.light,
         })
+        if (unswapped) carried = carryFaceTone(head, unswapped, analysis.geometry.all, target)
       } catch (error) {
         // The dyes still go on; the face is left out.
         console.warn('[look] face swap failed', error)
@@ -492,7 +520,7 @@ export function dressBody(
       const painter = painterOf(analysis, scalp)
       painter.paint(
         head,
-        painter.tone(head) ?? (skin ? hexToRgb(skin) : analysis.skin),
+        scalpTone(analysis, painter, skin, carried),
         job.wig ? (hair ? hexToRgb(hair) : job.stubble) : analysis.hairColor,
         job.wig,
       )
