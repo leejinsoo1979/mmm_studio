@@ -172,13 +172,12 @@ describe('fitting the bald cranium to a head', () => {
     )
   })
 
-  test('takes a bald head’s scalp, smaller or larger, as its cranium', () => {
+  test('takes a smaller scalp as its cranium, but never one larger than its own', () => {
     const data = skullData(0.1, 0.1)
-    for (const size of [0.095, 0.104]) {
-      const fit = craniumFit(data, SAME, sphere(size, 2000).points, EYES)
-      // Out to the sides from the eyes' middle: the scalp's own size.
-      expect(fit.scale[0]).toBeCloseTo(size / 0.1, 2)
-    }
+    // Out to the sides from the eyes' middle: the scalp's own size.
+    expect(craniumFit(data, SAME, sphere(0.095, 2000).points, EYES).scale[0]).toBeCloseTo(0.95, 2)
+    // A short cut's shell lying evenly 4 mm over it is hair, not a bigger scalp.
+    expect(craniumFit(data, SAME, sphere(0.104, 2000).points, EYES).scale[0]).toBeCloseTo(1, 6)
   })
 
   test('keeps the face where it is', () => {

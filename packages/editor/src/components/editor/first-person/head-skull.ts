@@ -220,18 +220,16 @@ const FEWEST_FACE_BONES = 8
 /**
  * A head's own points over the cranium (at least CRANIUM_ZONE) whose
  * nearest point of the bald cranium faces along an axis (at least FACING)
- * say how big its cranium is that way. Where they lie within TIGHT of each
- * other (from LOW to HIGH) they are the scalp itself — a bald head, or hair
- * painted on — and the cranium is as big as their middle; where hair is
- * modelled over it, it is no bigger than the lowest tenth of them (LOW)
- * allow: the scalp is under the hair. Never more than REACH bigger or
- * smaller; too few of them (EVIDENCE) say nothing.
+ * say how big its cranium may be that way: no bigger than the lowest tenth
+ * of them (LOW) allow, the scalp being under whatever of them is hair. It
+ * never grows past the bald cranium the face bones fit: a short cut's
+ * shell, lying evenly over the scalp, can't be told from a bigger scalp,
+ * and taken for one the head made bald is as big as it was with its hair.
+ * Never more than REACH smaller; too few of them (EVIDENCE) say nothing.
  */
 const CRANIUM_ZONE = 0.3
 const FACING = 0.85
 const LOW = 0.1
-const HIGH = 0.9
-const TIGHT = 0.005
 const REACH = 0.1
 const EVIDENCE = 8
 
@@ -243,8 +241,9 @@ const quantile = (values: number[], at: number) => {
 /**
  * The bald cranium's fit (`fit`, by the face bones) to a head's own: the
  * face stays where `fit` puts it — the scale is about `eyes` (their middle
- * x, level y and front z) — and the cranium is scaled on each axis to the
- * head's own points (`points`, bind pose; see CRANIUM_ZONE).
+ * x, level y and front z) — and the cranium made smaller on each axis
+ * where the head's own points (`points`, bind pose) lie inside it (see
+ * CRANIUM_ZONE).
  */
 export function craniumFit(
   data: SkullData,
@@ -253,7 +252,6 @@ export function craniumFit(
   eyes: readonly [number, number, number],
 ): AxisFit {
   const skull = fitBald(data, fit)
-  const heights: number[][] = [[], [], []]
   // Per point, the scale that would take the cranium to it: its height
   // along the axis over its distance from the eyes along it.
   const ratios: number[][] = [[], [], []]
@@ -270,16 +268,12 @@ export function craniumFit(
     if (axis < 0) continue
     const arm = Math.abs(skull.points[nearest * 3 + axis]! - eyes[axis]!)
     if (arm <= 0) continue
-    heights[axis]!.push(stand[0]!)
     ratios[axis]!.push((stand[0]! * facing[axis]!) / arm)
   }
   const scale = [0, 1, 2].map((axis) => {
-    const along = heights[axis]!
-    if (along.length < EVIDENCE) return 1
-    const tight = quantile(along, HIGH) - quantile(along, LOW) < TIGHT
     const by = ratios[axis]!
-    const out = tight ? quantile(by, 0.5) : Math.min(0, quantile(by, LOW))
-    return 1 + Math.max(-REACH, Math.min(REACH, out))
+    if (by.length < EVIDENCE) return 1
+    return 1 + Math.max(-REACH, Math.min(0, quantile(by, LOW)))
   }) as AxisFit['scale']
   const about: AxisFit = {
     scale,
