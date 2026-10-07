@@ -1202,6 +1202,14 @@ const UNDER_KEPT = 0.0008
 const UNDER_CLOTHES = 0.003
 const TUCK_REACH = 0.015
 
+/**
+ * Low down the neck (see LOW_NECK) the bald surface goes this far under the
+ * kept skin: the neck curves out to the collar there, and the bald
+ * surface's triangles, tucked under the skin only at their corners, would
+ * stand out of it between them in slivers.
+ */
+const UNDER_LOW_NECK = 0.004
+
 /** Where on a hair card (its corners' weights) its shadow is cast from. */
 const CARD_SAMPLES = [
   [1, 0, 0],
@@ -1472,25 +1480,50 @@ function* baldSteps(
   // would show inside them.
   if (fan && fan.points.length > 0) {
     const lowest = fan.points[1]! - UNDER_NECKLINE
-    for (let i = 1; i < scalpPoints.length; i += 3) {
-      scalpPoints[i] = Math.max(scalpPoints[i]!, lowest)
+    const raised: number[] = []
+    for (let i = 0; i < scalpPoints.length / 3; i++) {
+      if (scalpPoints[i * 3 + 1]! >= lowest) continue
+      scalpPoints[i * 3 + 1] = lowest
+      raised.push(i)
     }
+    // Raised straight up, where the neck curves out to the collar they
+    // stand out of its skin, in slivers across it: tucked under it again.
+    const raisedPoints = Float32Array.from(
+      raised.flatMap((i) => [
+        scalpPoints[i * 3]!,
+        scalpPoints[i * 3 + 1]!,
+        scalpPoints[i * 3 + 2]!,
+      ]),
+    )
+    tuckUnder(
+      raisedPoints,
+      surfaceOf(ownMeshes(model, 'body'), [
+        { points: anchors, normals: keptNormals, grid: keptGrid },
+      ]),
+      UNDER_CLOTHES,
+      TUCK_REACH,
+    )
+    raised.forEach((i, k) => {
+      scalpPoints.set(raisedPoints.subarray(k * 3, k * 3 + 3), i * 3)
+    })
   }
   // Low down the neck where the body's own skin or collar is over it — its
   // triangles, not only its points, far apart there — the body shows: what
   // of the bald surface reaches there would stand out of it, showing the
   // head's texture stretched over the body's neck.
+  let underBody: Int32Array | null = null
   if (bodyMesh && bodyGeometry) {
-    const underBody = underKept(scalpPoints, vertexNormals(scalpPoints, corners), {
+    const overBody = underKept(scalpPoints, vertexNormals(scalpPoints, corners), {
       points: bindPoints(bodyMesh, bodyGeometry, 'position'),
       normals: bindPoints(bodyMesh, bodyGeometry, 'normal'),
       index: indexOf(bodyGeometry),
     }).triangle
+    underBody = overBody
     const kept: number[] = []
     for (let t = 0; t < corners.length; t += 3) {
       const hidden = [0, 1, 2].every((k) => {
         const i = corners[t + k]!
-        return scalpPoints[i * 3 + 1]! < neck - LOW_NECK && underBody[i]! >= 0
+        return scalpPoints[i * 3 + 1]! < neck - LOW_NECK && overBody[i]! >= 0
       })
       if (!hidden) kept.push(corners[t]!, corners[t + 1]!, corners[t + 2]!)
     }
@@ -1524,11 +1557,32 @@ function* baldSteps(
     index: keptUnder,
   })
   for (let j = 0; j < scalpPoints.length / 3; j++) {
-    const lift = -UNDER_KEPT - under.height[j]!
+    const lift =
+      -(scalpPoints[j * 3 + 1]! < neck - LOW_NECK ? UNDER_LOW_NECK : UNDER_KEPT) - under.height[j]!
     if (under.triangle[j]! < 0 || lift >= 0) continue
     for (let axis = 0; axis < 3; axis++) {
       scalpPoints[j * 3 + axis]! += under.normal[j * 3 + axis]! * lift
     }
+  }
+  // Down the neck, what lies wholly under the kept skin (or, lower, the
+  // body's) is theirs to show: tucked under their points, the bald surface
+  // still crosses them at a slant where the neck curves out to the collar,
+  // in slivers streaked with the texels they lie on — a smear down the neck.
+  {
+    const shown: number[] = []
+    for (let t = 0; t < corners.length; t += 3) {
+      const hidden = [0, 1, 2].every((k) => {
+        const i = corners[t + k]!
+        const y = scalpPoints[i * 3 + 1]!
+        return (
+          y < neck &&
+          (under.triangle[i]! >= 0 || (y < neck - LOW_NECK && (underBody?.[i] ?? -1) >= 0))
+        )
+      })
+      if (!hidden) shown.push(corners[t]!, corners[t + 1]!, corners[t + 2]!)
+    }
+    corners.length = 0
+    corners.push(...shown)
   }
   /** A kept triangle's corners' values (`size` per point) at a point of the bald surface under it. */
   const underValue = (values: ArrayLike<number>, size: number, j: number, out: number[]) => {

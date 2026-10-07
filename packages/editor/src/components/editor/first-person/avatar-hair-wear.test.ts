@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import type { BufferGeometry, Mesh, Object3D, SkinnedMesh } from 'three'
+import { type BufferGeometry, type Mesh, type Object3D, type SkinnedMesh, Vector3 } from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { prepareHair, wearHair } from './avatar-hair'
 import { applyShape, headOf, type Shaper } from './avatar-shape'
+import { underKept } from './bald-head'
 import { type HairLibrary, loadHairLibrary } from './hair-styles'
 
 const ROCKETBOX = join(import.meta.dir, '../../../../../../apps/editor/public/characters/rocketbox')
@@ -128,5 +129,49 @@ describe('a head made bald ahead of wearing', () => {
     expect(took).toBeLessThan(100)
     worn.takeOff()
     whole.takeOff()
+  }, 60000)
+})
+
+describe('a bald head’s neck', () => {
+  test('shows its kept skin, none of the bald surface wholly under it to cross it in slivers', async () => {
+    const basis = await library()
+    const scene = await loadCharacter('Male_Adult_02')
+    const worn = wearHair(scene, null, basis)
+    const head = headOf(scene) as SkinnedMesh
+    const scalp = scene.getObjectByName('hair:scalp') as SkinnedMesh
+    const bind = (mesh: SkinnedMesh, name: 'position' | 'normal') => {
+      const attribute = mesh.geometry.getAttribute(name)
+      const out = new Float32Array(attribute.count * 3)
+      const v = new Vector3()
+      for (let i = 0; i < attribute.count; i++) {
+        v.fromBufferAttribute(attribute, i)
+        if (name === 'position') v.applyMatrix4(mesh.bindMatrix)
+        else v.transformDirection(mesh.bindMatrix)
+        out.set([v.x, v.y, v.z], i * 3)
+      }
+      return out
+    }
+    const bones = head.skeleton.bones
+    const headBone = bones.findIndex((bone) => /Head$/.test(bone.name))
+    const neck = new Vector3().setFromMatrixPosition(
+      head.skeleton.boneInverses[headBone]!.clone().invert(),
+    ).y
+    const points = bind(scalp, 'position')
+    const under = underKept(points, bind(scalp, 'normal'), {
+      points: bind(head, 'position'),
+      normals: bind(head, 'normal'),
+      index: head.geometry.index!.array,
+    })
+    const corners = scalp.geometry.index!.array
+    let hidden = 0
+    for (let t = 0; t < corners.length; t += 3) {
+      const low = [0, 1, 2].every((k) => {
+        const i = corners[t + k]!
+        return points[i * 3 + 1]! < neck && under.triangle[i]! >= 0
+      })
+      if (low) hidden++
+    }
+    expect(hidden).toBe(0)
+    worn.takeOff()
   }, 60000)
 })
