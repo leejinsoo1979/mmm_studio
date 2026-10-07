@@ -497,9 +497,10 @@ export function dressBody(
     // How the face's photo shifted the forehead's colour (see carryFaceTone).
     let carried: Rgb | null = null
     if (swap) {
-      // A bald head's forehead runs on into the scalp: the face's colour
-      // goes on up it, from the head as it was.
-      const unswapped = bald ? copyPixels(head) : null
+      // A bald head's forehead — made bald, or a character's own with no
+      // hair — runs on into the scalp: the face's colour goes on up it,
+      // from the head as it was.
+      const unswapped = bald || !analysis.hairColor ? copyPixels(head) : null
       try {
         head = runFaceJob({
           head,
