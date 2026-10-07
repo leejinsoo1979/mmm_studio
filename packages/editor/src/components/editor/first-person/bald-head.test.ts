@@ -20,9 +20,11 @@ import {
   scalpUvs,
   smoothNape,
   spreadWeights,
+  stubbleAt,
   TONE_RINGS,
   texelShares,
   underKept,
+  wigFringe,
   withNeckPiece,
 } from './bald-head'
 import { PointGrid, type Skull } from './head-skull'
@@ -402,6 +404,45 @@ describe('painting round the cut', () => {
     // Both halves of the square: as much of the left as of the right in each.
     expect(share![0]! + share![1]!).toBeCloseTo(1, 1)
     expect(share![1]!).toBeGreaterThan(share![0]!)
+  })
+})
+
+describe('a shaved head’s stubble', () => {
+  const marks = { neck: 0.7, nape: 0 }
+  /** Places over a head, here and there. */
+  const places = Array.from({ length: 200 }, (_, i) => [
+    Math.sin(i * 1.3) * 0.08,
+    0.8 + Math.cos(i * 0.7) * 0.08,
+    0.02 + Math.sin(i * 2.1) * 0.05,
+  ])
+
+  test('is thick well inside the hair’s cut, thinning out over a hairline, none well out of it', () => {
+    for (const [x, y, z] of places) {
+      expect(stubbleAt(x!, y!, z!, 0.03, false, marks)).toBeGreaterThan(0.7)
+      expect(stubbleAt(x!, y!, z!, -0.02, false, marks)).toBe(0)
+    }
+    const across = places.map(([x, y, z]) => stubbleAt(x!, y!, z!, 0, false, marks))
+    // On the cut itself it wanders, here thicker, there thinner.
+    expect(Math.max(...across) - Math.min(...across)).toBeGreaterThan(0.2)
+  })
+
+  test('thins out sooner on the face (a forehead’s baby hairs) and never grows down the neck behind', () => {
+    for (const [x, y, z] of places) {
+      for (const inside of [-0.006, -0.003, 0, 0.004]) {
+        expect(stubbleAt(x!, y!, z!, inside, true, marks)).toBeLessThanOrEqual(
+          stubbleAt(x!, y!, z!, inside, false, marks),
+        )
+      }
+      expect(stubbleAt(x!, marks.neck - 0.08, -Math.abs(z!), 0.03, false, marks)).toBe(0)
+    }
+  })
+
+  test('rings a borrowed hairline: thick where its hair shows, none a couple of centimetres off', () => {
+    for (const [x, y, z] of places) {
+      expect(wigFringe(x!, y!, z!, 0)).toBeGreaterThan(0.6)
+      expect(wigFringe(x!, y!, z!, 0.03)).toBe(0)
+      expect(wigFringe(x!, y!, z!, 0.006)).toBeLessThanOrEqual(wigFringe(x!, y!, z!, 0.002))
+    }
   })
 })
 

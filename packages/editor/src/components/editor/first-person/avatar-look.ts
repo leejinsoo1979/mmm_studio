@@ -41,7 +41,7 @@ import {
   runLookJob,
   sameLookJob,
 } from './look-job'
-import { packTriangles } from './look-pixels'
+import { packTriangles, type Rgb } from './look-pixels'
 
 type PartMesh = { mesh: Mesh; material: MeshStandardMaterial }
 
@@ -303,12 +303,15 @@ function shodBody(parts: Record<Part, PartMesh[]>): SkinnedMesh | null {
  * aborted it first; `retry` when the face or the landmarks it and the paint
  * are placed by, or the feet, couldn't be loaded (the look went on without
  * them) and may load later. `scalp` is how a bald head's skin is painted
- * (see bald-head.ts).
+ * (see bald-head.ts), `stubble` the colour of the hair worn over it and
+ * `wig` where that shows.
  */
 async function applyLook(
   model: Object3D,
   look: AvatarPaint,
   scalp: ScalpPaint | null,
+  stubble: Rgb | null,
+  wig: Float32Array | null,
   avatarId: string,
   signal: AbortSignal,
 ): Promise<{ undo: () => void; retry: boolean } | null> {
@@ -347,6 +350,8 @@ async function applyLook(
     face: target && look.face,
     paint: look.paint,
     scalp: look.bald ? scalp : null,
+    stubble: look.bald ? stubble : null,
+    wig: look.bald ? wig : null,
     feet: look.feet,
     feetBind: shod && donor ? bindOf(shod) : null,
     feetDonor: donor?.donor ?? null,
@@ -450,6 +455,8 @@ export function useAvatarLook(
   const paint = look?.paint ?? NO_PAINT
   const footwear = look?.feet ?? SHOD
   const scalp = worn?.paint ?? null
+  const stubble = worn?.stubble ?? null
+  const wig = worn?.hairline ?? null
   useEffect(() => {
     const look: AvatarPaint = { hair, skin, face, paint, feet: footwear, bald: scalp !== null }
     if (dressing.current && (dressing.current.model !== model || !hasLook(look))) {
@@ -462,7 +469,7 @@ export function useAvatarLook(
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const dress = (attempt: number) => {
-      applyLook(model, look, scalp, avatarId, controller.signal)
+      applyLook(model, look, scalp, stubble, wig, avatarId, controller.signal)
         .then((applied) => {
           if (!applied) return
           if (controller.signal.aborted) {
@@ -483,7 +490,7 @@ export function useAvatarLook(
       controller.abort()
       clearTimeout(timer)
     }
-  }, [model, hair, skin, face, paint, footwear, scalp, avatarId])
+  }, [model, hair, skin, face, paint, footwear, scalp, stubble, wig, avatarId])
 
   useEffect(
     () => () => {

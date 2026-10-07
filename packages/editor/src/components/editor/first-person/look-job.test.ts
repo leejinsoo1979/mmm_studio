@@ -97,6 +97,8 @@ const look = (key: string, change: Partial<Omit<LookJob, 'body'>>) => ({
   face: null,
   paint: NO_PAINT,
   scalp: null,
+  stubble: null,
+  wig: null,
   feet: SHOD,
   feetBind: null,
   feetDonor: null,
@@ -143,7 +145,7 @@ describe('a body’s analysis', () => {
 describe('a body dressed in a look', () => {
   // The paint with the landmarks is face-paint.test.ts's.
   /** A bald head's paint: the crown's quad painted wholly, the tone read off the cheek's. */
-  const corner = (u: number, v: number) => [u, v, 1, -1, 0, 1]
+  const corner = (u: number, v: number) => [u, v, 1, -1, 0, 1, 0, 0, 0, 0, 1]
   const scalp: ScalpPaint = {
     paint: Float32Array.from([
       ...corner(0.1, 0.02),
@@ -165,11 +167,19 @@ describe('a body dressed in a look', () => {
       expect(Math.abs(value - to[c]!)).toBeLessThan(to[c]! * 0.12)
     })
 
+  /** How light a colour is. */
+  const lightness = ([r, g, b]: Rgb) => 0.2126 * r + 0.7152 * g + 0.0722 * b
+  /** The forehead's tone, shadowed by its hair's stubble where the hair was painted: nearer the skin than the hair. */
+  const stubbled = (colour: Rgb) => {
+    expect(lightness(colour)).toBeLessThan(lightness(SKIN))
+    expect(lightness(colour)).toBeGreaterThan((lightness(SKIN) + lightness(HAIR)) / 2)
+  }
+
   test('a bald head’s skin is painted round the cut to the forehead’s tone, without landmarks', () => {
     const { pixels, geometry } = head(HAIR)
     const analysis = analyseBody(pixels, body(), null, geometry)
     const bald = dressBody(analysis, look('unplaced', { scalp }), null).head!
-    near(rows(bald, 0.04, 0.2), SKIN)
+    stubbled(rows(bald, 0.04, 0.2))
     // The jaw, as dark as the hair but not painted, stays.
     expect(rows(bald, 0.52, 0.73)).toEqual(rows(pixels, 0.52, 0.73))
   })
@@ -178,7 +188,10 @@ describe('a body dressed in a look', () => {
     const { pixels, geometry } = head(HAIR)
     const analysis = analyseBody(pixels, body(), null, geometry)
     const bald = dressBody(analysis, look('dyed', { scalp, hair: '#c03020' }), null).head!
-    near(rows(bald, 0.04, 0.2), SKIN)
+    stubbled(rows(bald, 0.04, 0.2))
+    // Its stubble is the hair's own colour, grown back undyed.
+    const [br, bg] = rows(bald, 0.04, 0.2)
+    expect(br).toBeLessThan(bg * 1.6)
     const own = dressBody(analysis, look('dyed', { hair: '#c03020' }), null).head!
     const [r, g] = rows(own, 0.02, 0.2)
     expect(r).toBeGreaterThan(g * 2)

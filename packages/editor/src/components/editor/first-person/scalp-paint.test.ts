@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { type ScalpPaint, SHADED } from './bald-head'
 import type { Pixels, Rgb } from './look-pixels'
-import { relightBody, scalpPainter, skinGrain } from './scalp-paint'
+import { relightBody, scalpPainter, skinGrain, stubbleShade } from './scalp-paint'
 
 const SIZE = 16
 
@@ -46,16 +46,47 @@ function band(from: number, to: number, top: number[], bottom: number[]) {
   ])
 }
 
+/** A kept corner packed for painting (see PAINTED) past its u, v: at the origin, where hair may grow. */
+const kept = (amount: number, ref: number, share: number, hair: number, stubble = 0) => [
+  amount,
+  ref,
+  share,
+  hair,
+  stubble,
+  0,
+  0,
+  0,
+  1,
+]
+
+/** A corner of the bald surface packed for painting (see SCALP) past its u, v: no skin round it. */
+const bare = (x: number, y: number, z: number, stubble = 0) => [-1, 0, x, y, z, stubble]
+
 /** The left half packed for painting (see PAINTED): how much at the top and the bottom, no skin round it, the hair painted over where `hair`. */
 const leftHalf = (top: number, bottom: number, hair = 1) =>
-  band(0, 0.5, [top, -1, 0, hair], [bottom, -1, 0, hair])
+  band(0, 0.5, kept(top, -1, 0, hair), kept(bottom, -1, 0, hair))
 
 const paintScalp = (
   head: Pixels,
   plan: Partial<ScalpPaint>,
   tone: Rgb,
   hair: Float32Array | null = null,
-) => scalpPainter(head.width, head.height, planned(plan), hair, null).paint(head, tone)
+  stubble: Rgb | null = null,
+  wig: Float32Array | null = null,
+) =>
+  scalpPainter(head.width, head.height, planned(plan), hair, null).paint(head, tone, stubble, wig)
+
+/** The mean lightness of a texture's texels from column `from` to `to` (exclusive), every row. */
+const lightness = (pixels: Pixels, from: number, to: number) => {
+  let sum = 0
+  for (let y = 0; y < pixels.height; y++) {
+    for (let x = from; x < to; x++) {
+      const [r, g, b] = at(pixels, x, y)
+      sum += 0.2126 * r! + 0.7152 * g! + 0.0722 * b!
+    }
+  }
+  return sum / (pixels.height * (to - from))
+}
 
 const scalpTone = (
   head: Pixels,
@@ -104,7 +135,7 @@ describe('painting a bald head’s skin round the cut', () => {
     paintScalp(
       head,
       {
-        paint: band(0, 0.5, [1, 0, 1, 1], [1, 0, 1, 1]),
+        paint: band(0, 0.5, kept(1, 0, 1, 1), kept(1, 0, 1, 1)),
         skin: Float32Array.from([0.75, 0.5, 0, 0, 0]),
       },
       TONE,
@@ -118,7 +149,7 @@ describe('painting a bald head’s skin round the cut', () => {
     paintScalp(
       head,
       {
-        paint: band(0, 0.5, [1, 0, 1, 1], [1, 0, 1, 1]),
+        paint: band(0, 0.5, kept(1, 0, 1, 1), kept(1, 0, 1, 1)),
         skin: Float32Array.from([0.75, 0.5, 0, 0, 0]),
       },
       TONE,
@@ -137,7 +168,7 @@ describe('painting the bald surface', () => {
     paintScalp(
       head,
       {
-        scalp: band(0, 0.5, [-1, 0, 0, 0.1, 0], [-1, 0, 0, 0, 0]),
+        scalp: band(0, 0.5, bare(0, 0.1, 0), bare(0, 0, 0)),
         kept: Float32Array.from([0, 0.5, 0.25, 0.5, 0.25, 1, 0, 0.5, 0.25, 1, 0, 1]),
       },
       TONE,
@@ -155,6 +186,68 @@ describe('painting the bald surface', () => {
     // Past it, padded a few texels.
     expect(near(at(head, 6, 8), TONE)).toBe(true)
     expect(at(head, 12, 8)).toEqual(HAIR)
+  })
+})
+
+describe('a shaved head’s stubble', () => {
+  test('is the hair’s colour greyed, darker and cooler, showing more for dark hair than fair', () => {
+    const [colour, dark] = stubbleShade(HAIR, TONE)
+    expect(colour[0] / colour[2]).toBeLessThan(HAIR[0] / HAIR[2])
+    expect(colour[0]).toBeLessThan(HAIR[0])
+    const [, fair] = stubbleShade([210, 170, 120], TONE)
+    expect(dark).toBeGreaterThan(fair)
+    expect(fair).toBeGreaterThan(0)
+  })
+
+  test('shadows the skin as thick as its corners say, in grains, only given the hair’s colour', () => {
+    const plan = { paint: band(0, 1, kept(1, -1, 0, 0, 1), kept(1, -1, 0, 0, 1)), kept: ALL_KEPT }
+    const bare = image(() => SKIN)
+    paintScalp(bare, plan, TONE)
+    const stubbled = image(() => SKIN)
+    paintScalp(stubbled, plan, TONE, null, HAIR)
+    expect(lightness(stubbled, 0, SIZE)).toBeLessThan(lightness(bare, 0, SIZE) * 0.9)
+    // Grains: texel by texel, more or less of it.
+    const texels = Array.from({ length: SIZE }, (_, x) => at(stubbled, x, 8)[0]!)
+    expect(Math.max(...texels) - Math.min(...texels)).toBeGreaterThan(5)
+  })
+
+  test('under another’s hair, rings only its hairline', () => {
+    // The bald surface from x 0 to 0.1 (bind units) top to bottom; the hair
+    // worn shows over its top edge.
+    const corner = (x: number) => bare(x, 0, 0, 1)
+    const plan = { scalp: band(0, 1, corner(0), corner(0.1)) }
+    const wig = Float32Array.from([0, 0, 0, 0, 0, 0.005, 0, 0, -0.005])
+    const head = image(() => SKIN)
+    paintScalp(head, plan, TONE, null, HAIR, wig)
+    const plain = image(() => SKIN)
+    paintScalp(plain, plan, TONE)
+    const flipped = (pixels: Pixels) => ({
+      ...pixels,
+      data: Uint8ClampedArray.from(pixels.data, (_, i) => {
+        const texel = i >> 2
+        const x = texel % SIZE
+        const y = (texel - x) / SIZE
+        return pixels.data[(x * SIZE + y) * 4 + (i & 3)]!
+      }),
+    })
+    // Rows as columns: near the hair, shadowed; at the far corners (10 cm
+    // off), as without.
+    expect(lightness(flipped(head), 0, 2)).toBeLessThan(lightness(flipped(plain), 0, 2) * 0.9)
+    const far = lightness(flipped(plain), SIZE - 1, SIZE)
+    expect(Math.abs(lightness(flipped(head), SIZE - 1, SIZE) - far)).toBeLessThan(far * 0.02)
+  })
+})
+
+describe('the skin’s own grain', () => {
+  test('stays where kept skin is painted wholly another colour', () => {
+    // Skin with a pore every few texels.
+    const head = image((x, y) => ((x * 7 + y * 3) % 5 === 0 ? [150, 110, 90] : SKIN))
+    paintScalp(head, { paint: leftHalf(1, 1, 0), kept: ALL_KEPT }, TONE)
+    const row = Array.from({ length: 6 }, (_, x) => at(head, x + 1, 8))
+    const shades = row.map(([r]) => r!)
+    expect(Math.max(...shades) - Math.min(...shades)).toBeGreaterThan(15)
+    // Each texel the tone, lighter or darker.
+    for (const colour of row) expect(colour[0]! / colour[2]!).toBeCloseTo(TONE[0] / TONE[2], 1)
   })
 })
 
@@ -247,7 +340,7 @@ describe('the bald surface’s grain', () => {
   })
 
   test('grains the bald surface by where it is, not by its texels', () => {
-    const plan = (y: number) => ({ scalp: band(0, 1, [-1, 0, 0, y, 0], [-1, 0, 0.05, y, 0.05]) })
+    const plan = (y: number) => ({ scalp: band(0, 1, bare(0, y, 0), bare(0.05, y, 0.05)) })
     const shades = [0.8, 0.9].map((y) => {
       const head = image(() => HAIR)
       paintScalp(head, plan(y), TONE)

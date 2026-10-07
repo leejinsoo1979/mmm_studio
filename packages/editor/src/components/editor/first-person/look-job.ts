@@ -73,6 +73,14 @@ export type LookJob = {
   paint: FacePaint
   /** How a bald head's skin is painted round where its hair was taken out (see bald-head.ts); null for its own hair. */
   scalp: ScalpPaint | null
+  /**
+   * The colour of the hair worn over a bald head, which the stubble round
+   * its hairline is (see scalp-paint.ts): a borrowed style's, or its dye's.
+   * Bald, the stubble is the head's own hair's, undyed: it grew back.
+   */
+  stubble: Rgb | null
+  /** Where that borrowed hair shows (bind pose), its hairline thinning out into stubble on the skin; null for none. */
+  wig: Float32Array | null
   feet: AvatarFeet
   /**
    * Out of shoes, the body mesh with them in its bind pose and the donor
@@ -480,7 +488,12 @@ export function dressBody(
     }
     if (scalp) {
       const painter = painterOf(analysis, scalp)
-      painter.paint(head, painter.tone(head) ?? (skin ? hexToRgb(skin) : analysis.skin))
+      painter.paint(
+        head,
+        painter.tone(head) ?? (skin ? hexToRgb(skin) : analysis.skin),
+        job.wig ? (hair ? hexToRgb(hair) : job.stubble) : analysis.hairColor,
+        job.wig,
+      )
     }
     if (target) {
       paintFace(head, analysis.geometry, target, paint, {

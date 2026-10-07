@@ -1,5 +1,12 @@
 import { rasterise } from './front-render'
-import { PointGrid, SKULL_CELL, type Skull, smoothstep, type Triples } from './head-skull'
+import {
+  PointGrid,
+  SKULL_CELL,
+  type Skull,
+  smoothstep,
+  type Triples,
+  valueNoise,
+} from './head-skull'
 
 /**
  * A character wearing any hair but its own is made bald first, cleanly:
@@ -1803,15 +1810,89 @@ const PAINT_ZONE = 0.02
 const FOREHEAD_FACING = 0.4
 
 /**
+ * A shaved head is no clean skin: where the hair grew it is shadowed with
+ * stubble, thinning out over a hairline a centimetre or so wide. Its
+ * density (0–1, see scalp-paint.ts) is full STUBBLE_IN (bind units) inside
+ * the cut — the head's own hairline — and none STUBBLE_OUT out of it on
+ * the kept skin (STUBBLE_FACE_OUT on the face: a forehead's baby hairs),
+ * the line wandering by HAIRLINE_WOBBLE in cells HAIRLINE_CELL across, so
+ * it follows no triangle's edge. How far into the cut a place is, is read
+ * as the most of its own and the mean of the places within HAIRLINE_CLOSE
+ * of it: a cut runs round what the hair's shell covered, which a forelock
+ * or a parting leaves short of the hairline in a notch of bare skin, while
+ * a hairline has none. Behind the neck it thins out from
+ * NAPE_LINE[1] down to none at NAPE_LINE[0] (under the top of the neck):
+ * long hair's cut runs further down the neck than any hair grows. None on
+ * the ears; and from place to place it is thicker or thinner by up to
+ * STUBBLE_PATCHY, in patches STUBBLE_PATCH across.
+ */
+const STUBBLE_IN = 0.012
+const STUBBLE_OUT = 0.006
+const STUBBLE_FACE_OUT = 0.003
+const HAIRLINE_WOBBLE = 0.005
+const HAIRLINE_CELL = 0.012
+const HAIRLINE_CLOSE = 0.02
+const CLOSE_TRIED = 32
+const NAPE_LINE: readonly [number, number] = [-0.05, -0.01]
+const STUBBLE_PATCHY = 0.25
+const STUBBLE_PATCH = 0.02
+
+/** Kept skin standing this far (bind units) over the skull near an ear is the ear: no stubble on it. */
+const EAR_STANDING = 0.006
+
+/**
+ * How thick a shaved head's stubble is at a place (bind pose; see
+ * STUBBLE_IN), `inside` how far into the cut it is (negative out of it,
+ * on the kept skin), `face` whether it is on the face.
+ */
+export function stubbleAt(
+  x: number,
+  y: number,
+  z: number,
+  inside: number,
+  face: boolean,
+  marks: Pick<HeadMarks, 'neck' | 'nape'>,
+) {
+  const wobble = hairlineWobble(x, y, z)
+  const line = smoothstep(-(face ? STUBBLE_FACE_OUT : STUBBLE_OUT), STUBBLE_IN, inside + wobble)
+  const nape =
+    z < marks.nape
+      ? smoothstep(marks.neck + NAPE_LINE[0], marks.neck + NAPE_LINE[1], y + 2 * wobble)
+      : 1
+  const patch = 1 - STUBBLE_PATCHY * (0.5 + 0.5 * valueNoise(x, y, z, STUBBLE_PATCH, 23))
+  return line * nape * patch
+}
+
+/** How far a hairline wanders from its line (bind units) at a place: it follows no triangle's edge. */
+const hairlineWobble = (x: number, y: number, z: number) =>
+  HAIRLINE_WOBBLE *
+  (valueNoise(x, y, z, HAIRLINE_CELL, 21) + 0.5 * valueNoise(x, y, z, HAIRLINE_CELL / 3, 22))
+
+/**
+ * Under another's hair the head shows no stubble of its own hair, but
+ * round the hair worn's hairline it does, as a head's own hairline thins
+ * out into the skin: wholly within WIG_NEAR (bind units) of where the hair
+ * shows, none from WIG_FAR — else the wig's edge is a cut across the skin.
+ */
+const WIG_NEAR = 0.002
+const WIG_FAR = 0.016
+
+/** How thick the stubble round a borrowed hairline is at a place `apart` (bind units) from where the hair shows. */
+export const wigFringe = (x: number, y: number, z: number, apart: number) =>
+  1 - smoothstep(WIG_NEAR, WIG_FAR, apart + hairlineWobble(x, y, z))
+
+/**
  * Numbers per triangle when packed for painting, per corner: u, v, how
  * much to paint, which skin round it its colour is (see `ScalpPaint.skin`;
- * −1 for none) and how much, and whether the hair's colour left there is
- * painted over (1) or not (0, the face).
+ * −1 for none) and how much, whether the hair's colour left there is
+ * painted over (1) or not (0, the face), its stubble (see STUBBLE_IN),
+ * where it is (x, y, z in the bind pose), and whether hair may grow there
+ * at all (0 on an ear).
  */
-export const PAINTED = 18
+export const PAINTED = 33
 
-/** Numbers per triangle of the bald surface packed for painting, per corner: u, v, which skin round it its colour is and how much, and where it is (x, y, z in the bind pose). */
-export const SCALP = 21
+/** Numbers per triangle of the bald surface packed for painting, per corner: u, v, which skin round it its colour is and how much, where it is (x, y, z in the bind pose), and its stubble. */
+export const SCALP = 24
 
 /** Numbers per triangle when packed for reading the tone from: u, v per corner. */
 export const READ = 6
@@ -1847,7 +1928,14 @@ export type ScalpPaint = {
  * cut, or from all of the forehead.
  */
 export function scalpPaint(
-  head: { points: Triples; normals: Triples; uvs: Triples; index: ArrayLike<number> },
+  head: {
+    points: Triples
+    normals: Triples
+    uvs: Triples
+    index: ArrayLike<number>
+    /** How far each point stands over the skull, to tell an ear from the skin round it. */
+    height?: ArrayLike<number>
+  },
   taken: ArrayLike<number>,
   rings: Uint8Array,
   spots: Int32Array,
@@ -1896,6 +1984,65 @@ export function scalpPaint(
         ? 0
         : 1 - smoothstep(FULL, FACE_FEATHER, fromCut[i]!)
   const ear = (i: number) => nearEar(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!, marks)
+  // How far into the cut each kept point and each corner of the bald
+  // surface is (negative out of it), its notches closed (see HAIRLINE_CLOSE).
+  const scalpCount = scalp.points.length / 3
+  const closed = new Float32Array(count + scalpCount)
+  {
+    const ids: number[] = []
+    const at: number[] = []
+    for (let i = 0; i < count; i++) {
+      closed[i] = -Math.min(fromCut[i]!, 2 * HAIRLINE_CLOSE)
+      if (!used[i]) continue
+      ids.push(i)
+      at.push(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!)
+    }
+    for (let k = 0; k < scalpCount; k++) {
+      const [x, y, z] = [scalp.points[k * 3]!, scalp.points[k * 3 + 1]!, scalp.points[k * 3 + 2]!]
+      closed[count + k] =
+        cut.grid.nearest(x, y, z, 1, found, distances) > 0
+          ? Math.min(Math.sqrt(distances[0]!), 2 * HAIRLINE_CLOSE)
+          : 2 * HAIRLINE_CLOSE
+      ids.push(count + k)
+      at.push(x, y, z)
+    }
+    const grid = new PointGrid(at, SKULL_CELL)
+    const own = Float32Array.from(ids, (id) => closed[id]!)
+    for (const [n, id] of ids.entries()) {
+      // A notch is narrow: only what lies near the cut is closed.
+      if (Math.abs(own[n]!) >= HAIRLINE_CLOSE / 2) continue
+      const near = grid.nearest(
+        at[n * 3]!,
+        at[n * 3 + 1]!,
+        at[n * 3 + 2]!,
+        CLOSE_TRIED,
+        found,
+        distances,
+        HAIRLINE_CLOSE,
+      )
+      let sum = 0
+      let total = 0
+      for (let j = 0; j < near; j++) {
+        const weight = 1 - Math.sqrt(distances[j]!) / HAIRLINE_CLOSE
+        if (weight <= 0) continue
+        sum += own[found[j]!]! * weight
+        total += weight
+      }
+      if (total > 0) closed[id] = Math.max(own[n]!, sum / total)
+    }
+  }
+  const onEar = (i: number) => ear(i) && (head.height?.[i] ?? 1) > EAR_STANDING
+  const stubbleOf = (i: number) =>
+    onEar(i)
+      ? 0
+      : stubbleAt(
+          points[i * 3]!,
+          points[i * 3 + 1]!,
+          points[i * 3 + 2]!,
+          closed[i]!,
+          face(i),
+          marks,
+        )
   // Skin of the head itself (not an eyeball, the teeth), but the ears —
   // redder than skin — and the forehead and the brows: the scalp's tone is
   // the forehead's own.
@@ -1958,7 +2105,19 @@ export function scalpPaint(
     if (corners.some((i) => amountOf(i) > 0 || zone[i]! >= PAINT_ZONE || behindNeck(i) || ear(i))) {
       for (const i of corners) {
         const [ref, share] = local(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!)
-        paint.push(uvs[i * 2]!, uvs[i * 2 + 1]!, amountOf(i), ref, share, face(i) ? 0 : 1)
+        paint.push(
+          uvs[i * 2]!,
+          uvs[i * 2 + 1]!,
+          amountOf(i),
+          ref,
+          share,
+          face(i) ? 0 : 1,
+          stubbleOf(i),
+          points[i * 3]!,
+          points[i * 3 + 1]!,
+          points[i * 3 + 2]!,
+          onEar(i) ? 0 : 1,
+        )
       }
     }
     const front = corners.every(
@@ -1970,19 +2129,17 @@ export function scalpPaint(
   }
   const packed: number[] = []
   for (let k = 0; k < scalp.points.length / 3; k++) {
-    const [ref, share] = local(
-      scalp.points[k * 3]!,
-      scalp.points[k * 3 + 1]!,
-      scalp.points[k * 3 + 2]!,
-    )
+    const [x, y, z] = [scalp.points[k * 3]!, scalp.points[k * 3 + 1]!, scalp.points[k * 3 + 2]!]
+    const [ref, share] = local(x, y, z)
     packed.push(
       scalp.uvs[k * 2]!,
       scalp.uvs[k * 2 + 1]!,
       ref,
       share,
-      scalp.points[k * 3]!,
-      scalp.points[k * 3 + 1]!,
-      scalp.points[k * 3 + 2]!,
+      x,
+      y,
+      z,
+      stubbleAt(x, y, z, closed[count + k]!, false, marks),
     )
   }
   return {

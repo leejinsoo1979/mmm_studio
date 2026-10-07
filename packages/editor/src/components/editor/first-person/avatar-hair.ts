@@ -54,6 +54,7 @@ import {
   fitSkull,
   invertFit,
   keepStandoff,
+  ontoSurface,
   PointGrid,
   pushOut,
   SKULL_CELL,
@@ -1030,6 +1031,12 @@ export type HairPart = {
   clearance: number
   /** How far each of its points stood over the donor's bald cranium (bind units; see `keepStandoff`). */
   standoff: Float32Array
+  /**
+   * Places on it where its hair shows (see HAIR_SHOWS; three corners and
+   * their weights each), for the stubble round its hairline on the head it
+   * is worn over (see scalp-paint.ts); null where it has no texture read.
+   */
+  shows: { corners: Uint32Array; weights: Float32Array } | null
 }
 
 /**
@@ -1044,6 +1051,8 @@ export type HairAsset = {
   anchors: Float32Array
   fit: AxisFit
   basis: HairBasis
+  /** Its colour (the cap's painted hair, else the cards'), a bald head's stubble under it; null where unread. */
+  color: Rgb | null
 }
 
 /**
@@ -1385,6 +1394,7 @@ export function hairAssetOf(
   const parts: HairPart[] = []
   const opacityMaterial = opacity && ownMaterial(opacity)
   const hair = pixels?.opacity ? meanColor(pixels.opacity) : null
+  let color = hair
   if (capped.length > 0) {
     const material = ownMaterial(head).clone()
     material.name = `${id}:hair-cap`
@@ -1409,6 +1419,7 @@ export function hairAssetOf(
       bleedBelow: CAP_BLEED_BELOW,
       clearance: CAP_CLEARANCE,
       standoff: standoffOf(capGeometry),
+      shows: null,
     }
     const uv = geometry.getAttribute('uv')
     const uvs = new Float32Array(count * 2)
@@ -1438,17 +1449,14 @@ export function hairAssetOf(
           ),
         }
       })
-      cap.pixels = capPixels(
-        pixels.head,
-        paintedHair(pixels.head, triangles) ?? hair,
-        skin,
-        triangles,
-      )
+      color = paintedHair(pixels.head, triangles) ?? hair
+      cap.pixels = capPixels(pixels.head, color, skin, triangles)
       // What shows of it is hair's colour all through: dyed wholly.
       cap.dyeMask = Float32Array.from({ length: cap.pixels.width * cap.pixels.height }, (_, i) =>
         cap.pixels!.data[i * 4 + 3]! > 0 ? 1 : 0,
       )
       cap.lum = maskedLuminance(cap.pixels, cap.dyeMask)
+      cap.shows = showing(capGeometry, cap.pixels)
     }
     parts.push(cap)
   }
@@ -1470,6 +1478,7 @@ export function hairAssetOf(
         bleedBelow: BLEED_BELOW,
         clearance: CARD_CLEARANCE,
         standoff: standoffOf(cardGeometry),
+        shows: null,
       })
     }
   }
@@ -1480,7 +1489,42 @@ export function hairAssetOf(
     anchors: boneBindPositions(head),
     fit: cranium,
     basis,
+    color,
   }
+}
+
+/** Where the cap's texture is at least this opaque, its hair shows. */
+const HAIR_SHOWS = 0.3
+
+/** Hair standing this far (bind units) off the wearer's head, or less, grows from the head under it. */
+const ROOTS_REACH = 0.04
+
+/** Places over a part's triangles (see CARD_SAMPLES) where its texture (`pixels`) shows hair. */
+function showing(
+  geometry: BufferGeometry,
+  pixels: Pixels,
+): { corners: Uint32Array; weights: Float32Array } {
+  const index = indexOf(geometry)
+  const uv = geometry.getAttribute('uv')
+  const corners: number[] = []
+  const weights: number[] = []
+  for (let t = 0; t < index.length / 3; t++) {
+    const at = [0, 1, 2].map((k) => index[t * 3 + k]!)
+    for (const sample of CARD_SAMPLES) {
+      let u = 0
+      let v = 0
+      for (let k = 0; k < 3; k++) {
+        u += uv.getX(at[k]!) * sample[k]!
+        v += uv.getY(at[k]!) * sample[k]!
+      }
+      const x = Math.min(pixels.width - 1, Math.max(0, Math.floor(u * pixels.width)))
+      const y = Math.min(pixels.height - 1, Math.max(0, Math.floor(v * pixels.height)))
+      if (pixels.data[(y * pixels.width + x) * 4 + 3]! < 255 * HAIR_SHOWS) continue
+      corners.push(...at)
+      weights.push(...sample)
+    }
+  }
+  return { corners: Uint32Array.from(corners), weights: Float32Array.from(weights) }
 }
 
 /**
@@ -2001,7 +2045,15 @@ function makeBald(
         )
       : new Float32Array()
   const paint: ScalpPaint = {
-    ...scalpPaint({ points, normals, uvs, index }, taken, rings, spots, zone, marks, scalpCorners),
+    ...scalpPaint(
+      { points, normals, uvs, index, height },
+      taken,
+      rings,
+      spots,
+      zone,
+      marks,
+      scalpCorners,
+    ),
     shadow,
   }
   let scalp: BufferGeometry | null = null
@@ -2416,7 +2468,7 @@ function wearBorrowed(
   asset: HairAsset,
   bald: Pick<BaldHead, 'surface' | 'triangles' | 'ears' | 'fit'>,
   undo: (() => void)[],
-): (hex: string | null) => void {
+): { dye: (hex: string | null) => void; hairline: Float32Array | null } {
   // From the donor's cranium to the wearer's: the hair sits on the bald head
   // as it sat on the donor's.
   const carry = composeFits(bald.fit, invertFit(asset.fit))
@@ -2439,6 +2491,8 @@ function wearBorrowed(
   const unbindNormal = new Matrix3().getNormalMatrix(unbind)
 
   const dyes: ((hex: string | null) => void)[] = []
+  // Where the hair worn shows over the head (bind pose).
+  let hairline: Float32Array | null = null
   for (const part of asset.parts) {
     const geometry = part.geometry.clone()
     const skinIndex = geometry.getAttribute('skinIndex')
@@ -2508,6 +2562,21 @@ function wearBorrowed(
       }
       earClear = new BufferAttribute(colour, 4)
     }
+    if (part.shows) {
+      // Its hair's places dropped onto the head under them: where it stands
+      // off the scalp, it is the scalp under it the hair grows from.
+      const { corners, weights } = part.shows
+      const places = new Float32Array(corners.length)
+      const turned = new Float32Array(corners.length)
+      for (let j = 0; j < corners.length; j++) {
+        const place = j - (j % 3)
+        for (let axis = 0; axis < 3; axis++) {
+          places[place + axis]! += carried[corners[j]! * 3 + axis]! * weights[j]!
+          turned[place + axis]! += normal.getComponent(corners[j]!, axis) * weights[j]!
+        }
+      }
+      hairline = ontoSurface(places, turned, bald.surface, ROOTS_REACH, 0)
+    }
     geometry.setAttribute('position', new BufferAttribute(carried, 3))
     geometry.getAttribute('position').applyMatrix4(unbind)
     normal.applyNormalMatrix(unbindNormal)
@@ -2576,8 +2645,11 @@ function wearBorrowed(
       material.dispose()
     })
   }
-  return (hex) => {
-    for (const each of dyes) each(hex)
+  return {
+    dye: (hex) => {
+      for (const each of dyes) each(hex)
+    },
+    hairline,
   }
 }
 
@@ -2585,6 +2657,10 @@ function wearBorrowed(
 export type WornHair = {
   /** How the bald head's skin is painted round the cut (see scalp-paint.ts); null with no bald head. */
   paint: ScalpPaint | null
+  /** The colour of the borrowed hair worn, which the bald head's stubble is; null for none. */
+  stubble: Rgb | null
+  /** Where the borrowed hair worn shows (bind pose), for the stubble round its hairline; null for none. */
+  hairline: Float32Array | null
   /** Dyes the borrowed hair (`null` for its own colour). */
   dye: (hex: string | null) => void
   /** Takes it all off again. */
@@ -2605,13 +2681,21 @@ export function wearHair(model: Object3D, asset: HairAsset | null, basis: HairBa
   const takeOff = () => {
     for (const step of undo.reverse()) step()
   }
-  if (!head?.isSkinnedMesh) return { paint: null, dye: () => {}, takeOff }
+  if (!head?.isSkinnedMesh) {
+    return { paint: null, stubble: null, hairline: null, dye: () => {}, takeOff }
+  }
   const bald = baldHeadOf(model, head, basis)
   if (bald) goBald(model, head, bald, undo)
   const headwear = !!bald && !!asset && hideHeadwear(model, bald.top, bald.neck, undo)
   hideOwnHair(model, !headwear, undo)
-  const dye = asset && bald ? wearBorrowed(model, head, asset, bald, undo) : () => {}
-  return { paint: bald?.paint ?? null, dye, takeOff }
+  const worn = asset && bald ? wearBorrowed(model, head, asset, bald, undo) : null
+  return {
+    paint: bald?.paint ?? null,
+    stubble: (worn && asset?.color) || null,
+    hairline: worn?.hairline ?? null,
+    dye: worn?.dye ?? (() => {}),
+    takeOff,
+  }
 }
 
 /**
@@ -2708,6 +2792,9 @@ export type HairOn = {
   shaper: Shaper
   /** How the bald head's skin is painted (see scalp-paint.ts), or null. */
   paint: ScalpPaint | null
+  /** The colour of the borrowed hair worn and where it shows (see `WornHair`), or null. */
+  stubble: Rgb | null
+  hairline: Float32Array | null
 }
 
 /**
@@ -2755,7 +2842,15 @@ export function useAvatarHair(
         const hair = wearHair(model, asset, library)
         hair.dye(dyeRef.current)
         worn.current = { model, hair }
-        setOn({ model, on: { shaper: () => null, paint: hair.paint } })
+        setOn({
+          model,
+          on: {
+            shaper: () => null,
+            paint: hair.paint,
+            stubble: hair.stubble,
+            hairline: hair.hairline,
+          },
+        })
       })
       .catch((error: unknown) => {
         if (warned.has(style)) return

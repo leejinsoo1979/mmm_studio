@@ -469,6 +469,32 @@ export function ontoSurface(
   return out
 }
 
+/** A steady pseudo-random number in [-1, 1] for a cell of space. */
+export function cellHash(x: number, y: number, z: number, seed: number) {
+  const s = Math.sin(x * 127.1 + y * 311.7 + z * 191.3 + seed * 74.7) * 43758.5453
+  return 2 * (s - Math.floor(s)) - 1
+}
+
+/** Noise in [-1, 1] smooth through space, cells `cell` across. */
+export function valueNoise(x: number, y: number, z: number, cell: number, seed: number) {
+  const fx = x / cell
+  const fy = y / cell
+  const fz = z / cell
+  const [ix, iy, iz] = [Math.floor(fx), Math.floor(fy), Math.floor(fz)]
+  const ease = (t: number) => t * t * (3 - 2 * t)
+  const [tx, ty, tz] = [ease(fx - ix), ease(fy - iy), ease(fz - iz)]
+  let sum = 0
+  for (let dz = 0; dz <= 1; dz++) {
+    for (let dy = 0; dy <= 1; dy++) {
+      for (let dx = 0; dx <= 1; dx++) {
+        const w = (dx ? tx : 1 - tx) * (dy ? ty : 1 - ty) * (dz ? tz : 1 - tz)
+        sum += w * cellHash(ix + dx, iy + dy, iz + dz, seed)
+      }
+    }
+  }
+  return sum
+}
+
 export const smoothstep = (from: number, to: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - from) / (to - from)))
   return t * t * (3 - 2 * t)

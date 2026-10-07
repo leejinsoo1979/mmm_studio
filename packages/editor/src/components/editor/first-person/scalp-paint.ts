@@ -1,5 +1,6 @@
-import { PAINTED, READ, SCALP, type ScalpPaint, SHADED, SKIN_REF } from './bald-head'
+import { PAINTED, READ, SCALP, type ScalpPaint, SHADED, SKIN_REF, wigFringe } from './bald-head'
 import { rasterise } from './front-render'
+import { cellHash, PointGrid, SKULL_CELL, smoothstep, valueNoise } from './head-skull'
 import { byLightness, luminance, type Pixels, type Rgb } from './look-pixels'
 
 /**
@@ -13,6 +14,10 @@ import { byLightness, luminance, type Pixels, type Rgb } from './look-pixels'
  * further off — grained as skin is. And the body's texture, lit again
  * where the hair shaded it.
  */
+
+/** Numbers per corner of a triangle packed for painting, and of the bald surface's. */
+const PAINTED_CORNER = PAINTED / 3
+const SCALP_CORNER = SCALP / 3
 
 /** Texels round a painted triangle (px) painted with it, so no seam shows at a UV island's rim. */
 const MARGIN = 1
@@ -36,26 +41,11 @@ const LEAST_READ = 50
  */
 const TONE_QUANTILE = 0.4
 
-/** The scalp's grain: how much a texel's lightness strays, alone and with the texels round it. */
-const GRAIN_FINE = 0.05
-const GRAIN_COARSE = 0.03
-const GRAIN_CELL = 4
-
-const smoothstep = (from: number, to: number, x: number) => {
-  const t = Math.min(1, Math.max(0, (x - from) / (to - from)))
-  return t * t * (3 - 2 * t)
-}
-
 /** A steady pseudo-random number in [0, 1) for a texel. */
 function hash(x: number, y: number, seed: number) {
   const s = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453
   return s - Math.floor(s)
 }
-
-const grain = (x: number, y: number) =>
-  1 +
-  GRAIN_FINE * (2 * hash(x, y, 3) - 1) +
-  GRAIN_COARSE * (2 * hash(Math.floor(x / GRAIN_CELL), Math.floor(y / GRAIN_CELL), 5) - 1)
 
 /**
  * The bald surface's grain, by where it is (bind units), not by its
@@ -69,32 +59,6 @@ const SKIN_FINE_CELL = 0.004
 const SKIN_FINE = 0.05
 const SKIN_MOTTLE_CELL = 0.02
 const SKIN_MOTTLE = 0.06
-
-/** A steady pseudo-random number in [-1, 1] for a cell of space. */
-function cellHash(x: number, y: number, z: number, seed: number) {
-  const s = Math.sin(x * 127.1 + y * 311.7 + z * 191.3 + seed * 74.7) * 43758.5453
-  return 2 * (s - Math.floor(s)) - 1
-}
-
-/** Noise in [-1, 1] smooth through space, cells `cell` across. */
-function valueNoise(x: number, y: number, z: number, cell: number, seed: number) {
-  const fx = x / cell
-  const fy = y / cell
-  const fz = z / cell
-  const [ix, iy, iz] = [Math.floor(fx), Math.floor(fy), Math.floor(fz)]
-  const ease = (t: number) => t * t * (3 - 2 * t)
-  const [tx, ty, tz] = [ease(fx - ix), ease(fy - iy), ease(fz - iz)]
-  let sum = 0
-  for (let dz = 0; dz <= 1; dz++) {
-    for (let dy = 0; dy <= 1; dy++) {
-      for (let dx = 0; dx <= 1; dx++) {
-        const w = (dx ? tx : 1 - tx) * (dy ? ty : 1 - ty) * (dz ? tz : 1 - tz)
-        sum += w * cellHash(ix + dx, iy + dy, iz + dz, seed)
-      }
-    }
-  }
-  return sum
-}
 
 /** How much lighter or darker skin is at a place on the bald surface (see SKIN_FINE_CELL). */
 export const skinGrain = (x: number, y: number, z: number) =>
@@ -139,6 +103,104 @@ const SHADOWED = 0.88
 const SKIN_READ = 4
 const SKIN_SHARE = 0.3
 
+/** How far (bind units) a borrowed hairline is looked for round a place: past it, it has no stubble from it. */
+const WIG_REACH = 0.03
+
+const sameValues = (a: ArrayLike<number>, b: ArrayLike<number>) =>
+  a.length === b.length && Array.prototype.every.call(a, (value, i) => value === b[i])
+
+/**
+ * Painted skin keeps the skin's fine grain — pores, freckles, its light and
+ * shade texel by texel — as each texel strays in lightness from the mean
+ * of those within DETAIL_REACH texels (on a 2048 texture) round it: its
+ * own, where it is skin, else a texel of the forehead's picked by it (on
+ * the bald surface by where it is, in cells DETAIL_CELL across). Painted
+ * one flat colour, it is rubber beside the face. No more than DETAIL_MOST
+ * lighter or darker.
+ */
+const DETAIL_REACH = 4
+const DETAIL_CELL = 0.0004
+const DETAIL_MOST = 0.25
+
+/**
+ * Each painted texel's (`texels`) fine grain, from `head` as it is (see
+ * DETAIL_REACH): its own where `own`, else the `pick`-th share of the way
+ * through the forehead's (the first of `forehead`'s lists holding
+ * LEAST_READ texels); none where there is none.
+ */
+function fineGrain(
+  head: Pixels,
+  texels: Int32Array,
+  own: Uint8Array,
+  picks: Float32Array,
+  forehead: number[][],
+): Float32Array {
+  const { width, height, data } = head
+  const reach = Math.max(1, Math.round((DETAIL_REACH * width) / 2048))
+  const pool = forehead.find((list) => list.length >= LEAST_READ) ?? []
+  // Only the texels these lie among are read.
+  let [left, top, right, bottom] = [width, height, -1, -1]
+  for (const list of [texels, pool]) {
+    for (const texel of list) {
+      const x = texel % width
+      const y = (texel - x) / width
+      left = Math.min(left, x)
+      right = Math.max(right, x)
+      top = Math.min(top, y)
+      bottom = Math.max(bottom, y)
+    }
+  }
+  const grains = new Float32Array(texels.length).fill(1)
+  if (right < left) return grains
+  left = Math.max(0, left - reach)
+  top = Math.max(0, top - reach)
+  const across = Math.min(width, right + reach + 1) - left
+  const down = Math.min(height, bottom + reach + 1) - top
+  const lightness = new Float32Array(across * down)
+  for (let y = 0; y < down; y++) {
+    for (let x = 0; x < across; x++) {
+      const p = ((top + y) * width + left + x) * 4
+      lightness[y * across + x] = luminance(data[p]!, data[p + 1]!, data[p + 2]!)
+    }
+  }
+  const sums = boxSums(lightness, across, down, 1, reach)
+  const counts = boxSums(new Float32Array(across * down).fill(1), across, down, 1, reach)
+  const strayOf = (texel: number) => {
+    const x = (texel % width) - left
+    const y = Math.floor(texel / width) - top
+    const at = y * across + x
+    const mean = sums[at]! / counts[at]!
+    return Math.min(1 + DETAIL_MOST, Math.max(1 - DETAIL_MOST, lightness[at]! / Math.max(1, mean)))
+  }
+  const strays = Float32Array.from(pool, strayOf)
+  for (let i = 0; i < texels.length; i++) {
+    if (own[i]) grains[i] = strayOf(texels[i]!)
+    else if (strays.length > 0) grains[i] = strays[Math.floor(picks[i]! * strays.length)]!
+  }
+  return grains
+}
+
+/**
+ * Where the head's own hair was painted on the skin it keeps — a sideburn,
+ * the nape — its stubble is as thick as the hair was within HAIRLINE_BLUR
+ * texels (on a 2048 texture) round: read texel by texel, it would be
+ * scratched in along each strand.
+ */
+const HAIRLINE_BLUR = 6
+
+/** A mask (`width` × `height`) averaged over the box `reach` texels round each texel. */
+function blurred(mask: Float32Array, width: number, height: number, reach: number) {
+  const sums = boxSums(mask, width, height, 1, reach)
+  return Float32Array.from(sums, (sum, i) => {
+    const x = i % width
+    const y = (i - x) / width
+    // At the texture's edges the box holds fewer texels.
+    const across = Math.min(width - 1, x + reach) - Math.max(0, x - reach) + 1
+    const down = Math.min(height - 1, y + reach) - Math.max(0, y - reach) + 1
+    return sum / (across * down)
+  })
+}
+
 /** How many texels out from what is painted the texels on no triangle take its colour. */
 const PAD = 4
 const NEIGHBOURS = [
@@ -154,6 +216,35 @@ const NEIGHBOURS = [
  * little of which is skin doesn't stand out.
  */
 const SKIN_BLEND = 0.02
+
+/**
+ * Stubble shows as the hair's colour through the skin, greyed (STUBBLE_GREY
+ * of the way to its own lightness), a little darker and cooler — the skin
+ * over it scatters blue — and more as the hair is darker than the skin:
+ * over at most STUBBLE_DARK of the skin where it is thickest, at least
+ * STUBBLE_FAINT of that for hair as fair as the skin. Each texel shows
+ * SPECKLE more or less of it (its own hairs), never more than STUBBLE_MOST.
+ * On the bald surface its hairs are STUBBLE_GRAIN (bind units) apart.
+ */
+const STUBBLE_GREY = 0.4
+const STUBBLE_DARKER = 0.85
+const STUBBLE_COOL: Rgb = [0.94, 1, 1.08]
+const STUBBLE_DARK = 0.42
+const STUBBLE_FAINT = 0.3
+const SPECKLE = 0.4
+const STUBBLE_MOST = 0.8
+const STUBBLE_GRAIN = 0.0004
+
+/** Stubble's colour over skin of the scalp's `tone`, from the hair's, and how much of it shows at its thickest. */
+export function stubbleShade(hair: Rgb, tone: Rgb): [Rgb, number] {
+  const grey = luminance(...hair)
+  const colour = hair.map(
+    (value, c) => (value + (grey - value) * STUBBLE_GREY) * STUBBLE_DARKER * STUBBLE_COOL[c]!,
+  ) as unknown as Rgb
+  const skin = Math.max(1, luminance(...tone))
+  const contrast = Math.min(1, Math.max(0, (skin - grey) / skin))
+  return [colour, STUBBLE_DARK * (STUBBLE_FAINT + (1 - STUBBLE_FAINT) * contrast)]
+}
 
 /**
  * Paints a bald head's skin round the cut and the bald surface (see
@@ -174,9 +265,12 @@ export type ScalpPainter = {
    * as its corners say, and wholly where it is the hair's colour; the bald
    * surface's wholly. Each in the colour of the skin round it where there
    * is skin near (read off `head` as it is), `tone` elsewhere; grained like
-   * skin.
+   * skin. Then, given the colour of the hair worn (`stubble`), the
+   * stubble a shaved head shows where its hair grew (see `stubbleShade`)
+   * — or, under another's hair (`wig`: where it shows, bind-pose points),
+   * round that hair's hairline alone (see bald-head.ts's `wigFringe`).
    */
-  paint: (head: Pixels, tone: Rgb) => void
+  paint: (head: Pixels, tone: Rgb, stubble?: Rgb | null, wig?: Float32Array | null) => void
 }
 
 export function scalpPainter(
@@ -196,7 +290,7 @@ export function scalpPainter(
   const size = { width, height }
   const isSkin = (texel: number) =>
     !((hair && hair[texel]! > HAIR_MOST) || (skin && skin[texel]! < SKIN_LEAST))
-  const read = tone.map((list) => {
+  const foreheads = tone.map((list) => {
     const seen = new Uint8Array(width * height)
     const texels: number[] = []
     for (let t = 0; t < list.length / READ; t++) {
@@ -216,14 +310,14 @@ export function scalpPainter(
   const cornerShare = new Float32Array(cornerRef.length)
   for (let t = 0; t < paintCount; t++) {
     for (let k = 0; k < 3; k++) {
-      cornerRef[t * 3 + k] = paint[t * PAINTED + k * 6 + 3]!
-      cornerShare[t * 3 + k] = paint[t * PAINTED + k * 6 + 4]!
+      cornerRef[t * 3 + k] = paint[t * PAINTED + k * PAINTED_CORNER + 3]!
+      cornerShare[t * 3 + k] = paint[t * PAINTED + k * PAINTED_CORNER + 4]!
     }
   }
   for (let t = 0; t < scalpCount; t++) {
     for (let k = 0; k < 3; k++) {
-      cornerRef[(paintCount + t) * 3 + k] = scalp[t * SCALP + k * 7 + 2]!
-      cornerShare[(paintCount + t) * 3 + k] = scalp[t * SCALP + k * 7 + 3]!
+      cornerRef[(paintCount + t) * 3 + k] = scalp[t * SCALP + k * SCALP_CORNER + 2]!
+      cornerShare[(paintCount + t) * 3 + k] = scalp[t * SCALP + k * SCALP_CORNER + 3]!
     }
   }
 
@@ -233,9 +327,13 @@ export function scalpPainter(
   const second = new Float32Array(width * height)
   for (let t = 0; t < paintCount; t++) {
     const at = t * PAINTED
-    eachTexel(size, paint, t, PAINTED, 6, (texel, w0, w1, w2) => {
-      const own = paint[at + 2]! * w0 + paint[at + 8]! * w1 + paint[at + 14]! * w2
-      const hairy = paint[at + 5]! * w0 + paint[at + 11]! * w1 + paint[at + 17]! * w2
+    const corner = (offset: number, w0: number, w1: number, w2: number) =>
+      paint[at + offset]! * w0 +
+      paint[at + PAINTED_CORNER + offset]! * w1 +
+      paint[at + 2 * PAINTED_CORNER + offset]! * w2
+    eachTexel(size, paint, t, PAINTED, PAINTED_CORNER, (texel, w0, w1, w2) => {
+      const own = corner(2, w0, w1, w2)
+      const hairy = corner(5, w0, w1, w2)
       const wanted = Math.max(own, hair ? hairy * smoothstep(HAIR_FROM, HAIR_TO, hair[texel]!) : 0)
       if (wanted > amount[texel]!) {
         amount[texel] = wanted
@@ -262,7 +360,7 @@ export function scalpPainter(
     )
   }
   for (let t = 0; t < scalpCount; t++) {
-    eachTexel(size, scalp, t, SCALP, 7, (texel, w0, w1) => {
+    eachTexel(size, scalp, t, SCALP, SCALP_CORNER, (texel, w0, w1) => {
       if (shown[texel] || amount[texel]! >= 1) return
       amount[texel] = 1
       owner[texel] = paintCount + t
@@ -311,26 +409,108 @@ export function scalpPainter(
   for (let texel = 0; texel < amount.length; texel++) if (amount[texel]! > 0) painted.push(texel)
   const texels = Int32Array.from(painted)
   const weights = Float32Array.from(texels, (texel) => Math.min(1, amount[texel]!))
-  // The kept skin grained by its texels; the bald surface, whose texels lie
-  // along the hair's strands, by where they are.
+  // The bald surface mottled by where it is (its texels lie along the
+  // hair's strands); its fine grain, and the kept skin's, is the skin's own
+  // (see DETAIL_REACH).
   const shades = Float32Array.from(texels, (texel) => {
     const t = owner[texel]!
-    if (t < 0) return 1
-    if (t < paintCount) {
-      const x = texel % width
-      return grain(x, (texel - x) / width)
-    }
+    if (t < paintCount) return 1
     const at = (t - paintCount) * SCALP
     const w = [first[texel]!, second[texel]!, 1 - first[texel]! - second[texel]!]
     const place = [4, 5, 6].map((c) =>
-      w.reduce((sum, wk, k) => sum + wk * scalp[at + k * 7 + c]!, 0),
+      w.reduce((sum, wk, k) => sum + wk * scalp[at + k * SCALP_CORNER + c]!, 0),
     )
     return skinGrain(place[0]!, place[1]!, place[2]!)
+  })
+  // How thick the stubble is on each (see bald-head.ts's STUBBLE_IN), and
+  // each texel's own hairs: more or fewer of them, by texel on the kept
+  // skin, by where it is on the bald surface.
+  const stubbles = new Float32Array(texels.length)
+  const specks = new Float32Array(texels.length)
+  // The hair painted on the skin as a hairline (see HAIRLINE_BLUR), not strand by strand.
+  const hairline =
+    hair && blurred(hair, width, height, Math.max(1, Math.round((HAIRLINE_BLUR * width) / 2048)))
+  for (let i = 0; i < texels.length; i++) {
+    const texel = texels[i]!
+    const t = owner[texel]!
+    if (t < 0) continue
+    const w = [first[texel]!, second[texel]!, 1 - first[texel]! - second[texel]!]
+    const x = texel % width
+    if (t < paintCount) {
+      const at = t * PAINTED
+      const of = (offset: number) =>
+        w.reduce((sum, wk, k) => sum + wk * paint[at + k * PAINTED_CORNER + offset]!, 0)
+      // Where the head's own hair was painted on the skin kept, its hairline.
+      const painted = hairline ? of(5) * smoothstep(HAIR_FROM, HAIR_TO, hairline[texel]!) : 0
+      stubbles[i] = Math.max(of(6), painted)
+      specks[i] = hash(x, (texel - x) / width, 9)
+      continue
+    }
+    const at = (t - paintCount) * SCALP
+    const of = (offset: number) =>
+      w.reduce((sum, wk, k) => sum + wk * scalp[at + k * SCALP_CORNER + offset]!, 0)
+    stubbles[i] = of(7)
+    specks[i] =
+      0.5 + 0.5 * cellHash(of(4) / STUBBLE_GRAIN, of(5) / STUBBLE_GRAIN, of(6) / STUBBLE_GRAIN, 9)
+  }
+  // Whose fine grain each takes: its own where it is kept skin, else one of
+  // the forehead's texels', picked by it (see DETAIL_REACH).
+  const ownGrain = Uint8Array.from(texels, (texel) =>
+    owner[texel]! >= 0 && owner[texel]! < paintCount && isSkin(texel) ? 1 : 0,
+  )
+  const picks = Float32Array.from(texels, (texel) => {
+    const t = owner[texel]!
+    const x = texel % width
+    if (t < paintCount) return hash(x, (texel - x) / width, 13)
+    const at = (t - paintCount) * SCALP
+    const w = [first[texel]!, second[texel]!, 1 - first[texel]! - second[texel]!]
+    const place = [4, 5, 6].map(
+      (c) =>
+        w.reduce((sum, wk, k) => sum + wk * scalp[at + k * SCALP_CORNER + c]!, 0) / DETAIL_CELL,
+    )
+    return 0.5 + 0.5 * cellHash(place[0]!, place[1]!, place[2]!, 13)
   })
   const owners = Int32Array.from(texels, (texel) => owner[texel]!)
   const firsts = Float32Array.from(texels, (texel) => first[texel]!)
   const seconds = Float32Array.from(texels, (texel) => second[texel]!)
   const reach = Math.max(1, Math.round((SKIN_READ * width) / 2048))
+
+  // Each corner's stubble round the hairline of the hair worn over it, for
+  // the last hair worn (see `wigFringe`).
+  let lastWig: Float32Array | null = null
+  let lastFringe: Float32Array | null = null
+  const fringeOf = (wig: Float32Array) => {
+    if (lastFringe && lastWig && sameValues(lastWig, wig)) return lastFringe
+    const grid = new PointGrid(wig, SKULL_CELL)
+    const found: number[] = []
+    const distances: number[] = []
+    const fringe = new Float32Array(cornerRef.length)
+    for (let k = 0; k < fringe.length; k++) {
+      const t = Math.floor(k / 3)
+      const corner = k % 3
+      const [values, at, place, grows] =
+        t < paintCount
+          ? [
+              paint,
+              t * PAINTED + corner * PAINTED_CORNER,
+              7,
+              paint[t * PAINTED + corner * PAINTED_CORNER + 10]!,
+            ]
+          : [scalp, (t - paintCount) * SCALP + corner * SCALP_CORNER, 4, 1]
+      if (!grows) continue
+      const x = values[at + place]!
+      const y = values[at + place + 1]!
+      const z = values[at + place + 2]!
+      const apart =
+        grid.nearest(x, y, z, 1, found, distances, WIG_REACH) > 0
+          ? Math.sqrt(distances[0]!)
+          : Number.POSITIVE_INFINITY
+      fringe[k] = wigFringe(x, y, z, apart)
+    }
+    lastWig = wig
+    lastFringe = fringe
+    return fringe
+  }
 
   /** The skin's colour round a place on the texture (u, v), or null where too little of it is skin. */
   const skinAt = (head: Pixels, u: number, v: number): Rgb | null => {
@@ -355,7 +535,7 @@ export function scalpPainter(
 
   return {
     tone: (head) => {
-      for (const list of read) {
+      for (const list of foreheads) {
         if (list.length < LEAST_READ) continue
         const samples = list.map((texel): Rgb => {
           const p = texel * 4
@@ -365,7 +545,7 @@ export function scalpPainter(
       }
       return null
     },
-    paint: (head, tone) => {
+    paint: (head, tone, stubble = null, wig = null) => {
       const count = refs.length / SKIN_REF
       const read = Array.from({ length: count }, (_, r) =>
         skinAt(head, refs[r * SKIN_REF]!, refs[r * SKIN_REF + 1]!),
@@ -404,9 +584,10 @@ export function scalpPainter(
         }
       }
       const { data } = head
+      const grains = fineGrain(head, texels, ownGrain, picks, foreheads)
       for (let i = 0; i < texels.length; i++) {
         const w = weights[i]!
-        const shade = shades[i]!
+        const shade = shades[i]! * grains[i]!
         const corner = owners[i]! * 3
         if (corner < 0) {
           for (let c = 0; c < 3; c++) {
@@ -426,6 +607,25 @@ export function scalpPainter(
             shade
           const p = texels[i]! * 4 + c
           data[p] = data[p]! + (target - data[p]!) * w
+        }
+      }
+      if (stubble) {
+        const [colour, most] = stubbleShade(stubble, tone)
+        const fringe = wig ? fringeOf(wig) : null
+        for (let i = 0; i < texels.length; i++) {
+          let thick = stubbles[i]!
+          if (fringe) {
+            const corner = owners[i]! * 3
+            if (corner < 0) continue
+            const w0 = firsts[i]!
+            const w1 = seconds[i]!
+            thick =
+              fringe[corner]! * w0 + fringe[corner + 1]! * w1 + fringe[corner + 2]! * (1 - w0 - w1)
+          }
+          if (thick <= 0) continue
+          const a = Math.min(STUBBLE_MOST, most * thick * (1 - SPECKLE + 2 * SPECKLE * specks[i]!))
+          const p = texels[i]! * 4
+          for (let c = 0; c < 3; c++) data[p + c] = data[p + c]! + (colour[c]! - data[p + c]!) * a
         }
       }
       for (let i = 0; i < pads.length; i++) {
