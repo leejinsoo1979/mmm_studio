@@ -115,18 +115,22 @@ const sameValues = (a: ArrayLike<number>, b: ArrayLike<number>) =>
  * of those within DETAIL_REACH texels (on a 2048 texture) round it: its
  * own, where it is skin, else a texel of the forehead's picked by it (on
  * the bald surface by where it is, in cells DETAIL_CELL across). Painted
- * one flat colour, it is rubber beside the face. No more than DETAIL_MOST
- * lighter or darker.
+ * one flat colour, it is rubber beside the face. Kept skin keeps its own
+ * from further round (OWN_REACH): its creases and folds, all but the
+ * broad shadow the hair cast. No more than DETAIL_MOST lighter or darker.
  */
 const DETAIL_REACH = 4
+const OWN_REACH = 12
 const DETAIL_CELL = 0.0004
-const DETAIL_MOST = 0.25
+const DETAIL_MOST = 0.3
 
 /**
  * Each painted texel's (`texels`) fine grain, from `head` as it is (see
  * DETAIL_REACH): its own where `own`, else the `pick`-th share of the way
  * through the forehead's (the first of `forehead`'s lists holding
- * LEAST_READ texels); none where there is none.
+ * LEAST_READ texels); none where there is none. The mean is the skin's
+ * round it (`isSkin`): skin between strands of hair painted on it is no
+ * lighter than skin.
  */
 function fineGrain(
   head: Pixels,
@@ -134,9 +138,11 @@ function fineGrain(
   own: Uint8Array,
   picks: Float32Array,
   forehead: number[][],
+  isSkin: (texel: number) => boolean,
 ): Float32Array {
   const { width, height, data } = head
   const reach = Math.max(1, Math.round((DETAIL_REACH * width) / 2048))
+  const ownReach = Math.max(1, Math.round((OWN_REACH * width) / 2048))
   const pool = forehead.find((list) => list.length >= LEAST_READ) ?? []
   // Only the texels these lie among are read.
   let [left, top, right, bottom] = [width, height, -1, -1]
@@ -152,29 +158,42 @@ function fineGrain(
   }
   const grains = new Float32Array(texels.length).fill(1)
   if (right < left) return grains
-  left = Math.max(0, left - reach)
-  top = Math.max(0, top - reach)
-  const across = Math.min(width, right + reach + 1) - left
-  const down = Math.min(height, bottom + reach + 1) - top
+  left = Math.max(0, left - ownReach)
+  top = Math.max(0, top - ownReach)
+  const across = Math.min(width, right + ownReach + 1) - left
+  const down = Math.min(height, bottom + ownReach + 1) - top
   const lightness = new Float32Array(across * down)
+  const skin = new Float32Array(across * down)
+  const skinLightness = new Float32Array(across * down)
   for (let y = 0; y < down; y++) {
     for (let x = 0; x < across; x++) {
-      const p = ((top + y) * width + left + x) * 4
-      lightness[y * across + x] = luminance(data[p]!, data[p + 1]!, data[p + 2]!)
+      const texel = (top + y) * width + left + x
+      const p = texel * 4
+      const at = y * across + x
+      lightness[at] = luminance(data[p]!, data[p + 1]!, data[p + 2]!)
+      skin[at] = isSkin(texel) ? 1 : 0
+      skinLightness[at] = lightness[at]! * skin[at]!
     }
   }
-  const sums = boxSums(lightness, across, down, 1, reach)
-  const counts = boxSums(new Float32Array(across * down).fill(1), across, down, 1, reach)
-  const strayOf = (texel: number) => {
-    const x = (texel % width) - left
-    const y = Math.floor(texel / width) - top
-    const at = y * across + x
-    const mean = sums[at]! / counts[at]!
-    return Math.min(1 + DETAIL_MOST, Math.max(1 - DETAIL_MOST, lightness[at]! / Math.max(1, mean)))
+  const means = (round: number) => {
+    const sums = boxSums(skinLightness, across, down, 1, round)
+    const counts = boxSums(skin, across, down, 1, round)
+    return Float32Array.from(sums, (sum, at) =>
+      counts[at]! > 0 ? sum / counts[at]! : lightness[at]!,
+    )
   }
-  const strays = Float32Array.from(pool, strayOf)
+  const near = means(reach)
+  const wide = means(ownReach)
+  const strayOf = (texel: number, mean: Float32Array) => {
+    const at = (Math.floor(texel / width) - top) * across + (texel % width) - left
+    return Math.min(
+      1 + DETAIL_MOST,
+      Math.max(1 - DETAIL_MOST, lightness[at]! / Math.max(1, mean[at]!)),
+    )
+  }
+  const strays = Float32Array.from(pool, (texel) => strayOf(texel, near))
   for (let i = 0; i < texels.length; i++) {
-    if (own[i]) grains[i] = strayOf(texels[i]!)
+    if (own[i]) grains[i] = strayOf(texels[i]!, wide)
     else if (strays.length > 0) grains[i] = strays[Math.floor(picks[i]! * strays.length)]!
   }
   return grains
@@ -584,7 +603,7 @@ export function scalpPainter(
         }
       }
       const { data } = head
-      const grains = fineGrain(head, texels, ownGrain, picks, foreheads)
+      const grains = fineGrain(head, texels, ownGrain, picks, foreheads, isSkin)
       for (let i = 0; i < texels.length; i++) {
         const w = weights[i]!
         const shade = shades[i]! * grains[i]!

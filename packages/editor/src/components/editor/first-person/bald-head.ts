@@ -1811,12 +1811,16 @@ const FULL = 0.02
 const FEATHER = 0.07
 
 /**
- * On the face, the paint fades out by FACE_FEATHER instead, takes none of
- * the hair's colour left on the skin (brows, a beard, lashes), and none of
- * it reaches below BROWS over the eyes.
+ * On the face, the paint is whole only within FACE_FULL of the cut and
+ * fades out by FACE_FEATHER instead — slowly, a forehead's light and shade
+ * changing over centimetres, not along a line — takes none of the hair's
+ * colour left on the skin (brows, a beard, lashes), and fades out over
+ * BROWS_FADE down to BROWS over the eyes, none reaching under it.
  */
-const FACE_FEATHER = 0.025
+const FACE_FULL = 0.01
+const FACE_FEATHER = 0.045
 const BROWS = 0.035
+const BROWS_FADE = 0.015
 
 /**
  * The scalp's colour is the skin's round it — the cheek's by a cheek, the
@@ -2015,9 +2019,8 @@ export function scalpPaint(
   const amountOf = (i: number) =>
     !face(i)
       ? 1 - smoothstep(FULL, FEATHER, fromCut[i]!)
-      : points[i * 3 + 1]! < eyeLevel + BROWS
-        ? 0
-        : 1 - smoothstep(FULL, FACE_FEATHER, fromCut[i]!)
+      : (1 - smoothstep(FACE_FULL, FACE_FEATHER, fromCut[i]!)) *
+        smoothstep(eyeLevel + BROWS, eyeLevel + BROWS + BROWS_FADE, points[i * 3 + 1]!)
   const ear = (i: number) => nearEar(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!, marks)
   // How far into the cut each kept point and each corner of the bald
   // surface is (negative out of it), its notches closed (see HAIRLINE_CLOSE).
