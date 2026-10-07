@@ -9,6 +9,7 @@ import {
   neckFitted,
   necklineFan,
   type OwnHead,
+  openSpots,
   ownHair,
   PAINTED,
   READ,
@@ -521,6 +522,21 @@ describe('the cut cleaned', () => {
       ...Array(60).keys(),
       80,
       81,
+    ])
+  })
+})
+
+describe('a mesh’s open rim', () => {
+  test('is the spots on edges of one triangle only', () => {
+    // A strip of 3 quads: every spot is on its rim.
+    const { index, spots, spotCount } = strip(3, () => ({}))
+    expect([...openSpots(index, spots, spotCount)]).toEqual(Array(8).fill(1))
+    // A closed tetrahedron, its fourth corner a seam's twin of the first: none.
+    const closed = [0, 1, 2, 4, 3, 1, 1, 3, 2, 2, 3, 0]
+    expect([...openSpots(closed, Int32Array.from([0, 1, 2, 3, 0]), 4)]).toEqual([0, 0, 0, 0])
+    // One face off: its three corners are on the rim, the fourth not.
+    expect([...openSpots(closed.slice(3), Int32Array.from([0, 1, 2, 3, 0]), 4)]).toEqual([
+      1, 1, 1, 0,
     ])
   })
 })
