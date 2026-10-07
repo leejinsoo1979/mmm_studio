@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  capFade,
   capPixels,
   cardKinds,
   carryPoints,
@@ -209,16 +210,43 @@ describe('the cap’s texture in the donor’s hair', () => {
   const skinRgb = SKIN_COLOUR as [number, number, number]
   const SIZE = 256
 
-  test('closes sparse strands into one patch of hair', () => {
+  test('thins sparse strands out into the skin, as many as there are', () => {
     // Hair to x 100; past it, strands every other column to x 120, then skin.
     const head = image(SIZE, SIZE, (x) =>
       x < 100 || (x < 120 && x % 2 === 0) ? HAIR_COLOUR : SKIN_COLOUR,
     )
     const cap = capPixels(head, hairRgb, skinRgb, whole)
     expect(alpha(cap, 50, 128)).toBe(255)
-    // Between two strands, hair too.
-    expect(alpha(cap, 111, 128)).toBe(255)
+    // The strands partly there, joined to the hair: neither the hair nor the skin.
+    expect(alpha(cap, 110, 128)).toBeGreaterThan(0)
+    expect(alpha(cap, 110, 128)).toBeLessThan(255)
     expect(alpha(cap, 200, 128)).toBe(0)
+  })
+
+  test('lets short hair’s stubble be as see-through as it is', () => {
+    // Hair to x 100; past it, a colour halfway to the skin's (stubble), from x 140 skin.
+    const half = HAIR_COLOUR.map((c, k) => (c + SKIN_COLOUR[k]!) / 2)
+    const head = image(SIZE, SIZE, (x) => (x < 100 ? HAIR_COLOUR : x < 140 ? half : SKIN_COLOUR))
+    const cap = capPixels(head, hairRgb, skinRgb, whole)
+    const stubble = alpha(cap, 120, 128)
+    expect(stubble).toBeGreaterThan(40)
+    expect(stubble).toBeLessThan(215)
+    // Coloured as the hair round it, not the skin it was painted over.
+    const p = (128 * SIZE + 120) * 4
+    expect(cap.data[p]!).toBeLessThan(HAIR_COLOUR[0]! + 20)
+  })
+
+  test('fades out to the cap’s rim', () => {
+    const head = image(SIZE, SIZE, () => HAIR_COLOUR)
+    // Clear along the left edge (u = 0), whole from the right.
+    const fading = [
+      { u: [0, 1, 1], v: [0, 0, 1], solid: false, fade: [0, 1, 1] },
+      { u: [0, 1, 0], v: [0, 1, 1], solid: false, fade: [0, 1, 0] },
+    ]
+    const cap = capPixels(head, hairRgb, skinRgb, fading)
+    expect(alpha(cap, 1, 128)).toBeLessThan(10)
+    expect(alpha(cap, 64, 128)).toBeLessThan(alpha(cap, 192, 128))
+    expect(alpha(cap, 254, 128)).toBeGreaterThan(245)
   })
 
   test('cuts away specks of hair’s colour on the skin: a mole, a pore', () => {
@@ -237,6 +265,43 @@ describe('the cap’s texture in the donor’s hair', () => {
     expect(edge).toBeGreaterThan(0)
     expect(edge).toBeLessThan(255)
     expect(alpha(cap, 100, 128)).toBeLessThan(edge)
+  })
+})
+
+describe('the cap’s fade to its rim', () => {
+  // A 4 × 4 grid of quads 1 cm each, its points numbered row by row.
+  const points: number[] = []
+  for (let y = 0; y <= 4; y++) for (let x = 0; x <= 4; x++) points.push(x * 0.01, y * 0.01, 0)
+  const index: number[] = []
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      const a = y * 5 + x
+      index.push(a, a + 1, a + 6, a, a + 6, a + 5)
+    }
+  }
+  const spots = Int32Array.from({ length: 25 }, (_, i) => i)
+  const triangles = Array.from({ length: 32 }, (_, t) => t)
+  const none = new Uint8Array(25)
+  const fadeOf = (seeds: Uint8Array, free: Uint8Array) =>
+    capFade(points, index, spots, 25, triangles, seeds, free, 0.015)
+
+  test('is clear on the rim, whole clear of it', () => {
+    const fade = fadeOf(none, none)
+    expect(fade[0]).toBe(0)
+    expect(fade[22]).toBe(0)
+    expect(fade[12]).toBe(1)
+    expect(fade[6]!).toBeGreaterThan(0)
+    expect(fade[6]!).toBeLessThan(1)
+  })
+
+  test('fades from the spots it is given (an ear), not from a rim standing free', () => {
+    const seeds = new Uint8Array(25)
+    seeds[12] = 1
+    expect(fadeOf(seeds, none)[12]).toBe(0)
+    // The left edge stands free: its middle is 2 cm from the rest of the rim.
+    const free = Uint8Array.from({ length: 25 }, (_, i) => (i % 5 === 0 ? 1 : 0))
+    expect(fadeOf(none, free)[10]).toBe(1)
+    expect(fadeOf(none, free)[0]).toBe(0)
   })
 })
 

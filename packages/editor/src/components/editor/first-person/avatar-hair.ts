@@ -395,26 +395,57 @@ const SKIN_NEAR = 0.1
 const SKIN_FAR = 0.2
 
 /**
- * The cap's hair, on a 1024 texture: closed over gaps CLOSE texels across
- * (a sideburn's or a hairline's sparse strands one patch, not specks);
- * without patches of fewer than SPECK texels (a pore, a mole, a blemish of
- * the donor's skin); its edge faded over EDGE texels.
+ * How much of a texel is hair is where its colour lies between the skin's
+ * (the donor's cheeks') and the hair's round it: the colour of the texels
+ * plainly hair (KNOWN_HAIR of the hair mask) averaged within LOCAL_REACH
+ * texels (on a 1024 texture), or LOCAL_FAR where none are that near. Hair
+ * and skin less apart than CONTRAST (in each channel's 0–255, together)
+ * are told apart by the mask alone. (The skin between short hair's strands
+ * is no skin to read: its own colour would leave the stubble no hair.)
  */
-const CLOSE = 3
-const SPECK = 120
-const EDGE = 3
-
-/** A triangle of the cap on its texture (corners in 0–1 UVs): `solid` on the hair's sculpted shell. */
-export type CapTriangle = { u: number[]; v: number[]; solid: boolean }
+const KNOWN_HAIR = 0.9
+const LOCAL_REACH = 8
+const LOCAL_FAR = 32
+const CONTRAST = 40
 
 /**
- * The cap's texture: the donor's head texture with everything but its hair
- * cut away (alpha 0), the donor's skin round it and on it never carried
- * over. Hair is what is nearer the hair's colour than the skin's — the hair
- * painted onto the scalp, the temples, the sideburns — and, on the sculpted
- * shell (`solid`), what isn't plainly skin; closed over its gaps, cleared
- * of specks and faded at its edge, never across a UV island's rim (see
- * CLOSE; the cap is drawn blended: see `hairAssetOf`).
+ * A texel at least STRAND hair, joined (through texels at least that) to
+ * one at least ROOTED hair, is hair; the rest of the donor's skin is cut
+ * away, and patches of hair of fewer than SPECK texels (on a 1024
+ * texture: a mole, a pore). The cap is opaque where a texel is OPAQUE
+ * hair, fading to clear at STRAND: a hairline thins out into the skin as
+ * the donor's was painted. Each texel's share is the mean of those SMOOTH
+ * texels round it, so no single texel stands out of the edge.
+ */
+/** How many texels (on a 1024 texture) round a UV island's rim take its texels' colour and opacity. */
+const RIM_PAD = 2
+
+const STRAND = 0.25
+const ROOTED = 0.6
+const OPAQUE = 0.8
+const SPECK = 120
+const SMOOTH = 1
+
+/** A texel at least this much hair keeps its own colour; the clearer, the more the hair's round it (the skin's under it is the wearer's). */
+const OWN_COLOUR: readonly [number, number] = [0.5, 0.9]
+
+/**
+ * A triangle of the cap on its texture (corners in 0–1 UVs): `solid` on the
+ * hair's sculpted shell; `fade`, per corner, how far it is from the cap's
+ * rim (0 on it, 1 clear of it: see `hairAssetOf`), where it fades out.
+ */
+export type CapTriangle = { u: number[]; v: number[]; solid: boolean; fade?: number[] }
+
+/**
+ * The cap's texture: the donor's head texture as a matte of its hair over
+ * its skin, so the wig's edge is the donor's own hairline — thinning out
+ * into the skin strand by strand, short hair's stubble see-through — not a
+ * cut-out. Each texel is as opaque as it is hair: where its colour lies
+ * between the skin's round it and the hair's (see LOCAL_REACH), on the
+ * sculpted shell (`solid`) at least as much as it isn't plainly skin; cut
+ * away where it is no part of the hair (see STRAND) and faded out towards
+ * the cap's rim (`fade`). Its colour is the hair's round it where it is
+ * clear: what shows through is the wearer's skin, never the donor's.
  */
 export function capPixels(
   head: Pixels,
@@ -423,116 +454,176 @@ export function capPixels(
   triangles: readonly CapTriangle[],
 ): Pixels {
   const { width, height, data } = head
+  const count = width * height
+  const scale = width / 1024
   const mask = hairMask(head, hair, skin)
   const skinLum = luminance(...skin)
-  const notSkin = (texel: number) =>
-    smoothstep(
-      SKIN_NEAR,
-      SKIN_FAR,
-      colorDistance(data[texel * 4]!, data[texel * 4 + 1]!, data[texel * 4 + 2]!, skin, skinLum),
-    )
-  const covered = new Uint8Array(mask.length)
-  const hairy = new Uint8Array(mask.length)
+  const covered = new Uint8Array(count)
+  const solid = new Uint8Array(count)
+  const fade = new Float32Array(count)
   for (const tri of triangles) {
-    fillTexels(width, height, tri.u, tri.v, (texel) => {
+    fillTexels(width, height, tri.u, tri.v, (texel, w0, w1, w2) => {
       covered[texel] = 1
-      const share = tri.solid ? Math.max(mask[texel]!, notSkin(texel)) : mask[texel]!
-      if (share >= 0.5) hairy[texel] = 1
+      if (tri.solid) solid[texel] = 1
+      const f = tri.fade ? tri.fade[0]! * w0 + tri.fade[1]! * w1 + tri.fade[2]! * w2 : 1
+      fade[texel] = Math.max(fade[texel]!, f)
     })
   }
-  const scale = width / 1024
-  const reach = Math.max(1, Math.round(CLOSE * scale))
-  const closed = spread(
-    spread(hairy, covered, width, height, reach, 1),
-    covered,
+  const colours = new Float32Array(count * 3)
+  for (let i = 0; i < count; i++) {
+    for (let c = 0; c < 3; c++) colours[i * 3 + c] = data[i * 4 + c]!
+  }
+  const near = Math.max(1, Math.round(LOCAL_REACH * scale))
+  const far = Math.max(near + 1, Math.round(LOCAL_FAR * scale))
+  const hairRound = meanWhere(
+    colours,
     width,
     height,
-    reach,
-    0,
+    (i) => covered[i] === 1 && mask[i]! >= KNOWN_HAIR,
+    [near, far],
+    hair,
   )
-  const kept = withoutSpecks(closed, width, height, Math.round(SPECK * scale * scale))
-  const soft = softened(kept, covered, width, height, Math.max(1, Math.round(EDGE * scale)))
+  const raw = new Float32Array(count)
+  for (let i = 0; i < count; i++) {
+    if (!covered[i]) continue
+    let apart = 0
+    let along = 0
+    for (let c = 0; c < 3; c++) {
+      const span = hairRound[i * 3 + c]! - skin[c]!
+      apart += span * span
+      along += (colours[i * 3 + c]! - skin[c]!) * span
+    }
+    let hairy = apart >= CONTRAST * CONTRAST ? Math.min(1, Math.max(0, along / apart)) : mask[i]!
+    if (solid[i]) {
+      const r = data[i * 4]!
+      const g = data[i * 4 + 1]!
+      const b = data[i * 4 + 2]!
+      hairy = Math.max(
+        hairy,
+        smoothstep(SKIN_NEAR, SKIN_FAR, colorDistance(r, g, b, skin, skinLum)),
+      )
+    }
+    raw[i] = hairy
+  }
+  const share = smoothed(raw, covered, width, height, Math.max(1, Math.round(SMOOTH * scale)))
+  const hairy = joinedHair(share, covered, width, height, Math.round(SPECK * scale * scale))
   const out: Pixels = { data: new Uint8ClampedArray(data), width, height }
-  for (let i = 0; i < mask.length; i++) out.data[i * 4 + 3] = Math.round(255 * soft[i]!)
+  for (let i = 0; i < count; i++) {
+    const amount = hairy[i] ? share[i]! : 0
+    out.data[i * 4 + 3] = Math.round(255 * smoothstep(STRAND, OPAQUE, amount) * fade[i]!)
+    const own = smoothstep(OWN_COLOUR[0], OWN_COLOUR[1], amount)
+    for (let c = 0; c < 3; c++) {
+      out.data[i * 4 + c] =
+        hairRound[i * 3 + c]! + (colours[i * 3 + c]! - hairRound[i * 3 + c]!) * own
+    }
+  }
+  // Texels off the cap's triangles round a UV island's rim as the island's
+  // next to them: filtered, the rim would take in their clear and show a
+  // seam through the hair.
+  let ring: number[] = []
+  const done = Uint8Array.from(covered)
+  for (let i = 0; i < count; i++) if (covered[i]) ring.push(i)
+  for (let round = 0; round < Math.max(1, Math.round(RIM_PAD * scale)); round++) {
+    const next: number[] = []
+    for (const texel of ring) {
+      const x = texel % width
+      for (const other of [
+        x > 0 ? texel - 1 : -1,
+        x < width - 1 ? texel + 1 : -1,
+        texel >= width ? texel - width : -1,
+        texel < count - width ? texel + width : -1,
+      ]) {
+        if (other < 0 || done[other]) continue
+        done[other] = 1
+        out.data.copyWithin(other * 4, texel * 4, texel * 4 + 4)
+        next.push(other)
+      }
+    }
+    ring = next
+  }
   return out
 }
 
 /**
- * A mask grown (`value` 1) or shrunk (`value` 0) by `reach` texels each way
- * over the texels `covered` holds; texels it doesn't hold neither grow nor
- * shrink it, so a UV island's rim stays where it is.
+ * Per texel (`width` × `height`), the mean colour (`colours`, 3 per texel)
+ * of the texels `known` round it — within the first of `reaches` (texels,
+ * each way) that holds any — or `fallback`.
  */
-function spread(
-  mask: Uint8Array,
-  covered: Uint8Array,
+function meanWhere(
+  colours: Float32Array,
   width: number,
   height: number,
-  reach: number,
-  value: 0 | 1,
-): Uint8Array {
-  const pass = (from: Uint8Array, along: boolean) => {
-    const out = new Uint8Array(from)
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const texel = y * width + x
-        if (!covered[texel] || from[texel] === value) continue
-        for (let d = -reach; d <= reach; d++) {
-          const nx = along ? x + d : x
-          const ny = along ? y : y + d
-          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
-          const other = ny * width + nx
-          if (covered[other] && from[other] === value) {
-            out[texel] = value
-            break
-          }
-        }
-      }
-    }
-    return out
+  known: (texel: number) => boolean,
+  reaches: readonly number[],
+  fallback: Rgb,
+): Float32Array {
+  const count = width * height
+  const values = new Float32Array(count * 4)
+  for (let i = 0; i < count; i++) {
+    if (!known(i)) continue
+    values.set([colours[i * 3]!, colours[i * 3 + 1]!, colours[i * 3 + 2]!, 1], i * 4)
   }
-  return pass(pass(mask, true), false)
+  const out = new Float32Array(count * 3)
+  const done = new Uint8Array(count)
+  for (const reach of reaches) {
+    const sums = boxSums(values, width, height, 4, reach)
+    for (let i = 0; i < count; i++) {
+      const n = sums[i * 4 + 3]!
+      if (done[i] || n <= 0) continue
+      done[i] = 1
+      for (let c = 0; c < 3; c++) out[i * 3 + c] = sums[i * 4 + c]! / n
+    }
+  }
+  for (let i = 0; i < count; i++) if (!done[i]) out.set(fallback, i * 3)
+  return out
 }
 
-/** A mask without its patches (4-connected) of fewer than `fewest` texels. */
-function withoutSpecks(mask: Uint8Array, width: number, height: number, fewest: number) {
-  const out = new Uint8Array(mask)
-  const seen = new Uint8Array(mask.length)
-  const patch: number[] = []
-  for (let start = 0; start < mask.length; start++) {
-    if (!mask[start] || seen[start]) continue
-    patch.length = 0
-    patch.push(start)
-    seen[start] = 1
-    for (let k = 0; k < patch.length; k++) {
-      const texel = patch[k]!
-      const x = texel % width
-      const neighbours = [
-        x > 0 ? texel - 1 : -1,
-        x < width - 1 ? texel + 1 : -1,
-        texel >= width ? texel - width : -1,
-        texel < width * (height - 1) ? texel + width : -1,
-      ]
-      for (const other of neighbours) {
-        if (other >= 0 && mask[other] && !seen[other]) {
-          seen[other] = 1
-          patch.push(other)
-        }
+/** Sums of `values` (`width` × `height`, `channels` per texel) over the box `reach` texels round each. */
+function boxSums(
+  values: Float32Array,
+  width: number,
+  height: number,
+  channels: number,
+  reach: number,
+) {
+  const across = new Float32Array(values.length)
+  for (let y = 0; y < height; y++) {
+    for (let c = 0; c < channels; c++) {
+      let sum = 0
+      for (let x = -reach; x < width + reach; x++) {
+        const add = x + reach
+        if (add < width) sum += values[(y * width + add) * channels + c]!
+        const drop = x - reach - 1
+        if (drop >= 0) sum -= values[(y * width + drop) * channels + c]!
+        if (x >= 0 && x < width) across[(y * width + x) * channels + c] = sum
       }
     }
-    if (patch.length < fewest) for (const texel of patch) out[texel] = 0
+  }
+  const out = new Float32Array(values.length)
+  for (let x = 0; x < width; x++) {
+    for (let c = 0; c < channels; c++) {
+      let sum = 0
+      for (let y = -reach; y < height + reach; y++) {
+        const add = y + reach
+        if (add < height) sum += across[(add * width + x) * channels + c]!
+        const drop = y - reach - 1
+        if (drop >= 0) sum -= across[(drop * width + x) * channels + c]!
+        if (y >= 0 && y < height) out[(y * width + x) * channels + c] = sum
+      }
+    }
   }
   return out
 }
 
-/** A mask averaged over each texel and those within `reach` round it that `covered` holds: only texels it holds change. */
-function softened(
-  mask: Uint8Array,
+/** A field (per texel) averaged over each texel and those within `reach` round it that `covered` holds: only texels it holds change. */
+function smoothed(
+  field: Float32Array,
   covered: Uint8Array,
   width: number,
   height: number,
   reach: number,
 ): Float32Array {
-  const out = Float32Array.from(mask)
+  const out = Float32Array.from(field)
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       if (!covered[y * width + x]) continue
@@ -543,12 +634,53 @@ function softened(
           const nx = x + dx
           const ny = y + dy
           if (nx < 0 || ny < 0 || nx >= width || ny >= height || !covered[ny * width + nx]) continue
-          sum += mask[ny * width + nx]!
+          sum += field[ny * width + nx]!
           n++
         }
       }
       out[y * width + x] = sum / n
     }
+  }
+  return out
+}
+
+/**
+ * Which texels are hair (1): at least STRAND of it, joined (4-connected,
+ * over texels at least that) to one at least ROOTED, in patches of at
+ * least `fewest` texels.
+ */
+function joinedHair(
+  share: Float32Array,
+  covered: Uint8Array,
+  width: number,
+  height: number,
+  fewest: number,
+): Uint8Array {
+  const out = new Uint8Array(share.length)
+  const seen = new Uint8Array(share.length)
+  const patch: number[] = []
+  for (let start = 0; start < share.length; start++) {
+    if (seen[start] || !covered[start] || share[start]! < STRAND) continue
+    patch.length = 0
+    patch.push(start)
+    seen[start] = 1
+    let rooted = false
+    for (let k = 0; k < patch.length; k++) {
+      const texel = patch[k]!
+      if (share[texel]! >= ROOTED) rooted = true
+      const x = texel % width
+      for (const other of [
+        x > 0 ? texel - 1 : -1,
+        x < width - 1 ? texel + 1 : -1,
+        texel >= width ? texel - width : -1,
+        texel < width * (height - 1) ? texel + width : -1,
+      ]) {
+        if (other < 0 || seen[other] || !covered[other] || share[other]! < STRAND) continue
+        seen[other] = 1
+        patch.push(other)
+      }
+    }
+    if (rooted && patch.length >= fewest) for (const texel of patch) out[texel] = 1
   }
   return out
 }
@@ -871,8 +1003,27 @@ export type HairAsset = {
  */
 const CAP_ZONE = 0.02
 
-/** Where the skull's zone is at least this at every corner, the donor's head is scalp: in the cap, for any hair painted there. */
-const CAP_SCALP = 0.05
+/**
+ * Round the hair the cap takes CAP_RINGS rings of the donor's triangles
+ * more, but the face — low in the skull's zone, within CAP_FACE_DEPTH of
+ * the eyes' front — the ears (where the skull's zone is under CAP_EAR_ZONE
+ * beside the head, no further forward than CAP_EAR_FRONT in front of the
+ * top of the neck: a sideburn is), and what lies lower than CAP_SIDEBURN
+ * under the eyes in front of the neck (a beard).
+ */
+const CAP_RINGS = 2
+const CAP_FACE_DEPTH = 0.05
+const CAP_EAR_ZONE = 0.03
+const CAP_EAR_FRONT = 0.015
+const CAP_SIDEBURN = 0.06
+
+/**
+ * The cap fades out over this far (bind units) from its rim and from the
+ * donor's ears (see `capFade`); not from its rim where that stands more
+ * than CAP_LYING over the donor's bald cranium.
+ */
+const CAP_FADE = 0.006
+const CAP_LYING = 0.006
 
 /** A cap triangle's corners off the skull's nearest point by more than this are hair whatever the zone. */
 const CAP_OFF = 0.006
@@ -900,15 +1051,13 @@ const STANDOFF_REACH = 0.015
 const CARD_ALPHA_TEST = 0.4
 
 /**
- * The cap is blended over the bald head, its faintest texels (below
- * CAP_ALPHA_TEST) not drawn. Every texel not wholly hair takes the colour
- * of the hair round it (see `bleedHair`): a hairline's strands over the
- * donor's skin, or short hair the skin shows through, are hair-coloured
- * and as opaque as there is hair, the wearer's own skin showing through
- * them instead of the donor's.
+ * The cap is blended over the bald head (see `capPixels`), its faintest
+ * texels (below CAP_ALPHA_TEST) not drawn. The texels cut away (less
+ * opaque than CAP_BLEED_BELOW) take the colour of the hair round them (see
+ * `bleedHair`), so filtering brings in no dark or light fringe.
  */
-const CAP_ALPHA_TEST = 0.05
-const CAP_BLEED_BELOW = 255
+const CAP_ALPHA_TEST = 0.02
+const CAP_BLEED_BELOW = 1
 
 /** A piece of a head's hair this small beside its largest, wholly below the neck, is worn there: a bead, a pendant. */
 const JEWEL = 0.05
@@ -955,6 +1104,69 @@ function jewellery(
     const piece = own[t] ? pieces.get(find(spots[index[t * 3]!]!)) : undefined
     return piece && piece.size < JEWEL * largest && piece.top < neck ? 1 : 0
   })
+}
+
+/**
+ * How far into a cap (`triangles` of a mesh's `index`, its points joined
+ * at their `spots`) each spot is from its rim and from the spots `seeds`
+ * flags, along its edges, as a share of `reach` (bind units): 0 on them,
+ * 1 from `reach` in, eased between. The cap's texture fades out by it, so
+ * its rim — where the donor's triangles end on the skin — never shows as
+ * an edge; but not from its rim where it stands off the head (`free`):
+ * the hem of a shell of long hair, its own edge.
+ */
+export function capFade(
+  points: Triples,
+  index: ArrayLike<number>,
+  spots: Int32Array,
+  spotCount: number,
+  triangles: readonly number[],
+  seeds: Uint8Array,
+  free: Uint8Array,
+  reach: number,
+): Float32Array {
+  const uses = new Map<number, number>()
+  const key = (a: number, b: number) => Math.min(a, b) * spotCount + Math.max(a, b)
+  const first = new Int32Array(spotCount).fill(-1)
+  for (const t of triangles) {
+    for (let k = 0; k < 3; k++) {
+      const i = index[t * 3 + k]!
+      if (first[spots[i]!]! < 0) first[spots[i]!] = i
+      const edge = key(spots[i]!, spots[index[t * 3 + ((k + 1) % 3)]!]!)
+      uses.set(edge, (uses.get(edge) ?? 0) + 1)
+    }
+  }
+  const distance = new Float64Array(spotCount).fill(Number.POSITIVE_INFINITY)
+  const edges: [number, number, number][] = []
+  for (const [edge, count] of uses) {
+    const [a, b] = [Math.floor(edge / spotCount), edge % spotCount]
+    const rim = count === 1 && !(free[a] && free[b])
+    if (rim || seeds[a]) distance[a] = 0
+    if (rim || seeds[b]) distance[b] = 0
+    const [i, j] = [first[a]! * 3, first[b]! * 3]
+    edges.push([
+      a,
+      b,
+      Math.hypot(
+        points[i]! - points[j]!,
+        points[i + 1]! - points[j + 1]!,
+        points[i + 2]! - points[j + 2]!,
+      ),
+    ])
+  }
+  for (let changed = true; changed; ) {
+    changed = false
+    for (const [a, b, length] of edges) {
+      if (distance[a]! + length < distance[b]!) {
+        distance[b] = distance[a]! + length
+        changed = true
+      } else if (distance[b]! + length < distance[a]!) {
+        distance[a] = distance[b]! + length
+        changed = true
+      }
+    }
+  }
+  return Float32Array.from(distance, (d) => smoothstep(0, reach, d))
 }
 
 /**
@@ -1042,13 +1254,56 @@ export function hairAssetOf(
       for (const i of corners) onHair[spots[i]!] = 1
     }
   }
-  for (let t = 0; shell && own && t < index.length / 3; t++) {
-    const corners = [0, 1, 2].map((k) => index[t * 3 + k]!)
-    if (own[t]) continue
-    const round = corners.some((i) => onHair[spots[i]!]) && corners.every(clearOfFace)
-    if (round || corners.every((i) => zone[i]! >= CAP_SCALP)) capTriangles.push(t)
+  // And the skin round it, a few rings of triangles out — a hairline, a
+  // temple or a sideburn is painted there; its texture says how much of it
+  // is hair (see `capPixels`) — but the face (the brows, a beard) and the
+  // ears: the wearer's are its own.
+  const eyes = eyesOf(head)
+  const nape =
+    boneBindPositions(head)[head.skeleton.bones.findIndex((b) => isHeadBone(b.name)) * 3 + 2]
+  const marks =
+    eyes && neck !== undefined && nape !== undefined
+      ? { eyes: [eyes.slice(0, 3), eyes.slice(3, 6)], neck, nape }
+      : null
+  const ear = (i: number) =>
+    !!marks &&
+    !shell?.[i] &&
+    zone[i]! < CAP_EAR_ZONE &&
+    points[i * 3 + 2]! < marks.nape + CAP_EAR_FRONT &&
+    nearEar(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!, marks)
+  if (own && marks) {
+    const eyeLevel = (marks.eyes[0]![1]! + marks.eyes[1]![1]!) / 2
+    const eyeFront = Math.max(marks.eyes[0]![2]!, marks.eyes[1]![2]!)
+    const roundHair = (i: number) => {
+      const y = points[i * 3 + 1]!
+      const z = points[i * 3 + 2]!
+      const face = zone[i]! < CAP_ZONE && z > eyeFront - CAP_FACE_DEPTH && y > marks.neck
+      return !face && !ear(i) && (y > eyeLevel - CAP_SIDEBURN || z < marks.nape)
+    }
+    const inCap = new Uint8Array(index.length / 3)
+    for (const t of capTriangles) inCap[t] = 1
+    for (let ring = 0; ring < CAP_RINGS; ring++) {
+      const reached = new Uint8Array(spotCount)
+      for (let t = 0; t < inCap.length; t++) {
+        if (inCap[t]) for (let k = 0; k < 3; k++) reached[spots[index[t * 3 + k]!]!] = 1
+      }
+      for (let t = 0; t < inCap.length; t++) {
+        const corners = [0, 1, 2].map((k) => index[t * 3 + k]!)
+        if (inCap[t] || !corners.some((i) => reached[spots[i]!]) || !corners.every(roundHair)) {
+          continue
+        }
+        inCap[t] = 1
+        capTriangles.push(t)
+      }
+    }
   }
-  const capped = joinedToHair(capTriangles, index, spots, spotCount, onHair)
+  const capped = joinedToHair(
+    capTriangles.filter((t) => ![0, 1, 2].every((k) => ear(index[t * 3 + k]!))),
+    index,
+    spots,
+    spotCount,
+    onHair,
+  )
   const opacity = ownMeshes(scene, 'opacity')[0]
   const parts: HairPart[] = []
   const opacityMaterial = opacity && ownMaterial(opacity)
@@ -1088,12 +1343,19 @@ export function hairAssetOf(
     const cheeks = [...places].filter(([name]) => /Cheek$/.test(name)).map(([, place]) => place)
     const skin = pixels && skinTone(pixels.head, uvs, points, cheeks)
     if (pixels && hair && skin) {
+      const ears = new Uint8Array(spotCount)
+      for (let i = 0; i < count; i++) if (ear(i)) ears[spots[i]!] = 1
+      const free = new Uint8Array(spotCount)
+      const over = standingOver(points, bald).height
+      for (let i = 0; i < count; i++) if (over[i]! > CAP_LYING) free[spots[i]!] = 1
+      const fade = capFade(points, index, spots, spotCount, capped, ears, free, CAP_FADE)
       const triangles = capped.map((t): CapTriangle => {
         const at = [0, 1, 2].map((k) => index[t * 3 + k]!)
         return {
           u: at.map((i) => uvs[i * 2]!),
           v: at.map((i) => uvs[i * 2 + 1]!),
           solid: !!shell && at.every((i) => shell[i]),
+          fade: at.map((i) => fade[spots[i]!]!),
         }
       })
       cap.pixels = capPixels(
@@ -1102,9 +1364,9 @@ export function hairAssetOf(
         skin,
         triangles,
       )
-      cap.dyeMask = Float32Array.from(
-        { length: cap.pixels.width * cap.pixels.height },
-        (_, i) => cap.pixels!.data[i * 4 + 3]! / 255,
+      // What shows of it is hair's colour all through: dyed wholly.
+      cap.dyeMask = Float32Array.from({ length: cap.pixels.width * cap.pixels.height }, (_, i) =>
+        cap.pixels!.data[i * 4 + 3]! > 0 ? 1 : 0,
       )
       cap.lum = maskedLuminance(cap.pixels, cap.dyeMask)
     }
@@ -1157,6 +1419,8 @@ type BaldHead = {
   scalp: BufferGeometry | null
   collar: BufferGeometry | null
   surface: Surface
+  /** The surface's triangles (kept skin's and the bald surface's), on its points. */
+  triangles: Uint32Array
   paint: ScalpPaint
   top: number
   neck: number
@@ -1711,6 +1975,14 @@ function makeBald(
   })
   surfacePoints.set(scalpPoints, keptIds.length * 3)
   surfaceNormals.set(scalpNormals, keptIds.length * 3)
+  const surfaceAt = new Int32Array(count)
+  keptIds.forEach((i, k) => {
+    surfaceAt[i] = k
+  })
+  const surfaceTriangles = Uint32Array.from([
+    ...Array.from(kept, (i) => surfaceAt[i]!),
+    ...corners.map((j) => keptIds.length + j),
+  ])
   let top = Number.NEGATIVE_INFINITY
   for (let i = 1; i < bald.points.length; i += 3) top = Math.max(top, bald.points[i]!)
   return {
@@ -1726,6 +1998,7 @@ function makeBald(
       normals: surfaceNormals,
       grid: new PointGrid(surfacePoints, SKULL_CELL),
     },
+    triangles: surfaceTriangles,
     paint,
     top,
     neck,
@@ -2047,7 +2320,7 @@ function wearBorrowed(
   model: Object3D,
   head: SkinnedMesh,
   asset: HairAsset,
-  bald: Pick<BaldHead, 'surface' | 'fit'>,
+  bald: Pick<BaldHead, 'surface' | 'triangles' | 'fit'>,
   undo: (() => void)[],
 ): (hex: string | null) => void {
   // From the donor's cranium to the wearer's: the hair sits on the bald head
@@ -2092,6 +2365,25 @@ function wearBorrowed(
       const nz = normal.getZ(i) / carry.scale[2]
       const length = Math.hypot(nx, ny, nz) || 1
       normal.setXYZ(i, nx / length, ny / length, nz / length)
+    }
+    // The cap nowhere under the bald head's triangles either: far apart
+    // round the ears, its points let a flat stretch of it (a temple painted
+    // with hair) sink under the scalp there, which then shows through it
+    // bare. (The cards hang free.)
+    if (part.name === 'cap') {
+      const over = underKept(
+        carried,
+        Float32Array.from({ length: normal.count * 3 }, (_, j) =>
+          normal.getComponent((j / 3) | 0, j % 3),
+        ),
+        { points: bald.surface.points, normals: bald.surface.normals, index: bald.triangles },
+      )
+      for (let i = 0; i < normal.count; i++) {
+        const lift = part.clearance - over.height[i]!
+        if (over.triangle[i]! < 0 || lift <= 0) continue
+        for (let axis = 0; axis < 3; axis++)
+          carried[i * 3 + axis]! += over.normal[i * 3 + axis]! * lift
+      }
     }
     geometry.setAttribute('position', new BufferAttribute(carried, 3))
     geometry.getAttribute('position').applyMatrix4(unbind)
