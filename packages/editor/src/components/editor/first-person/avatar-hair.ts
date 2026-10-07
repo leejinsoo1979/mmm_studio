@@ -1261,6 +1261,51 @@ function earPointsOf(head: SkinnedMesh, points: Triples): Uint8Array | null {
 
 const baldHeads = new WeakMap<BufferGeometry, BaldHead | null>()
 
+/** A head made bald (see `BaldHead`) all at once: `baldSteps` run through. */
+function makeBald(
+  model: Object3D,
+  head: SkinnedMesh,
+  geometry: BufferGeometry,
+  basis: HairBasis,
+): BaldHead | null {
+  const steps = baldSteps(model, head, geometry, basis)
+  for (;;) {
+    const step = steps.next()
+    if (step.done) return step.value
+  }
+}
+
+const preparing = new WeakMap<BufferGeometry, Promise<void>>()
+
+/**
+ * Makes a character's head bald ahead of its wearing any hair but its own
+ * (see `wearHair`), a step at a time between frames: all at once it is
+ * half a second or more of the page's time, the walk stopped as a saved
+ * wig loads, or another player wearing one joins.
+ */
+export function prepareHair(model: Object3D, basis: HairBasis): Promise<void> {
+  const head = headOf(model) as SkinnedMesh | null
+  if (!head?.isSkinnedMesh) return Promise.resolve()
+  const geometry = loadedGeometry(head)
+  if (baldHeads.has(geometry)) return Promise.resolve()
+  let found = preparing.get(geometry)
+  if (!found) {
+    found = (async () => {
+      const steps = baldSteps(model, head, geometry, basis)
+      for (;;) {
+        const step = steps.next()
+        if (step.done) {
+          baldHeads.set(geometry, step.value)
+          return
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+    })().finally(() => preparing.delete(geometry))
+    preparing.set(geometry, found)
+  }
+  return found
+}
+
 /**
  * A head made bald (see `BaldHead`), worked out once per head geometry as
  * loaded. Null for a head the library takes no hair off (one wearing a
@@ -1288,12 +1333,17 @@ function skinOf(geometry: BufferGeometry, i: number, slots: (slot: number) => nu
   return pairs
 }
 
-function makeBald(
+/**
+ * A head made bald (see `BaldHead`) as `makeBald` makes it, a step at a
+ * time: it yields between its stages, none much over a tenth of a second
+ * (see `prepareHair`).
+ */
+function* baldSteps(
   model: Object3D,
   head: SkinnedMesh,
   geometry: BufferGeometry,
   basis: HairBasis,
-): BaldHead | null {
+): Generator<void, BaldHead | null> {
   const own = basis.bald.get(ownMaterial(head).name)
   const fit = faceFit(basis.skull, bonePlaces(head))
   const eyes = eyesOf(head)
@@ -1320,6 +1370,7 @@ function makeBald(
     marks,
     earPointsOf(head, points),
   )
+  yield
   const cranium = craniumOf(basis, fit, points, eyes)!
   const fitted = fitBald(basis.skull, cranium)
   const kept = keptTriangles(index, taken)
@@ -1340,9 +1391,11 @@ function makeBald(
     normals: vertexNormals(necked, hung.triangles),
     grid: new PointGrid(necked, SKULL_CELL),
   }
+  yield
   const bent = bentSkull(skull, hung.triangles, anchors, neck)
   smoothNape(bent.points, hung.triangles, bent.known, neck, marks.nape)
   const bald = { ...hung, points: bent.points, normals: vertexNormals(bent.points, hung.triangles) }
+  yield
   const chosen = scalpTriangles(bald, { points, normals, index: kept }, marks)
 
   // The bald surface as a mesh beside the head: its points used.
@@ -1374,6 +1427,7 @@ function makeBald(
   const keptGrid = new PointGrid(anchors, SKULL_CELL)
   const found: number[] = []
   const distances: number[] = []
+  yield
   tuckUnder(
     scalpPoints,
     { points: anchors, normals: keptNormals, grid: keptGrid },
@@ -1463,6 +1517,7 @@ function makeBald(
         : 0,
     ),
   )
+  yield
   const under = underKept(scalpPoints, vertexNormals(scalpPoints, corners), {
     points,
     normals,
@@ -1560,6 +1615,7 @@ function makeBald(
       fixedUvs[j * 2 + 1] = at[1]!
     }
   }
+  yield
   const placed = scalpUvs(
     scalpPoints,
     corners,
@@ -1576,6 +1632,7 @@ function makeBald(
   // the kept skin and the body meet it, the spine's weight reached up over
   // the occiput and the nape folded as the head turned. The face's bones
   // count as the head: a nape doesn't move with the jaw or a brow.
+  yield
   const nearest = Array.from({ length: vertices }, (_, i) => {
     const n = keptGrid.nearest(
       scalpPoints[i * 3]!,
@@ -1643,6 +1700,7 @@ function makeBald(
     geometry.getAttribute('skinIndex').itemSize,
   )
 
+  yield
   const rings = cutRings(index, taken, spots, spotCount, TONE_RINGS)
   const { zone } = standingOver(points, fitted)
   const scalpCorners = {
@@ -1655,6 +1713,7 @@ function makeBald(
     scalpCorners.points.set(scalpPoints.subarray(i * 3, i * 3 + 3), k * 3)
   })
   // What shaded the body: what was taken out of the head, and the cards.
+  yield
   const hairPoints: number[] = []
   for (let t = 0; t < index.length / 3; t++) {
     if (!taken[t]) continue
@@ -1696,6 +1755,7 @@ function makeBald(
           marks,
         )
       : new Float32Array()
+  yield
   const paint: ScalpPaint = {
     ...scalpPaint(
       { points, normals, uvs, index, height },
@@ -1708,6 +1768,7 @@ function makeBald(
     ),
     shadow,
   }
+  yield
   let scalp: BufferGeometry | null = null
   if (vertices > 0) {
     const shade = hollowShade(scalpPoints, scalpNormals, surfaceAround)
@@ -2501,6 +2562,8 @@ export function useAvatarHair(
           takeOff()
           return
         }
+        await prepareHair(model, library)
+        if (!current) return
         worn.current?.hair.takeOff()
         const hair = wearHair(model, asset, library)
         hair.dye(dyeRef.current)

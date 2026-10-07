@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { BufferGeometry, Mesh, Object3D, SkinnedMesh } from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { wearHair } from './avatar-hair'
+import { prepareHair, wearHair } from './avatar-hair'
 import { applyShape, headOf, type Shaper } from './avatar-shape'
 import { type HairLibrary, loadHairLibrary } from './hair-styles'
 
@@ -106,4 +106,27 @@ describe('a hairstyle worn with the face reshaped', () => {
     unshape()
     asLoaded()
   }, 30000)
+})
+
+describe('a head made bald ahead of wearing', () => {
+  test('a step at a time between frames, is the one made at once', async () => {
+    const basis = await library()
+    const scalpOf = (scene: Object3D) =>
+      Array.from(
+        (scene.getObjectByName('hair:scalp') as Mesh).geometry.getAttribute('position')
+          .array as Float32Array,
+      )
+    const atOnce = await loadCharacter('Female_Adult_08')
+    const ahead = await loadCharacter('Female_Adult_08')
+    await prepareHair(ahead, basis)
+    // Made already: wearing it does no more than put it on.
+    const started = performance.now()
+    const worn = wearHair(ahead, null, basis)
+    const took = performance.now() - started
+    const whole = wearHair(atOnce, null, basis)
+    expect(scalpOf(ahead)).toEqual(scalpOf(atOnce))
+    expect(took).toBeLessThan(100)
+    worn.takeOff()
+    whole.takeOff()
+  }, 60000)
 })
