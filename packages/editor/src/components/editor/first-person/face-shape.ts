@@ -595,11 +595,96 @@ const PHOTO_GAIN = 1.5
 export type ShapeField = (x: number, y: number, out: number[]) => void
 
 /**
+ * How the head round the face follows the face's shape (see `headFollow`):
+ * scaled across about the face's middle, down about the brows and deeper
+ * (applied in the bind pose, see avatar-shape.ts) by these, beyond where
+ * the face keeps its own field (`own`, 0–1 at a place on the front view).
+ */
+export type HeadFollow = {
+  across: number
+  down: number
+  deep: number
+  middle: number
+  brow: number
+  own: (x: number, y: number) => number
+}
+
+/**
  * A face shape's field and, for the eyeballs (faceShaper tells them by
  * their bones, and moves each whole), the same without the sliders that
- * shape only the skin round them.
+ * shape only the skin round them; and how the head round the face follows
+ * it (null where it doesn't change the face's size).
  */
-export type FaceField = ShapeField & { eyeballs: ShapeField }
+export type FaceField = ShapeField & { eyeballs: ShapeField; head: HeadFollow | null }
+
+/**
+ * The head round a face follows its outline's size: a face made narrower
+ * or shorter (by the photo's proportions, the sliders, the pins) would
+ * otherwise sit under the skull it had, small under a big dome — on a bald
+ * head above all, where no hair hides it. The skull is scaled across and
+ * down as the outline is (each axis the nearest fit to its points' moves,
+ * no more than HEAD_REACH either way), and as much deeper as wider: its
+ * length keeps to its breadth, as a bald head's does. Within the ellipse round the face (from the
+ * chin up to FACE_ABOVE × the eyes' distance over the brows, across to the
+ * outline's sides) the face keeps its own field, the head's taking over
+ * FACE_FADE of its size past it.
+ */
+const HEAD_REACH = 0.12
+const FACE_ABOVE = 0.35
+const FACE_FADE = 0.4
+
+/** No smaller a change of the face's size than this moves the head. */
+const HEAD_LEAST = 1e-4
+
+function headFollow(target: readonly Point[], field: ShapeField): HeadFollow | null {
+  const p = (landmark: number) => target[facePointOf(landmark)]!
+  const rightIris = p(468)
+  const leftIris = p(473)
+  const e = distance(rightIris, leftIris)
+  const middle = (rightIris[0] + leftIris[0]) / 2
+  const eyeLevel = (rightIris[1] + leftIris[1]) / 2
+  const brows = FACE_PARTS.brows.map((i) => target[i]!)
+  const browTop = Math.min(...brows.map(([, y]) => y))
+  const brow = centroid(brows)[1]
+  const outline = FACE_PARTS.oval.map((i) => target[i]!).filter(([, y]) => y >= browTop)
+  const out = [0, 0, 0]
+  let across = 0
+  let acrossSpread = 0
+  let down = 0
+  let downSpread = 0
+  for (const [x, y] of outline) {
+    field(x, y, out)
+    across += out[0]! * (x - middle)
+    acrossSpread += (x - middle) ** 2
+    down += out[1]! * (y - brow)
+    downSpread += (y - brow) ** 2
+  }
+  const scale = (sum: number, spread: number) =>
+    1 + clamp(spread > 0 ? sum / spread : 0, -HEAD_REACH, HEAD_REACH)
+  const scaleAcross = scale(across, acrossSpread)
+  const scaleDown = scale(down, downSpread)
+  if (Math.abs(scaleAcross - 1) < HEAD_LEAST && Math.abs(scaleDown - 1) < HEAD_LEAST) return null
+  const chin = p(152)[1]
+  const halfWidth = Math.abs(p(454)[0] - p(234)[0]) / 2
+  const above = eyeLevel - browTop + FACE_ABOVE * e
+  const below = chin - eyeLevel
+  return {
+    across: scaleAcross,
+    down: scaleDown,
+    deep: scaleAcross,
+    middle,
+    brow,
+    own: (x, y) => {
+      const u = (x - middle) / halfWidth
+      const v = (y - eyeLevel) / (y < eyeLevel ? above : below)
+      const reach = Math.sqrt(u * u + v * v)
+      if (reach <= 1) return 1
+      if (reach >= 1 + FACE_FADE) return 0
+      const t = (reach - 1) / FACE_FADE
+      return 1 - t * t * (3 - 2 * t)
+    },
+  }
+}
 
 /**
  * The sliders that shape the skin round the eyes — the lids and their
@@ -719,7 +804,9 @@ export function faceShapeField(
           out[2]! += extra[2]!
         }
       : first
-  return Object.assign(withPins(field, pinned), {
+  const faceField = withPins(field, pinned)
+  return Object.assign(faceField, {
+    head: headFollow(target, faceField),
     eyeballs: withPins(
       fieldOf(brushList.filter((brush) => !ROUND_THE_EYES.has(brush.slider))),
       pinned && pinsField(withoutRoundTheEyes(shape.pins), landmarks),

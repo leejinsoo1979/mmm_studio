@@ -18,11 +18,13 @@ import {
   DEFAULT_FACE_SHAPE,
   type FaceShape,
   faceShapeField,
+  type HeadFollow,
   hasFaceShape,
   type ShapeField,
 } from './face-shape'
 import { loadFaceTargets } from './face-targets'
 import { type HeadFrame, headFrame, originalGeometry } from './head-geometry'
+import { smoothstep } from './head-skull'
 
 /**
  * How much of a shape reaches a point by its depth in the head (as a share
@@ -154,39 +156,62 @@ function eyeballMove({ middle, radius }: Eyeball, move: PointMove) {
   }
 }
 
-/** A field on the head's front view as moves of bind-pose points. */
-function fieldMove(field: ShapeField, frame: HeadFrame): PointMove {
+/**
+ * Down the neck from the head bone's height, the head's following the face
+ * (see face-shape.ts's `HeadFollow`) fades out over NECK_FADE of the front
+ * view: the neck meets the body where it did.
+ */
+const NECK_FADE = 0.18
+
+/**
+ * A field on the head's front view as moves of bind-pose points: the face's
+ * own as deep in the head as DEPTH_FROM–DEPTH_TO say, and, given how the
+ * head follows it (`head`), the head round it scaled with it — across,
+ * down, and deeper about the face's front.
+ */
+function fieldMove(field: ShapeField, frame: HeadFrame, head: HeadFollow | null = null): PointMove {
   const { left, top, size, neck, front } = frame
   const depth = Math.max(front - neck.z, 1e-6)
+  const neckLevel = (top - neck.y) / size
   // The field is the front view's, so a point and the one a step deeper
   // share its value: the last few are kept, as the normals' steps (across,
   // down, deeper) come right after their point and the field can be costly.
   const kept = Array.from({ length: 3 }, () => ({ x: Number.NaN, y: Number.NaN, out: [0, 0, 0] }))
   let next = 0
+  const valueAt = (x: number, y: number) => {
+    for (const value of kept) if (value.x === x && value.y === y) return value.out
+    const value = kept[next]!
+    next = (next + 1) % kept.length
+    field(x, y, value.out)
+    value.x = x
+    value.y = y
+    return value.out
+  }
   return (point, _index, move) => {
     const t = ((point.z - neck.z) / depth - DEPTH_FROM) / (DEPTH_TO - DEPTH_FROM)
-    if (t <= 0) {
-      move.set(0, 0, 0)
-      return
-    }
-    const reach = t >= 1 ? 1 : t * t * (3 - 2 * t)
+    const reach = t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t)
     const x = (point.x - left) / size
     const y = (top - point.y) / size
-    let value = kept[0]!
-    let found = value.x === x && value.y === y
-    for (let k = 1; k < kept.length && !found; k++) {
-      value = kept[k]!
-      found = value.x === x && value.y === y
+    const fade = head ? 1 - smoothstep(neckLevel, neckLevel + NECK_FADE, y) : 0
+    if (fade <= 0) {
+      if (reach <= 0) {
+        move.set(0, 0, 0)
+        return
+      }
+      const out = valueAt(x, y)
+      move.set(out[0]! * size, -out[1]! * size, out[2]! * size).multiplyScalar(reach)
+      return
     }
-    if (!found) {
-      value = kept[next]!
-      next = (next + 1) % kept.length
-      field(x, y, value.out)
-      value.x = x
-      value.y = y
-    }
-    const { out } = value
-    move.set(out[0]! * size, -out[1]! * size, out[2]! * size).multiplyScalar(reach)
+    // The face's own field where it is the face, the head's move round it.
+    const out = reach > 0 ? valueAt(x, y) : null
+    const own = out ? reach * (1 - (1 - head!.own(x, y)) * fade) : 0
+    const headX = (head!.across - 1) * (x - head!.middle) * fade
+    const headY = (head!.down - 1) * (y - head!.brow) * fade
+    move.set(
+      ((out ? out[0]! * own : 0) + headX * (1 - own)) * size,
+      -((out ? out[1]! * own : 0) + headY * (1 - own)) * size,
+      (out ? out[2]! * reach : 0) * size + (head!.deep - 1) * (point.z - front) * fade * (1 - own),
+    )
   }
 }
 
@@ -197,10 +222,10 @@ function fieldMove(field: ShapeField, frame: HeadFrame): PointMove {
  * the skin round them move over them.
  */
 export function faceShaper(
-  field: ShapeField & { eyeballs?: ShapeField },
+  field: ShapeField & { eyeballs?: ShapeField; head?: HeadFollow | null },
   frame: HeadFrame,
 ): Shaper {
-  const move = fieldMove(field, frame)
+  const move = fieldMove(field, frame, field.head)
   const eyeballField = field.eyeballs ? fieldMove(field.eyeballs, frame) : move
   return (mesh) => {
     const found = eyeballsOf(mesh)

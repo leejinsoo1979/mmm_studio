@@ -4,6 +4,7 @@ import {
   Bone,
   BufferGeometry,
   Float32BufferAttribute,
+  Mesh,
   MeshBasicMaterial,
   Skeleton,
   SkinnedMesh,
@@ -601,5 +602,51 @@ describe('the eyeballs, under the field', () => {
       expect(grown[0]).toBeCloseTo(growth, 1)
       for (const { by } of eyeball) expect(by.z).toBeCloseTo(eyeball[0]!.by.z, 9)
     }
+  })
+})
+
+describe('the head round the face', () => {
+  const shaped = (sliders: Record<string, number>) =>
+    faceShapeField(featured, { fit: 1, sliders, pins: {} }, null)!
+
+  test('follows the face’s size: a narrower face, a narrower head; a nose alone leaves it be', () => {
+    const narrower = shaped({ faceWidth: -1 }).head!
+    expect(narrower.across).toBeLessThan(0.97)
+    expect(narrower.down).toBeCloseTo(1, 3)
+    expect(narrower.deep).toBe(narrower.across)
+    expect(shaped({ faceLength: 1 }).head!.down).toBeGreaterThan(1.03)
+    expect(shaped({ noseTip: 1 }).head).toBeNull()
+  })
+
+  test('leaves the face its own field, and takes over past it', () => {
+    const { own } = shaped({ faceWidth: -1 }).head!
+    expect(own(0.5, 0.6)).toBe(1)
+    expect(own(0.5, 0.02)).toBe(0)
+    expect(own(0.02, 0.46)).toBe(0)
+  })
+
+  test('moves the skull with the face, its back too, and not the neck down at the body', () => {
+    /** The featured face's front view as the bind pose: x across, y up, the face's front at z = 0. */
+    const frame: HeadFrame = {
+      left: 0,
+      top: 1,
+      size: 1,
+      neck: new Vector3(0.5, 0.2, -0.2),
+      front: 0,
+    }
+    const move = faceShaper(shaped({ faceWidth: -1 }), frame)(new Mesh(new BufferGeometry()))!
+    const by = (x: number, y: number, z: number) => {
+      const out = new Vector3()
+      move(new Vector3(x, y, z), -1, out)
+      return out
+    }
+    // The crown's side, in.
+    expect(by(0.7, 0.95, -0.1).x).toBeLessThan(-0.003)
+    // The back of the head, in and forward: as much deeper as narrower.
+    const back = by(0.7, 0.7, -0.35)
+    expect(back.x).toBeLessThan(-0.003)
+    expect(back.z).toBeGreaterThan(0.003)
+    // Under the head bone (y 0.2) by the fade, the back of the neck where it meets the body.
+    expect(by(0.6, 0.0, -0.3).length()).toBe(0)
   })
 })
