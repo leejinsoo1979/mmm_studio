@@ -10,7 +10,12 @@ import {
   Source,
   type Texture,
 } from 'three'
-import { type AvatarLook, type AvatarPaint, hasLook } from '../../../store/use-avatar-profile'
+import {
+  type AvatarLook,
+  type AvatarPaint,
+  DEFAULT_SHAVE,
+  hasLook,
+} from '../../../store/use-avatar-profile'
 import { applyBodyBones } from './avatar-body'
 import {
   bindOf,
@@ -352,6 +357,7 @@ async function applyLook(
     scalp: look.bald ? scalp : null,
     stubble: look.bald ? stubble : null,
     wig: look.bald ? wig : null,
+    shave: look.shave,
     feet: look.feet,
     feetBind: shod && donor ? bindOf(shod) : null,
     feetDonor: donor?.donor ?? null,
@@ -454,11 +460,20 @@ export function useAvatarLook(
   const face = look?.face ?? null
   const paint = look?.paint ?? NO_PAINT
   const footwear = look?.feet ?? SHOD
+  const shave = look?.shave ?? DEFAULT_SHAVE
   const scalp = worn?.paint ?? null
   const stubble = worn?.stubble ?? null
   const wig = worn?.hairline ?? null
   useEffect(() => {
-    const look: AvatarPaint = { hair, skin, face, paint, feet: footwear, bald: scalp !== null }
+    const look: AvatarPaint = {
+      hair,
+      skin,
+      face,
+      paint,
+      feet: footwear,
+      shave,
+      bald: scalp !== null,
+    }
     if (dressing.current && (dressing.current.model !== model || !hasLook(look))) {
       dressing.current.undo()
       takeOffFeet(dressing.current.model)
@@ -490,7 +505,7 @@ export function useAvatarLook(
       controller.abort()
       clearTimeout(timer)
     }
-  }, [model, hair, skin, face, paint, footwear, scalp, stubble, wig, avatarId])
+  }, [model, hair, skin, face, paint, footwear, shave, scalp, stubble, wig, avatarId])
 
   useEffect(
     () => () => {

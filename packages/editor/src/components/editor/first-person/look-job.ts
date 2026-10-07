@@ -81,6 +81,8 @@ export type LookJob = {
   stubble: Rgb | null
   /** Where that borrowed hair shows (bind pose), its hairline thinning out into stubble on the skin; null for none. */
   wig: Float32Array | null
+  /** How much a bald head's stubble has grown back (0–1, see scalp-paint.ts's `shavedShade`). */
+  shave: number
   feet: AvatarFeet
   /**
    * Out of shoes, the body mesh with them in its bind pose and the donor
@@ -120,6 +122,7 @@ const SAME_PART: {
   scalp: is,
   stubble: alike,
   wig: is,
+  shave: is,
   feet: alike,
   feetBind: is,
   feetDonor: is,
@@ -470,7 +473,8 @@ function painterOf(analysis: Analysis, scalp: ScalpPaint): ScalpPainter {
  * head), the swapped face (onto the skin as dyed, the dyes' masks being the
  * character's own face and not the photo's) and, on a bald head, its
  * colour carried on up the forehead, a bald head's skin painted round the
- * cut to the scalp's tone (see `scalpTone`), the face paint over it all, and the irises last (a face photo's, unless
+ * cut to the scalp's tone (see `scalpTone`) with its stubble as grown
+ * back as the look says, the face paint over it all, and the irises last (a face photo's, unless
  * the paint picks one). `photo` is the face's photo, read (null leaves the
  * face out).
  */
@@ -523,6 +527,7 @@ export function dressBody(
         scalpTone(analysis, painter, skin, carried),
         job.wig ? (hair ? hexToRgb(hair) : job.stubble) : analysis.hairColor,
         job.wig,
+        job.shave,
       )
     }
     if (target) {

@@ -74,10 +74,14 @@ export function readAvatarFace(value: unknown): AvatarFace | null {
 export const DEFAULT_FACE_BLEND = 1
 export const DEFAULT_FACE_LIGHT = 0.5
 
+/** How much a shaved head's stubble has grown back unless the player says (see scalp-paint.ts's `shavedShade`): a light shadow. */
+export const DEFAULT_SHAVE = 0.35
+
 /**
  * The player's changes to their character: hair and skin dyes (hex), a face
  * photo, the face's shape (the photo's proportions, the sliders, the
- * sculpted pins), the build, the hairstyle, and what is painted on the face.
+ * sculpted pins), the build, the hairstyle and how much a shaved head's
+ * stubble has grown back (0–1), and what is painted on the face.
  */
 export type AvatarLook = {
   hair: string | null
@@ -86,6 +90,7 @@ export type AvatarLook = {
   shape: FaceShape
   body: BodyShape
   hairStyle: HairStyle
+  shave: number
   paint: FacePaint
   feet: AvatarFeet
 }
@@ -97,6 +102,7 @@ export const NO_LOOK: AvatarLook = {
   shape: DEFAULT_FACE_SHAPE,
   body: DEFAULT_BODY_SHAPE,
   hairStyle: null,
+  shave: DEFAULT_SHAVE,
   paint: NO_PAINT,
   feet: SHOD,
 }
@@ -112,6 +118,7 @@ export function readAvatarLook(value: unknown): AvatarLook {
     shape: readFaceShape(look.shape),
     body: readBodyShape(look.body),
     hairStyle: readHairStyle(look.hairStyle),
+    shave: unit(look.shave, DEFAULT_SHAVE),
     paint: readFacePaint(look.paint),
     feet: readAvatarFeet(look.feet),
   }
@@ -120,9 +127,12 @@ export function readAvatarLook(value: unknown): AvatarLook {
 /**
  * What of a look is painted on the character's textures (the shapes are the
  * geometry's, a borrowed hairstyle its own mesh): the dyes, the face photo,
- * the face paint, and a shaved head.
+ * the face paint, and a shaved head and its stubble.
  */
-export type AvatarPaint = Pick<AvatarLook, 'hair' | 'skin' | 'face' | 'paint' | 'feet'> & {
+export type AvatarPaint = Pick<
+  AvatarLook,
+  'hair' | 'skin' | 'face' | 'paint' | 'feet' | 'shave'
+> & {
   bald: boolean
 }
 
@@ -132,6 +142,7 @@ export const paintOf = (look: AvatarLook): AvatarPaint => ({
   face: look.face,
   paint: look.paint,
   feet: look.feet,
+  shave: look.shave,
   // Any hairstyle but the character's own makes the head bald, its skin
   // painted round where its own hair was taken out.
   bald: look.hairStyle !== null,

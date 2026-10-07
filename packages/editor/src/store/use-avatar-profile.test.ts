@@ -6,6 +6,7 @@ import { FACE_SLIDERS } from '../components/editor/first-person/face-shape'
 import useAvatarProfile, {
   type AvatarLook,
   changesCharacter,
+  DEFAULT_SHAVE,
   MAX_CHARACTER_NAME,
   NO_LOOK,
   readAvatarLook,
@@ -101,5 +102,16 @@ describe('a look with a sculpted face', () => {
     const text = JSON.stringify(LARGEST)
     expect(text.length).toBeLessThan(12 * 1024)
     expect(text).not.toContain('data:')
+  })
+})
+
+describe('a look’s shaved head', () => {
+  test('keeps how much its stubble has grown back, in range; an older save gets the light default', () => {
+    expect(readAvatarLook({ ...NO_LOOK, shave: 0.8 }).shave).toBe(0.8)
+    expect(readAvatarLook({ ...NO_LOOK, shave: 3 }).shave).toBe(1)
+    const { shave: _, ...older } = NO_LOOK
+    expect(readAvatarLook(older).shave).toBe(DEFAULT_SHAVE)
+    expect(DEFAULT_SHAVE).toBeGreaterThan(0)
+    expect(DEFAULT_SHAVE).toBeLessThan(0.5)
   })
 })

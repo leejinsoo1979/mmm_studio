@@ -1057,6 +1057,9 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
                 hair={look.hair}
                 hairStyle={look.hairStyle}
                 onPick={(hairStyle) => lookPatch({ hairStyle }, true)}
+                onShaveCommit={(shave) => lookPatch({ shave }, true)}
+                onShavePreview={(shave) => lookPatch({ shave }, false)}
+                shave={look.shave}
               />
             ) : (
               <HairColorBody

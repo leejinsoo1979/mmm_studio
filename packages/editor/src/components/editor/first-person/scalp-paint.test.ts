@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { type ScalpPaint, SHADED } from './bald-head'
-import type { Pixels, Rgb } from './look-pixels'
-import { relightBody, scalpPainter, skinGrain, stubbleShade } from './scalp-paint'
+import { luminance, type Pixels, type Rgb } from './look-pixels'
+import { relightBody, scalpPainter, shavedShade, skinGrain, stubbleShade } from './scalp-paint'
 
 const SIZE = 16
 
@@ -73,8 +73,15 @@ const paintScalp = (
   hair: Float32Array | null = null,
   stubble: Rgb | null = null,
   wig: Float32Array | null = null,
+  shave = 1,
 ) =>
-  scalpPainter(head.width, head.height, planned(plan), hair, null).paint(head, tone, stubble, wig)
+  scalpPainter(head.width, head.height, planned(plan), hair, null).paint(
+    head,
+    tone,
+    stubble,
+    wig,
+    shave,
+  )
 
 /** The mean lightness of a texture's texels from column `from` to `to` (exclusive), every row. */
 const lightness = (pixels: Pixels, from: number, to: number) => {
@@ -209,6 +216,31 @@ describe('a shaved head’s stubble', () => {
     // Grains: texel by texel, more or less of it.
     const texels = Array.from({ length: SIZE }, (_, x) => at(stubbled, x, 8)[0]!)
     expect(Math.max(...texels) - Math.min(...texels)).toBeGreaterThan(5)
+  })
+
+  test('is a cool shadow of the skin, not a coat of the hair’s colour; none for hair as fair as the skin', () => {
+    const [colour, dark] = shavedShade(HAIR, TONE, 1)
+    expect(luminance(...colour)).toBeLessThan(luminance(...TONE))
+    expect(luminance(...colour)).toBeGreaterThan(luminance(...HAIR) * 1.5)
+    expect(colour[2] / colour[0]).toBeGreaterThan(TONE[2] / TONE[0])
+    expect(dark).toBeGreaterThan(0.3)
+    expect(shavedShade(HAIR, TONE, 0.5)[1]).toBeCloseTo(dark / 2, 6)
+    expect(shavedShade([215, 170, 130], TONE, 1)[1]).toBe(0)
+  })
+
+  test('as grown back as the look says: none shaved clean, a light shadow, a buzz cut', () => {
+    const plan = { paint: band(0, 1, kept(1, -1, 0, 0, 1), kept(1, -1, 0, 0, 1)), kept: ALL_KEPT }
+    const shaved = (shave: number) => {
+      const head = image(() => SKIN)
+      paintScalp(head, plan, TONE, null, HAIR, null, shave)
+      return lightness(head, 0, SIZE)
+    }
+    const clean = image(() => SKIN)
+    paintScalp(clean, plan, TONE)
+    expect(shaved(0)).toBe(lightness(clean, 0, SIZE))
+    expect(shaved(0.35)).toBeLessThan(shaved(0))
+    expect(shaved(0.35)).toBeGreaterThan(shaved(0) * 0.93)
+    expect(shaved(1)).toBeLessThan(shaved(0.35))
   })
 
   test('under another’s hair, rings only its hairline', () => {

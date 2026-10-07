@@ -12,7 +12,14 @@ import {
 import { Loader2, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { Chips, ColorPanel, FOCUS_RING, PanelNote, RoundTile } from './studio-controls'
+import {
+  AmountSlider,
+  Chips,
+  ColorPanel,
+  FOCUS_RING,
+  PanelNote,
+  RoundTile,
+} from './studio-controls'
 import { HAIR_SWATCHES, hairSections } from './studio-data'
 
 type Filter = 'all' | AvatarGender
@@ -95,21 +102,27 @@ const DyeBadge = ({ hex }: { hex: string }) => (
 )
 
 /**
- * The hairstyle gallery: the character's own hair, a shaved head, and
- * every other character's hair to borrow, by length and by name (filtered
- * by the sex it was made for, which starts as the character's own). The
- * worn one shows its dye.
+ * The hairstyle gallery: the character's own hair, a shaved head (and how
+ * much its stubble has grown back), and every other character's hair to
+ * borrow, by length and by name (filtered by the sex it was made for,
+ * which starts as the character's own). The worn one shows its dye.
  */
 export function HairStyleBody({
   avatar,
   hairStyle,
   hair,
+  shave,
   onPick,
+  onShavePreview,
+  onShaveCommit,
 }: {
   avatar: string
   hairStyle: HairStyle
   hair: string | null
+  shave: number
   onPick: (style: HairStyle) => void
+  onShavePreview: (shave: number) => void
+  onShaveCommit: (shave: number) => void
 }) {
   const [library, retry] = useHairLibrary()
   const [filter, setFilter] = useState<Filter>(() => avatarGender(avatar))
@@ -136,6 +149,20 @@ export function HairStyleBody({
           <BaldHead />
         </RoundTile>
       </div>
+      {hairStyle === BALD && (
+        <div className="flex flex-col gap-1.5 rounded-2xl bg-white/[0.04] p-3 ring-1 ring-white/10">
+          <AmountSlider
+            label="삭발 정도"
+            onCommit={onShaveCommit}
+            onPreview={onShavePreview}
+            value={shave}
+          />
+          <div className="flex justify-between text-[10px] text-white/40">
+            <span>매끈하게 민 머리</span>
+            <span>짧게 자란 머리</span>
+          </div>
+        </div>
+      )}
       {hairSections(styles).map((section) => (
         <section aria-label={section.label} className="flex flex-col gap-2.5" key={section.length}>
           <h3 className="font-medium text-[11px] text-white/45 tracking-wide">{section.label}</h3>

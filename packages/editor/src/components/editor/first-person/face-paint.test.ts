@@ -440,6 +440,7 @@ describe('a body dressed in a look, placed by its landmarks', () => {
         scalp: null,
         stubble: null,
         wig: null,
+        shave: 0.35,
         feet: SHOD,
         feetBind: null,
         feetDonor: null,

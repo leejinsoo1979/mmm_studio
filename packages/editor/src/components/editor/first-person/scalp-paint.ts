@@ -260,7 +260,7 @@ const SPECKLE = 0.4
 const STUBBLE_MOST = 0.8
 const STUBBLE_GRAIN = 0.0004
 
-/** Stubble's colour over skin of the scalp's `tone`, from the hair's, and how much of it shows at its thickest. */
+/** Stubble's colour round a borrowed hairline over skin of the scalp's `tone`, from the hair's, and how much of it shows at its thickest. */
 export function stubbleShade(hair: Rgb, tone: Rgb): [Rgb, number] {
   const grey = luminance(...hair)
   const colour = hair.map(
@@ -269,6 +269,37 @@ export function stubbleShade(hair: Rgb, tone: Rgb): [Rgb, number] {
   const skin = Math.max(1, luminance(...tone))
   const contrast = Math.min(1, Math.max(0, (skin - grey) / skin))
   return [colour, STUBBLE_DARK * (STUBBLE_FAINT + (1 - STUBBLE_FAINT) * contrast)]
+}
+
+/**
+ * A shaved head's stubble is no layer of the hair's colour over the skin —
+ * at a millimetre or two that reads as felt — but the hairs' cut ends and
+ * roots seen through it: a fine, cool shadow of the skin (SHAVED_COOL of
+ * its colour, SHAVED_HAIR of the way to the hair's, greyed), only as much
+ * as the hair is darker than the skin (none for hair as fair as it) and at
+ * most SHAVED_DARK of it where the hair grew thickest on a head shaved a
+ * few days ago (`shave` 1); none on one shaved clean (0). Texel by texel it
+ * is grainy, each showing its own few hairs: a share GRAIN_LEAST of it at
+ * the least, up to GRAIN_LEAST + GRAIN_MOST, most nearer the least.
+ */
+const SHAVED_COOL: Rgb = [0.72, 0.78, 0.88]
+const SHAVED_HAIR = 0.25
+const SHAVED_DARK = 0.6
+const GRAIN_LEAST = 0.25
+const GRAIN_MOST = 1.5
+
+/** A shaved head's stubble's colour over skin of the scalp's `tone`, from the hair's, and how much of it shows at its thickest, `shave` grown. */
+export function shavedShade(hair: Rgb, tone: Rgb, shave: number): [Rgb, number] {
+  const grey = luminance(...hair)
+  const colour = tone.map(
+    (value, c) =>
+      value * SHAVED_COOL[c]! +
+      ((hair[c]! + (grey - hair[c]!) * STUBBLE_GREY) * STUBBLE_COOL[c]! - value * SHAVED_COOL[c]!) *
+        SHAVED_HAIR,
+  ) as unknown as Rgb
+  const skin = Math.max(1, luminance(...tone))
+  const contrast = Math.min(1, Math.max(0, (skin - grey) / skin))
+  return [colour, SHAVED_DARK * contrast * Math.min(1, Math.max(0, shave))]
 }
 
 /**
@@ -290,12 +321,19 @@ export type ScalpPainter = {
    * as its corners say, and wholly where it is the hair's colour; the bald
    * surface's wholly. Each in the colour of the skin round it where there
    * is skin near (read off `head` as it is), `tone` elsewhere; grained like
-   * skin. Then, given the colour of the hair worn (`stubble`), the
-   * stubble a shaved head shows where its hair grew (see `stubbleShade`)
-   * — or, under another's hair (`wig`: where it shows, bind-pose points),
-   * round that hair's hairline alone (see bald-head.ts's `wigFringe`).
+   * skin. Then, given the colour of the hair (`stubble`), the stubble a
+   * shaved head shows where its hair grew, `shave` grown back (see
+   * `shavedShade`) — or, under another's hair (`wig`: where it shows,
+   * bind-pose points), round that hair's hairline alone, in its colour
+   * (see `stubbleShade` and bald-head.ts's `wigFringe`).
    */
-  paint: (head: Pixels, tone: Rgb, stubble?: Rgb | null, wig?: Float32Array | null) => void
+  paint: (
+    head: Pixels,
+    tone: Rgb,
+    stubble?: Rgb | null,
+    wig?: Float32Array | null,
+    shave?: number,
+  ) => void
 }
 
 export function scalpPainter(
@@ -580,7 +618,7 @@ export function scalpPainter(
       }
       return null
     },
-    paint: (head, tone, stubble = null, wig = null) => {
+    paint: (head, tone, stubble = null, wig = null, shave = 1) => {
       const count = refs.length / SKIN_REF
       const read = Array.from({ length: count }, (_, r) =>
         skinAt(head, refs[r * SKIN_REF]!, refs[r * SKIN_REF + 1]!),
@@ -644,21 +682,28 @@ export function scalpPainter(
           data[p] = data[p]! + (target - data[p]!) * w
         }
       }
-      if (stubble) {
+      if (stubble && wig) {
         const [colour, most] = stubbleShade(stubble, tone)
-        const fringe = wig ? fringeOf(wig) : null
+        const fringe = fringeOf(wig)
         for (let i = 0; i < texels.length; i++) {
-          let thick = stubbles[i]!
-          if (fringe) {
-            const corner = owners[i]! * 3
-            if (corner < 0) continue
-            const w0 = firsts[i]!
-            const w1 = seconds[i]!
-            thick =
-              fringe[corner]! * w0 + fringe[corner + 1]! * w1 + fringe[corner + 2]! * (1 - w0 - w1)
-          }
+          const corner = owners[i]! * 3
+          if (corner < 0) continue
+          const w0 = firsts[i]!
+          const w1 = seconds[i]!
+          const thick =
+            fringe[corner]! * w0 + fringe[corner + 1]! * w1 + fringe[corner + 2]! * (1 - w0 - w1)
           if (thick <= 0) continue
           const a = Math.min(STUBBLE_MOST, most * thick * (1 - SPECKLE + 2 * SPECKLE * specks[i]!))
+          const p = texels[i]! * 4
+          for (let c = 0; c < 3; c++) data[p + c] = data[p + c]! + (colour[c]! - data[p + c]!) * a
+        }
+      } else if (stubble) {
+        const [colour, most] = shavedShade(stubble, tone, shave)
+        for (let i = 0; most > 0 && i < texels.length; i++) {
+          const thick = stubbles[i]!
+          if (thick <= 0) continue
+          // Thinning out over the hairline more slowly than it filled in.
+          const a = Math.min(1, most * thick * thick * (GRAIN_LEAST + GRAIN_MOST * specks[i]! ** 2))
           const p = texels[i]! * 4
           for (let c = 0; c < 3; c++) data[p + c] = data[p + c]! + (colour[c]! - data[p + c]!) * a
         }

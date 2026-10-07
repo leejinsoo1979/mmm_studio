@@ -101,6 +101,7 @@ const look = (key: string, change: Partial<Omit<LookJob, 'body'>>) => ({
   scalp: null,
   stubble: null,
   wig: null,
+  shave: 0.35,
   feet: SHOD,
   feetBind: null,
   feetDonor: null,
@@ -313,6 +314,7 @@ describe('the same look', () => {
       scalp,
       stubble: [40, 30, 25],
       wig,
+      shave: 0.35,
       feet: SHOD,
       feetBind: null,
       feetDonor: null,
@@ -335,6 +337,7 @@ describe('the same look', () => {
     expect(sameLookJob(job(), job({ feet: { wear: 'bare', color: null } }))).toBe(false)
     expect(sameLookJob(job(), job({ scalp: null }))).toBe(false)
     expect(sameLookJob(job(), job({ stubble: [41, 30, 25] }))).toBe(false)
+    expect(sameLookJob(job(), job({ shave: 0.8 }))).toBe(false)
   })
 
   test('tells what is worked out once apart by being the same, not by value', () => {
