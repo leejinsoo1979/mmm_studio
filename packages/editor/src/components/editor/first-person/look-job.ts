@@ -106,8 +106,8 @@ const alike = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.
 
 /**
  * How each part of two jobs is told the same: what is worked out once and
- * shared (the bald scalp, the feet's fit and donor, the face landmarks) by
- * being the same, the look's own settings by value.
+ * shared (the bald scalp, where a wig shows, the feet's fit and donor, the
+ * face landmarks) by being the same, the look's own settings by value.
  */
 const SAME_PART: {
   [K in Exclude<keyof LookJob, 'body'>]: (a: LookJob[K], b: LookJob[K]) => boolean
@@ -118,6 +118,8 @@ const SAME_PART: {
   face: alike,
   paint: alike,
   scalp: is,
+  stubble: alike,
+  wig: is,
   feet: alike,
   feetBind: is,
   feetDonor: is,

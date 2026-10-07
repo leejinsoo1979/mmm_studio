@@ -273,6 +273,7 @@ describe('the same look', () => {
   const body = { key: 'm002' } as LookJob['body']
   const scalp = {} as ScalpPaint
   const target = [0.5, 0.5]
+  const wig = new Float32Array(3)
   const job = (patch: Partial<LookJob> = {}): LookJob =>
     ({
       body,
@@ -288,6 +289,8 @@ describe('the same look', () => {
       },
       paint: { ...NO_PAINT, lips: '#aa3344' },
       scalp,
+      stubble: [40, 30, 25],
+      wig,
       feet: SHOD,
       feetBind: null,
       feetDonor: null,
@@ -309,10 +312,12 @@ describe('the same look', () => {
     expect(sameLookJob(job(), job({ face: { ...job().face!, light: 0.6 } }))).toBe(false)
     expect(sameLookJob(job(), job({ feet: { wear: 'bare', color: null } }))).toBe(false)
     expect(sameLookJob(job(), job({ scalp: null }))).toBe(false)
+    expect(sameLookJob(job(), job({ stubble: [41, 30, 25] }))).toBe(false)
   })
 
   test('tells what is worked out once apart by being the same, not by value', () => {
     expect(sameLookJob(job(), job({ scalp: {} as ScalpPaint }))).toBe(false)
     expect(sameLookJob(job(), job({ target: [...target] }))).toBe(false)
+    expect(sameLookJob(job(), job({ wig: new Float32Array(3) }))).toBe(false)
   })
 })
