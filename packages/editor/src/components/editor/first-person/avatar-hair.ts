@@ -445,9 +445,17 @@ const LIGHTER: readonly [number, number] = [0.6, 1.25]
 /**
  * A triangle of the cap on its texture (corners in 0–1 UVs): `solid` on the
  * hair's sculpted shell; `fade`, per corner, how far it is from the cap's
- * rim (0 on it, 1 clear of it: see `hairAssetOf`), where it fades out.
+ * rim (0 on it, 1 clear of it: see `hairAssetOf`), where it fades out;
+ * `lying`, per corner, how much it lies on the skin of the head (1) rather
+ * than standing free of it or over an ear (0), where it is hair or not.
  */
-export type CapTriangle = { u: number[]; v: number[]; solid: boolean; fade?: number[] }
+export type CapTriangle = {
+  u: number[]
+  v: number[]
+  solid: boolean
+  fade?: number[]
+  lying?: number[]
+}
 
 /**
  * The cap's texture: the donor's head texture as a matte of its hair over
@@ -474,12 +482,17 @@ export function capPixels(
   const covered = new Uint8Array(count)
   const solid = new Uint8Array(count)
   const fade = new Float32Array(count)
+  // Texels two triangles share (a texture mirrored left and right) are
+  // hair or not if either says so.
+  const lying = new Float32Array(count).fill(1)
+  const at = (values: number[] | undefined, w0: number, w1: number, w2: number) =>
+    values ? values[0]! * w0 + values[1]! * w1 + values[2]! * w2 : 1
   for (const tri of triangles) {
     fillTexels(width, height, tri.u, tri.v, (texel, w0, w1, w2) => {
       covered[texel] = 1
       if (tri.solid) solid[texel] = 1
-      const f = tri.fade ? tri.fade[0]! * w0 + tri.fade[1]! * w1 + tri.fade[2]! * w2 : 1
-      fade[texel] = Math.max(fade[texel]!, f)
+      fade[texel] = Math.max(fade[texel]!, at(tri.fade, w0, w1, w2))
+      lying[texel] = Math.min(lying[texel]!, at(tri.lying, w0, w1, w2))
     })
   }
   const colours = new Float32Array(count * 3)
@@ -523,7 +536,13 @@ export function capPixels(
   const out: Pixels = { data: new Uint8ClampedArray(data), width, height }
   for (let i = 0; i < count; i++) {
     const amount = hairy[i] ? share[i]! : 0
-    out.data[i * 4 + 3] = Math.round(255 * smoothstep(STRAND, OPAQUE, amount) * fade[i]!)
+    // Standing free of the head, or over an ear, the cap may have nothing
+    // behind it but the cap itself, drawn in no order, or the world: a
+    // see-through texel there is a pale smear in the hair. There it is hair
+    // or not, to its rim; on the skin, its hairline thins out and fades.
+    const soft = smoothstep(STRAND, OPAQUE, amount) * fade[i]!
+    const hard = amount >= (STRAND + OPAQUE) / 2 ? 1 : 0
+    out.data[i * 4 + 3] = Math.round(255 * (hard + (soft - hard) * lying[i]!))
     // Of the colour unmixed, its lightness alone: the donor's skin is
     // shaded unlike its cheeks, so its hue would come out ruddy.
     const own = smoothstep(UNMIXED[0], UNMIXED[1], amount)
@@ -1044,6 +1063,7 @@ const CAP_ZONE = 0.02
 const CAP_RINGS = 2
 const CAP_FACE_DEPTH = 0.05
 const CAP_EAR_ZONE = 0.03
+const CAP_EAR_ROUNDS = 8
 const CAP_EAR_FRONT = 0.015
 const CAP_SIDEBURN = 0.06
 
@@ -1298,12 +1318,12 @@ export function hairAssetOf(
     eyes && neck !== undefined && nape !== undefined
       ? { eyes: [eyes.slice(0, 3), eyes.slice(3, 6)], neck, nape }
       : null
-  const ear = (i: number) =>
+  const overEar = (i: number) =>
     !!marks &&
-    !shell?.[i] &&
     zone[i]! < CAP_EAR_ZONE &&
     points[i * 3 + 2]! < marks.nape + CAP_EAR_FRONT &&
     nearEar(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!, marks)
+  const ear = (i: number) => !shell?.[i] && overEar(i)
   if (own && marks) {
     const eyeLevel = (marks.eyes[0]![1]! + marks.eyes[1]![1]!) / 2
     const eyeFront = Math.max(marks.eyes[0]![2]!, marks.eyes[1]![2]!)
@@ -1330,8 +1350,32 @@ export function hairAssetOf(
       }
     }
   }
+  // The ear's own folds the donor's hair took with it (see bald-head.ts's
+  // `cleanCut`) are the donor's ear, not hair: on another head they would
+  // stand as slivers of its skin. An ear the hair covers wholly, joined to
+  // no ear it keeps, is hair.
+  const folds = new Uint8Array(index.length / 3)
+  if (own) {
+    const inCap = new Uint8Array(index.length / 3)
+    for (const t of capTriangles) inCap[t] = 1
+    for (let round = 0; round < CAP_EAR_ROUNDS; round++) {
+      const kept = new Uint8Array(spotCount)
+      for (let t = 0; t < inCap.length; t++) {
+        if (!inCap[t] || folds[t]) for (let k = 0; k < 3; k++) kept[spots[index[t * 3 + k]!]!] = 1
+      }
+      let grew = false
+      for (let t = 0; t < inCap.length; t++) {
+        const corners = [0, 1, 2].map((k) => index[t * 3 + k]!)
+        if (!inCap[t] || folds[t] || !corners.every(ear)) continue
+        if (!corners.some((i) => kept[spots[i]!])) continue
+        folds[t] = 1
+        grew = true
+      }
+      if (!grew) break
+    }
+  }
   const capped = joinedToHair(
-    capTriangles.filter((t) => ![0, 1, 2].every((k) => ear(index[t * 3 + k]!))),
+    capTriangles.filter((t) => !folds[t]),
     index,
     spots,
     spotCount,
@@ -1346,10 +1390,7 @@ export function hairAssetOf(
     material.name = `${id}:hair-cap`
     Object.assign(material, {
       transparent: true,
-      // Where the cap lies over itself (a shell of long hair over its hem),
-      // drawn in no order, a see-through texel drawn first would hide the
-      // hair behind it and show what is behind the head through it.
-      depthWrite: false,
+      depthWrite: true,
       alphaTest: CAP_ALPHA_TEST,
       side: FrontSide,
       // Where the cap lies on the wearer's own scalp, it is drawn over it.
@@ -1392,6 +1433,9 @@ export function hairAssetOf(
           v: at.map((i) => uvs[i * 2 + 1]!),
           solid: !!shell && at.every((i) => shell[i]),
           fade: at.map((i) => fade[spots[i]!]!),
+          lying: at.map((i) =>
+            overEar(i) ? 0 : 1 - smoothstep(CAP_LYING, 2 * CAP_LYING, over[i]!),
+          ),
         }
       })
       cap.pixels = capPixels(

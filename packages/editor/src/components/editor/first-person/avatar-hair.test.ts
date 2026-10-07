@@ -241,6 +241,19 @@ describe('the cap’s texture in the donor’s hair', () => {
     )
   })
 
+  test('standing free of the head, is hair or not, to its rim', () => {
+    const half = HAIR_COLOUR.map((c, k) => (c + SKIN_COLOUR[k]!) / 2)
+    const head = image(SIZE, SIZE, (x) => (x < 100 ? HAIR_COLOUR : x < 140 ? half : SKIN_COLOUR))
+    const free = [
+      { u: [0, 1, 1], v: [0, 0, 1], solid: false, fade: [0, 1, 1], lying: [0, 0, 0] },
+      { u: [0, 1, 0], v: [0, 1, 1], solid: false, fade: [0, 1, 0], lying: [0, 0, 0] },
+    ]
+    const cap = capPixels(head, hairRgb, skinRgb, free)
+    for (const x of [1, 50, 120, 200]) expect([0, 255]).toContain(alpha(cap, x, 128))
+    expect(alpha(cap, 1, 128)).toBe(255)
+    expect(alpha(cap, 200, 128)).toBe(0)
+  })
+
   test('fades out to the cap’s rim', () => {
     const head = image(SIZE, SIZE, () => HAIR_COLOUR)
     // Clear along the left edge (u = 0), whole from the right.
