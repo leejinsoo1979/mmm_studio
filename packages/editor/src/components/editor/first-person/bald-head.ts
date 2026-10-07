@@ -276,6 +276,9 @@ function piecesOf(
 const RIM_STANDING = 0.012
 const RIM_BELOW = 0.02
 
+/** How many rings of the ear's own triangles at most are given back to it (see `cleanCut`). */
+const EAR_ROUNDS = 8
+
 /** How many rounds kept triangles wholly on the cut are taken in (see `withRimTaken`). */
 const ISLAND_ROUNDS = 2
 
@@ -295,11 +298,13 @@ const LYING = 0.025
 /**
  * `taken` with the rim of any gear modelled in the head (see RIM_STANDING)
  * taken too, the skin left between the hair taken (every corner on the
- * cut), and what that leaves of the head in small pieces beside it.
- * `height` is how far each point stands over the skull fitted to the head.
+ * cut), and what that leaves of the head in small pieces beside it; but
+ * the ear's own folds given back (see EAR_ROUNDS), and a small piece lying
+ * on the neck (see NECK_TOP). `height` is how far each point stands over
+ * the skull fitted to the head, `zone` the skull's hair zone there.
  */
 export function cleanCut(
-  head: Pick<OwnHead, 'points' | 'index' | 'spots' | 'spotCount' | 'height'>,
+  head: Pick<OwnHead, 'points' | 'index' | 'spots' | 'spotCount' | 'height' | 'zone'>,
   taken: ArrayLike<number>,
   marks: HeadMarks,
 ): Uint8Array {
@@ -365,15 +370,36 @@ export function cleanCut(
     }
     if (!grew) break
   }
-  if (!any) return out
-  const kept = piecesOf(index, spots, head.spotCount, (t) => out[t] === 0)
-  const beside = new Set<number>()
-  for (let t = 0; t < count; t++) {
-    if (!out[t] && [0, 1, 2].some((k) => added[spots[index[t * 3 + k]!]!]))
-      beside.add(kept.piece(t))
+  if (any) {
+    const kept = piecesOf(index, spots, head.spotCount, (t) => out[t] === 0)
+    const beside = new Set<number>()
+    for (let t = 0; t < count; t++) {
+      if (!out[t] && [0, 1, 2].some((k) => added[spots[index[t * 3 + k]!]!]))
+        beside.add(kept.piece(t))
+    }
+    for (let t = 0; t < count; t++) {
+      if (!out[t] && beside.has(kept.piece(t)) && kept.size(t) < PIECE * kept.largest) out[t] = 1
+    }
   }
-  for (let t = 0; t < count; t++) {
-    if (!out[t] && beside.has(kept.piece(t)) && kept.size(t) < PIECE * kept.largest) out[t] = 1
+  // The ear's own folds the hair took with it — the bowl inside it, the
+  // back of its rim — go back to the ear they are joined to: the bald
+  // surface closes no ear the head keeps, so they would be holes in it.
+  const ear = (i: number) =>
+    head.zone[i]! < EAR_ZONE &&
+    nearEar(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!, marks)
+  for (let round = 0; round < EAR_ROUNDS; round++) {
+    const keptSpot = new Uint8Array(head.spotCount)
+    for (let t = 0; t < count; t++) {
+      if (!out[t]) for (let k = 0; k < 3; k++) keptSpot[spots[index[t * 3 + k]!]!] = 1
+    }
+    let grew = false
+    for (let t = 0; t < count; t++) {
+      const corners = [0, 1, 2].map((k) => index[t * 3 + k]!)
+      if (!out[t] || !corners.every(ear) || !corners.some((i) => keptSpot[spots[i]!])) continue
+      out[t] = 0
+      grew = true
+    }
+    if (!grew) break
   }
   return out
 }

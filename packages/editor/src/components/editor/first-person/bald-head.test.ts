@@ -490,6 +490,22 @@ describe('the cut cleaned', () => {
     expect(takenQuads(cleanCut(head, taken, marks))).toEqual([0, 1, 2, 3, 4, 5, 6])
   })
 
+  test('gives the ear’s folds the hair took back to the ear they are joined to', () => {
+    // The strip beside the head, at the ear's height behind the eyes: the
+    // ear (zone 0) kept from quad 10 on, its folds in quads 5–9 taken with
+    // the hair (quads 0–4, over the skull's hair zone).
+    const head = strip(30, (c) => ({ zone: c <= 5 ? 0.3 : 0 }))
+    const taken = new Uint8Array(60)
+    for (let q = 0; q < 10; q++) taken[q * 2] = taken[q * 2 + 1] = 1
+    const eyes = [
+      [-0.2, 0.01, 0.5],
+      [-0.1, 0.01, 0.5],
+    ]
+    expect(takenQuads(cleanCut(head, taken, { eyes, neck: -0.1, nape: 0 }))).toEqual([
+      0, 1, 2, 3, 4, 5,
+    ])
+  })
+
   test('keeps a small piece apart from the rest lying on the neck just under its top', () => {
     // Under the top of the neck (y < 0): quads 70–71 lying on it, 80–81 standing off it.
     const head = strip(100, (c) =>

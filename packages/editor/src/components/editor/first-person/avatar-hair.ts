@@ -1545,8 +1545,8 @@ function makeBald(
     nape: places[headBone * 3 + 2]!,
   }
   const { spots, count: spotCount } = spotsOf(points)
-  const { height } = standingOver(points, fitSkull(basis.skull, fit))
-  const taken = cleanCut({ points, index, spots, spotCount, height }, own, marks)
+  const { height, zone: skullZone } = standingOver(points, fitSkull(basis.skull, fit))
+  const taken = cleanCut({ points, index, spots, spotCount, height, zone: skullZone }, own, marks)
   const cranium = craniumOf(basis, fit, points, eyes)!
   const fitted = fitBald(basis.skull, cranium)
   const kept = keptTriangles(index, taken)
