@@ -211,9 +211,9 @@ describe('the cap’s texture in the donor’s hair', () => {
   const SIZE = 256
 
   test('thins sparse strands out into the skin, as many as there are', () => {
-    // Hair to x 100; past it, strands every other column to x 120, then skin.
+    // Hair to x 100; past it, strands two columns wide one apart to x 120, then skin.
     const head = image(SIZE, SIZE, (x) =>
-      x < 100 || (x < 120 && x % 2 === 0) ? HAIR_COLOUR : SKIN_COLOUR,
+      x < 100 || (x < 120 && x % 3 !== 0) ? HAIR_COLOUR : SKIN_COLOUR,
     )
     const cap = capPixels(head, hairRgb, skinRgb, whole)
     expect(alpha(cap, 50, 128)).toBe(255)

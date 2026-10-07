@@ -420,9 +420,9 @@ const CONTRAST = 40
 /** How many texels (on a 1024 texture) round a UV island's rim take its texels' colour and opacity. */
 const RIM_PAD = 2
 
-const STRAND = 0.25
+const STRAND = 0.32
 const ROOTED = 0.6
-const OPAQUE = 0.8
+const OPAQUE = 0.85
 const SPECK = 120
 const SMOOTH = 1
 
@@ -1032,6 +1032,9 @@ const CAP_OFF = 0.006
 const CAP_CLEARANCE = 0.0015
 const CARD_CLEARANCE = 0.003
 
+/** The cap is clear within OFF_EAR[0] (bind units) of the wearer's ears, whole from OFF_EAR[1]. */
+const OFF_EAR: readonly [number, number] = [0.004, 0.012]
+
 /** Deeper (bind units) into the wearer than this, a point is left be by `pushOut`. */
 const PUSH_REACH = 0.03
 
@@ -1421,6 +1424,8 @@ type BaldHead = {
   surface: Surface
   /** The surface's triangles (kept skin's and the bald surface's), on its points. */
   triangles: Uint32Array
+  /** The points of its own ears (bind pose), which no other's hair lies on. */
+  ears: PointGrid
   paint: ScalpPaint
   top: number
   neck: number
@@ -1999,6 +2004,18 @@ function makeBald(
       grid: new PointGrid(surfacePoints, SKULL_CELL),
     },
     triangles: surfaceTriangles,
+    ears: new PointGrid(
+      Float32Array.from(
+        keptIds
+          .filter(
+            (i) =>
+              height[i]! > TURN_STANDING &&
+              nearEar(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!, marks),
+          )
+          .flatMap((i) => [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!]),
+      ),
+      SKULL_CELL,
+    ),
     paint,
     top,
     neck,
@@ -2320,7 +2337,7 @@ function wearBorrowed(
   model: Object3D,
   head: SkinnedMesh,
   asset: HairAsset,
-  bald: Pick<BaldHead, 'surface' | 'triangles' | 'fit'>,
+  bald: Pick<BaldHead, 'surface' | 'triangles' | 'ears' | 'fit'>,
   undo: (() => void)[],
 ): (hex: string | null) => void {
   // From the donor's cranium to the wearer's: the hair sits on the bald head
@@ -2385,6 +2402,30 @@ function wearBorrowed(
           carried[i * 3 + axis]! += over.normal[i * 3 + axis]! * lift
       }
     }
+    // The cap clear over the wearer's ears: its hair, round the donor's,
+    // would lie on them as a film where the two heads' ears part.
+    let earClear: BufferAttribute | null = null
+    if (part.name === 'cap' && bald.ears.points.length > 0) {
+      const old = geometry.getAttribute('color')
+      const colour = new Float32Array((carried.length / 3) * 4)
+      const found: number[] = []
+      const distances: number[] = []
+      for (let i = 0; i < carried.length / 3; i++) {
+        for (let c = 0; c < 3; c++) colour[i * 4 + c] = old ? old.getComponent(i, c) : 1
+        const near = bald.ears.nearest(
+          carried[i * 3]!,
+          carried[i * 3 + 1]!,
+          carried[i * 3 + 2]!,
+          1,
+          found,
+          distances,
+          OFF_EAR[1],
+        )
+        colour[i * 4 + 3] =
+          near > 0 ? smoothstep(OFF_EAR[0], OFF_EAR[1], Math.sqrt(distances[0]!)) : 1
+      }
+      earClear = new BufferAttribute(colour, 4)
+    }
     geometry.setAttribute('position', new BufferAttribute(carried, 3))
     geometry.getAttribute('position').applyMatrix4(unbind)
     normal.applyNormalMatrix(unbindNormal)
@@ -2392,6 +2433,10 @@ function wearBorrowed(
       skinIndex.array[i] = slots[skinIndex.array[i]!]!
 
     const material = part.material.clone() as MeshStandardMaterial
+    if (earClear) {
+      geometry.setAttribute('color', earClear)
+      material.vertexColors = true
+    }
     const map = material.map
     const shared = texturesOf(part.material)
     let dyed: Texture | null = null
