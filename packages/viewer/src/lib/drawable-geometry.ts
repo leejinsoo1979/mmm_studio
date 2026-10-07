@@ -1,4 +1,4 @@
-import { type BufferGeometry, Float32BufferAttribute } from 'three'
+import { type BufferGeometry, Float32BufferAttribute, type Object3D } from 'three'
 
 /**
  * True when `geometry` has a bound, non-empty `position` attribute — i.e. it is
@@ -46,4 +46,68 @@ export function ensureSecondaryUv(geometry: BufferGeometry | undefined | null): 
     values[index * 2 + 1] = uv.getY(index)
   }
   geometry.setAttribute('uv2', new Float32BufferAttribute(values, 2))
+}
+
+/**
+ * Holds back `dispose()` on a drawn geometry while a mesh in a scene still
+ * draws it.
+ *
+ * Disposing frees the geometry's GPU vertex buffers. Unlike WebGL, the WebGPU
+ * renderer does not reliably rebuild them when the geometry is drawn again: a
+ * render object that shares its material state with an earlier draw in the
+ * same pass skips the geometry upload and binds the freed buffer, so the
+ * validator rejects the draw ("Vertex buffer slot 1 … was not set") and drops
+ * the frame's whole command buffer. React StrictMode runs every effect cleanup
+ * once right after mount in development, so the common
+ * `useEffect(() => () => geometry.dispose(), [geometry])` disposes a memoised
+ * geometry its mesh keeps drawing (the ceiling placeholder, the site ground, …).
+ *
+ * Returns `track(object, geometry)`, called for every draw. A tracked
+ * geometry's `dispose()` is deferred one `schedule` tick and then dropped if a
+ * mesh that drew it still holds it and is still attached to a scene; otherwise
+ * it runs. A geometry swapped out (`dispose()` then `mesh.geometry = next`) or
+ * unmounted is therefore still freed.
+ */
+export function createInUseDisposeGuard(
+  schedule: (run: () => void) => void = (run) => {
+    setTimeout(run, 0)
+  },
+): (object: Object3D, geometry: BufferGeometry) => void {
+  const drawnBy = new WeakMap<BufferGeometry, Set<Object3D>>()
+
+  const stillDrawn = (geometry: BufferGeometry, objects: Set<Object3D>) => {
+    for (const object of objects) {
+      if ((object as { geometry?: unknown }).geometry === geometry && isInScene(object)) {
+        return true
+      }
+      objects.delete(object)
+    }
+    return false
+  }
+
+  return (object, geometry) => {
+    const known = drawnBy.get(geometry)
+    if (known) {
+      known.add(object)
+      return
+    }
+    const objects = new Set<Object3D>([object])
+    drawnBy.set(geometry, objects)
+    const dispose = geometry.dispose
+    let pending = false
+    geometry.dispose = () => {
+      if (pending) return
+      pending = true
+      schedule(() => {
+        pending = false
+        if (!stillDrawn(geometry, objects)) dispose.call(geometry)
+      })
+    }
+  }
+}
+
+function isInScene(object: Object3D): boolean {
+  let root = object
+  while (root.parent) root = root.parent
+  return (root as { isScene?: boolean }).isScene === true
 }

@@ -17,7 +17,11 @@ import {
   useState,
 } from 'react'
 import * as THREE from 'three/webgpu'
-import { ensureSecondaryUv, hasDrawableGeometry } from '../../lib/drawable-geometry'
+import {
+  createInUseDisposeGuard,
+  ensureSecondaryUv,
+  hasDrawableGeometry,
+} from '../../lib/drawable-geometry'
 import { PERF_OVERLAY_ENABLED, pushGpuSample } from '../../lib/gpu-perf'
 import { applyIsolation, clearIsolation } from '../../lib/isolation'
 import { ensureKtx2Support } from '../../lib/ktx2-loader'
@@ -131,6 +135,13 @@ function UnsupportedGpuViewerFallback() {
  * transient placeholder, or a derived edge/outline geometry) flickers the entire
  * canvas, not just itself. See `hasDrawableGeometry`.
  *
+ * Draws whose group or draw range is empty (the placeholders' count-0 groups)
+ * are skipped too, silently: they draw nothing by design.
+ *
+ * It also keeps a drawn geometry's `dispose()` from freeing buffers a mesh in
+ * the scene still draws, which binds a freed buffer on the next draw with the
+ * same consequence. See `createInUseDisposeGuard`.
+ *
  * The custom render-object function is the documented three.js hook for this
  * (`Renderer.setRenderObjectFunction`); it must call `renderObject()` for
  * everything it keeps. `MergedOutlineNode` captures and restores this function
@@ -138,6 +149,7 @@ function UnsupportedGpuViewerFallback() {
  * carry the same check inline).
  */
 function installEmptyDrawGuard(renderer: THREE.WebGPURenderer) {
+  const trackDrawnGeometry = createInUseDisposeGuard()
   renderer.setRenderObjectFunction(
     (
       object: any,
@@ -151,7 +163,8 @@ function installEmptyDrawGuard(renderer: THREE.WebGPURenderer) {
       passId: any,
     ) => {
       if (!hasDrawableGeometry(geometry, group)) {
-        if (warnedEmptyDraw && !warnedEmptyDraw.has(geometry ?? object)) {
+        const emptyBuffer = !(geometry?.attributes?.position?.count > 0)
+        if (emptyBuffer && warnedEmptyDraw && !warnedEmptyDraw.has(geometry ?? object)) {
           warnedEmptyDraw.add(geometry ?? object)
           console.warn(
             '[viewer] skipped a draw with an empty position buffer (would poison the WebGPU command encoder)',
@@ -161,6 +174,7 @@ function installEmptyDrawGuard(renderer: THREE.WebGPURenderer) {
         return
       }
       ensureSecondaryUv(geometry)
+      trackDrawnGeometry(object, geometry)
       ;(renderer as any).renderObject(
         object,
         scene,
