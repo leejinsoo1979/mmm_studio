@@ -70,19 +70,25 @@ function bitmapOf(texture: Texture): Promise<ImageBitmap> {
     : createImageBitmap(image)
 }
 
-const bodies = new WeakMap<Texture, Promise<LookBody>>()
+const bodies = new WeakMap<Texture['source'], Promise<LookBody>>()
 
 /**
  * A body's textures and head geometry for a look, gathered once per body
- * (its head texture names it). `head` is its head mesh: a bald head's
- * surface shares its texture (see avatar-hair.ts).
+ * (its head texture's picture names it). `head` is its head mesh: a bald
+ * head's surface shares its texture (see avatar-hair.ts). Named by the
+ * picture rather than the texture, the copies of a texture showing it —
+ * the character studio's own, sharpened — name the same body: the game's
+ * body, dressed in a look the studio just made, has the worker keep what
+ * it worked out of that body for the studio (see look-job.ts) instead of
+ * spending seconds on it again.
  */
 function lookBody(parts: Record<Part, PartMesh[]>, head: Mesh | null): Promise<LookBody> | null {
   const headMap = parts.head[0]?.material.map
   const bodyMap = parts.body[0]?.material.map
   const opacityMap = parts.opacity[0]?.material.map
   if (!(headMap && bodyMap && head)) return null
-  let found = bodies.get(headMap)
+  const picture = headMap.source
+  let found = bodies.get(picture)
   if (!found) {
     const geometry = headGeometry(head)
     found = Promise.all([
@@ -90,7 +96,7 @@ function lookBody(parts: Record<Part, PartMesh[]>, head: Mesh | null): Promise<L
       bitmapOf(bodyMap),
       opacityMap ? bitmapOf(opacityMap) : null,
     ]).then(([head, body, opacity]) => ({
-      key: headMap.uuid,
+      key: picture.uuid,
       head,
       body,
       opacity,
@@ -100,8 +106,8 @@ function lookBody(parts: Record<Part, PartMesh[]>, head: Mesh | null): Promise<L
         eyes: geometry.eyes.map(packTriangles),
       },
     }))
-    found.catch(() => bodies.delete(headMap))
-    bodies.set(headMap, found)
+    found.catch(() => bodies.delete(picture))
+    bodies.set(picture, found)
   }
   return found
 }
