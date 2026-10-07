@@ -664,6 +664,15 @@ const CAP_SIDEBURN = 0.06
 const CAP_FADE = 0.006
 const CAP_LYING = 0.006
 
+/**
+ * Over the forehead — above the eyes, less than CAP_FRONT behind their
+ * front — the cap lies on the head standing up to CAP_LYING_FRONT over it:
+ * a fringe swept up off the hairline still has the forehead behind it, and
+ * its hairline thins out into the skin there, not cut off sharp.
+ */
+const CAP_FRONT = 0.08
+const CAP_LYING_FRONT = 0.02
+
 /** A cap triangle's corners off the skull's nearest point by more than this are hair whatever the zone. */
 const CAP_OFF = 0.006
 
@@ -1008,9 +1017,15 @@ export function hairAssetPlan(
     const places = bonePlaces(head)
     const cheeks = [...places].filter(([name]) => /Cheek$/.test(name)).map(([, place]) => place)
     plan.skin = cheekUvs(uvs, points, cheeks)
-    const free = new Uint8Array(spotCount)
     const over = standingOver(points, bald).height
-    for (let i = 0; i < count; i++) if (over[i]! > CAP_LYING) free[spots[i]!] = 1
+    const eyeLevel = marks ? (marks.eyes[0]![1]! + marks.eyes[1]![1]!) / 2 : 0
+    const eyeFront = marks ? Math.max(marks.eyes[0]![2]!, marks.eyes[1]![2]!) : 0
+    const lyingUp = (i: number) =>
+      marks && points[i * 3 + 1]! > eyeLevel && points[i * 3 + 2]! > eyeFront - CAP_FRONT
+        ? CAP_LYING_FRONT
+        : CAP_LYING
+    const free = new Uint8Array(spotCount)
+    for (let i = 0; i < count; i++) if (over[i]! > lyingUp(i)) free[spots[i]!] = 1
     const ears = new Uint8Array(spotCount)
     for (let i = 0; i < count; i++) if (ear(i) && !free[spots[i]!]) ears[spots[i]!] = 1
     const fade = capFade(points, index, spots, spotCount, capped, ears, free, CAP_FADE)
@@ -1021,7 +1036,9 @@ export function hairAssetPlan(
         v: at.map((i) => uvs[i * 2 + 1]!),
         solid: !!shell && at.every((i) => shell[i]),
         fade: at.map((i) => fade[spots[i]!]!),
-        lying: at.map((i) => (overEar(i) ? 0 : 1 - smoothstep(CAP_LYING, 2 * CAP_LYING, over[i]!))),
+        lying: at.map((i) =>
+          overEar(i) ? 0 : 1 - smoothstep(lyingUp(i), 2 * lyingUp(i), over[i]!),
+        ),
       }
     })
   }

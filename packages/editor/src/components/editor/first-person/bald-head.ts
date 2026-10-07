@@ -1817,7 +1817,7 @@ const FEATHER = 0.07
  * colour left on the skin (brows, a beard, lashes), and fades out over
  * BROWS_FADE down to BROWS over the eyes, none reaching under it.
  */
-const FACE_FULL = 0.01
+const FACE_FULL = 0.02
 const FACE_FEATHER = 0.045
 const BROWS = 0.035
 const BROWS_FADE = 0.015

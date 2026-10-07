@@ -117,12 +117,15 @@ const sameValues = (a: ArrayLike<number>, b: ArrayLike<number>) =>
  * the bald surface by where it is, in cells DETAIL_CELL across). Painted
  * one flat colour, it is rubber beside the face. Kept skin keeps its own
  * from further round (OWN_REACH): its creases and folds, all but the
- * broad shadow the hair cast. No more than DETAIL_MOST lighter or darker.
+ * broad shadow the hair cast. No more than DETAIL_MOST lighter or darker,
+ * the kept skin no more than OWN_MOST: a stray strand of hair painted on
+ * it, too faint for the hair's mask, stays faint.
  */
 const DETAIL_REACH = 4
 const OWN_REACH = 12
 const DETAIL_CELL = 0.0004
-const DETAIL_MOST = 0.3
+const DETAIL_MOST = 0.2
+const OWN_MOST = 0.12
 
 /**
  * Each painted texel's (`texels`) fine grain, from `head` as it is (see
@@ -184,16 +187,13 @@ function fineGrain(
   }
   const near = means(reach)
   const wide = means(ownReach)
-  const strayOf = (texel: number, mean: Float32Array) => {
+  const strayOf = (texel: number, mean: Float32Array, most: number) => {
     const at = (Math.floor(texel / width) - top) * across + (texel % width) - left
-    return Math.min(
-      1 + DETAIL_MOST,
-      Math.max(1 - DETAIL_MOST, lightness[at]! / Math.max(1, mean[at]!)),
-    )
+    return Math.min(1 + most, Math.max(1 - most, lightness[at]! / Math.max(1, mean[at]!)))
   }
-  const strays = Float32Array.from(pool, (texel) => strayOf(texel, near))
+  const strays = Float32Array.from(pool, (texel) => strayOf(texel, near, DETAIL_MOST))
   for (let i = 0; i < texels.length; i++) {
-    if (own[i]) grains[i] = strayOf(texels[i]!, wide)
+    if (own[i]) grains[i] = strayOf(texels[i]!, wide, OWN_MOST)
     else if (strays.length > 0) grains[i] = strays[Math.floor(picks[i]! * strays.length)]!
   }
   return grains
@@ -206,6 +206,12 @@ function fineGrain(
  * scratched in along each strand.
  */
 const HAIRLINE_BLUR = 6
+
+/** Skin where this much of the skin round it is hair (see HAIRLINE_BLUR) lies among hair painted on it. */
+const AMONG_HAIR = 0.1
+
+/** Hair painted on the skin is painted over as far as its blurred mask (see HAIRLINE_BLUR) this many times over says. */
+const SPREAD_HAIR = 1.5
 
 /** A mask (`width` × `height`) averaged over the box `reach` texels round each texel. */
 function blurred(mask: Float32Array, width: number, height: number, reach: number) {
@@ -340,6 +346,9 @@ export function scalpPainter(
     }
   }
 
+  // The hair painted on the skin as a hairline (see HAIRLINE_BLUR), not strand by strand.
+  const hairline =
+    hair && blurred(hair, width, height, Math.max(1, Math.round((HAIRLINE_BLUR * width) / 2048)))
   const amount = new Float32Array(width * height)
   const owner = new Int32Array(width * height).fill(-1)
   const first = new Float32Array(width * height)
@@ -353,7 +362,10 @@ export function scalpPainter(
     eachTexel(size, paint, t, PAINTED, PAINTED_CORNER, (texel, w0, w1, w2) => {
       const own = corner(2, w0, w1, w2)
       const hairy = corner(5, w0, w1, w2)
-      const wanted = Math.max(own, hair ? hairy * smoothstep(HAIR_FROM, HAIR_TO, hair[texel]!) : 0)
+      // Painted over as a whole, not strand by strand: else the skin
+      // between the strands stays, in streaks.
+      const hairHere = hair ? Math.max(hair[texel]!, SPREAD_HAIR * hairline![texel]!) : 0
+      const wanted = Math.max(own, hairy * smoothstep(HAIR_FROM, HAIR_TO, hairHere))
       if (wanted > amount[texel]!) {
         amount[texel] = wanted
         owner[texel] = t
@@ -446,9 +458,6 @@ export function scalpPainter(
   // skin, by where it is on the bald surface.
   const stubbles = new Float32Array(texels.length)
   const specks = new Float32Array(texels.length)
-  // The hair painted on the skin as a hairline (see HAIRLINE_BLUR), not strand by strand.
-  const hairline =
-    hair && blurred(hair, width, height, Math.max(1, Math.round((HAIRLINE_BLUR * width) / 2048)))
   for (let i = 0; i < texels.length; i++) {
     const texel = texels[i]!
     const t = owner[texel]!
@@ -474,8 +483,15 @@ export function scalpPainter(
   }
   // Whose fine grain each takes: its own where it is kept skin, else one of
   // the forehead's texels', picked by it (see DETAIL_REACH).
+  // (Among hair painted on the skin, even the skin between its strands
+  // takes the forehead's: its own is shaded by them, in streaks.)
   const ownGrain = Uint8Array.from(texels, (texel) =>
-    owner[texel]! >= 0 && owner[texel]! < paintCount && isSkin(texel) ? 1 : 0,
+    owner[texel]! >= 0 &&
+    owner[texel]! < paintCount &&
+    isSkin(texel) &&
+    !(hairline && hairline[texel]! > AMONG_HAIR)
+      ? 1
+      : 0,
   )
   const picks = Float32Array.from(texels, (texel) => {
     const t = owner[texel]!
