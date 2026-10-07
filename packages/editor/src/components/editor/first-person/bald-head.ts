@@ -308,12 +308,15 @@ const LYING = 0.025
  * cut), and what that leaves of the head in small pieces beside it; but
  * the ear's own folds given back (see EAR_ROUNDS), and a small piece lying
  * on the neck (see NECK_TOP). `height` is how far each point stands over
- * the skull fitted to the head, `zone` the skull's hair zone there.
+ * the skull fitted to the head, `zone` the skull's hair zone there; `ears`
+ * flags the points of its ears' own folds where they were found (see
+ * ear-shape.ts), all of whose triangles go back to them.
  */
 export function cleanCut(
   head: Pick<OwnHead, 'points' | 'index' | 'spots' | 'spotCount' | 'height' | 'zone'>,
   taken: ArrayLike<number>,
   marks: HeadMarks,
+  ears: ArrayLike<number> | null = null,
 ): Uint8Array {
   const { points, index, spots, height } = head
   const count = index.length / 3
@@ -407,6 +410,29 @@ export function cleanCut(
       grew = true
     }
     if (!grew) break
+  }
+  // However high up the ear or deep in its bowl: torn out, it is holes.
+  if (ears) {
+    for (let t = 0; t < count; t++) {
+      if (out[t] && [0, 1, 2].every((k) => ears[index[t * 3 + k]!])) out[t] = 0
+    }
+  }
+  // As is a small piece taken apart from the hair, wholly by an ear (one
+  // hidden under the hair, its folds unfound): the bald surface closes
+  // the head under the hair, not the ear's bowl.
+  {
+    const near = (i: number) =>
+      nearEar(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!, marks)
+    const pieces = piecesOf(index, spots, head.spotCount, (t) => out[t] === 1)
+    const away = new Set<number>()
+    for (let t = 0; t < count; t++) {
+      if (out[t] && ![0, 1, 2].every((k) => near(index[t * 3 + k]!))) away.add(pieces.piece(t))
+    }
+    for (let t = 0; t < count; t++) {
+      if (out[t] && !away.has(pieces.piece(t)) && pieces.size(t) < PIECE * pieces.largest) {
+        out[t] = 0
+      }
+    }
   }
   return out
 }

@@ -41,6 +41,7 @@ import {
   vertexNormals,
   withNeckPiece,
 } from './bald-head'
+import { earsOf } from './ear-shape'
 import { BLEED_BELOW, bleedHair, pictureOf, texturePixels } from './hair-bleed'
 import { dyeHair } from './hair-dye'
 import { BALD, type HairLibrary, type HairStyle, loadHairLibrary } from './hair-styles'
@@ -1612,6 +1613,34 @@ const TURN_BACK = 0.015
 /** Kept skin standing this far over the skull, or on an ear, keeps its own normals. */
 const TURN_STANDING = 0.006
 
+/** Points this near (bind units) an ear's point found on the head are it. */
+const ON_EAR = 1e-4
+
+/** Which of a head's points (bind pose) are its ears' own folds (see ear-shape.ts); null where none were found. */
+function earPointsOf(head: SkinnedMesh, points: Triples): Uint8Array | null {
+  const ears = earsOf(head)
+  if (ears.length === 0) return null
+  const grid = new PointGrid(
+    Float32Array.from(ears.flatMap((ear) => ear.points.flatMap((point) => point.toArray()))),
+    SKULL_CELL,
+  )
+  const found: number[] = []
+  const distances: number[] = []
+  return Uint8Array.from({ length: points.length / 3 }, (_, i) =>
+    grid.nearest(
+      points[i * 3]!,
+      points[i * 3 + 1]!,
+      points[i * 3 + 2]!,
+      1,
+      found,
+      distances,
+      ON_EAR,
+    ) > 0 && distances[0]! <= ON_EAR * ON_EAR
+      ? 1
+      : 0,
+  )
+}
+
 const baldHeads = new WeakMap<BufferGeometry, BaldHead | null>()
 
 /**
@@ -1667,7 +1696,12 @@ function makeBald(
   }
   const { spots, count: spotCount } = spotsOf(points)
   const { height, zone: skullZone } = standingOver(points, fitSkull(basis.skull, fit))
-  const taken = cleanCut({ points, index, spots, spotCount, height, zone: skullZone }, own, marks)
+  const taken = cleanCut(
+    { points, index, spots, spotCount, height, zone: skullZone },
+    own,
+    marks,
+    earPointsOf(head, points),
+  )
   const cranium = craniumOf(basis, fit, points, eyes)!
   const fitted = fitBald(basis.skull, cranium)
   const kept = keptTriangles(index, taken)
