@@ -426,8 +426,21 @@ const OPAQUE = 0.85
 const SPECK = 120
 const SMOOTH = 1
 
-/** A texel at least this much hair keeps its own colour; the clearer, the more the hair's round it (the skin's under it is the wearer's). */
-const OWN_COLOUR: readonly [number, number] = [0.5, 0.9]
+/**
+ * A texel part hair, part the donor's skin, shows the hair's part of it:
+ * the hair's hue, as light as the texel is with the skin's share taken
+ * out. The less of it is hair, the less sure that is: from UNMIXED[1] down
+ * to UNMIXED[0] it turns to the lightness of the hair round it. Left
+ * mixed, the donor's skin would stay in the hairline as a ruddy fringe
+ * over the wearer's.
+ */
+const UNMIXED: readonly [number, number] = [0.3, 0.7]
+
+/** A texel this much hair (PURE[1]) is plainly hair: it keeps its own colour, from PURE[0] up. */
+const PURE: readonly [number, number] = [0.75, 0.95]
+
+/** How much lighter or darker than the hair round it a texel of it is let be (its strands, its shine). */
+const LIGHTER: readonly [number, number] = [0.6, 1.25]
 
 /**
  * A triangle of the cap on its texture (corners in 0–1 UVs): `solid` on the
@@ -511,10 +524,27 @@ export function capPixels(
   for (let i = 0; i < count; i++) {
     const amount = hairy[i] ? share[i]! : 0
     out.data[i * 4 + 3] = Math.round(255 * smoothstep(STRAND, OPAQUE, amount) * fade[i]!)
-    const own = smoothstep(OWN_COLOUR[0], OWN_COLOUR[1], amount)
+    // Of the colour unmixed, its lightness alone: the donor's skin is
+    // shaded unlike its cheeks, so its hue would come out ruddy.
+    const own = smoothstep(UNMIXED[0], UNMIXED[1], amount)
+    const unmixed = [0, 1, 2].map((c) =>
+      Math.max(0, skin[c]! + (colours[i * 3 + c]! - skin[c]!) / Math.max(amount, UNMIXED[0])),
+    )
+    // The hair's own colour: at its edge even the texels plainly hair
+    // round it are tinged with the skin, lighter and ruddier.
+    const round = hair
+    const lighter = Math.min(
+      LIGHTER[1],
+      Math.max(
+        LIGHTER[0],
+        luminance(unmixed[0]!, unmixed[1]!, unmixed[2]!) /
+          Math.max(1, luminance(round[0]!, round[1]!, round[2]!)),
+      ),
+    )
+    const pure = smoothstep(PURE[0], PURE[1], amount)
     for (let c = 0; c < 3; c++) {
-      out.data[i * 4 + c] =
-        hairRound[i * 3 + c]! + (colours[i * 3 + c]! - hairRound[i * 3 + c]!) * own
+      const part = round[c]! * (1 + (lighter - 1) * own)
+      out.data[i * 4 + c] = part + (colours[i * 3 + c]! - part) * pure
     }
   }
   // Texels off the cap's triangles round a UV island's rim as the island's

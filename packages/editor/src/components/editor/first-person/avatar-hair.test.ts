@@ -231,9 +231,14 @@ describe('the cap’s texture in the donor’s hair', () => {
     const stubble = alpha(cap, 120, 128)
     expect(stubble).toBeGreaterThan(40)
     expect(stubble).toBeLessThan(215)
-    // Coloured as the hair round it, not the skin it was painted over.
+    // Coloured as the hair, not the skin it was painted over: of its hue.
     const p = (128 * SIZE + 120) * 4
     expect(cap.data[p]!).toBeLessThan(HAIR_COLOUR[0]! + 20)
+    const hue = (r: number, b: number) => r / Math.max(1, b)
+    expect(hue(cap.data[p]!, cap.data[p + 2]!)).toBeCloseTo(
+      hue(HAIR_COLOUR[0]!, HAIR_COLOUR[2]!),
+      0,
+    )
   })
 
   test('fades out to the cap’s rim', () => {
