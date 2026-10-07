@@ -1346,7 +1346,10 @@ export function hairAssetOf(
     material.name = `${id}:hair-cap`
     Object.assign(material, {
       transparent: true,
-      depthWrite: true,
+      // Where the cap lies over itself (a shell of long hair over its hem),
+      // drawn in no order, a see-through texel drawn first would hide the
+      // hair behind it and show what is behind the head through it.
+      depthWrite: false,
       alphaTest: CAP_ALPHA_TEST,
       side: FrontSide,
       // Where the cap lies on the wearer's own scalp, it is drawn over it.
@@ -1376,11 +1379,11 @@ export function hairAssetOf(
     const cheeks = [...places].filter(([name]) => /Cheek$/.test(name)).map(([, place]) => place)
     const skin = pixels && skinTone(pixels.head, uvs, points, cheeks)
     if (pixels && hair && skin) {
-      const ears = new Uint8Array(spotCount)
-      for (let i = 0; i < count; i++) if (ear(i)) ears[spots[i]!] = 1
       const free = new Uint8Array(spotCount)
       const over = standingOver(points, bald).height
       for (let i = 0; i < count; i++) if (over[i]! > CAP_LYING) free[spots[i]!] = 1
+      const ears = new Uint8Array(spotCount)
+      for (let i = 0; i < count; i++) if (ear(i) && !free[spots[i]!]) ears[spots[i]!] = 1
       const fade = capFade(points, index, spots, spotCount, capped, ears, free, CAP_FADE)
       const triangles = capped.map((t): CapTriangle => {
         const at = [0, 1, 2].map((k) => index[t * 3 + k]!)
@@ -2432,8 +2435,9 @@ function wearBorrowed(
           carried[i * 3 + axis]! += over.normal[i * 3 + axis]! * lift
       }
     }
-    // The cap clear over the wearer's ears: its hair, round the donor's,
-    // would lie on them as a film where the two heads' ears part.
+    // The cap clear over the wearer's ears where it lay on the donor's
+    // head: its hair, round the donor's ears, would lie on the wearer's as
+    // a film where the two heads' ears part.
     let earClear: BufferAttribute | null = null
     if (part.name === 'cap' && bald.ears.points.length > 0) {
       const old = geometry.getAttribute('color')
@@ -2442,6 +2446,10 @@ function wearBorrowed(
       const distances: number[] = []
       for (let i = 0; i < carried.length / 3; i++) {
         for (let c = 0; c < 3; c++) colour[i * 4 + c] = old ? old.getComponent(i, c) : 1
+        colour[i * 4 + 3] = 1
+        // Only what lay on the donor's head: long hair hanging past the
+        // ear is no film on it.
+        if (part.standoff[i]! > CAP_LYING) continue
         const near = bald.ears.nearest(
           carried[i * 3]!,
           carried[i * 3 + 1]!,
