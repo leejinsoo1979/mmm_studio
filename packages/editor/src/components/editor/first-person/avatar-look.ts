@@ -39,6 +39,7 @@ import {
   type LookResult,
   type Part,
   runLookJob,
+  sameLookJob,
 } from './look-job'
 import { packTriangles } from './look-pixels'
 
@@ -234,6 +235,56 @@ function makeLook(body: object, job: LookJob, signal: AbortSignal): Promise<Look
   })
 }
 
+/**
+ * The look made last, with its own handles on its textures (bitmaps share
+ * their pixels): a body put in the same look again — the game's, as the
+ * character studio closes on the look it just made — is dressed at once,
+ * not seconds later, once the worker made it again, its new textures then
+ * sent to the GPU as the player walks off.
+ */
+let lastMade: { job: LookJob; result: LookResult } | null = null
+
+/** A look's result with its own handles on its textures, their colours as they are (see look-job.ts's `bitmapOf`). */
+async function copyOf(result: LookResult): Promise<LookResult> {
+  const parts: LookResult['parts'] = {}
+  await Promise.all(
+    (Object.entries(result.parts) as [Part, ImageBitmap][]).map(async ([part, bitmap]) => {
+      parts[part] = await createImageBitmap(bitmap, { premultiplyAlpha: 'none' })
+    }),
+  )
+  return { ...result, parts }
+}
+
+const closeAll = (result: LookResult) => {
+  for (const bitmap of Object.values(result.parts)) bitmap.close()
+}
+
+/** A look as makeLook makes it, or a copy of the one made last when that is the same look. */
+async function madeLook(
+  body: object,
+  job: LookJob,
+  signal: AbortSignal,
+): Promise<LookResult | null> {
+  const last = lastMade
+  if (last && sameLookJob(last.job, job)) {
+    const copy = await copyOf(last.result).catch(() => null)
+    if (copy) return copy
+  }
+  const result = await makeLook(body, job, signal)
+  // A face that failed is tried again (see useAvatarLook): not kept.
+  if (result && !result.faceFailed) {
+    copyOf(result).then(
+      (copy) => {
+        const replaced = lastMade
+        lastMade = { job, result: copy }
+        if (replaced) closeAll(replaced.result)
+      },
+      () => {},
+    )
+  }
+  return result
+}
+
 /** The body mesh with the shoes, which borrowed feet replace (not its copy without them). */
 function shodBody(parts: Record<Part, PartMesh[]>): SkinnedMesh | null {
   const found = parts.body.find(
@@ -308,7 +359,7 @@ async function applyLook(
     takeOffFeet(model)
     return { undo: () => {}, retry }
   }
-  const result = await makeLook(model, job, signal)
+  const result = await madeLook(model, job, signal)
   if (!result || signal.aborted) {
     for (const bitmap of Object.values(result?.parts ?? {})) bitmap.close()
     return null

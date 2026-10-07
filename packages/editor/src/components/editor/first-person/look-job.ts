@@ -92,6 +92,38 @@ export type LookJob = {
 /** How many bodies the look worker keeps, the page sending each once (see avatar-look.ts). */
 export const BODIES_KEPT = 3
 
+const is = (a: unknown, b: unknown) => a === b
+/** Plain data (the paint, the footwear, a face photo and its settings) alike by value. */
+const alike = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b)
+
+/**
+ * How each part of two jobs is told the same: what is worked out once and
+ * shared (the bald scalp, the feet's fit and donor, the face landmarks) by
+ * being the same, the look's own settings by value.
+ */
+const SAME_PART: {
+  [K in Exclude<keyof LookJob, 'body'>]: (a: LookJob[K], b: LookJob[K]) => boolean
+} = {
+  avatar: is,
+  hair: is,
+  skin: is,
+  face: alike,
+  paint: alike,
+  scalp: is,
+  feet: alike,
+  feetBind: is,
+  feetDonor: is,
+  target: is,
+}
+
+/** Whether two jobs make the same look: the same body (by its key) in the same look. */
+export function sameLookJob(a: LookJob, b: LookJob): boolean {
+  if (a.body.key !== b.body.key) return false
+  return (Object.keys(SAME_PART) as (keyof typeof SAME_PART)[]).every((part) =>
+    (SAME_PART[part] as (x: unknown, y: unknown) => boolean)(a[part], b[part]),
+  )
+}
+
 /** A job as the page hands it to the look worker: its body by key, the body itself when the worker hasn't it. */
 export type LookMessage = { job: Omit<LookJob, 'body'>; key: string; body: LookBody | null }
 

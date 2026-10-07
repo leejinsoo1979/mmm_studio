@@ -3,7 +3,7 @@ import type { ScalpPaint } from './bald-head'
 import { NO_PAINT } from './face-paint'
 import { SHOD } from './footwear'
 import type { HeadGeometry } from './head-geometry'
-import { analyseBody, dressBody, type LookJob } from './look-job'
+import { analyseBody, dressBody, type LookJob, sameLookJob } from './look-job'
 import {
   type HeadTriangle,
   type Pixels,
@@ -252,5 +252,54 @@ describe('packed triangles', () => {
         })
       }
     })
+  })
+})
+
+describe('the same look', () => {
+  // Only its key tells a body apart.
+  const body = { key: 'm002' } as LookJob['body']
+  const scalp = {} as ScalpPaint
+  const target = [0.5, 0.5]
+  const job = (patch: Partial<LookJob> = {}): LookJob =>
+    ({
+      body,
+      avatar: 'Male_Adult_01',
+      hair: '#c0392b',
+      skin: null,
+      face: {
+        photo: 'data:image/jpeg;base64,AA',
+        points: [0.1, 0.2],
+        blend: 1,
+        light: 0.5,
+        eyes: null,
+      },
+      paint: { ...NO_PAINT, lips: '#aa3344' },
+      scalp,
+      feet: SHOD,
+      feetBind: null,
+      feetDonor: null,
+      target,
+      ...patch,
+    }) as LookJob
+
+  test('is the same body in settings alike by value, even read again from a save', () => {
+    const saved = JSON.parse(JSON.stringify({ face: job().face, paint: job().paint, feet: SHOD }))
+    expect(sameLookJob(job(), job(saved))).toBe(true)
+    // Another texture showing the same picture names the same body.
+    expect(sameLookJob(job(), job({ body: { ...body } }))).toBe(true)
+  })
+
+  test('is not another body, nor any setting of the look changed', () => {
+    expect(sameLookJob(job(), job({ body: { ...body, key: 'f001' } }))).toBe(false)
+    expect(sameLookJob(job(), job({ hair: '#000000' }))).toBe(false)
+    expect(sameLookJob(job(), job({ paint: { ...NO_PAINT, lips: '#aa3345' } }))).toBe(false)
+    expect(sameLookJob(job(), job({ face: { ...job().face!, light: 0.6 } }))).toBe(false)
+    expect(sameLookJob(job(), job({ feet: { wear: 'bare', color: null } }))).toBe(false)
+    expect(sameLookJob(job(), job({ scalp: null }))).toBe(false)
+  })
+
+  test('tells what is worked out once apart by being the same, not by value', () => {
+    expect(sameLookJob(job(), job({ scalp: {} as ScalpPaint }))).toBe(false)
+    expect(sameLookJob(job(), job({ target: [...target] }))).toBe(false)
   })
 })
