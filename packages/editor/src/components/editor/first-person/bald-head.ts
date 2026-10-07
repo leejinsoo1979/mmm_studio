@@ -280,6 +280,19 @@ const RIM_BELOW = 0.02
 const ISLAND_ROUNDS = 2
 
 /**
+ * A piece of what was taken apart from the rest (smaller than PIECE of the
+ * largest), wholly under the top of the neck but reaching up within
+ * NECK_TOP of it, and lying on the neck (standing less than LYING over the
+ * skull), is the neck's own skin — painted with the hair's shadow, or a
+ * fuller neck than the skull's — not hair hanging down it: it is kept
+ * (painted over: see scalp-paint.ts). Closed with the bald surface, it
+ * would be a patch of another shade, at the back of the neck across the
+ * texture's seam.
+ */
+const NECK_TOP = 0.05
+const LYING = 0.025
+
+/**
  * `taken` with the rim of any gear modelled in the head (see RIM_STANDING)
  * taken too, the skin left between the hair taken (every corner on the
  * cut), and what that leaves of the head in small pieces beside it.
@@ -293,6 +306,25 @@ export function cleanCut(
   const { points, index, spots, height } = head
   const count = index.length / 3
   const out = Uint8Array.from(taken)
+  {
+    const pieces = piecesOf(index, spots, head.spotCount, (t) => out[t] === 1)
+    const lying = new Map<number, boolean>()
+    const reaches = new Set<number>()
+    for (let t = 0; t < count; t++) {
+      if (!out[t]) continue
+      const piece = pieces.piece(t)
+      const corners = [0, 1, 2].map((k) => index[t * 3 + k]!)
+      const low = corners.every((i) => points[i * 3 + 1]! < marks.neck && height[i]! < LYING)
+      lying.set(piece, (lying.get(piece) ?? true) && low)
+      if (corners.some((i) => points[i * 3 + 1]! > marks.neck - NECK_TOP)) reaches.add(piece)
+    }
+    for (let t = 0; t < count; t++) {
+      const piece = out[t] ? pieces.piece(t) : -1
+      if (lying.get(piece) && reaches.has(piece) && pieces.size(t) < PIECE * pieces.largest) {
+        out[t] = 0
+      }
+    }
+  }
   const eyeLevel = marks.eyes.reduce((sum, eye) => sum + eye[1]!, 0) / marks.eyes.length
   const middle = marks.eyes.reduce((sum, eye) => sum + eye[0]!, 0) / marks.eyes.length
   const eyeFront = Math.max(...marks.eyes.map((eye) => eye[2]!))
@@ -846,9 +878,6 @@ const SAME_WAY = 0.3
 const COVER_TRIED = 24
 const COVER_REACH = 0.04
 
-/** Down the neck, the bald surface is the head's own neck where the kept skin is this near all round. */
-const OWN_NECK = 0.02
-
 /**
  * The skull's ear: low in its zone, this far to the side of the eyes'
  * middle, between NECK_BAND under the top of the neck and EAR_TOP over
@@ -888,9 +917,10 @@ const NECK_PATCH = 12
 
 /**
  * Which triangles of the bald surface close the head over what was taken
- * out: all not hidden by its kept skin (see COVER), its face, its throat,
- * an ear of its own or its own neck — and a ring round those, tucked under
- * the cut's edge — but for strays.
+ * out: all not hidden by its kept skin (see COVER), its face, its throat
+ * or an ear of its own — and a ring round those, tucked under the cut's
+ * edge — but for strays. What of it lies under the kept skin shows as that
+ * skin does (see `underKept`): a hole where the two part would show.
  */
 export function scalpTriangles(bald: BaldSkull, kept: KeptHead, marks: HeadMarks): number[] {
   const { points, normals, zone, triangles } = bald
@@ -905,13 +935,7 @@ export function scalpTriangles(bald: BaldSkull, kept: KeptHead, marks: HeadMarks
       for (let axis = 0; axis < 3; axis++) centres[t * 3 + axis]! += kept.points[i * 3 + axis]! / 3
     }
   }
-  const keptPoints: number[] = []
-  for (let i = 0; i < used.length; i++) {
-    if (used[i])
-      keptPoints.push(kept.points[i * 3]!, kept.points[i * 3 + 1]!, kept.points[i * 3 + 2]!)
-  }
   const centreGrid = new PointGrid(centres, SKULL_CELL)
-  const pointGrid = new PointGrid(keptPoints, SKULL_CELL)
   const found: number[] = []
   const distances: number[] = []
   const covered = (t: number) => {
@@ -989,22 +1013,6 @@ export function scalpTriangles(bald: BaldSkull, kept: KeptHead, marks: HeadMarks
         ownEars[x > middle ? 1 : 0]! >= EAR_POINTS
       )
     })
-  const ownNeck = (t: number) =>
-    [0, 1, 2].every((k) => {
-      const i = triangles[t * 3 + k]!
-      if (points[i * 3 + 1]! >= marks.neck) return false
-      return (
-        pointGrid.nearest(
-          points[i * 3]!,
-          points[i * 3 + 1]!,
-          points[i * 3 + 2]!,
-          1,
-          found,
-          distances,
-          OWN_NECK,
-        ) > 0 && distances[0]! <= OWN_NECK ** 2
-      )
-    })
   // The throat: the front half of the neck, which hair never covers.
   let throatZ = 0
   let below = 0
@@ -1029,7 +1037,7 @@ export function scalpTriangles(bald: BaldSkull, kept: KeptHead, marks: HeadMarks
   const open = new Uint8Array(points.length / 3)
   for (let t = 0; t < count; t++) {
     const face = [0, 1, 2].every((k) => faceAt(triangles[t * 3 + k]!))
-    if (face || throat(t) || skullEar(t) || ownNeck(t) || covered(t)) continue
+    if (face || throat(t) || skullEar(t) || covered(t)) continue
     for (let k = 0; k < 3; k++) open[triangles[t * 3 + k]!] = 1
   }
   // The ring tucked under the cut's edge, but not on the throat: down the
@@ -1194,12 +1202,15 @@ const EXTRAPOLATE = 0.5
  * the scalp's (see scalp-paint.ts) — and meets the kept skin's texels at
  * the cut. A triangle that would span a seam of the texture gets corners
  * of its own (see TEAR). Returns which point of the surface each point is
- * (`from`), the points' texture coordinates and the triangles.
+ * (`from`), the points' texture coordinates and the triangles. Points
+ * whose place is `fixed` (`has`) keep it: the bald surface under kept
+ * skin shows that skin's texels.
  */
 export function scalpUvs(
   points: Triples,
   triangles: ArrayLike<number>,
   source: { points: Triples; uvs: Triples; index: ArrayLike<number>; triangles: readonly number[] },
+  fixed?: { uvs: Triples; has: ArrayLike<number> },
 ) {
   const count = points.length / 3
   const middles = new Float32Array(source.triangles.length * 3)
@@ -1249,6 +1260,10 @@ export function scalpUvs(
   const uvs: number[] = []
   const at = [0, 0]
   for (let i = 0; i < count; i++) {
+    if (fixed?.has[i]) {
+      uvs.push(fixed.uvs[i * 2]!, fixed.uvs[i * 2 + 1]!)
+      continue
+    }
     const { t, weights } = nearestSource([points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!])
     if (t < 0) uvs.push(0, 0)
     else {
@@ -1319,6 +1334,90 @@ export function scalpUvs(
     uvs: Float32Array.from(uvs),
     triangles: Uint32Array.from(out),
   }
+}
+
+/**
+ * A point of the bald surface lies under the skin the head keeps where it
+ * is within UNDER_REACH (bind units) of one of its triangles along its
+ * normal, its place in that triangle's plane inside it (no further out of
+ * it than WITHIN of its corners' weights: a point under the edge between
+ * two lies in both), the two turned alike (SAME_WAY). The UNDER_TRIED
+ * kept triangles nearest it (by their middles) are tried.
+ */
+const UNDER_REACH = 0.02
+const WITHIN = 0.02
+const UNDER_TRIED = 12
+
+/**
+ * Which points of the bald surface (`points`, `normals`) lie under the
+ * skin the head keeps (`kept`, its triangles `index`) — round the cut, the
+ * ring tucked under its edge; down the neck, the piece hung below the
+ * skull — and where: per point the kept triangle over it (−1 for none),
+ * the weights of its corners there, and the point's height over it along
+ * its normal (negative under it) and that normal. Where the bald surface
+ * shows through the skin there, it shows as that skin does (see
+ * avatar-hair.ts's `makeBald`).
+ */
+export function underKept(points: Triples, normals: Triples, kept: KeptHead) {
+  const count = points.length / 3
+  const keptCount = kept.index.length / 3
+  const middles = new Float32Array(keptCount * 3)
+  const faces = new Float32Array(keptCount * 3)
+  for (let t = 0; t < keptCount; t++) {
+    const [a, b, c] = [0, 1, 2].map((k) => kept.index[t * 3 + k]! * 3)
+    const e = [0, 1, 2].map((axis) => kept.points[b! + axis]! - kept.points[a! + axis]!)
+    const f = [0, 1, 2].map((axis) => kept.points[c! + axis]! - kept.points[a! + axis]!)
+    const n = [
+      e[1]! * f[2]! - e[2]! * f[1]!,
+      e[2]! * f[0]! - e[0]! * f[2]!,
+      e[0]! * f[1]! - e[1]! * f[0]!,
+    ]
+    let own = 0
+    for (let axis = 0; axis < 3; axis++) {
+      middles[t * 3 + axis] =
+        (kept.points[a! + axis]! + kept.points[b! + axis]! + kept.points[c! + axis]!) / 3
+      own +=
+        n[axis]! * (kept.normals[a! + axis]! + kept.normals[b! + axis]! + kept.normals[c! + axis]!)
+    }
+    const length = (own < 0 ? -1 : 1) * (Math.hypot(n[0]!, n[1]!, n[2]!) || 1)
+    for (let axis = 0; axis < 3; axis++) faces[t * 3 + axis] = n[axis]! / length
+  }
+  const grid = new PointGrid(middles, SKULL_CELL)
+  const found: number[] = []
+  const distances: number[] = []
+  const triangle = new Int32Array(count).fill(-1)
+  const weights = new Float32Array(count * 3)
+  const height = new Float32Array(count)
+  const normal = new Float32Array(count * 3)
+  for (let i = 0; i < count; i++) {
+    const p = [points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!]
+    const near = grid.nearest(p[0]!, p[1]!, p[2]!, UNDER_TRIED, found, distances, 2 * UNDER_REACH)
+    let best = Number.POSITIVE_INFINITY
+    for (let j = 0; j < near; j++) {
+      const t = found[j]!
+      const facing =
+        faces[t * 3]! * normals[i * 3]! +
+        faces[t * 3 + 1]! * normals[i * 3 + 1]! +
+        faces[t * 3 + 2]! * normals[i * 3 + 2]!
+      if (facing < SAME_WAY) continue
+      const [a, b, c] = [0, 1, 2].map((k) => kept.index[t * 3 + k]! * 3)
+      const w = weightsInPlane(p, kept.points, a!, b!, c!)
+      if (Math.min(w[0]!, w[1]!, w[2]!) < -WITHIN) continue
+      const over =
+        (p[0]! - kept.points[a!]!) * faces[t * 3]! +
+        (p[1]! - kept.points[a! + 1]!) * faces[t * 3 + 1]! +
+        (p[2]! - kept.points[a! + 2]!) * faces[t * 3 + 2]!
+      if (Math.abs(over) > UNDER_REACH || Math.abs(over) >= best) continue
+      best = Math.abs(over)
+      triangle[i] = t
+      const clamped = w.map((value) => Math.max(0, value))
+      const sum = clamped[0]! + clamped[1]! + clamped[2]! || 1
+      for (let k = 0; k < 3; k++) weights[i * 3 + k] = clamped[k]! / sum
+      height[i] = over
+      normal.set(faces.subarray(t * 3, t * 3 + 3), i * 3)
+    }
+  }
+  return { triangle, weights, height, normal }
 }
 
 /** How many rounds at most skin weights are spread over the bald surface from where they are known, and the change a round under which they have settled. */

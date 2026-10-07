@@ -37,6 +37,7 @@ import {
   smoothNape,
   spreadWeights,
   TONE_RINGS,
+  underKept,
   vertexNormals,
   withNeckPiece,
 } from './bald-head'
@@ -1203,9 +1204,8 @@ const CARD_SAMPLES = [
   [1 / 3, 1 / 3, 1 / 3],
 ] as const
 
-/** How far down the neck (bind units, from its top) and how near the body the bald surface gives way to the body. */
+/** How far down the neck (bind units, from its top) the bald surface gives way to the body over it. */
 const LOW_NECK = 0.04
-const ON_BODY = 0.01
 
 /** Low down the neck, the bald surface this near the kept skin's points (bind units: they are far apart there), and this far from the cut, lies under it. */
 const UNDER_SKIN = 0.02
@@ -1384,12 +1384,22 @@ function makeBald(
       scalpPoints[i] = Math.max(scalpPoints[i]!, lowest)
     }
   }
-  // Low down the neck where the body's own skin or collar is, the body
-  // shows: what of the bald surface reaches there would stand out of it.
-  // So does the head's own neck skin away from the cut: tucked under the
-  // skin's points, the bald surface would still poke through the skin's
-  // flat triangles between them.
+  // Low down the neck where the body's own skin or collar is over it — its
+  // triangles, not only its points, far apart there — the body shows: what
+  // of the bald surface reaches there would stand out of it, showing the
+  // head's texture stretched over the body's neck. So does the head's own
+  // neck skin away from the cut: tucked under the skin's points, the bald
+  // surface would still poke through the skin's flat triangles between
+  // them.
   {
+    const underBody =
+      bodyMesh && bodyGeometry
+        ? underKept(scalpPoints, vertexNormals(scalpPoints, corners), {
+            points: bindPoints(bodyMesh, bodyGeometry, 'position'),
+            normals: bindPoints(bodyMesh, bodyGeometry, 'normal'),
+            index: indexOf(bodyGeometry),
+          }).triangle
+        : null
     const near = (grid: PointGrid, i: number, within: number) =>
       grid.nearest(
         scalpPoints[i * 3]!,
@@ -1406,7 +1416,7 @@ function makeBald(
         const i = corners[t + k]!
         return (
           scalpPoints[i * 3 + 1]! < neck - LOW_NECK &&
-          (near(bodySurface.grid, i, ON_BODY) ||
+          ((underBody !== null && underBody[i]! >= 0) ||
             (near(keptGrid, i, UNDER_SKIN) && !near(cutGrid, i, OFF_CUT)))
         )
       })
@@ -1414,6 +1424,47 @@ function makeBald(
     }
     corners.length = 0
     corners.push(...kept)
+  }
+  // What of it lies under the kept skin — the ring tucked under the cut's
+  // edge, the piece hung down the neck — is tucked under its triangles, not
+  // only its points, and shows as that skin does where it still shows
+  // through: its texels, lit alike. Else it shows in patches of another
+  // shade wherever the two cross.
+  const keptUnder = keptTriangles(
+    index,
+    Uint8Array.from({ length: index.length / 3 }, (_, t) =>
+      taken[t] ||
+      [0, 1, 2].some((k) => {
+        const i = index[t * 3 + k]!
+        return (
+          height[i]! > TURN_STANDING &&
+          nearEar(points[i * 3]!, points[i * 3 + 1]!, points[i * 3 + 2]!, marks)
+        )
+      })
+        ? 1
+        : 0,
+    ),
+  )
+  const under = underKept(scalpPoints, vertexNormals(scalpPoints, corners), {
+    points,
+    normals,
+    index: keptUnder,
+  })
+  for (let j = 0; j < scalpPoints.length / 3; j++) {
+    const lift = -UNDER_KEPT - under.height[j]!
+    if (under.triangle[j]! < 0 || lift >= 0) continue
+    for (let axis = 0; axis < 3; axis++) {
+      scalpPoints[j * 3 + axis]! += under.normal[j * 3 + axis]! * lift
+    }
+  }
+  /** A kept triangle's corners' values (`size` per point) at a point of the bald surface under it. */
+  const underValue = (values: ArrayLike<number>, size: number, j: number, out: number[]) => {
+    const t = under.triangle[j]!
+    out.fill(0)
+    for (let k = 0; k < 3; k++) {
+      const i = keptUnder[t * 3 + k]!
+      for (let c = 0; c < size; c++) out[c]! += under.weights[j * 3 + k]! * values[i * size + c]!
+    }
   }
   const scalpNormals = vertexNormals(scalpPoints, corners)
   // The kept skin and the bald surface lit alike where they meet: each
@@ -1460,6 +1511,15 @@ function makeBald(
       turn(scalpLit, scalpNormals, j, normals, i, share)
     }
   }
+  {
+    const lit = [0, 0, 0]
+    for (let j = 0; j < scalpPoints.length / 3; j++) {
+      if (under.triangle[j]! < 0) continue
+      underValue(turned, 3, j, lit)
+      const length = Math.hypot(lit[0]!, lit[1]!, lit[2]!) || 1
+      for (let axis = 0; axis < 3; axis++) scalpLit[j * 3 + axis] = lit[axis]! / length
+    }
+  }
   const vertices = olds.length
   const aroundPoints = new Float32Array(anchors.length + scalpPoints.length)
   aroundPoints.set(anchors)
@@ -1472,12 +1532,22 @@ function makeBald(
     uvs[i * 2] = uv.getX(i)
     uvs[i * 2 + 1] = uv.getY(i)
   }
-  const placed = scalpUvs(scalpPoints, corners, {
-    points,
-    uvs,
-    index,
-    triangles: [...taken.keys()].filter((t) => taken[t]),
-  })
+  const fixedUvs = new Float32Array(vertices * 2)
+  {
+    const at = [0, 0]
+    for (let j = 0; j < vertices; j++) {
+      if (under.triangle[j]! < 0) continue
+      underValue(uvs, 2, j, at)
+      fixedUvs[j * 2] = at[0]!
+      fixedUvs[j * 2 + 1] = at[1]!
+    }
+  }
+  const placed = scalpUvs(
+    scalpPoints,
+    corners,
+    { points, uvs, index, triangles: [...taken.keys()].filter((t) => taken[t]) },
+    { uvs: fixedUvs, has: Uint8Array.from(under.triangle, (t) => (t >= 0 ? 1 : 0)) },
+  )
 
   // Skinned as the head was where its hair was: the cranium with the head
   // alone (see CRANIUM_RIGID), the nape with the head mesh's own weights,
@@ -1613,6 +1683,7 @@ function makeBald(
   let scalp: BufferGeometry | null = null
   if (vertices > 0) {
     const shade = hollowShade(scalpPoints, scalpNormals, surfaceAround)
+    for (let j = 0; j < vertices; j++) if (under.triangle[j]! >= 0) shade[j] = 1
     scalp = new BufferGeometry()
     const unbind = head.bindMatrix.clone().invert()
     const unbindNormal = new Matrix3().getNormalMatrix(unbind)

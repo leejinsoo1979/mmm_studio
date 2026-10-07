@@ -21,6 +21,7 @@ import {
   spreadWeights,
   TONE_RINGS,
   texelShares,
+  underKept,
   withNeckPiece,
 } from './bald-head'
 import { PointGrid, type Skull } from './head-skull'
@@ -488,6 +489,24 @@ describe('the cut cleaned', () => {
     for (const q of [0, 1, 2, 4, 5, 6]) taken[q * 2] = taken[q * 2 + 1] = 1
     expect(takenQuads(cleanCut(head, taken, marks))).toEqual([0, 1, 2, 3, 4, 5, 6])
   })
+
+  test('keeps a small piece apart from the rest lying on the neck just under its top', () => {
+    // Under the top of the neck (y < 0): quads 70–71 lying on it, 80–81 standing off it.
+    const head = strip(100, (c) =>
+      c >= 70 ? { y: -0.03, height: c >= 80 && c <= 82 ? 0.04 : 0.01 } : {},
+    )
+    const taken = new Uint8Array(200)
+    for (const q of [...Array(60).keys(), 70, 71, 80, 81]) taken[q * 2] = taken[q * 2 + 1] = 1
+    const eyes = [
+      [0.5, 1, -1],
+      [0.6, 1, -1],
+    ]
+    expect(takenQuads(cleanCut(head, taken, { eyes, neck: 0, nape: 0 }))).toEqual([
+      ...Array(60).keys(),
+      80,
+      81,
+    ])
+  })
 })
 
 describe('the bald surface on the texture', () => {
@@ -526,6 +545,56 @@ describe('the bald surface on the texture', () => {
       (f) => placed.uvs[f * 2]!,
     )
     expect(Math.max(...us) - Math.min(...us)).toBeLessThan(0.2)
+  })
+
+  test('keeps the places it is given', () => {
+    const points = Float32Array.from([0.2, 0.3, 0, 0.6, 0.3, 0, 0.4, 0.7, 0])
+    const placed = scalpUvs(points, [0, 1, 2], square, {
+      uvs: Float32Array.from([0, 0, 0.25, 0.75, 0, 0]),
+      has: [0, 1, 0],
+    })
+    expect(placed.uvs[2]).toBeCloseTo(0.25, 6)
+    expect(placed.uvs[3]).toBeCloseTo(0.75, 6)
+    expect(placed.uvs[0]).toBeCloseTo(0.2, 5)
+  })
+})
+
+describe('the bald surface under the kept skin', () => {
+  // The kept skin: a square 3 cm across in z = 0, facing +z.
+  const kept = {
+    points: Float32Array.from([0, 0, 0, 0.03, 0, 0, 0.03, 0.03, 0, 0, 0.03, 0]),
+    normals: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+    index: [0, 1, 2, 0, 2, 3],
+  }
+
+  test('finds the kept triangle over a point under it, and how far under', () => {
+    const points = Float32Array.from([
+      0.021, 0.006, -0.005, 0.006, 0.021, 0.003, 0.039, 0.015, -0.005,
+    ])
+    const normals = Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1])
+    const under = underKept(points, normals, kept)
+    expect(under.triangle[0]).toBe(0)
+    expect(under.height[0]).toBeCloseTo(-0.005, 6)
+    expect([...under.normal.subarray(0, 3)]).toEqual([0, 0, 1])
+    // Its place on the kept triangle, by its corners' weights.
+    const at = [0, 1].map((axis) =>
+      [0, 1, 2].reduce(
+        (sum, k) => sum + under.weights[k]! * kept.points[kept.index[k]! * 3 + axis]!,
+        0,
+      ),
+    )
+    expect(at[0]).toBeCloseTo(0.021, 6)
+    expect(at[1]).toBeCloseTo(0.006, 6)
+    // Standing a little out of it, still there; beside it, not.
+    expect(under.triangle[1]).toBe(1)
+    expect(under.height[1]).toBeCloseTo(0.003, 6)
+    expect(under.triangle[2]).toBe(-1)
+  })
+
+  test('not where it is turned away, nor far under', () => {
+    const points = Float32Array.from([0.015, 0.006, -0.005, 0.015, 0.006, -0.03])
+    const normals = Float32Array.from([0, 0, -1, 0, 0, 1])
+    expect([...underKept(points, normals, kept).triangle]).toEqual([-1, -1])
   })
 })
 
