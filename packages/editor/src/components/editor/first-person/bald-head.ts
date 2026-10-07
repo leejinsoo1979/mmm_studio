@@ -342,9 +342,17 @@ export function cleanCut(
   }
   // Skin the hair's flood left in between the hair it took — a sideburn
   // taken square by square — is taken too: kept, it would stand as islands
-  // of the head's own skin in the scalp.
+  // of the head's own skin in the scalp. Behind the neck, under its top,
+  // the head's open rim counts as the cut: tongues of skin reaching down
+  // between the hair taken to where the head ends at the collar would
+  // stand in the bald surface there.
+  const open = openSpots(index, spots, head.spotCount)
+  for (let i = 0; i < points.length / 3; i++) {
+    const behind = points[i * 3 + 1]! < marks.neck && points[i * 3 + 2]! < marks.nape
+    if (!behind) open[spots[i]!] = 0
+  }
   for (let round = 0; round < ISLAND_ROUNDS; round++) {
-    const onCut = new Uint8Array(head.spotCount)
+    const onCut = Uint8Array.from(open)
     for (let t = 0; t < count; t++) {
       if (out[t]) for (let k = 0; k < 3; k++) onCut[spots[index[t * 3 + k]!]!] = 1
     }
@@ -368,6 +376,26 @@ export function cleanCut(
     if (!out[t] && beside.has(kept.piece(t)) && kept.size(t) < PIECE * kept.largest) out[t] = 1
   }
   return out
+}
+
+/** Which spots lie on a mesh's open rim: on an edge (between spots) of one triangle only. */
+export function openSpots(index: ArrayLike<number>, spots: Int32Array, spotCount: number) {
+  const uses = new Map<number, number>()
+  for (let t = 0; t < index.length; t += 3) {
+    for (let k = 0; k < 3; k++) {
+      const a = spots[index[t + k]!]!
+      const b = spots[index[t + ((k + 1) % 3)]!]!
+      const key = Math.min(a, b) * spotCount + Math.max(a, b)
+      uses.set(key, (uses.get(key) ?? 0) + 1)
+    }
+  }
+  const open = new Uint8Array(spotCount)
+  for (const [key, count] of uses) {
+    if (count !== 1) continue
+    open[Math.floor(key / spotCount)] = 1
+    open[key % spotCount] = 1
+  }
+  return open
 }
 
 /** The triangles (corners, flat) of `index` not flagged in `taken`. */
@@ -1720,8 +1748,8 @@ export const TONE_RINGS = 5
  * scalp's colour, fading out to none at FEATHER: by how far it is, not how
  * many triangles, so the paint's edge follows no triangle's.
  */
-const FULL = 0.012
-const FEATHER = 0.045
+const FULL = 0.02
+const FEATHER = 0.07
 
 /**
  * On the face, the paint fades out by FACE_FEATHER instead, takes none of
@@ -1738,7 +1766,7 @@ const BROWS = 0.035
  * wholly within LOCAL_NEAR of that skin, fading to the scalp's one tone
  * (read off the forehead) at LOCAL_FAR, over the crown.
  */
-const SKIN_OFF_CUT = 0.012
+const SKIN_OFF_CUT = 0.03
 const LOCAL_NEAR = 0.02
 const LOCAL_FAR = 0.08
 

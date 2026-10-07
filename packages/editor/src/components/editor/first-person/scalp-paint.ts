@@ -127,6 +127,14 @@ function eachTexel(
   )
 }
 
+/**
+ * The skin round the cut a corner's colour comes from is no darker than
+ * this share of the scalp's tone: darker, it is the old hair's shadow
+ * painted on it — under the occiput, behind the ears — and the bald head
+ * would be stained with it.
+ */
+const SHADOWED = 0.88
+
 /** How far round (px, on a 2048 texture) the skin a corner's colour comes from is read, and how much of what is there must be skin. */
 const SKIN_READ = 4
 const SKIN_SHARE = 0.3
@@ -378,7 +386,14 @@ export function scalpPainter(
           total += weight
           for (let c = 0; c < 3; c++) sum[c]! += colour[c]! * weight
         }
-        return total > 0 ? [sum[0]! / total, sum[1]! / total, sum[2]! / total] : null
+        if (total <= 0) return null
+        // No darker than the hair's shadow on the skin round it lets the skin be.
+        const lift = Math.max(
+          1,
+          (SHADOWED * luminance(...tone)) /
+            Math.max(1, luminance(sum[0]!, sum[1]!, sum[2]!) / total),
+        )
+        return [(sum[0]! / total) * lift, (sum[1]! / total) * lift, (sum[2]! / total) * lift]
       })
       const targets = new Float32Array(cornerRef.length * 3)
       for (let k = 0; k < cornerRef.length; k++) {

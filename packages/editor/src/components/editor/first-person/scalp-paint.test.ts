@@ -98,8 +98,8 @@ describe('painting a bald head’s skin round the cut', () => {
   })
 
   test('paints in the colour of the skin round a corner, as much as it says', () => {
-    // The skin read at the right half's middle: a darker neck.
-    const NECK: Rgb = [140, 100, 80]
+    // The skin read at the right half's middle: a fairer neck.
+    const NECK: Rgb = [230, 180, 150]
     const head = image((x) => (x < 8 ? HAIR : NECK))
     paintScalp(
       head,
@@ -110,6 +110,24 @@ describe('painting a bald head’s skin round the cut', () => {
       TONE,
     )
     expect(near(at(head, 3, 8), NECK)).toBe(true)
+  })
+
+  test('lifts skin round a corner darkened by the old hair’s shadow', () => {
+    const SHADOW: Rgb = [100, 70, 55]
+    const head = image((x) => (x < 8 ? HAIR : SHADOW))
+    paintScalp(
+      head,
+      {
+        paint: band(0, 0.5, [1, 0, 1, 1], [1, 0, 1, 1]),
+        skin: Float32Array.from([0.75, 0.5, 0, 0, 0]),
+      },
+      TONE,
+    )
+    const painted = at(head, 3, 8)
+    const lum = (c: readonly number[]) => 0.2126 * c[0]! + 0.7152 * c[1]! + 0.0722 * c[2]!
+    expect(lum(painted)).toBeGreaterThan(0.8 * lum(TONE))
+    // Of the skin's hue still.
+    expect(painted[0]! / painted[2]!).toBeCloseTo(SHADOW[0] / SHADOW[2], 1)
   })
 })
 

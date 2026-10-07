@@ -365,24 +365,24 @@ describe('painting round the cut', () => {
       },
       scalp,
     )
-    // Triangles within the feather of the cut (4.5 cm): quads 1 to 5.
-    expect(painted.paint.length / PAINTED).toBe(10)
+    // Triangles within the feather of the cut (7 cm): quads 1 to 7.
+    expect(painted.paint.length / PAINTED).toBe(14)
     const amount = (x: number) => {
       for (let k = 0; k < painted.paint.length; k += PAINTED / 3) {
         if (Math.abs(painted.paint[k]! - x) < 1e-6) return painted.paint[k + 2]!
       }
       return Number.NaN
     }
-    // Wholly within 1.2 cm of it, then less and less.
+    // Wholly within 2 cm of it, then less and less.
     expect(amount(0.01)).toBe(1)
-    expect(amount(0.02)).toBe(1)
-    expect(amount(0.03)).toBeLessThan(1)
-    expect(amount(0.04)).toBeLessThan(amount(0.03))
-    expect(amount(0.06)).toBe(0)
-    // Its colour the skin's round it, read clear of the cut.
+    expect(amount(0.03)).toBe(1)
+    expect(amount(0.04)).toBeLessThan(1)
+    expect(amount(0.06)).toBeLessThan(amount(0.04))
+    expect(amount(0.08)).toBe(0)
+    // Its colour the skin's round it, read clear of the cut (and the old hair's shadow).
     const ref = painted.paint[3]!
     expect(ref).toBeGreaterThanOrEqual(0)
-    expect(painted.skin[ref * 5]!).toBeGreaterThanOrEqual(0.02)
+    expect(painted.skin[ref * 5]!).toBeGreaterThanOrEqual(0.04 - 1e-6)
     // The tone: the skin within the rings near the cut; the rest of the forehead after.
     expect(painted.tone[0]!.length / READ).toBe(2 * 4)
     expect(painted.tone[1]!.length / READ).toBe(2 * 7)

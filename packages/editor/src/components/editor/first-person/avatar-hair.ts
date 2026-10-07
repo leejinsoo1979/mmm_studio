@@ -1207,10 +1207,6 @@ const CARD_SAMPLES = [
 /** How far down the neck (bind units, from its top) the bald surface gives way to the body over it. */
 const LOW_NECK = 0.04
 
-/** Low down the neck, the bald surface this near the kept skin's points (bind units: they are far apart there), and this far from the cut, lies under it. */
-const UNDER_SKIN = 0.02
-const OFF_CUT = 0.015
-
 /** How far (bind units) under the middle of the body's neckline the bald surface reaches. */
 const UNDER_NECKLINE = 0.01
 
@@ -1387,38 +1383,18 @@ function makeBald(
   // Low down the neck where the body's own skin or collar is over it — its
   // triangles, not only its points, far apart there — the body shows: what
   // of the bald surface reaches there would stand out of it, showing the
-  // head's texture stretched over the body's neck. So does the head's own
-  // neck skin away from the cut: tucked under the skin's points, the bald
-  // surface would still poke through the skin's flat triangles between
-  // them.
-  {
-    const underBody =
-      bodyMesh && bodyGeometry
-        ? underKept(scalpPoints, vertexNormals(scalpPoints, corners), {
-            points: bindPoints(bodyMesh, bodyGeometry, 'position'),
-            normals: bindPoints(bodyMesh, bodyGeometry, 'normal'),
-            index: indexOf(bodyGeometry),
-          }).triangle
-        : null
-    const near = (grid: PointGrid, i: number, within: number) =>
-      grid.nearest(
-        scalpPoints[i * 3]!,
-        scalpPoints[i * 3 + 1]!,
-        scalpPoints[i * 3 + 2]!,
-        1,
-        found,
-        distances,
-        within,
-      ) > 0 && distances[0]! <= within ** 2
+  // head's texture stretched over the body's neck.
+  if (bodyMesh && bodyGeometry) {
+    const underBody = underKept(scalpPoints, vertexNormals(scalpPoints, corners), {
+      points: bindPoints(bodyMesh, bodyGeometry, 'position'),
+      normals: bindPoints(bodyMesh, bodyGeometry, 'normal'),
+      index: indexOf(bodyGeometry),
+    }).triangle
     const kept: number[] = []
     for (let t = 0; t < corners.length; t += 3) {
       const hidden = [0, 1, 2].every((k) => {
         const i = corners[t + k]!
-        return (
-          scalpPoints[i * 3 + 1]! < neck - LOW_NECK &&
-          ((underBody !== null && underBody[i]! >= 0) ||
-            (near(keptGrid, i, UNDER_SKIN) && !near(cutGrid, i, OFF_CUT)))
-        )
+        return scalpPoints[i * 3 + 1]! < neck - LOW_NECK && underBody[i]! >= 0
       })
       if (!hidden) kept.push(corners[t]!, corners[t + 1]!, corners[t + 2]!)
     }
