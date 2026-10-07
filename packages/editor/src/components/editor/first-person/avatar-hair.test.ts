@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
   capFade,
-  capPixels,
   cardKinds,
   carryPoints,
   foldTwins,
@@ -10,6 +9,7 @@ import {
   LASH,
   remapBones,
 } from './avatar-hair'
+import { capPicture, capPixels } from './hair-cap'
 import { BALD, packFlags, readHairStyle, unpackFlags } from './hair-styles'
 import type { Pixels } from './look-pixels'
 
@@ -194,6 +194,22 @@ describe('the cap’s texture', () => {
     const cap = capPixels(head, hairRgb, skinRgb, whole(false))
     expect(alpha(cap, 3, 8)).toBe(255)
     expect(alpha(cap, 12, 8)).toBe(0)
+  })
+
+  test('is cut with the skin read where the plan says, the hair’s colour its painted shell’s', () => {
+    const cards = image(4, 4, () => [120, 90, 60])
+    // The skin read on the right half.
+    const plan = { triangles: whole(true), skin: Float32Array.from([0.8, 0.5, 0.9, 0.5]) }
+    const picture = capPicture(head, cards, plan)
+    expect(alpha(picture.cap!.pixels, 3, 8)).toBe(255)
+    expect(alpha(picture.cap!.pixels, 12, 8)).toBe(0)
+    expect(picture.cards).toEqual([120, 90, 60])
+    expect(picture.color).toEqual(hairRgb)
+    // A dye takes what shows of it: as dark as the hair.
+    expect(picture.cap!.lum).toBeLessThan(80)
+    // No cards to read the hair's colour by, or no skin: no cap.
+    expect(capPicture(head, null, plan).cap).toBeNull()
+    expect(capPicture(head, cards, { ...plan, skin: new Float32Array() }).cap).toBeNull()
   })
 })
 
