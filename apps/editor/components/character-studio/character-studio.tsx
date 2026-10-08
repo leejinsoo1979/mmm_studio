@@ -9,6 +9,7 @@ import {
   avatarLabel,
   avatarTab,
   avatarThumbnailUrl,
+  BORROWED_HAIRSTYLES,
   canBindKey,
   DEFAULT_EMOTE_KEYS,
   EMOTE_CATEGORIES,
@@ -28,6 +29,7 @@ import {
   useAvatarProfile,
   useFaceTarget,
   useWalkthroughView,
+  wornHairStyle,
 } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { Check, Eye, EyeOff, Keyboard, Plus, X } from 'lucide-react'
@@ -630,9 +632,10 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const cancel = () => (dirty ? setConfirming(true) : close())
 
   // The hairstyle library is fetched as the studio opens, so 무작위 (and the
-  // 헤어 tab) needn't wait for it; a failed fetch is tried again there.
+  // 헤어 tab) needn't wait for it; a failed fetch is tried again there. No
+  // hairstyle is offered while BORROWED_HAIRSTYLES is off: nothing to fetch.
   useEffect(() => {
-    loadHairStyles().catch(() => {})
+    if (BORROWED_HAIRSTYLES) loadHairStyles().catch(() => {})
   }, [])
 
   // The game underneath rests while the studio is open.
@@ -666,7 +669,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const randomize = async () => {
     setRandomizing(true)
     try {
-      const styles = await loadHairStyles().catch(() => null)
+      const styles = BORROWED_HAIRSTYLES ? await loadHairStyles().catch(() => null) : null
       const current = draftRef.current
       commit({ ...current, look: randomLook(current.look, current.avatar, styles) })
     } finally {
@@ -1064,7 +1067,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
             ) : (
               <HairColorBody
                 hair={look.hair}
-                hairStyle={look.hairStyle}
+                hairStyle={wornHairStyle(look.hairStyle)}
                 onCommit={(hair) => lookPatch({ hair }, true)}
                 onPreview={(hair) => lookPatch({ hair }, false)}
               />

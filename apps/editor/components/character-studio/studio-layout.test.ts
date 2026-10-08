@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import {
   AVATAR_TABS,
   type AvatarLook,
+  BALD,
   BODY_SLIDERS,
   DEFAULT_EMOTE_KEYS,
   FACE_HANDLE,
@@ -133,6 +134,13 @@ describe('the rails', () => {
     expect(settings).not.toContain('eyes')
     expect(settings).not.toContain('browColor')
   })
+
+  test('the hair rail offers its colour only, no hairstyle or bald head to pick', () => {
+    for (const npc of [false, true]) {
+      expect(categoriesOf('hair', npc).map(({ label }) => label)).toEqual(['색상'])
+      expect(firstCategory('hair', npc, 'Female_Adult_03')).toBe('color')
+    }
+  })
 })
 
 describe('changed categories', () => {
@@ -195,6 +203,14 @@ describe('changed categories', () => {
     ).toBe(true)
   })
 
+  test('a saved hairstyle or bald head marks no hair category; a dye marks 색상', () => {
+    for (const hairStyle of [BALD, 'Female_Adult_03']) {
+      expect(categoryChanged('hair', 'color', context({ hairStyle }))).toBe(false)
+      expect(categoryChanged('hair', 'style', context({ hairStyle }))).toBe(false)
+    }
+    expect(categoryChanged('hair', 'color', context({ hair: '#8c2436' }))).toBe(true)
+  })
+
   test('changed keys mark 단축키', () => {
     expect(categoryChanged('motion', 'keys', context({}, { keys: { KeyQ: 'wave' } }))).toBe(true)
     expect(categoryChanged('motion', 'emotes', context({}, { keys: { KeyQ: 'wave' } }))).toBe(false)
@@ -208,9 +224,13 @@ describe('꾸민 곳', () => {
       lookChips({ ...NO_LOOK, shape: { ...NO_LOOK.shape, pins: { 4: [0, 0, 0.02] } } }),
     ).toEqual(['얼굴형'])
     expect(lookChips({ ...NO_LOOK, hair: '#8c2436', hairStyle: 'Female_Adult_03' })).toEqual([
-      '헤어스타일',
       '염색',
     ])
+  })
+
+  test('a saved hairstyle or bald head shows nothing: the character wears its own hair', () => {
+    expect(lookChips({ ...NO_LOOK, hairStyle: BALD, shave: 0.9 })).toEqual([])
+    expect(lookChips({ ...NO_LOOK, hairStyle: 'Female_Adult_03' })).toEqual([])
   })
 })
 

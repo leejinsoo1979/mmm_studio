@@ -34,6 +34,7 @@ import { hasBodyShape } from './body-shape'
 import { hasFacePaint, NO_PAINT } from './face-paint'
 import { loadFaceTargets } from './face-targets'
 import { SHOD } from './footwear'
+import { wornHairStyle } from './hair-styles'
 import { headGeometry } from './head-geometry'
 import {
   BODIES_KEPT,
@@ -437,7 +438,7 @@ export function useAvatarLook(
   avatarId: string,
 ) {
   const dressing = useRef<{ model: Object3D; undo: () => void } | null>(null)
-  const hairStyle = look?.hairStyle ?? null
+  const hairStyle = wornHairStyle(look?.hairStyle ?? null)
   const hair = look?.hair ?? null
   const worn = useAvatarHair(model, hairStyle, hair)
   const [feet, setFeet] = useState<ReturnType<typeof feetOn>>(null)

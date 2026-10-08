@@ -3,6 +3,7 @@ import {
   avatarGender,
   BEARD_STYLES,
   BODY_SLIDERS,
+  BORROWED_HAIRSTYLES,
   type BodyShape,
   FACE_SLIDERS,
   type FacePaint,
@@ -128,9 +129,9 @@ function randomHairColour(random: Random): string | null {
  * face replaces the sculpted one, its pins cleared), height, a hairstyle of
  * the character's sex (sometimes its own, which is null as the gallery
  * saves it, never its own id; the one it has while the library is
- * unavailable), hair colour and face paint. The base character, the face
- * photo (and how closely the head follows it) and the skin stay, as the
- * player chose those deliberately.
+ * unavailable, or BORROWED_HAIRSTYLES is off), hair colour and face paint.
+ * The base character, the face photo (and how closely the head follows it)
+ * and the skin stay, as the player chose those deliberately.
  */
 export function randomLook(
   look: AvatarLook,
@@ -142,7 +143,7 @@ export function randomLook(
   const body: BodyShape = { height: setting(random), sliders: settings(BODY_SLIDERS, random) }
   const gender = avatarGender(avatar)
   const ofSex = styles?.filter((style) => style.gender === gender && style.id !== avatar) ?? []
-  const hairStyle = !styles
+  const hairStyle = !(BORROWED_HAIRSTYLES && styles)
     ? look.hairStyle
     : ofSex.length === 0 || random() < OWN_HAIRSTYLE_CHANCE
       ? null

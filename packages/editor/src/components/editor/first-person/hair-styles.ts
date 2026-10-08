@@ -17,6 +17,19 @@ export function readHairStyle(value: unknown): HairStyle {
   return typeof value === 'string' && AVATAR_IDS.has(value) ? value : null
 }
 
+/**
+ * Whether hairstyles are worn: another character's hair cut out of its
+ * head and worn over this one's closed bald (see avatar-hair.ts), or the
+ * bald head alone. Off until hair generated on each character's own scalp
+ * replaces them: the studio offers none, a random look borrows none, and a
+ * look naming one (saved, or another player's) shows the character's own
+ * hair, the name kept for that hair to take over.
+ */
+export const BORROWED_HAIRSTYLES: boolean = false
+
+/** The hairstyle a look is worn in: the character's own (null) while BORROWED_HAIRSTYLES is off. */
+export const wornHairStyle = (style: HairStyle): HairStyle => (BORROWED_HAIRSTYLES ? style : null)
+
 /** A hairstyle the library offers: the avatar whose hair it is, and how that hair reads. */
 export type HairStyleEntry = {
   id: string

@@ -4,6 +4,7 @@ import {
   type AvatarTab,
   avatarTab,
   BALD,
+  BORROWED_HAIRSTYLES,
   type BodySliderId,
   DEFAULT_EMOTE_KEYS,
   type EmoteId,
@@ -15,6 +16,7 @@ import {
   hasFacePaint,
   hasFaceShape,
   regionChanged,
+  wornHairStyle,
 } from '@pascal-app/editor'
 import type { CameraFocus, StageInsets, StagePose } from './stage-contract'
 
@@ -140,7 +142,7 @@ const CATEGORIES: Record<Exclude<StudioTab, 'face'>, readonly Category[]> = {
   preset: AVATAR_TABS.map(({ id, label }) => ({ id, label, subTabs: [] })),
   body: BODY_CATEGORIES.map(({ id, label }) => ({ id, label, subTabs: [] })),
   hair: [
-    { id: 'style', label: '스타일', subTabs: [] },
+    ...(BORROWED_HAIRSTYLES ? [{ id: 'style', label: '스타일', subTabs: [] }] : []),
     { id: 'color', label: '색상', subTabs: [] },
   ],
   makeup: [
@@ -248,7 +250,7 @@ export function categoryChanged(tab: StudioTab, category: string, context: Chang
       return entry.sliders.some((id) => (look.body.sliders[id] ?? 0) !== 0)
     }
     case 'hair':
-      return category === 'style' ? look.hairStyle !== null : look.hair !== null
+      return category === 'style' ? wornHairStyle(look.hairStyle) !== null : look.hair !== null
     case 'makeup':
       return makeupChanged(category as MakeupCategory, look.paint)
     case 'skin':
@@ -262,11 +264,12 @@ export function categoryChanged(tab: StudioTab, category: string, context: Chang
 
 /** What a look changes, for 꾸민 곳 (empty: the character as it comes). */
 export function lookChips(look: AvatarLook): string[] {
+  const hairStyle = wornHairStyle(look.hairStyle)
   return [
     look.face && '내 얼굴',
     hasFaceShape(look.shape) && '얼굴형',
     hasBodyShape(look.body) && '체형',
-    look.hairStyle && (look.hairStyle === BALD ? '민머리' : '헤어스타일'),
+    hairStyle && (hairStyle === BALD ? '민머리' : '헤어스타일'),
     look.hair && '염색',
     hasFacePaint(look.paint) && '메이크업',
     look.skin && '피부 톤',

@@ -126,9 +126,11 @@ export {
 } from './components/editor/first-person/footwear'
 export {
   BALD,
+  BORROWED_HAIRSTYLES,
   type HairStyle,
   type HairStyleEntry,
   loadHairStyles,
+  wornHairStyle,
 } from './components/editor/first-person/hair-styles'
 export { type HeadFrame, headFrame } from './components/editor/first-person/head-geometry'
 // Gait blending and presence smoothing, for bodies driven outside the player
