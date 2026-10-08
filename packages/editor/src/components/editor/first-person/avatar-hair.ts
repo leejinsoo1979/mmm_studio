@@ -2573,6 +2573,12 @@ export type HairOn = {
   /** The colour of the borrowed hair worn and where it shows (see `WornHair`), or null. */
   stubble: Rgb | null
   hairline: Float32Array | null
+  /**
+   * 'generated' for hair grown on the character's own scalp (see
+   * generated-hair.ts): the look paints the head's skin alone, and a dye
+   * goes to the hair's material, not the textures.
+   */
+  mode?: 'generated'
 }
 
 /**

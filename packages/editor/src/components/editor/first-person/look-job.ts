@@ -56,6 +56,14 @@ export type LookBody = {
   geometry: PackedGeometry
 }
 
+/**
+ * What a bald head's skin is painted for: borrowed hair worn over it like a
+ * wig (its stubble round the hairline, a shaved head's shade, the dye), or
+ * hair generated on the head's own scalp, which paints the skin alone and
+ * leaves the dye to the hair's material, so a dye starts no job.
+ */
+export type ScalpMode = 'wig' | 'generated'
+
 /** A look to put on a body (see `AvatarPaint`), with the character's face landmarks. */
 export type LookJob = {
   body: LookBody
@@ -73,6 +81,7 @@ export type LookJob = {
   paint: FacePaint
   /** How a bald head's skin is painted round where its hair was taken out (see bald-head.ts); null for its own hair. */
   scalp: ScalpPaint | null
+  scalpMode: ScalpMode
   /**
    * The colour of the hair worn over a bald head, which the stubble round
    * its hairline is (see scalp-paint.ts): a borrowed style's, or its dye's.
@@ -120,6 +129,7 @@ const SAME_PART: {
   face: alike,
   paint: alike,
   scalp: is,
+  scalpMode: is,
   stubble: alike,
   wig: is,
   shave: is,
@@ -483,6 +493,9 @@ export function dressBody(
   job: Omit<LookJob, 'body'> & { key: string },
   photo: Pixels | null,
 ): Partial<Record<Part, Pixels>> {
+  if (job.scalpMode === 'generated') {
+    throw new Error('the scalp under generated hair: generated hair is not built yet')
+  }
   const { face, hair, skin, paint, target, scalp } = job
   const bald = scalp !== null
   const swap = face && photo && target

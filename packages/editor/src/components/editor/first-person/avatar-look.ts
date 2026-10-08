@@ -356,6 +356,7 @@ async function applyLook(
     face: target && look.face,
     paint: look.paint,
     scalp: look.bald ? scalp : null,
+    scalpMode: 'wig',
     stubble: look.bald ? stubble : null,
     wig: look.bald ? wig : null,
     shave: look.shave,
