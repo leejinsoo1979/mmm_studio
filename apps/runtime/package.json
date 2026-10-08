@@ -19,6 +19,7 @@
     "asar": true,
     "files": [
       "src/**/*",
+      "!src/**/*.test.*",
       "runtime-config.json"
     ],
     "mac": {
