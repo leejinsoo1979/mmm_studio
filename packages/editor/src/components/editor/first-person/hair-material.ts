@@ -5,13 +5,11 @@ import {
   atan,
   attribute,
   cameraViewMatrix,
-  ceil,
   clamp,
   cross,
   directionToColor,
   dot,
   exp,
-  exp2,
   Fn,
   float,
   floor,
@@ -263,16 +261,11 @@ function strandInputs() {
   const layer = floor(shape.z.add(0.5).div(LAYER_STRIDE))
   const atlasLayer = shape.z.sub(layer.mul(LAYER_STRIDE))
   const at: N = uv()
-  // Layers sit side by side, so keep every filter tap inside this one: half a texel of the
-  // level sampled (judged on the larger footprint, anisotropy included) plus half the
-  // footprint across. At a few pixels wide that is mip 6, where 2.5 texels would bleed.
-  const texels = max(fwidth(at.x).mul(ATLAS_TILE_WIDTH), fwidth(at.y).mul(ATLAS_HEIGHT))
-  const levelTexel = exp2(ceil(log2(max(texels, 1))))
-  const margin = min(
-    0.5,
-    max(2.5, levelTexel.mul(0.5)).div(ATLAS_TILE_WIDTH).add(fwidth(at.x).mul(0.5)),
-  )
-  const across = clamp(at.x, margin, float(1).sub(margin))
+  // Layers sit side by side. Clamping across to 2.5 texels, with each layer's two edge columns
+  // empty, keeps a far mip's coverage the layer's own (measured on 4-12 px strips); clamping
+  // to half a texel of the level sampled instead pulls a narrow strip's edges to its densest
+  // middle and makes the wispy layers read twice as dense.
+  const across = clamp(at.x, 2.5 / ATLAS_TILE_WIDTH, 1 - 2.5 / ATLAS_TILE_WIDTH)
   const atlasUv = vec2(atlasLayer.add(across).div(ATLAS_LAYERS), at.y)
   const map = hairAtlas()
   const texel = texture(map, atlasUv)
@@ -502,7 +495,7 @@ class HairLightingModel extends PhysicalLightingModel {
         materialEnvIntensity,
       )
       reflectedLight.indirectSpecular!.addAssign(
-        sheen.mul(h.albedo).mul(0.3).mul(ambientOcclusion!),
+        sheen.mul(h.albedo.mul(0.3).add(h.rTint.mul(0.02))).mul(ambientOcclusion!),
       )
     }
   }
@@ -682,9 +675,9 @@ export class HairNodeMaterial extends MeshStandardNodeMaterial {
       shift: lock.mul(2).sub(1).mul(0.04).add(s.texel.b.sub(0.5).mul(0.04)),
       expR: ease(shine.x),
       expTRT: ease(shine.y),
-      kR: shine.z.mul(mix(0.5, 1, light)),
-      kTRT: hash(strand.add(5)).mul(0.8).add(0.6).mul(0.6),
-      rTint: mix(vec3(1) as N, baseHue, light.oneMinus().mul(0.2)),
+      kR: shine.z.mul(mix(0.12, 1.6, light)),
+      kTRT: hash(strand.add(5)).mul(0.8).add(0.6).mul(0.25),
+      rTint: mix(vec3(1) as N, baseHue, light.oneMinus().mul(0.6)),
       rNoise: mx_noise_float(vec3(shape.y.div(period), strand.mul(0.37), 0))
         .mul(0.25)
         .add(1)

@@ -36,7 +36,6 @@ const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x)
 export const ROOT_SHADE = 0.72
 export const TIP_LIFT = 1.08
 
-/** A character's hair as the strands' and roots' shaders take it (colours linear). */
 export type HairLookValues = {
   base: Rgb
   root: Rgb
@@ -75,7 +74,6 @@ export function hairLookValues(look: {
 /** How much wider strips are drawn when only `detail` (0–1) of them are, so coverage holds (`HairValues.width`). */
 export const lodWidthScale = (detail: number) => Math.max(0.05, detail) ** -0.8
 
-/** The root layer's per-character values as its shader reads them. */
 export type RootsStyleValues = {
   /** Hairline elevation at 33 even steps of |a| over [0, π]. */
   hairline: Float32Array
@@ -155,7 +153,6 @@ export function hairlineWobble(a: number): number {
   return sum
 }
 
-/** Each strip's span of a geometry's index (in triangles' order) and its middle, for sorting. */
 export type StripRanges = { start: Uint32Array; count: Uint32Array; centre: Float32Array }
 
 /**

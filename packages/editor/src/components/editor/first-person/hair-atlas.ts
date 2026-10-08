@@ -48,7 +48,6 @@ export function atlasLayerOf(kind: AtlasKind, pick: number): number {
   return first + Math.min(count - 1, Math.max(0, Math.floor(pick * count)))
 }
 
-/** The kind an atlas layer belongs to. */
 export function atlasKindOf(layer: number): AtlasKind {
   for (const [kind, { first, count }] of Object.entries(ATLAS_KINDS) as [
     AtlasKind,
@@ -146,7 +145,6 @@ const SPECS: Record<Exclude<AtlasKind, 'curly'> | 'curlyDense' | 'curlyMedium', 
   },
 }
 
-/** A periodic wave along the strand: `turns` whole periods per repeat, starting at `phase` (rows). */
 type Wave = { amp: number; turns: number; phase: number }
 
 type SubLock = { centre: number; half: number; path: Wave[]; breathe: Wave }
@@ -155,7 +153,6 @@ type Fibre = {
   /** The sub-lock it runs in (-1: between them), and where across it (half widths from its middle). */
   lock: number
   offset: number
-  /** Where across the strip, for one between sub-locks. */
   centre: number
   path: Wave[]
   width: number
@@ -168,7 +165,6 @@ type SpecName = keyof typeof SPECS
 
 type LayerPlan = { kind: SpecName; locks: SubLock[]; fibres: Fibre[] }
 
-/** mulberry32: integer only, the same on every engine. */
 function random(seed: number) {
   let s = seed >>> 0
   return () => {
@@ -184,7 +180,7 @@ const SINE = Float64Array.from({ length: ATLAS_HEIGHT }, (_, i) =>
   Math.sin((2 * Math.PI * i) / ATLAS_HEIGHT),
 )
 
-/** A wave's value at row `y`: whole periods over the repeat, so row y and row y + 1024 agree exactly. */
+/** Whole periods over the repeat, so row y and row y + 1024 agree exactly. */
 function wave(w: Wave, y: number) {
   const i = (((w.turns * y + w.phase) % ATLAS_HEIGHT) + ATLAS_HEIGHT) % ATLAS_HEIGHT
   return w.amp * SINE[Math.floor(i)]!
@@ -280,7 +276,6 @@ function pathAt(path: readonly Wave[], y: number) {
   return sum
 }
 
-/** A layer's row `y` (any integer: the repeat wraps), as RGBA floats 0–1 across its 256 texels. */
 function layerRow(
   layer: LayerPlan,
   y: number,
@@ -313,7 +308,6 @@ function layerRow(
       if (r > out[x * 4]!) out[x * 4] = r
     }
   }
-  // G, B, A: fibres laid one over another, each with its own value and shift.
   const turn = ((2 * Math.PI) / ATLAS_HEIGHT) * curl * y
   for (let f = 0; f < layer.fibres.length; f++) {
     const fibre = layer.fibres[f]!
@@ -346,14 +340,12 @@ function layerRow(
 
 const MAX_LOCKS = 8
 
-/** Layer `layer`'s row `y` (any integer; the repeat wraps) as RGBA8. */
 export function atlasLayerRow(layer: number, y: number): Uint8Array {
   const row = new Float32Array(ATLAS_TILE_WIDTH * 4)
   layerRow(plan(layer), y, row, new Float64Array(MAX_LOCKS), new Float64Array(MAX_LOCKS))
   return Uint8Array.from(row, (v) => Math.round(clamp01(v) * 255))
 }
 
-/** One level of the atlas: RGBA8 rows of `width` texels, `height` rows. */
 export type AtlasMip = { data: Uint8Array; width: number; height: number }
 
 /** R's share of texels at or above one half (128 of 255) over a layer's columns `[x0, x1)` of a mip. */
@@ -375,7 +367,6 @@ export function strandAtlas(): AtlasMip[] {
   const H = ATLAS_HEIGHT
   const levels: AtlasMip[] = []
   const top = new Uint8Array(ATLAS_WIDTH * H * 4)
-  // R before quantising, per layer, for the coverage-preserving filter.
   let coverage: Float32Array[] = []
   const targets: number[] = []
   const row = new Float32Array(W * 4)
