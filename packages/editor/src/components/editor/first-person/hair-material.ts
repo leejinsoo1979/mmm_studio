@@ -388,7 +388,7 @@ const lobe = (tangent: N, half: N, exponent: N) => {
  */
 function deepAlbedo(h: HairShading): N {
   const peak = max(max(h.albedo.x, h.albedo.y), max(h.albedo.z, 1e-4))
-  const saturation = h.depth.mul(mix(0.6, 1.5, lightness(h.albedo)))
+  const saturation = h.depth.mul(mix(0.6, 0.8, lightness(h.albedo)))
   return h.albedo.mul(h.albedo.div(peak).pow(saturation)).mul(mix(1, h.deepest.oneMinus(), h.depth))
 }
 
@@ -675,7 +675,7 @@ export class HairNodeMaterial extends MeshStandardNodeMaterial {
       shift: lock.mul(2).sub(1).mul(0.04).add(s.texel.b.sub(0.5).mul(0.04)),
       expR: ease(shine.x),
       expTRT: ease(shine.y),
-      kR: shine.z.mul(mix(0.12, 1.6, light)),
+      kR: shine.z.mul(mix(0.12, 2, light)),
       kTRT: hash(strand.add(5)).mul(0.8).add(0.6).mul(0.25),
       rTint: mix(vec3(1) as N, baseHue, light.oneMinus().mul(0.6)),
       rNoise: mx_noise_float(vec3(shape.y.div(period), strand.mul(0.37), 0))
@@ -711,8 +711,10 @@ const SHELL_HEIGHTS = [1.2, 2.2, 3.7] as const
 
 /**
  * Bind-space cells of `size`, stretched 3:1 along the comb: each cell's
- * hash, and how sharp the cells may be drawn (0 once under a pixel, where
- * they must fade to their mean or they would sparkle).
+ * hash, and how sharp the cells may be drawn. Hard-edged cells alias until
+ * they are a few pixels across (a 1-2 px cell crawled over the whole
+ * undercut in the orbit), so they fade to their mean below 2 px and are
+ * whole only from 4 px.
  */
 function cells(bind: N, comb: N, across: N, normal: N, size: number, salt: N) {
   const cell = vec3(
@@ -724,7 +726,7 @@ function cells(bind: N, comb: N, across: N, normal: N, size: number, salt: N) {
     .floor()
   const id = hash(cell.x.add(cell.y.mul(157)).add(cell.z.mul(113)).add(salt))
   const pixels = float(size).div(max(length(fwidth(bind)), 1e-7))
-  return { id, sharp: smoothstep(1, 2, pixels) }
+  return { id, sharp: smoothstep(2, 4, pixels) }
 }
 
 /**
@@ -774,9 +776,9 @@ export class RootsNodeMaterial extends MeshStandardNodeMaterial {
     const isShell: N = height.greaterThan(SHELL_HEIGHTS[0])
 
     // The buzz: density 0.55–0.9 over ~3 mm so skin glints through, broken by 1.2 and 3.6 mm
-    // cells that stay drawn down to 2 px (studio framing), each root a 0.4 mm cell above that.
+    // cells (the coarse one stays drawn at studio framing), each root a 0.4 mm cell up close.
     // Stacked fractional coverage under A2C dithers the same samples, so the shells draw whole
-    // cells only, and fade out where those cells are under a pixel: then the root layer carries
+    // cells only, and fade out where those cells are too small: then the root layer carries
     // what the stack would.
     const undercut = value('undercut', 'vec4')
     const band: N = absA.greaterThan(0.95).and(e.lessThan(undercut.x))
