@@ -106,7 +106,7 @@ describe('formatRepeatSummary', () => {
       10_000,
     )
     expect(summary.split('\n')).toEqual([
-      '[viewer] WebGPU uncaptured errors still occurring (repeats within 10 s, each logged in full once):',
+      '[viewer] WebGPU uncaptured errors still occurring (repeats within 10 s; the first 50 distinct messages were each logged in full once):',
       '  40× Vertex buffer slot 0 required by [RenderPipeline "renderPipeline_LineBasicNodeMaterial_59"] was not set.',
       '  2× rare',
     ])

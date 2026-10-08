@@ -92,15 +92,20 @@ export function createInUseDisposeGuard(
   let scheduled = false
 
   const settle = (geometry: BufferGeometry, objects: Set<Object3D>, dispose: () => void) => {
+    const geometryOf = (object: Object3D) => (object as { geometry?: BufferGeometry }).geometry
+    for (const object of objects) {
+      if (geometryOf(object) === geometry && isInScene(object)) return
+    }
+    // Every mesh that drew the geometry stays known until it is disposed: three
+    // frees the buffers of the first one's current geometry, whichever it is.
     const drawnSince = new Set<BufferGeometry>()
     for (const object of objects) {
-      const current = (object as { geometry?: BufferGeometry }).geometry
-      if (current === geometry && isInScene(object)) return
+      const current = geometryOf(object)
       if (current && current !== geometry && drawnBy.get(current)?.has(object)) {
         drawnSince.add(current)
       }
-      objects.delete(object)
     }
+    objects.clear()
     dispose()
     for (const next of drawnSince) {
       for (const attribute of Object.values(next.attributes)) attribute.needsUpdate = true
@@ -110,7 +115,11 @@ export function createInUseDisposeGuard(
   const flush = () => {
     for (const [geometry, run] of held) {
       held.delete(geometry)
-      run()
+      try {
+        run()
+      } catch (error) {
+        console.error('[viewer] a geometry dispose listener threw', error)
+      }
     }
   }
 
@@ -136,6 +145,21 @@ export function createInUseDisposeGuard(
   }
 
   return { track, flush }
+}
+
+/**
+ * Has `renderer.render` settle the guard's held-back disposes first, on every
+ * call: pass renders nested inside a frame's render included.
+ */
+export function flushBeforeRender<A extends unknown[], R>(
+  renderer: { render: (...args: A) => R },
+  guard: Pick<InUseDisposeGuard, 'flush'>,
+): void {
+  const render = renderer.render.bind(renderer)
+  renderer.render = (...args: A) => {
+    guard.flush()
+    return render(...args)
+  }
 }
 
 function isInScene(object: Object3D): boolean {

@@ -20,6 +20,7 @@ import * as THREE from 'three/webgpu'
 import {
   createInUseDisposeGuard,
   ensureSecondaryUv,
+  flushBeforeRender,
   hasDrawableGeometry,
 } from '../../lib/drawable-geometry'
 import { createGpuErrorReporter } from '../../lib/gpu-error-log'
@@ -153,11 +154,7 @@ function UnsupportedGpuViewerFallback() {
  */
 function installEmptyDrawGuard(renderer: THREE.WebGPURenderer) {
   const disposeGuard = createInUseDisposeGuard()
-  const render = renderer.render.bind(renderer)
-  renderer.render = (scene, camera) => {
-    disposeGuard.flush()
-    render(scene, camera)
-  }
+  flushBeforeRender(renderer, disposeGuard)
   renderer.setRenderObjectFunction(
     (
       object: any,

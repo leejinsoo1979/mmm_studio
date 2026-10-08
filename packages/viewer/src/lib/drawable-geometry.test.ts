@@ -1,6 +1,6 @@
 // @ts-expect-error — bun:test is provided by the Bun runtime; viewer does not
 // depend on @types/bun so the import type is unresolved at compile time.
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import {
   type BufferAttribute,
   BufferGeometry,
@@ -11,7 +11,11 @@ import {
   type Object3D,
   Scene,
 } from 'three'
-import { createInUseDisposeGuard, type InUseDisposeGuard } from './drawable-geometry'
+import {
+  createInUseDisposeGuard,
+  flushBeforeRender,
+  type InUseDisposeGuard,
+} from './drawable-geometry'
 
 const position = (geometry: BufferGeometry) => geometry.getAttribute('position') as BufferAttribute
 
@@ -170,6 +174,67 @@ describe('createInUseDisposeGuard', () => {
     guard.flush()
     expect(position(next).version).toBe(version)
   })
+
+  test('a dropped dispose keeps every mesh that drew the geometry', () => {
+    const { guard, scene, geometry, mesh } = setup()
+    const twin = new Mesh(geometry)
+    scene.add(twin)
+    guard.track(mesh, geometry)
+    guard.track(twin, geometry)
+    const next = triangle()
+    mesh.geometry = next
+    guard.track(mesh, next)
+    geometry.dispose()
+    guard.flush()
+    scene.remove(twin)
+    const version = position(next).version
+    geometry.dispose()
+    guard.flush()
+    expect(position(next).version).toBe(version + 1)
+  })
+
+  test('a throwing dispose listener neither escapes the flush nor stops the others', () => {
+    const { guard, geometry, mesh, disposed } = setup()
+    const other = triangle()
+    const twin = new Mesh(other)
+    let otherDisposed = 0
+    geometry.addEventListener('dispose', () => {
+      throw new Error('listener')
+    })
+    other.addEventListener('dispose', () => {
+      otherDisposed++
+    })
+    guard.track(mesh, geometry)
+    guard.track(twin, other)
+    mesh.geometry = triangle()
+    geometry.dispose()
+    other.dispose()
+    const error = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(() => guard.flush()).not.toThrow()
+      expect(error).toHaveBeenCalledTimes(1)
+    } finally {
+      error.mockRestore()
+    }
+    expect(disposed()).toBe(1)
+    expect(otherDisposed).toBe(1)
+  })
+})
+
+describe('flushBeforeRender', () => {
+  test('settles the held disposes before every render, nested ones included', () => {
+    const calls: string[] = []
+    const renderer = {
+      render(pass: string) {
+        calls.push(`render ${pass}`)
+        if (pass === 'frame') this.render('shadow')
+        return pass.length
+      },
+    }
+    flushBeforeRender(renderer, { flush: () => calls.push('flush') })
+    expect(renderer.render('frame')).toBe(5)
+    expect(calls).toEqual(['flush', 'render frame', 'flush', 'render shadow'])
+  })
 })
 
 type Attribute = BufferAttribute | InterleavedBufferAttribute
@@ -282,6 +347,33 @@ describe('createInUseDisposeGuard against three-like bookkeeping', () => {
     mesh.geometry = triangle()
     frame()
     old.dispose()
+    frame()
+    frame()
+    expect(renderer.freedDraws()).toBe(0)
+  })
+
+  test('a geometry shared by two meshes is settled against the mesh three tied it to', () => {
+    // three ties the dispose to the first mesh that drew it, here the one that
+    // moves on first; the second keeps the first dispose from running.
+    const timers: Array<() => void> = []
+    const guard = createInUseDisposeGuard((run) => timers.push(run))
+    const scene = new Scene()
+    const shared = triangle()
+    const first = new Mesh(shared)
+    const second = new Mesh(shared)
+    scene.add(first, second)
+    const renderer = threeLikeRenderer(guard)
+    const frame = () => {
+      renderer.render(scene)
+      for (const run of timers.splice(0)) run()
+    }
+    frame()
+    first.geometry = triangle()
+    frame()
+    shared.dispose()
+    frame()
+    scene.remove(second)
+    shared.dispose()
     frame()
     frame()
     expect(renderer.freedDraws()).toBe(0)

@@ -56,5 +56,5 @@ export function formatRepeatSummary(repeats: Map<string, number>, intervalMs: nu
   const shown = lines.slice(0, MAX_SUMMARY_LINES)
   if (lines.length > shown.length) shown.push(`  …and ${lines.length - shown.length} more messages`)
   const seconds = Math.round(intervalMs / 1000)
-  return `[viewer] WebGPU uncaptured errors still occurring (repeats within ${seconds} s, each logged in full once):\n${shown.join('\n')}`
+  return `[viewer] WebGPU uncaptured errors still occurring (repeats within ${seconds} s; the first ${MAX_DISTINCT_MESSAGES} distinct messages were each logged in full once):\n${shown.join('\n')}`
 }
