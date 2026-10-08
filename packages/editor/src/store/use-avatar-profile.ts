@@ -134,7 +134,8 @@ export function readAvatarLook(value: unknown): AvatarLook {
 /**
  * What of a look is painted on the character's textures (the shapes are the
  * geometry's, generated hair its own meshes): the dyes, the face photo, the
- * face paint, and the skin painted where the head's own hair was.
+ * face paint, and the skin painted where the head's own hair was (with a
+ * shaved head's stubble).
  */
 export type AvatarPaint = Pick<
   AvatarLook,
