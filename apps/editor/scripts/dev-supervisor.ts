@@ -57,12 +57,13 @@ function probe(): Promise<ProbeResult> {
   })
 }
 
-function descendants(pid: number): number[] {
+/** `null` when `ps` cannot be run. */
+function descendants(pid: number): number[] | null {
   try {
     const ps = execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' })
     return descendantsOf(pid, childrenByParent(ps))
   } catch {
-    return []
+    return null
   }
 }
 
@@ -92,7 +93,7 @@ let startTimer: ReturnType<typeof setTimeout> | null = null
 // Descendants are listed before anything is signalled: once `next dev` is gone, its children are
 // re-parented and can no longer be found from it, and an orphaned next-server keeps the port.
 async function stopTree(proc: ChildProcess, graceMs: number) {
-  const tree = descendants(proc.pid!)
+  const tree = descendants(proc.pid!) ?? []
   if (!hasExited(proc)) {
     const exited = new Promise((resolve) => proc.once('exit', resolve))
     signal(proc.pid!, 'SIGTERM')
@@ -161,7 +162,9 @@ async function watch() {
     say(messages.recovered(port, restarts), 'ok')
   }
   if (liveness.refusedSince === null) return
-  const hasServer = descendants(proc.pid!).length > 0
+  const tree = descendants(proc.pid!)
+  // Without `ps`, assume the server child is still there and wait the longer window.
+  const hasServer = tree === null || tree.length > 0
   if (!refusedTooLong(liveness, Date.now(), hasServer, timing)) return
   say(messages.refused(port, Date.now() - liveness.refusedSince, hasServer))
   tearingDown = proc
@@ -180,7 +183,7 @@ for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
     if (startTimer) clearTimeout(startTimer)
     const proc = child
     if (!proc) process.exit(0)
-    treeAtStop = descendants(proc.pid!)
+    treeAtStop = descendants(proc.pid!) ?? []
     signal(proc.pid!, name)
     setTimeout(() => {
       say(messages.stopTimedOut(), 'error')
