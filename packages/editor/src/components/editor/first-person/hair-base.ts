@@ -74,10 +74,12 @@ export type BaseResult = {
   /**
    * The root layer, then the undercut's three shells from `shellStart` on
    * in the index. Each point copies its head point's (`srcVertex`) skinning
-   * and stands `height` (bind units) off it along its normal. `scalpDir` is
-   * its direction on the template, as long as roots grow there (0–1): they
-   * fade out toward the ears and the layer's lower edge, point by point, so
-   * no edge follows the head's triangles.
+   * and stands `height` (bind units) off it along its normal. `scalpDir`
+   * is its point's offset from the template's middle in template units, not
+   * normalised (the root layer reads its part in those units), with the
+   * height in mm as w. `grows` is how fully roots grow at each point (0–1):
+   * they fade out toward the ears and the layer's lower edge, point by
+   * point, so no edge follows the head's triangles.
    */
   roots: {
     position: Float32Array
@@ -89,6 +91,7 @@ export type BaseResult = {
     index: Uint32Array
     srcVertex: Uint32Array
     height: Float32Array
+    grows: Float32Array
     shellStart: number
   }
   /** How the look paints the skin where the head's own hair was (skin only, the same for any cut). */
@@ -143,8 +146,6 @@ const ROOTS_BELOW = 0.14
 /** Over how much elevation (rad) the root layer fades in from its lower edge, and over what (mm) from the ears' own points. */
 const ROOTS_EDGE = 0.06
 const ROOTS_EAR: readonly [number, number] = [2, 8]
-/** `scalpDir`'s least length, so a shader can still normalise it where nothing grows. */
-const MIN_GROWS = 1e-3
 /** The root layer's height over the head, and the undercut shells' (mm). */
 const ROOT_LAYER = 0.8
 const SHELLS = [1.5, 3, 4.5] as const
@@ -644,6 +645,7 @@ function rootLayer(
   const skinW: number[] = []
   const src: number[] = []
   const height: number[] = []
+  const grown: number[] = []
   const corners: number[] = []
   let shellStart = 0
   sets.forEach((set, s) => {
@@ -668,9 +670,8 @@ function rootLayer(
           const tx = (x - cranium.shift[0]) / cranium.scale[0] - origin[0]
           const ty = (y - cranium.shift[1]) / cranium.scale[1] - origin[1]
           const tz = (z - cranium.shift[2]) / cranium.scale[2] - origin[2]
-          const tl = Math.sqrt(tx * tx + ty * ty + tz * tz) || 1
-          const length = Math.max(MIN_GROWS, grows(i)) / tl
-          scalpDir.push(tx * length, ty * length, tz * length, heights[s]!)
+          scalpDir.push(tx, ty, tz, heights[s]!)
+          grown.push(grows(i))
           // Combed down and back over the head, along its surface.
           let gx = 0
           let gy = -1
@@ -703,6 +704,7 @@ function rootLayer(
     index: Uint32Array.from(corners),
     srcVertex: Uint32Array.from(src),
     height: Float32Array.from(height),
+    grows: Float32Array.from(grown),
     shellStart,
   }
 }

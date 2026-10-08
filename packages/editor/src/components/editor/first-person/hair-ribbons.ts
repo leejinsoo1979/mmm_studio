@@ -1,6 +1,6 @@
+import { packLayers, type StripLayer } from './hair-atlas'
 import type { RibbonArrays } from './hair-grow'
 import type { V3 } from './hair-scalp'
-import { packLayers, type StripLayer } from './hair-shading'
 import { smoothstep } from './head-skull'
 
 /**

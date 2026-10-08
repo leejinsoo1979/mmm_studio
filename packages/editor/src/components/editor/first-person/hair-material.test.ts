@@ -8,7 +8,8 @@ import {
   setHairLook,
   setRootsStyle,
 } from './hair-material'
-import { HAIRLINE_STEPS, hairLookValues, NO_UNDERCUT } from './hair-shading'
+import { HAIRLINE_STEPS } from './hair-scalp'
+import { hairLookValues, NO_UNDERCUT } from './hair-shading'
 
 function character() {
   const values = newHairValues()
@@ -50,15 +51,18 @@ describe('setRootsStyle', () => {
       { meshes },
       {
         hairline,
-        part: { x: 0.02, fade: -0.3 },
+        part: { x: 0.02, fade: [-0.04, 0.08], crown: -0.02 },
         undercut: { line: 0.35, shells: [0.85, 0.55, 0.3] },
       },
     )
     expect(values.hairline).toHaveLength(HAIRLINE_STEPS)
     expect(values.hairline[32]).toBeCloseTo(0.7 - 32 * 0.05, 6)
-    expect(values.part.toArray()).toEqual([0.02, -0.3])
+    expect(values.part.toArray()).toEqual([0.02, -0.04, 0.08, -0.02])
     expect(values.undercut.x).toBeCloseTo(0.35, 6)
-    setRootsStyle({ meshes }, { hairline, part: { x: 0, fade: 0 }, undercut: null })
+    setRootsStyle(
+      { meshes },
+      { hairline, part: { x: 0, fade: [-0.04, 0.08], crown: -0.02 }, undercut: null },
+    )
     expect(values.undercut.x).toBe(NO_UNDERCUT)
   })
 })

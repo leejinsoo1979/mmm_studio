@@ -1,5 +1,5 @@
 import { vertexNormals } from './bald-head'
-import { ATLAS_LAYER } from './hair-atlas'
+import { type AtlasKind, atlasLayerOf, STRIP_LAYER, type StripLayer } from './hair-atlas'
 import { type BaseInput, type BaseResult, headFits, spotsOf } from './hair-base'
 import { cutKey, type GrowCut } from './hair-cut'
 import { type Groom, hairlineTable, type Region, regional, unionHairline } from './hair-groom'
@@ -29,7 +29,6 @@ import {
   unitHash,
   type V3,
 } from './hair-scalp'
-import { STRIP_LAYER, type StripLayer } from './hair-shading'
 import type { HairLibrary } from './hair-styles'
 import { fitBald, PointGrid, smoothstep } from './head-skull'
 
@@ -93,7 +92,12 @@ export type HairBuild = {
   touchesBody: boolean
   /** The groom's hairline table (see hair-groom.ts's `hairlineTable`), for the root layer. */
   hairline: Float32Array
-  part: { x: number; fade: number }
+  /**
+   * Where the strands part, in template units round the scalp's middle: at
+   * x = `x`·(1 − smoothstep(fade[0], fade[1], −z)) for z ≥ `crown`; behind
+   * that the crown's whorl has no part. The root layer opens its roots there.
+   */
+  part: { x: number; fade: [number, number]; crown: number }
   undercut: { line: number; shells: [number, number, number] } | null
   /** Where an ombré tip colour starts and is full (bind height). */
   ombre: { earY: number; cutY: number }
@@ -1711,11 +1715,7 @@ function layOut(g: Grower, strips: Strip[], roots: Roots, tier: Tier, seed: numb
   }[] = []
   const fringeSlider = groom.sliders.fringe
   const curly = groom.atlasCurl > 0 || groom.sliders.curl > 0.6
-  const atlasOf = (kind: keyof typeof ATLAS_LAYER, c: number) => {
-    const layers: number | readonly number[] = ATLAS_LAYER[kind]
-    if (typeof layers === 'number') return layers
-    return layers[Math.floor(unitHash(seed ^ 0xa71a, c) * layers.length)]!
-  }
+  const atlasOf = (kind: AtlasKind, c: number) => atlasLayerOf(kind, unitHash(seed ^ 0xa71a, c))
   let triangles = 0
   const cap = groom.caps[tier]
   const push = (path: Path, entry: (typeof meta)[number]) => {
@@ -1753,16 +1753,14 @@ function layOut(g: Grower, strips: Strip[], roots: Roots, tier: Tier, seed: numb
         (FRINGE_WIDTH[0] + (FRINGE_WIDTH[1] - FRINGE_WIDTH[0]) * fringeSlider) * cmHs
       width = Math.min(width, fringeWidth * widen)
     }
-    const kind: keyof typeof ATLAS_LAYER = sheer
+    const kind: AtlasKind = sheer
       ? 'wispy'
       : strip.layer === STRIP_LAYER.inner
         ? 'dense'
-        : strip.layer === STRIP_LAYER.mid
-          ? curly
-            ? 'curlyDense'
-            : 'medium'
-          : curly
-            ? 'curlyMedium'
+        : curly
+          ? 'curly'
+          : strip.layer === STRIP_LAYER.mid
+            ? 'medium'
             : 'wispy'
     if (
       !push(strip, {
@@ -2063,7 +2061,11 @@ export async function growHair(
     roots: { tri: roots.tri, bary: roots.bary, grown: grownAt },
     touchesBody: groom.touchesBody,
     hairline: hairlineTable(groom),
-    part: { x: PART_SHIFT * groom.sliders.part, fade: PART_FADE[1] },
+    part: {
+      x: PART_SHIFT * groom.sliders.part,
+      fade: [PART_FADE[0], PART_FADE[1]],
+      crown: PART_CROWN,
+    },
     undercut: groom.undercut,
     ombre: {
       earY: state.ears.length > 0 ? Math.max(...state.ears.map((ear) => ear.top)) : state.eyeY,

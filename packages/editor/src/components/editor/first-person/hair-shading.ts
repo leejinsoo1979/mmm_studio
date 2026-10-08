@@ -1,14 +1,13 @@
 /**
- * The numbers generated hair's materials read, worked out without a
- * renderer: a character's colours and shine as the shader takes them, how
- * a strip's layer is packed into its vertices, the root layer's style, the
- * highlight's anti-aliasing, and the back-to-front order of the studio's
- * soft pass. Pure: no three (hair-material.ts puts these on the meshes).
+ * The values generated hair's materials read, worked out without a
+ * renderer (hair-material.ts puts them on the meshes), and the
+ * back-to-front order of the studio's soft pass. Pure: no three.
  */
+
+import { HAIRLINE_STEPS, unitHash, type WOBBLE_OCTAVES } from './hair-scalp'
 
 export type Rgb = [number, number, number]
 
-/** Hair's colour when neither the look nor the avatar gives one. */
 export const DEFAULT_HAIR = '#4f3426'
 
 const HEX = /^#[0-9a-f]{6}$/i
@@ -39,7 +38,6 @@ const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x)
 export const ROOT_SHADE = 0.72
 export const TIP_LIFT = 1.08
 
-/** A character's hair as the strands' and roots' shaders take it (colours linear). */
 export type HairLookValues = {
   base: Rgb
   root: Rgb
@@ -69,46 +67,23 @@ export function hairLookValues(look: {
     root: scaled(base, ROOT_SHADE),
     tip: look.tip && HEX.test(look.tip) ? linearOf(look.tip) : scaled(base, TIP_LIFT),
     skin: linearOf(look.skin, '#c8987a'),
-    expR: mix(60, 260, shine),
+    expR: mix(30, 120, shine),
     expTRT: mix(16, 48, shine),
     kR: mix(0.12, 0.3, shine),
   }
 }
 
-/**
- * A strip's layer: inner strips lie flat on the head; the rest turn to
- * face the camera (see hair-material.ts).
- */
-export const STRIP_LAYER = { inner: 0, mid: 1, outer: 2, stray: 3, baby: 4 } as const
-export type StripLayer = (typeof STRIP_LAYER)[keyof typeof STRIP_LAYER]
-
-/** `hairShape.z`: the atlas layer and the strip's layer in one float (atlas layer + 16 × strip layer). */
-export const packLayers = (atlasLayer: number, layer: StripLayer) => atlasLayer + 16 * layer
-
-export function unpackLayers(packed: number): { atlasLayer: number; layer: number } {
-  const layer = Math.floor((packed + 0.5) / 16)
-  return { atlasLayer: Math.round(packed - 16 * layer), layer }
-}
-
-/**
- * How a highlight's exponent eases off on a strip only a few pixels wide
- * (the shader's own sum): toward 16 as the strip narrows under 6 pixels,
- * and halved at the lowest detail (`detail` 0–1, the share of strips drawn).
- */
-export function highlightExponent(exponent: number, stripPixels: number, detail: number): number {
-  const narrow = clamp01(1 - stripPixels / 6)
-  return mix(exponent, 16, narrow) * mix(0.5, 1, clamp01(detail))
-}
-
-/** How much wider strips are drawn when only `detail` (0–1) of them are, so coverage holds. */
+/** How much wider strips are drawn when only `detail` (0–1) of them are, so coverage holds (`HairValues.width`). */
 export const lodWidthScale = (detail: number) => Math.max(0.05, detail) ** -0.8
 
-/** The root layer's per-character values as its shader reads them. */
 export type RootsStyleValues = {
   /** Hairline elevation at 33 even steps of |a| over [0, π]. */
   hairline: Float32Array
-  /** The part's x (template units) and the forward reach (z of the scalp direction) where it has faded out. */
-  part: [number, number]
+  /**
+   * The part (template units): its x at the front, the −z over which it
+   * eases back to the middle, and the z behind which the crown has none.
+   */
+  part: [x: number, fadeFrom: number, fadeTo: number, crown: number]
   /** The undercut's line (elevation; far below the head for none) and its three shells' coverages. */
   undercut: [number, number, number, number]
 }
@@ -116,12 +91,9 @@ export type RootsStyleValues = {
 /** No undercut: a line no part of the scalp lies below. */
 export const NO_UNDERCUT = -10
 
-export const HAIRLINE_STEPS = 33
-
-/** A build's hairline, part and undercut as the root layer reads them. */
 export function rootsStyleValues(build: {
   hairline: Float32Array
-  part: { x: number; fade: number }
+  part: { x: number; fade: readonly [number, number]; crown: number }
   undercut: { line: number; shells: [number, number, number] } | null
 }): RootsStyleValues {
   const hairline = new Float32Array(HAIRLINE_STEPS)
@@ -129,25 +101,26 @@ export function rootsStyleValues(build: {
   const u = build.undercut
   return {
     hairline,
-    part: [build.part.x, build.part.fade],
+    part: [build.part.x, build.part.fade[0], build.part.fade[1], build.part.crown],
     undercut: u ? [u.line, u.shells[0], u.shells[1], u.shells[2]] : [NO_UNDERCUT, 0, 0, 0],
   }
 }
 
-/** The hairline at |a| (radians), read from its 33 steps as the root shader reads them (linear between). */
-export function hairlineAt(table: ArrayLike<number>, a: number): number {
-  const x = (Math.min(Math.PI, Math.abs(a)) / Math.PI) * (HAIRLINE_STEPS - 1)
-  const i = Math.min(HAIRLINE_STEPS - 2, Math.floor(x))
-  return mix(table[i]!, table[i + 1]!, x - i)
+/**
+ * An octave's value-noise corners over a ∈ [−π, π]: `values[i − first]` is
+ * the noise at whole cell i (hair-scalp.ts's `noise1`). The shader reads
+ * these, so it needs no integer hash of its own.
+ */
+export function wobbleCorners(octave: (typeof WOBBLE_OCTAVES)[number]) {
+  const first = Math.floor(-Math.PI * octave.freq)
+  const last = Math.floor(Math.PI * octave.freq) + 1
+  const values = Float32Array.from(
+    { length: last - first + 1 },
+    (_, k) => unitHash(octave.seed, first + k) * 2 - 1,
+  )
+  return { first, values }
 }
 
-/** The root layer's hairline wobble: amplitude (radians of elevation) and frequency (per bind unit), per octave. */
-export const ROOT_WOBBLE = [
-  { amp: 0.035, freq: 9 },
-  { amp: 0.015, freq: 31 },
-] as const
-
-/** Each strip's span of a geometry's index (in triangles' order) and its middle, for sorting. */
 export type StripRanges = { start: Uint32Array; count: Uint32Array; centre: Float32Array }
 
 /**

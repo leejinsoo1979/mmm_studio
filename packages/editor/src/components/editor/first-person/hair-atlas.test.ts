@@ -1,13 +1,19 @@
 import { describe, expect, test } from 'bun:test'
 import {
   ATLAS_HEIGHT,
-  ATLAS_LAYER,
+  ATLAS_KINDS,
   ATLAS_LAYERS,
   ATLAS_TILE_WIDTH,
   ATLAS_WIDTH,
+  atlasKindOf,
+  atlasLayerOf,
   atlasLayerRow,
   coverageShare,
+  LAYER_STRIDE,
+  packLayers,
+  STRIP_LAYER,
   strandAtlas,
+  unpackLayers,
 } from './hair-atlas'
 
 const mips = strandAtlas()
@@ -38,12 +44,14 @@ describe('strandAtlas', () => {
   test('gives each role its density: dense over medium over wispy, solid nearly whole', () => {
     const share = (layer: number) =>
       coverageShare(mips[0]!, layer * ATLAS_TILE_WIDTH, (layer + 1) * ATLAS_TILE_WIDTH)
-    const dense = Math.min(...ATLAS_LAYER.dense.map(share))
-    const medium = ATLAS_LAYER.medium.map(share)
-    const wispy = Math.max(...ATLAS_LAYER.wispy.map(share))
+    const layers = (kind: keyof typeof ATLAS_KINDS) =>
+      Array.from({ length: ATLAS_KINDS[kind].count }, (_, i) => share(ATLAS_KINDS[kind].first + i))
+    const dense = Math.min(...layers('dense'))
+    const medium = layers('medium')
+    const wispy = Math.max(...layers('wispy'))
     expect(dense).toBeGreaterThan(Math.max(...medium))
     expect(Math.min(...medium)).toBeGreaterThan(wispy)
-    expect(share(ATLAS_LAYER.solid)).toBeGreaterThan(0.9)
+    expect(share(ATLAS_KINDS.solid.first)).toBeGreaterThan(0.9)
   })
 
   test('repeats along the strand: row 0 is row 1024', () => {
@@ -102,5 +110,62 @@ describe('strandAtlas', () => {
     const again = strandAtlas()
     expect(again[0]!.data).toEqual(mips[0]!.data)
     expect(again[3]!.data).toEqual(mips[3]!.data)
+  })
+})
+
+describe('ATLAS_KINDS', () => {
+  test('gives every layer exactly one kind, in order', () => {
+    const owners = Array.from({ length: ATLAS_LAYERS }, (_, layer) => atlasKindOf(layer))
+    let next = 0
+    for (const [kind, { first, count }] of Object.entries(ATLAS_KINDS)) {
+      expect(first as number).toBe(next)
+      for (let i = 0; i < count; i++) expect(owners[first + i]).toBe(kind as never)
+      next = first + count
+    }
+    expect(next).toBe(ATLAS_LAYERS)
+    expect(() => atlasKindOf(ATLAS_LAYERS)).toThrow()
+  })
+
+  test('keeps the wispy and stray layers next to each other (the material frays them as one range)', () => {
+    expect(ATLAS_KINDS.stray.first as number).toBe(
+      ATLAS_KINDS.wispy.first + ATLAS_KINDS.wispy.count,
+    )
+  })
+
+  test("picks each of a kind's variants, and only its own", () => {
+    for (const kind of Object.keys(ATLAS_KINDS) as (keyof typeof ATLAS_KINDS)[]) {
+      const { first, count } = ATLAS_KINDS[kind]
+      const seen = new Set<number>()
+      for (let k = 0; k <= 100; k++) {
+        const layer = atlasLayerOf(kind, k / 100)
+        expect(atlasKindOf(layer)).toBe(kind)
+        seen.add(layer)
+      }
+      expect([...seen].sort((p, q) => p - q)).toEqual(
+        Array.from({ length: count }, (_, i) => first + i),
+      )
+    }
+  })
+})
+
+describe('packLayers', () => {
+  test('round-trips every atlas layer and strip layer', () => {
+    for (const layer of Object.values(STRIP_LAYER)) {
+      for (let atlas = 0; atlas < ATLAS_LAYERS; atlas++) {
+        expect(unpackLayers(packLayers(atlas, layer))).toEqual({ atlasLayer: atlas, layer })
+      }
+    }
+    expect(ATLAS_LAYERS).toBeLessThanOrEqual(LAYER_STRIDE)
+  })
+
+  test('survives float rounding on the way through the GPU', () => {
+    expect(unpackLayers(packLayers(11, STRIP_LAYER.mid) - 1e-4)).toEqual({
+      atlasLayer: 11,
+      layer: 1,
+    })
+    expect(unpackLayers(packLayers(0, STRIP_LAYER.outer) + 1e-4)).toEqual({
+      atlasLayer: 0,
+      layer: 2,
+    })
   })
 })

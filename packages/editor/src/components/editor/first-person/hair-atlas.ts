@@ -20,56 +20,73 @@
  * coverage instead of fading. Pure: no three.
  */
 
-/** How many layers, and each one's size in texels (across, along). */
 export const ATLAS_LAYERS = 12
 export const ATLAS_TILE_WIDTH = 256
 export const ATLAS_HEIGHT = 1024
 export const ATLAS_WIDTH = ATLAS_TILE_WIDTH * ATLAS_LAYERS
 
-/** Which layer is which. Each role has more than one look, so neighbouring strips differ. */
-export const ATLAS_LAYER = {
-  dense: [0, 1, 2],
-  medium: [3, 4, 5],
-  wispy: [6, 7],
-  stray: 8,
-  curlyDense: 9,
-  curlyMedium: 10,
-  solid: 11,
+/**
+ * The one table of which atlas layers each kind of strip draws from: its
+ * first layer and how many variants follow it. The generator picks a
+ * strip's layer with `atlasLayerOf` and the material reads it back, so the
+ * two can never number the layers apart.
+ */
+export const ATLAS_KINDS = {
+  dense: { first: 0, count: 3 },
+  medium: { first: 3, count: 3 },
+  wispy: { first: 6, count: 2 },
+  stray: { first: 8, count: 1 },
+  curly: { first: 9, count: 2 },
+  solid: { first: 11, count: 1 },
 } as const
 
-type Kind = 'dense' | 'medium' | 'wispy' | 'stray' | 'curlyDense' | 'curlyMedium' | 'solid'
+export type AtlasKind = keyof typeof ATLAS_KINDS
 
-const KINDS: readonly Kind[] = [
-  'dense',
-  'dense',
-  'dense',
-  'medium',
-  'medium',
-  'medium',
-  'wispy',
-  'wispy',
-  'stray',
-  'curlyDense',
-  'curlyMedium',
-  'solid',
-]
+/** A strip's atlas layer: its kind's variant at `pick` (0–1, the strip's own random). */
+export function atlasLayerOf(kind: AtlasKind, pick: number): number {
+  const { first, count } = ATLAS_KINDS[kind]
+  return first + Math.min(count - 1, Math.max(0, Math.floor(pick * count)))
+}
+
+export function atlasKindOf(layer: number): AtlasKind {
+  for (const [kind, { first, count }] of Object.entries(ATLAS_KINDS) as [
+    AtlasKind,
+    { first: number; count: number },
+  ][]) {
+    if (layer >= first && layer < first + count) return kind
+  }
+  throw new Error(`no atlas layer ${layer}`)
+}
+
+/** A strip's layer of the hair: inner strips lie flat on the head, the rest face the camera. */
+export const STRIP_LAYER = { inner: 0, mid: 1, outer: 2, stray: 3, baby: 4 } as const
+export type StripLayer = (typeof STRIP_LAYER)[keyof typeof STRIP_LAYER]
+
+/** `hairShape.z` holds the atlas layer plus this times the strip layer. */
+export const LAYER_STRIDE = 16
+
+export const packLayers = (atlasLayer: number, layer: StripLayer) =>
+  atlasLayer + LAYER_STRIDE * layer
+
+export function unpackLayers(packed: number): { atlasLayer: number; layer: number } {
+  const layer = Math.floor((packed + 0.5) / LAYER_STRIDE)
+  return { atlasLayer: Math.round(packed - LAYER_STRIDE * layer), layer }
+}
+
+type Spec = {
+  locks: [number, number]
+  half: [number, number]
+  wander: number
+  fibres: number
+  fibreWidth: [number, number]
+  curl: number
+}
 
 /**
- * Per kind: how many sub-locks and how wide (half width, share of the
- * strip), how far they wander along the strand, how many fibres and how
- * wide (texels), and the curl's turns per repeat (0: straight).
+ * Sub-locks: count and half width (share of the strip), wander along the
+ * strand; fibres: count and width (texels); curl turns per repeat.
  */
-const SPECS: Record<
-  Kind,
-  {
-    locks: [number, number]
-    half: [number, number]
-    wander: number
-    fibres: number
-    fibreWidth: [number, number]
-    curl: number
-  }
-> = {
+const SPECS: Record<Exclude<AtlasKind, 'curly'> | 'curlyDense' | 'curlyMedium', Spec> = {
   dense: {
     locks: [7, 8],
     half: [0.07, 0.09],
@@ -128,7 +145,6 @@ const SPECS: Record<
   },
 }
 
-/** A periodic wave along the strand: `turns` whole periods per repeat, starting at `phase` (rows). */
 type Wave = { amp: number; turns: number; phase: number }
 
 type SubLock = { centre: number; half: number; path: Wave[]; breathe: Wave }
@@ -137,7 +153,6 @@ type Fibre = {
   /** The sub-lock it runs in (-1: between them), and where across it (half widths from its middle). */
   lock: number
   offset: number
-  /** Where across the strip, for one between sub-locks. */
   centre: number
   path: Wave[]
   width: number
@@ -146,9 +161,10 @@ type Fibre = {
   shift: number
 }
 
-type LayerPlan = { kind: Kind; locks: SubLock[]; fibres: Fibre[] }
+type SpecName = keyof typeof SPECS
 
-/** mulberry32: integer only, the same on every engine. */
+type LayerPlan = { kind: SpecName; locks: SubLock[]; fibres: Fibre[] }
+
 function random(seed: number) {
   let s = seed >>> 0
   return () => {
@@ -164,14 +180,21 @@ const SINE = Float64Array.from({ length: ATLAS_HEIGHT }, (_, i) =>
   Math.sin((2 * Math.PI * i) / ATLAS_HEIGHT),
 )
 
-/** A wave's value at row `y`: whole periods over the repeat, so row y and row y + 1024 agree exactly. */
+/** Whole periods over the repeat, so row y and row y + 1024 agree exactly. */
 function wave(w: Wave, y: number) {
   const i = (((w.turns * y + w.phase) % ATLAS_HEIGHT) + ATLAS_HEIGHT) % ATLAS_HEIGHT
   return w.amp * SINE[Math.floor(i)]!
 }
 
+/** The curly kind's two variants are a dense and a medium curl. */
+function specOf(layer: number): SpecName {
+  const kind = atlasKindOf(layer)
+  if (kind !== 'curly') return kind
+  return layer === ATLAS_KINDS.curly.first ? 'curlyDense' : 'curlyMedium'
+}
+
 function plan(layer: number): LayerPlan {
-  const kind = KINDS[layer]!
+  const kind = specOf(layer)
   const spec = SPECS[kind]
   const next = random(0x9e3779b9 ^ Math.imul(layer + 1, 0x85ebca6b))
   const between = (lo: number, hi: number) => lo + (hi - lo) * next()
@@ -253,7 +276,6 @@ function pathAt(path: readonly Wave[], y: number) {
   return sum
 }
 
-/** A layer's row `y` (any integer: the repeat wraps), as RGBA floats 0–1 across its 256 texels. */
 function layerRow(
   layer: LayerPlan,
   y: number,
@@ -286,7 +308,6 @@ function layerRow(
       if (r > out[x * 4]!) out[x * 4] = r
     }
   }
-  // G, B, A: fibres laid one over another, each with its own value and shift.
   const turn = ((2 * Math.PI) / ATLAS_HEIGHT) * curl * y
   for (let f = 0; f < layer.fibres.length; f++) {
     const fibre = layer.fibres[f]!
@@ -319,14 +340,12 @@ function layerRow(
 
 const MAX_LOCKS = 8
 
-/** Layer `layer`'s row `y` (any integer; the repeat wraps) as RGBA8. */
 export function atlasLayerRow(layer: number, y: number): Uint8Array {
   const row = new Float32Array(ATLAS_TILE_WIDTH * 4)
   layerRow(plan(layer), y, row, new Float64Array(MAX_LOCKS), new Float64Array(MAX_LOCKS))
   return Uint8Array.from(row, (v) => Math.round(clamp01(v) * 255))
 }
 
-/** One level of the atlas: RGBA8 rows of `width` texels, `height` rows. */
 export type AtlasMip = { data: Uint8Array; width: number; height: number }
 
 /** R's share of texels at or above one half (128 of 255) over a layer's columns `[x0, x1)` of a mip. */
@@ -348,7 +367,6 @@ export function strandAtlas(): AtlasMip[] {
   const H = ATLAS_HEIGHT
   const levels: AtlasMip[] = []
   const top = new Uint8Array(ATLAS_WIDTH * H * 4)
-  // R before quantising, per layer, for the coverage-preserving filter.
   let coverage: Float32Array[] = []
   const targets: number[] = []
   const row = new Float32Array(W * 4)

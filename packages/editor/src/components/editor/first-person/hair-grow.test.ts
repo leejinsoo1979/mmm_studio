@@ -1,11 +1,14 @@
 import { beforeAll, describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import {
-  ATLAS_LAYER,
   ATLAS_LAYERS,
   ATLAS_TILE_WIDTH,
+  type AtlasKind,
+  atlasKindOf,
   coverageShare,
+  STRIP_LAYER,
   strandAtlas,
+  unpackLayers,
 } from './hair-atlas'
 import { headFits } from './hair-base'
 import { DEFAULT_CUT_PARAMS, type HairCut, type HairCutStyle } from './hair-cut'
@@ -26,11 +29,18 @@ import {
   type Tier,
 } from './hair-grow'
 import { RIBBON_ITEM_SIZES } from './hair-ribbons'
-import { angles, inEyes, radiusAt, rayTriangle } from './hair-scalp'
-import { STRIP_LAYER, unpackLayers } from './hair-shading'
+import {
+  angles,
+  inEyes,
+  PART_CROWN,
+  PART_FADE,
+  partLine,
+  radiusAt,
+  rayTriangle,
+} from './hair-scalp'
 import { type HairLibrary, loadHairLibrary } from './hair-styles'
 import { loadHairHead } from './hair-test-utils'
-import { fitBald } from './head-skull'
+import { fitBald, smoothstep } from './head-skull'
 
 const ROCKETBOX = join(import.meta.dir, '../../../../../../apps/editor/public/characters/rocketbox')
 
@@ -499,6 +509,20 @@ describe('the vertex layout', () => {
   }, 30000)
 })
 
+describe('the part a build reports', () => {
+  test('is where the generator parts its strands, as the root layer reads it', async () => {
+    for (const part of [-1, 0, 0.6]) {
+      const b = await build('Female_Adult_01', cutOf('twoBlock', { part }), 'game')
+      expect(b.part.crown).toBe(PART_CROWN)
+      expect(b.part.fade).toEqual([PART_FADE[0], PART_FADE[1]])
+      for (const tz of [-0.06, -0.02, 0, 0.03, 0.06, 0.1]) {
+        const x = b.part.x * (1 - smoothstep(b.part.fade[0], b.part.fade[1], -tz))
+        expect(x).toBeCloseTo(partLine(part, tz), 9)
+      }
+    }
+  }, 30000)
+})
+
 describe('what a head keeps between grows', () => {
   const fresh = (id: string) => {
     const { fixture } = heads.get(id)!
@@ -543,10 +567,6 @@ describe('what a head keeps between grows', () => {
 })
 
 describe('the strand atlas each strip draws from', () => {
-  const kindOf = new Map<number, string>()
-  for (const [kind, layers] of Object.entries(ATLAS_LAYER)) {
-    for (const layer of [layers].flat()) kindOf.set(layer, kind)
-  }
   const top = strandAtlas()[0]!
   const coverage = Array.from({ length: ATLAS_LAYERS }, (_, layer) =>
     coverageShare(top, layer * ATLAS_TILE_WIDTH, (layer + 1) * ATLAS_TILE_WIDTH),
@@ -561,7 +581,7 @@ describe('the strand atlas each strip draws from', () => {
         const b = await build(id, cut, 'studio')
         const g = grown(id, cut, 'studio')
         const curly = curl > 0.6
-        const wanted = new Map<string, string>()
+        const wanted = new Map<string, AtlasKind>()
         for (let i = 0; i < g.strips.count; i++) {
           const root = g.info.root[i]!
           const layer = g.strips.layer[i]!
@@ -575,12 +595,10 @@ describe('the strand atlas each strip draws from', () => {
                 ? 'wispy'
                 : layer === STRIP_LAYER.inner
                   ? 'dense'
-                  : layer === STRIP_LAYER.mid
-                    ? curly
-                      ? 'curlyDense'
-                      : 'medium'
-                    : curly
-                      ? 'curlyMedium'
+                  : curly
+                    ? 'curly'
+                    : layer === STRIP_LAYER.mid
+                      ? 'medium'
                       : 'wispy',
           )
         }
@@ -589,7 +607,7 @@ describe('the strand atlas each strip draws from', () => {
           for (let v = 0; v < geometry.hairShape.length / 4; v += 2) {
             const { atlasLayer, layer } = unpackLayers(geometry.hairShape[v * 4 + 2]!)
             const strand = geometry.hairData[v * 4 + 3]!
-            expect(kindOf.get(atlasLayer)).toBe(wanted.get(`${strand}|${layer}`)!)
+            expect(atlasKindOf(atlasLayer)).toBe(wanted.get(`${strand}|${layer}`)!)
             checked++
           }
         }

@@ -178,13 +178,19 @@ export function hairlineAt(table: ArrayLike<number>, a: number) {
   return table[k]! * (1 - t) + table[k + 1]! * t
 }
 
+/** The hairline wobble's octaves over azimuth a: ±amp (rad) at freq per radian. */
+export const WOBBLE_OCTAVES = [
+  { amp: 0.035, freq: 9, seed: 0x51 },
+  { amp: 0.015, freq: 31, seed: 0x52 },
+] as const
+
 /**
- * The hairline's irregular edge (rad): ±0.035 at 9 per radian and ±0.015
- * at 31, the same along the whole hairline of every head, so the roots'
- * edge and the root layer's (its material repeats this) agree.
+ * The hairline's irregular edge (rad), the same along the whole hairline
+ * of every head, so the roots' edge and the root layer's (its material
+ * reads these octaves' noise corners, see hair-shading.ts) agree.
  */
 export const hairlineWobble = (a: number) =>
-  0.035 * noise1(a * 9, 0x51) + 0.015 * noise1(a * 31, 0x52)
+  WOBBLE_OCTAVES.reduce((sum, { amp, freq, seed }) => sum + amp * noise1(a * freq, seed), 0)
 
 /** How densely roots grow at (a, e) under a hairline table: 0 below it, 1 well inside. */
 export const hairlineDensity = (table: ArrayLike<number>, a: number, e: number) =>

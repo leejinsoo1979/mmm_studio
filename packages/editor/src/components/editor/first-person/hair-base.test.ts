@@ -153,6 +153,7 @@ describe.each([...HAIR_HEADS])('%s flattened', (id) => {
     expect(roots.position.length).toBe(n * 3)
     expect(roots.scalpDir.length).toBe(n * 4)
     expect(roots.comb.length).toBe(n * 3)
+    expect(roots.grows.length).toBe(n)
     expect(roots.index.length % 3).toBe(0)
     expect(roots.shellStart % 3).toBe(0)
     expect(roots.shellStart).toBeGreaterThan(0)
@@ -164,6 +165,28 @@ describe.each([...HAIR_HEADS])('%s flattened', (id) => {
         expect(roots.skinWeight[v * 4 + c]).toBe(head.input.head.skinWeight[i * 4 + c]!)
       }
     }
+  })
+
+  test("gives each root-layer point its template offset and height, as the root layer's part reads them", () => {
+    const { head, base } = heads.get(id)!
+    const { cranium } = headFits(head.input, library)
+    const origin = templateFrame(library.skull).origin
+    const { roots } = base
+    const shells = new Set<number>()
+    for (let v = 0; v < roots.srcVertex.length; v++) {
+      const i = roots.srcVertex[v]!
+      const p = base.head.points.subarray(i * 3, i * 3 + 3)
+      for (let axis = 0; axis < 3; axis++) {
+        const t = (p[axis]! - cranium.shift[axis]!) / cranium.scale[axis]! - origin[axis]!
+        expect(roots.scalpDir[v * 4 + axis]!).toBeCloseTo(t, 5)
+      }
+      shells.add(roots.scalpDir[v * 4 + 3]!)
+    }
+    // Not normalised: a head is about a tenth of the template's −1..1 across.
+    const t0 = Math.hypot(...roots.scalpDir.subarray(0, 3))
+    expect(t0).toBeGreaterThan(0.03)
+    expect(t0).toBeLessThan(0.3)
+    expect([...shells].sort((a, b) => a - b)).toEqual([0.8, 1.5, 3, 4.5].map(Math.fround))
   })
 
   test('paints well-formed skin only', () => {
@@ -245,8 +268,9 @@ describe.each([...HAIR_HEADS])('%s flattened, its own hair', (id) => {
       const [x, y, z] = base.head.points.subarray(i * 3, i * 3 + 3)
       const near =
         Math.min(...earPoints.map((q) => Math.hypot(q[0]! - x!, q[1]! - y!, q[2]! - z!))) / mm
-      const grows = Math.hypot(...roots.scalpDir.subarray(v * 4, v * 4 + 3))
-      expect(grows).toBeLessThanOrEqual(1 + 1e-6)
+      const grows = roots.grows[v]!
+      expect(grows).toBeGreaterThanOrEqual(0)
+      expect(grows).toBeLessThanOrEqual(1)
       if (near < 2) expect(grows).toBeLessThan(2e-3)
       if (near < 10 && grows > 0.05) reaching++
     }
