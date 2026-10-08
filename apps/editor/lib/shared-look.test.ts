@@ -4,6 +4,7 @@ import {
   FACE_POINT_COUNT,
   FACE_POINT_INDICES,
   type FacePin,
+  type HairCut,
   MAX_PIN,
   NO_LOOK,
   NO_PAINT,
@@ -15,6 +16,18 @@ import {
   toSharedLook,
   wantedPhotoId,
 } from './shared-look'
+
+/** The longest hair cut as JSON: the longest style name, every slider at a two-place negative, a tip. */
+const LARGEST_CUT: HairCut = {
+  style: 'twoBlock',
+  length: -0.37,
+  volume: -0.37,
+  curl: 0.37,
+  part: -0.37,
+  fringe: 0.37,
+  tip: '#a0522d',
+  shine: 0.37,
+}
 
 const photo = 'data:image/jpeg;base64,AAAA'
 const points = Array.from({ length: FACE_POINT_COUNT * 2 }, (_, i) => (i % 97) / 100)
@@ -32,6 +45,7 @@ const look = {
     >,
   },
   body: { height: 0.3, sliders: { shoulders: 0.5 } },
+  hairCut: LARGEST_CUT,
   hairStyle: 'Female_Adult_04',
   paint: { ...NO_PAINT, lips: '#c0404a', beard: 'stubble' as const },
 }
@@ -113,6 +127,7 @@ describe('a look shared through the participant document', () => {
   test('a build, a hairstyle or face paint alone is a look', () => {
     for (const change of [
       { body: { height: -0.4, sliders: {} } },
+      { hairCut: LARGEST_CUT },
       { hairStyle: 'bald' },
       { paint: { ...NO_PAINT, freckles: 0.5 } },
     ]) {
@@ -123,6 +138,17 @@ describe('a look shared through the participant document', () => {
     }
     // Someone else's idea of a hairstyle: none.
     expect(fromSharedLook({ ...NO_LOOK, hairStyle: '../evil' }, null)).toBeNull()
+  })
+
+  test('a hair cut this client can’t read is the character’s own hair', () => {
+    for (const hairCut of [{ style: 'mohawk' }, 'bob', 42, { ...LARGEST_CUT, style: null }]) {
+      expect(fromSharedLook({ ...NO_LOOK, hairCut }, null)).toBeNull()
+      const shared = JSON.parse(JSON.stringify(toSharedLook(look)))
+      expect(fromSharedLook({ ...shared, hairCut }, { photo, points })).toEqual({
+        ...look,
+        hairCut: null,
+      })
+    }
   })
 
   test('nothing usable in it: no look', () => {

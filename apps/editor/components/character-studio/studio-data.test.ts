@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import type { HairStyleEntry } from '@pascal-app/editor'
-import { hairSections } from './studio-data'
+import { HAIR_CUT_RANGES, HAIR_CUT_STYLES, type HairStyleEntry } from '@pascal-app/editor'
+import { HAIR_CUT_LABELS, HAIR_CUT_SLIDERS, hairSections } from './studio-data'
 
 const STYLES: HairStyleEntry[] = JSON.parse(
   readFileSync(
@@ -26,5 +26,19 @@ describe('the hairstyle gallery', () => {
     ])
     expect(sections.map(({ label }) => label)).toEqual(['짧은 머리', '긴 머리'])
     expect(sections[1]!.styles.map(({ name }) => name)).toEqual(['긴 머리 1', '긴 머리 2'])
+  })
+})
+
+describe('the generated hairstyles', () => {
+  test('each has a name of its own, in Korean', () => {
+    const names = HAIR_CUT_STYLES.map((style) => HAIR_CUT_LABELS[style])
+    expect(new Set(names).size).toBe(HAIR_CUT_STYLES.length)
+    for (const name of names) expect(name).toMatch(/^[가-힣]+$/)
+  })
+
+  test('every slider of a cut is offered once, length first', () => {
+    const ids = HAIR_CUT_SLIDERS.map(({ id }) => id)
+    expect(ids).toEqual(['length', 'volume', 'curl', 'part', 'fringe'])
+    expect([...ids].sort()).toEqual(Object.keys(HAIR_CUT_RANGES).sort())
   })
 })
