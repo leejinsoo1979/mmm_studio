@@ -27,8 +27,10 @@ import {
   parseDevPort,
   parseProbeHost,
   parsePs,
+  ROUTE_PROBE_PATH,
   readTiming,
   refusedTooLong,
+  routesMissing,
   stillRunning,
 } from './dev-supervisor-policy'
 
@@ -44,6 +46,8 @@ const timing = readTiming(process.env)
 const colors = process.stderr.isTTY && !process.env.NO_COLOR
 const KILL_WAIT_MS = 5_000
 const STOP_TIMEOUT_MS = 10_000
+// The first request after a restart compiles the route, and nothing is sent meanwhile.
+const ROUTE_PROBE_TIMEOUT_MS = 120_000
 
 function say(text: string, tone: 'warn' | 'error' | 'ok' = 'warn') {
   const time = new Date().toTimeString().slice(0, 8)
@@ -62,6 +66,32 @@ function probe(): Promise<ProbeResult> {
     socket.setTimeout(3_000, () => done('timeout'))
     socket.once('connect', () => done('open'))
     socket.once('error', (error: NodeJS.ErrnoException) => done(classifyConnectError(error.code)))
+  })
+}
+
+// A raw request rather than an HTTP client: Bun's honours HTTP_PROXY even for localhost.
+// `null` when no response came back.
+function probeRoutes(): Promise<boolean | null> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host })
+    let head = ''
+    const done = (result: boolean | null) => {
+      socket.destroy()
+      resolve(result)
+    }
+    socket.setTimeout(ROUTE_PROBE_TIMEOUT_MS, () => done(null))
+    socket.once('connect', () => {
+      socket.write(
+        `GET ${ROUTE_PROBE_PATH} HTTP/1.1\r\nHost: localhost:${port}\r\nConnection: close\r\n\r\n`,
+      )
+    })
+    socket.on('data', (chunk: Buffer) => {
+      head += chunk.toString('latin1')
+      const end = head.indexOf('\r\n\r\n')
+      if (end !== -1) done(routesMissing(head.slice(0, end)))
+    })
+    socket.once('error', () => done(null))
+    socket.once('end', () => done(null))
   })
 }
 
@@ -116,6 +146,7 @@ let liveness: Liveness = INITIAL_LIVENESS
 let deaths: number[] = []
 let restarts = 0
 let awaitingRecovery = false
+let restartedForRoutes = false
 let stopping = false
 let treeAtStop: ProcessEntry[] = []
 let waitingForPort = false
@@ -194,6 +225,26 @@ async function start() {
   })
 }
 
+// An open port is not enough after a restart, see ROUTE_PROBE_PATH. A plain restart has cleared
+// the broken routes before, so that is tried once; a second miss in a row only gets advice.
+async function confirmRecovery(proc: ChildProcess) {
+  const missing = await probeRoutes()
+  if (proc !== child || stopping || deathHandled.has(proc)) return
+  if (!missing) {
+    if (missing === false) restartedForRoutes = false
+    say(messages.recovered(port, restarts), 'ok')
+    return
+  }
+  if (restartedForRoutes) {
+    restartedForRoutes = false
+    say(messages.routesStillMissing(), 'error')
+    return
+  }
+  restartedForRoutes = true
+  say(messages.routesMissing())
+  await retire(proc)
+}
+
 async function watch() {
   const proc = child
   if (!proc || stopping || watching || deathHandled.has(proc)) return
@@ -204,7 +255,7 @@ async function watch() {
   liveness = nextLiveness(liveness, result, Date.now())
   if (result === 'open' && awaitingRecovery) {
     awaitingRecovery = false
-    say(messages.recovered(port, restarts), 'ok')
+    void confirmRecovery(proc)
   }
   if (liveness.refusedSince === null) return
   const tree = treeOf(proc)

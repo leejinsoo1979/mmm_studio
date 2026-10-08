@@ -205,6 +205,20 @@ export function stillRunning(
   return [...pids]
 }
 
+// After a crash restart Turbopack has come back serving its HTML not-found page for every
+// nested dynamic API route (/api/scenes/[id]/events, /thumbnail, /publish, …) while
+// /api/health answered, so the editor's live sync never reconnected. The events route answers
+// a scene that does not exist with JSON, so any other response means the routes are there.
+export const ROUTE_PROBE_PATH = '/api/scenes/dev-supervisor-probe/events'
+
+/** Reads the status line and headers of the probe's response. */
+export function routesMissing(responseHead: string): boolean {
+  const [statusLine = '', ...headers] = responseHead.split('\r\n')
+  const status = Number(statusLine.split(' ')[1])
+  const contentType = headers.find((header) => /^content-type:/i.test(header)) ?? ''
+  return status === 404 && contentType.toLowerCase().includes('text/html')
+}
+
 const seconds = (ms: number) => `${Math.round(ms / 100) / 10}초`
 
 export const messages = {
@@ -231,6 +245,18 @@ export const messages = {
   },
   recovered(port: number, restarts: number): string {
     return `에디터 개발 서버가 다시 열렸습니다: http://localhost:${port} (이번 실행에서 ${restarts}번째 재시작)`
+  },
+  routesMissing(): string {
+    return (
+      '서버는 다시 열렸지만 /api/scenes/[id]/ 아래 API(실시간 동기화, 썸네일, 게시)가 Next의 ' +
+      '404 페이지를 돌려줍니다. Turbopack 캐시 문제로 보여 한 번 더 다시 시작합니다.'
+    )
+  },
+  routesStillMissing(): string {
+    return (
+      '다시 시작한 뒤에도 /api/scenes/[id]/ 아래 API가 404입니다. Ctrl+C로 bun dev를 멈추고 ' +
+      'bun clean:cache 후 bun dev를 다시 실행하세요.'
+    )
   },
   giveUp(deaths: number, port: number, timing: SupervisorTiming): string {
     const window = Math.round(timing.windowMs / 60_000)

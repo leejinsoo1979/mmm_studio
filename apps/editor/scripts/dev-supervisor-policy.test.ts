@@ -15,6 +15,7 @@ import {
   parsePs,
   readTiming,
   refusedTooLong,
+  routesMissing,
   stillRunning,
 } from './dev-supervisor-policy'
 
@@ -187,6 +188,19 @@ describe('process table', () => {
     expect(stillRunning(recorded, later)).toEqual([13, 14])
     expect(stillRunning([...recorded, ...recorded], later)).toEqual([13, 14])
   })
+})
+
+test('only an HTML 404 means the nested API routes are missing', () => {
+  const head = (status: string, contentType?: string) =>
+    [`HTTP/1.1 ${status}`, 'vary: rsc', ...(contentType ? [contentType] : [])].join('\r\n')
+  expect(routesMissing(head('404 Not Found', 'Content-Type: text/html; charset=utf-8'))).toBe(true)
+  expect(routesMissing(head('404 Not Found', 'content-type: application/json'))).toBe(false)
+  expect(routesMissing(head('200 OK', 'content-type: text/event-stream; charset=utf-8'))).toBe(
+    false,
+  )
+  expect(routesMissing(head('500 Internal Server Error', 'content-type: text/html'))).toBe(false)
+  expect(routesMissing(head('404 Not Found'))).toBe(false)
+  expect(routesMissing('')).toBe(false)
 })
 
 describe('messages', () => {

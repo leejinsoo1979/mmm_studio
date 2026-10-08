@@ -22,11 +22,23 @@ for (const name of ['SIGINT', 'SIGTERM']) {
   })
 }
 `
-// SIGUSR2 closes the listener but keeps the process alive.
+// SIGUSR2 closes the listener but keeps the process alive. While the routes-missing file holds a
+// count above zero, the scene events route answers like Turbopack's broken restart: an HTML 404.
 const FAKE_SERVER = `
 import http from 'node:http'
-const server = http.createServer((req, res) => res.end('ok'))
-  .listen(Number(process.argv[2]), '127.0.0.1', () => console.log('SERVER_PID=' + process.pid))
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+const missing = new URL('./routes-missing', import.meta.url).pathname
+const server = http.createServer((req, res) => {
+  if (!/^\\/api\\/scenes\\/[^/]+\\/events$/.test(req.url)) return res.end('ok')
+  const left = existsSync(missing) ? Number(readFileSync(missing, 'utf8')) : 0
+  if (left > 0) {
+    writeFileSync(missing, String(left - 1))
+    res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' })
+    return res.end('<!DOCTYPE html><title>404: This page could not be found.</title>')
+  }
+  res.writeHead(404, { 'content-type': 'application/json' })
+  res.end('{"error":"not_found"}')
+}).listen(Number(process.argv[2]), '127.0.0.1', () => console.log('SERVER_PID=' + process.pid))
 process.on('SIGUSR2', () => { server.close(); setInterval(() => {}, 1000) })
 `
 
@@ -34,6 +46,8 @@ const dir = mkdtempSync(path.join(tmpdir(), 'dev-supervisor-'))
 writeFileSync(path.join(dir, 'fake-next-dev.mjs'), FAKE_NEXT_DEV)
 writeFileSync(path.join(dir, 'fake-server.mjs'), FAKE_SERVER)
 const supervisorPath = path.join(import.meta.dir, 'dev-supervisor.ts')
+
+const routesMissingFile = path.join(dir, 'routes-missing')
 
 const FAST = {
   DEV_SUPERVISOR_PROBE_MS: '100',
@@ -56,6 +70,7 @@ function signalGroup(proc: ChildProcess, name: NodeJS.Signals) {
 // Each supervisor leads its own process group, so a failed test cannot leave fake servers
 // holding ports.
 afterEach(async () => {
+  rmSync(routesMissingFile, { force: true })
   for (const proc of running.splice(0)) {
     if (proc.exitCode === null && proc.signalCode === null) {
       const exited = new Promise((resolve) => proc.once('exit', resolve))
@@ -212,6 +227,42 @@ test('tears a frozen next dev down once and restarts it once', async () => {
   expect(await run.exited).toBe(0)
   expect(alive(second)).toBe(false)
   expect(await portOpen(port)).toBe(false)
+}, 30_000)
+
+test('restarts once more when the scene API routes come back as an HTML 404', async () => {
+  const port = await freePort()
+  const run = supervise(['node', path.join(dir, 'fake-next-dev.mjs'), '--port', String(port)])
+  await until(() => run.serverPids().length === 1, 'first server')
+  await until(() => portOpen(port), 'port open')
+  writeFileSync(routesMissingFile, '1')
+  process.kill(run.serverPids()[0]!, 'SIGKILL')
+
+  await until(() => run.out.stderr.includes('다시 열렸습니다'), 'recovery message')
+  expect(run.out.stderr).toContain('404 페이지를 돌려줍니다')
+  expect(run.out.stderr).toContain('2/5번째 재시작')
+  expect(run.out.stderr.indexOf('404 페이지')).toBeLessThan(
+    run.out.stderr.indexOf('다시 열렸습니다'),
+  )
+  expect(run.serverPids()).toHaveLength(3)
+  run.proc.kill('SIGTERM')
+  expect(await run.exited).toBe(0)
+}, 30_000)
+
+test('gives advice instead of restarting again when the routes stay missing', async () => {
+  const port = await freePort()
+  const run = supervise(['node', path.join(dir, 'fake-next-dev.mjs'), '--port', String(port)])
+  await until(() => run.serverPids().length === 1, 'first server')
+  await until(() => portOpen(port), 'port open')
+  writeFileSync(routesMissingFile, '2')
+  process.kill(run.serverPids()[0]!, 'SIGKILL')
+
+  await until(() => run.out.stderr.includes('bun clean:cache 후'), 'advice')
+  await Bun.sleep(500)
+  expect(count(run.out.stderr, '후 다시 시작합니다')).toBe(2)
+  expect(run.out.stderr).not.toContain('다시 열렸습니다')
+  expect(run.serverPids()).toHaveLength(3)
+  run.proc.kill('SIGTERM')
+  expect(await run.exited).toBe(0)
 }, 30_000)
 
 test('a hangup during the restart delay stops without starting again', async () => {
