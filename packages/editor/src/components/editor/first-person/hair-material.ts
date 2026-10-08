@@ -353,11 +353,22 @@ const lobe = (tangent: N, half: N, exponent: N) => {
 }
 
 /**
+ * Deeper hair is darker and more saturated, as multiple scattering makes
+ * it look. The saturation works on the colour's own hue (each channel
+ * against the brightest), not on the colour itself: a dark brown raised
+ * to a power would go black.
+ */
+function deepAlbedo(h: HairShading): N {
+  const peak = max(max(h.albedo.x, h.albedo.y), max(h.albedo.z, 1e-4))
+  return h.albedo.mul(h.albedo.div(peak).pow(h.depth.mul(1.5))).mul(mix(1, 0.6, h.depth))
+}
+
+/**
  * Hair's light: two shifted strand highlights (R untinted, TRT in the hair's
  * colour), seen only from the lit side; wrapped diffuse darkening and
  * saturating with depth; tips glowing against a light behind; a deep-shadow
  * term that never darkens by more than half; the environment seen along
- * the fibre's bent normal. Each light's highlight is capped at twice its
+ * the fibre's bent normal. Each light's highlight is capped at its
  * colour, so resolved HDR edges never sparkle.
  */
 class HairLightingModel extends PhysicalLightingModel {
@@ -380,9 +391,9 @@ class HairLightingModel extends PhysicalLightingModel {
     const across = (d: N) => d.sub(h.tangent.mul(dot(h.tangent, d))).normalize()
     const sameSide = saturate(dot(across(L), across(V)).mul(0.5).add(0.5)).sqrt()
     const r: N = withR ? lobe(T1, H, h.expR).mul(h.kR).mul(h.rNoise).mul(sameSide) : float(0)
-    const specular = min(vec3(r).add(trt), vec3(2)).mul(visible)
+    const specular = min(vec3(r).add(trt), vec3(1)).mul(visible)
     const deep = max(0.5, exp(h.depth.mul(-2.2).mul(float(1.25).sub(saturate(NL)))))
-    const albedoDeep = h.albedo.pow(h.depth.mul(1.5).add(1))
+    const albedoDeep = deepAlbedo(h)
     const diffuse = albedoDeep.mul(saturate(NL.mul(0.75).add(0.25))).mul(1 / Math.PI)
     const scatter = saturate(dot(V.negate(), L))
       .pow(4)
@@ -434,7 +445,7 @@ class HairLightingModel extends PhysicalLightingModel {
     > & {
       reflectedLight: Record<string, N>
     }
-    const albedoDeep = h.albedo.pow(h.depth.mul(1.5).add(1))
+    const albedoDeep = deepAlbedo(h)
     const ambient = irradiance!
       .add(iblIrradiance!)
       .mul(albedoDeep)
