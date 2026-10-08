@@ -9,6 +9,7 @@ import path from 'node:path'
 // by a signal, so the parent then exits 0 on its own (or, with --linger, stays alive).
 const FAKE_NEXT_DEV = `
 import { fork } from 'node:child_process'
+console.log('NEXT_DEV_PID=' + process.pid)
 const port = process.argv[process.argv.indexOf('--port') + 1]
 const server = fork(new URL('./fake-server.mjs', import.meta.url).pathname, [port])
 server.on('exit', (code, signal) => { if (!signal) process.exit(code ?? 0) })
@@ -39,17 +40,29 @@ const FAST = {
   DEV_SUPERVISOR_BACKOFF_MS: '100',
   DEV_SUPERVISOR_REFUSED_MS: '1000',
   DEV_SUPERVISOR_ORPHAN_REFUSED_MS: '500',
+  DEV_SUPERVISOR_TERM_GRACE_MS: '500',
 }
 
 const running: ChildProcess[] = []
 
+function signalGroup(proc: ChildProcess, name: NodeJS.Signals) {
+  try {
+    process.kill(-proc.pid!, name)
+  } catch {
+    // The group is gone.
+  }
+}
+
+// Each supervisor leads its own process group, so a failed test cannot leave fake servers
+// holding ports.
 afterEach(async () => {
   for (const proc of running.splice(0)) {
-    if (proc.exitCode !== null || proc.signalCode !== null) continue
-    const exited = new Promise((resolve) => proc.once('exit', resolve))
-    proc.kill('SIGTERM')
-    await Promise.race([exited, Bun.sleep(5_000)])
-    proc.kill('SIGKILL')
+    if (proc.exitCode === null && proc.signalCode === null) {
+      const exited = new Promise((resolve) => proc.once('exit', resolve))
+      proc.kill('SIGTERM')
+      await Promise.race([exited, Bun.sleep(5_000)])
+    }
+    signalGroup(proc, 'SIGKILL')
   }
 })
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
@@ -96,6 +109,7 @@ function supervise(args: string[], env: Record<string, string> = {}) {
   const proc = spawn(process.execPath, [supervisorPath, ...args], {
     env: { ...process.env, ...FAST, NO_COLOR: '1', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
   })
   running.push(proc)
   const out = { stdout: '', stderr: '' }
@@ -106,9 +120,18 @@ function supervise(args: string[], env: Record<string, string> = {}) {
     out.stderr += chunk
   })
   const exited = new Promise<number | null>((resolve) => proc.once('exit', (code) => resolve(code)))
-  const serverPids = () => [...out.stdout.matchAll(/SERVER_PID=(\d+)/g)].map((m) => Number(m[1]))
-  return { proc, out, exited, serverPids }
+  const pids = (name: string) =>
+    [...out.stdout.matchAll(new RegExp(`${name}=(\\d+)`, 'g'))].map((m) => Number(m[1]))
+  return {
+    proc,
+    out,
+    exited,
+    serverPids: () => pids('SERVER_PID'),
+    nextDevPids: () => pids('NEXT_DEV_PID'),
+  }
 }
+
+const count = (text: string, part: string) => text.split(part).length - 1
 
 test('restarts after the server child is SIGKILLed and stops the whole tree on SIGINT', async () => {
   const port = await freePort()
@@ -161,6 +184,46 @@ test('restarts quickly when next dev outlives its server child', async () => {
   expect(run.out.stderr).toContain('next-server 프로세스가 사라졌습니다')
   run.proc.kill('SIGTERM')
   expect(await run.exited).toBe(0)
+}, 30_000)
+
+test('tears a frozen next dev down once and restarts it once', async () => {
+  const port = await freePort()
+  const run = supervise(['node', path.join(dir, 'fake-next-dev.mjs'), '--port', String(port)])
+  await until(() => run.serverPids().length === 1, 'first server')
+  await until(() => portOpen(port), 'port open')
+  await Bun.sleep(300)
+  // A frozen `next dev` ignores SIGTERM and cannot reap its dead server, which stays a zombie.
+  const [frozen] = run.nextDevPids()
+  process.kill(frozen!, 'SIGSTOP')
+  process.kill(run.serverPids()[0]!, 'SIGKILL')
+
+  await until(() => run.serverPids().length === 2, 'restarted server')
+  await until(() => run.out.stderr.includes('다시 열렸습니다'), 'recovery message')
+  await Bun.sleep(1_000)
+  expect(run.out.stderr).toContain('next-server 프로세스가 사라졌습니다')
+  expect(run.out.stderr).not.toContain('서버 프로세스는 남아 있지만')
+  expect(count(run.out.stderr, '후 다시 시작합니다')).toBe(1)
+  expect(run.out.stderr).not.toContain('이미 다른 프로세스')
+  expect(run.nextDevPids()).toHaveLength(2)
+  expect(alive(frozen!)).toBe(false)
+
+  const second = run.nextDevPids()[1]!
+  run.proc.kill('SIGINT')
+  expect(await run.exited).toBe(0)
+  expect(alive(second)).toBe(false)
+  expect(await portOpen(port)).toBe(false)
+}, 30_000)
+
+test('a hangup during the restart delay stops without starting again', async () => {
+  const port = await freePort()
+  const run = supervise(['node', '-e', "console.log('SPAWNED'); process.exit(3)"], {
+    PORT: String(port),
+    DEV_SUPERVISOR_BACKOFF_MS: '5000',
+  })
+  await until(() => run.out.stderr.includes('다시 시작합니다'), 'restart scheduled')
+  run.proc.kill('SIGHUP')
+  expect(await run.exited).toBe(0)
+  expect(count(run.out.stdout, 'SPAWNED')).toBe(1)
 }, 30_000)
 
 test('leaves a foreign listener alone and starts once the port is free', async () => {

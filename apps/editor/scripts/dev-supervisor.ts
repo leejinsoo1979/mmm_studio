@@ -13,20 +13,23 @@ import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
 import net from 'node:net'
 import { constants } from 'node:os'
 import {
-  childrenByParent,
   classifyConnectError,
   decideRestart,
   descendantsOf,
   exitStatusOf,
+  hasLiveProcess,
   INITIAL_LIVENESS,
   type Liveness,
   messages,
   nextLiveness,
   type ProbeResult,
+  type ProcessEntry,
   parseDevPort,
   parseProbeHost,
+  parsePs,
   readTiming,
   refusedTooLong,
+  stillRunning,
 } from './dev-supervisor-policy'
 
 const command = process.argv.slice(2)
@@ -39,6 +42,8 @@ const port = parseDevPort(command, process.env)
 const host = parseProbeHost(command)
 const timing = readTiming(process.env)
 const colors = process.stderr.isTTY && !process.env.NO_COLOR
+const KILL_WAIT_MS = 5_000
+const STOP_TIMEOUT_MS = 10_000
 
 function say(text: string, tone: 'warn' | 'error' | 'ok' = 'warn') {
   const time = new Date().toTimeString().slice(0, 8)
@@ -60,49 +65,82 @@ function probe(): Promise<ProbeResult> {
   })
 }
 
-/** `null` when `ps` cannot be run. */
-function descendants(pid: number): number[] | null {
+function processTable(): ProcessEntry[] | null {
   try {
-    const ps = execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' })
-    return descendantsOf(pid, childrenByParent(ps))
+    const ps = execFileSync('ps', ['-A', '-ww', '-o', 'pid=,ppid=,stat=,command='], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    })
+    return parsePs(ps)
   } catch {
     return null
   }
 }
 
-function signal(pid: number, name: NodeJS.Signals) {
-  try {
-    process.kill(pid, name)
-  } catch {
-    // Already gone.
+function treeOf(proc: ChildProcess): ProcessEntry[] | null {
+  const table = processTable()
+  return table && descendantsOf(proc.pid!, table)
+}
+
+function killRecorded(recorded: readonly ProcessEntry[]) {
+  if (recorded.length === 0) return
+  const table = processTable()
+  for (const pid of table ? stillRunning(recorded, table) : []) {
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      // Already gone.
+    }
   }
 }
 
 const hasExited = (proc: ChildProcess) => proc.exitCode !== null || proc.signalCode !== null
 
+function exitedWithin(proc: ChildProcess, ms: number): Promise<boolean> {
+  if (hasExited(proc)) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms)
+    proc.once('exit', () => {
+      clearTimeout(timer)
+      resolve(true)
+    })
+  })
+}
+
 let child: ChildProcess | null = null
-/** A `next dev` that is being killed because its port stayed closed; its exit is expected. */
-let tearingDown: ChildProcess | null = null
+/** Every `next dev` started that has not exited yet, so a stop reaches one still being torn down. */
+const live = new Set<ChildProcess>()
+/** Deaths already counted, so the exit event that ends a teardown does not count a second one. */
+const deathHandled = new WeakSet<ChildProcess>()
 let liveness: Liveness = INITIAL_LIVENESS
 let deaths: number[] = []
 let restarts = 0
 let awaitingRecovery = false
 let stopping = false
-let treeAtStop: number[] = []
+let treeAtStop: ProcessEntry[] = []
 let waitingForPort = false
 let watching = false
 let startTimer: ReturnType<typeof setTimeout> | null = null
 
-// Descendants are listed before anything is signalled: once `next dev` is gone, its children are
+// The tree is listed before anything is signalled: once `next dev` is gone, its children are
 // re-parented and can no longer be found from it, and an orphaned next-server keeps the port.
-async function stopTree(proc: ChildProcess, graceMs: number) {
-  const tree = descendants(proc.pid!) ?? []
-  if (!hasExited(proc)) {
-    const exited = new Promise((resolve) => proc.once('exit', resolve))
-    signal(proc.pid!, 'SIGTERM')
-    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, graceMs))])
+async function stopTree(proc: ChildProcess) {
+  const recorded = treeOf(proc) ?? []
+  proc.kill('SIGTERM')
+  if (!(await exitedWithin(proc, timing.termGraceMs))) {
+    // Listed again for a server that Next re-forked during the grace.
+    recorded.push(...(treeOf(proc) ?? []))
+    proc.kill('SIGKILL')
   }
-  for (const pid of [proc.pid!, ...tree]) signal(pid, 'SIGKILL')
+  killRecorded(recorded)
+  await exitedWithin(proc, KILL_WAIT_MS)
+}
+
+async function retire(proc: ChildProcess) {
+  deathHandled.add(proc)
+  await stopTree(proc)
+  if (child === proc) child = null
+  if (!stopping) scheduleRestart()
 }
 
 function scheduleRestart() {
@@ -134,19 +172,23 @@ async function start() {
   // Same process group on purpose: a Ctrl+C in a plain terminal reaches `next dev` directly.
   const proc = spawn(command[0]!, command.slice(1), { stdio: 'inherit' })
   child = proc
+  live.add(proc)
   proc.once('error', (error) => {
     say(`${command[0]} 실행 실패: ${error.message}`, 'error')
     process.exit(1)
   })
   proc.once('exit', (code, sig) => {
+    live.delete(proc)
     if (child === proc) child = null
     if (stopping) {
+      if (live.size > 0) return
       // `next dev` stops next-server itself; anything of the tree still alive now would keep
       // the port, so it goes too.
-      for (const pid of treeAtStop) signal(pid, 'SIGKILL')
+      killRecorded(treeAtStop)
       process.exit(exitStatusOf(code, sig, constants.signals))
     }
-    if (tearingDown === proc) return
+    if (deathHandled.has(proc)) return
+    deathHandled.add(proc)
     say(messages.exited(code, sig))
     scheduleRestart()
   })
@@ -154,26 +196,23 @@ async function start() {
 
 async function watch() {
   const proc = child
-  if (!proc || stopping || watching || tearingDown) return
+  if (!proc || stopping || watching || deathHandled.has(proc)) return
   watching = true
   const result = await probe()
   watching = false
-  if (proc !== child || stopping) return
+  if (proc !== child || stopping || deathHandled.has(proc)) return
   liveness = nextLiveness(liveness, result, Date.now())
   if (result === 'open' && awaitingRecovery) {
     awaitingRecovery = false
     say(messages.recovered(port, restarts), 'ok')
   }
   if (liveness.refusedSince === null) return
-  const tree = descendants(proc.pid!)
+  const tree = treeOf(proc)
   // Without `ps`, assume the server child is still there and wait the longer window.
-  const hasServer = tree === null || tree.length > 0
+  const hasServer = tree === null || hasLiveProcess(tree)
   if (!refusedTooLong(liveness, Date.now(), hasServer, timing)) return
   say(messages.refused(port, Date.now() - liveness.refusedSince, hasServer))
-  tearingDown = proc
-  await stopTree(proc, 5_000)
-  tearingDown = null
-  if (!stopping) scheduleRestart()
+  await retire(proc)
 }
 
 const watcher = setInterval(watch, timing.probeMs)
@@ -184,20 +223,20 @@ for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
     stopping = true
     clearInterval(watcher)
     if (startTimer) clearTimeout(startTimer)
-    const proc = child
-    if (!proc) process.exit(0)
-    treeAtStop = descendants(proc.pid!) ?? []
-    signal(proc.pid!, name)
+    if (live.size === 0) process.exit(0)
+    treeAtStop = [...live].flatMap((proc) => treeOf(proc) ?? [])
+    for (const proc of live) proc.kill(name)
     setTimeout(() => {
       say(messages.stopTimedOut(), 'error')
-      for (const pid of [proc.pid!, ...treeAtStop]) signal(pid, 'SIGKILL')
+      for (const proc of live) proc.kill('SIGKILL')
+      killRecorded(treeAtStop)
       process.exit(1)
-    }, 10_000).unref()
+    }, STOP_TIMEOUT_MS).unref()
   })
 }
 
 process.on('exit', () => {
-  if (child && !hasExited(child)) signal(child.pid!, 'SIGTERM')
+  for (const proc of live) proc.kill('SIGTERM')
 })
 
 void start()

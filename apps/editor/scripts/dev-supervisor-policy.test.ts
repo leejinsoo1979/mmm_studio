@@ -1,19 +1,21 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  childrenByParent,
   classifyConnectError,
   DEFAULT_TIMING,
   decideRestart,
   descendantsOf,
   exitStatusOf,
+  hasLiveProcess,
   INITIAL_LIVENESS,
   type Liveness,
   messages,
   nextLiveness,
   parseDevPort,
   parseProbeHost,
+  parsePs,
   readTiming,
   refusedTooLong,
+  stillRunning,
 } from './dev-supervisor-policy'
 
 describe('parseDevPort', () => {
@@ -122,8 +124,9 @@ test('readTiming takes positive numbers from the environment and ignores the res
     DEV_SUPERVISOR_MAX_RESTARTS: '2',
     DEV_SUPERVISOR_REFUSED_MS: 'soon',
     DEV_SUPERVISOR_BACKOFF_MS: '-5',
+    DEV_SUPERVISOR_TERM_GRACE_MS: '800',
   })
-  expect(timing).toEqual({ ...DEFAULT_TIMING, probeMs: 100, maxRestarts: 2 })
+  expect(timing).toEqual({ ...DEFAULT_TIMING, probeMs: 100, maxRestarts: 2, termGraceMs: 800 })
 })
 
 test('exitStatusOf passes codes through and maps signals like a shell', () => {
@@ -135,31 +138,69 @@ test('exitStatusOf passes codes through and maps signals like a shell', () => {
   expect(exitStatusOf(null, null, signals)).toBe(1)
 })
 
-test('descendantsOf walks the ps table breadth-first and skips unrelated processes', () => {
+describe('process table', () => {
   const ps = [
-    '  1     0',
-    ' 10     1',
-    ' 11    10',
-    ' 12    11',
-    ' 13    11',
-    ' 20     1',
+    '    1     0 Ss   /sbin/init',
+    '   10     1 S    bun scripts/dev-supervisor.ts next dev --port 3002',
+    '   11    10 Sl   node next dev --port 3002',
+    '   12    11 Z    [node] <defunct>',
+    '   13    11 Sl   next-server (v16.2.9)',
+    '   14    13 S    node .next/dev/build/postcss.js 46801',
+    '   20     1 S',
     '',
   ].join('\n')
-  const children = childrenByParent(ps)
-  expect(descendantsOf(10, children)).toEqual([11, 12, 13])
-  expect(descendantsOf(20, children)).toEqual([])
-  expect(descendantsOf(99, children)).toEqual([])
+  const table = parsePs(ps)
+
+  test('parsePs reads pid, parent, zombie state and command line', () => {
+    expect(table[2]).toEqual({
+      pid: 11,
+      ppid: 10,
+      zombie: false,
+      command: 'node next dev --port 3002',
+    })
+    expect(table[3]!.zombie).toBe(true)
+    expect(table[6]).toEqual({ pid: 20, ppid: 1, zombie: false, command: '' })
+  })
+
+  test('descendantsOf walks the table breadth-first and skips unrelated processes', () => {
+    expect(descendantsOf(10, table).map((entry) => entry.pid)).toEqual([11, 12, 13, 14])
+    expect(descendantsOf(20, table)).toEqual([])
+    expect(descendantsOf(99, table)).toEqual([])
+  })
+
+  test('a zombie the frozen next dev has not reaped is not a live server', () => {
+    const [zombie] = descendantsOf(11, table)
+    expect(hasLiveProcess([zombie!])).toBe(false)
+    expect(hasLiveProcess(descendantsOf(11, table))).toBe(true)
+  })
+
+  test('stillRunning only names recorded pids that still run the same command', () => {
+    const recorded = descendantsOf(10, table)
+    const later = parsePs(
+      [
+        // 11 exited and its number went to an unrelated process; 12 was reaped.
+        '   11     1 S    /usr/bin/ssh-agent',
+        '   13     1 Sl   next-server (v16.2.9)',
+        '   14     1 S    node .next/dev/build/postcss.js 46801',
+      ].join('\n'),
+    )
+    expect(stillRunning(recorded, later)).toEqual([13, 14])
+    expect(stillRunning([...recorded, ...recorded], later)).toEqual([13, 14])
+  })
 })
 
 describe('messages', () => {
   test('say what happened and how many restarts are left', () => {
+    expect(messages.exited(0, null)).toContain('FATAL ERROR: Reached heap limit')
     expect(messages.exited(0, null)).toContain('메모리 부족')
-    expect(messages.exited(1, null)).toContain('종료 코드 1')
+    expect(messages.exited(3, null)).toContain('next dev가 종료됐습니다(종료 코드 3)')
     expect(messages.exited(null, 'SIGKILL')).toContain('SIGKILL')
     expect(messages.restarting(2_000, 2, DEFAULT_TIMING)).toBe(
       '2초 후 다시 시작합니다 (최근 10분 동안 2/5번째 재시작).',
     )
-    expect(messages.refused(3002, 30_000, true)).toContain('30초')
+    expect(messages.refused(3000, 30_000, true)).toContain('3000번 포트가 30초 동안')
+    expect(messages.portBusy(3000)).toContain('3000번 포트를')
+    expect(messages.recovered(3002, 4)).toContain('이번 실행에서 4번째 재시작')
   })
 
   test('the give-up message names the next steps', () => {
@@ -167,5 +208,6 @@ describe('messages', () => {
     expect(text).toContain('10분 안에 6번')
     expect(text).toContain('bun dev --filter=editor...')
     expect(text).toContain('bun clean:cache')
+    expect(text).toContain('MMM Studio Experience')
   })
 })
