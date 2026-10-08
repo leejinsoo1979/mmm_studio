@@ -690,20 +690,6 @@ export class RootsNodeMaterial extends MeshStandardNodeMaterial {
       .mul(smoothstep(part.y, part.y.add(0.4), d.z))
       .mul(smoothstep(0.2, 0.35, e))
     density = min(density.mul(float(1).sub(partOpen.mul(0.6))), float(1).sub(partOpen.mul(0.2)))
-    const undercut = value('undercut', 'vec4')
-    const band = absA.greaterThan(0.95).and(e.lessThan(undercut.x))
-    const shell = height.greaterThan(SHELL_HEIGHTS[0])
-    const shellCoverage = select(
-      height.lessThan(SHELL_HEIGHTS[1]),
-      undercut.y,
-      select(height.lessThan(SHELL_HEIGHTS[2]), undercut.z, undercut.w),
-    )
-    const inBand: N = grows.mul(select(shell, shellCoverage, 0.85))
-    density = select(band, inBand, select(shell, 0, density))
-    const facing: N = abs(dot(normalViewGeometry, positionViewDirection))
-    density = density.mul(mix(0.65, 1, float(1).sub(facing)))
-    const detail = value('detail', 'float')
-    density = mix(density, grows, saturate(float(0.6).sub(detail).div(0.4)))
     // One cell per root, stretched along the comb; faded to its mean once under two pixels.
     const comb = (attribute('comb', 'vec3') as N).normalize()
     const n = normalLocal.normalize()
@@ -718,14 +704,37 @@ export class RootsNodeMaterial extends MeshStandardNodeMaterial {
     const cellHash = hash(cell.x.add(cell.y.mul(157)).add(cell.z.mul(113)))
     const cellPixels = float(ROOT_CELL).div(max(length(fwidth(bind)), 1e-7))
     const sharp = smoothstep(1, 2.5, cellPixels)
+    const undercut = value('undercut', 'vec4')
+    const band = absA.greaterThan(0.95).and(e.lessThan(undercut.x))
+    const shell = height.greaterThan(SHELL_HEIGHTS[0])
+    const shellCoverage = select(
+      height.lessThan(SHELL_HEIGHTS[1]),
+      undercut.y,
+      select(height.lessThan(SHELL_HEIGHTS[2]), undercut.z, undercut.w),
+    )
+    // Under a pixel, every layer's coverage dithers the same samples, so the shells would add
+    // nothing: the root layer then carries the whole stack's coverage itself.
+    const stack = float(1).sub(
+      float(0.15).mul(undercut.y.oneMinus()).mul(undercut.z.oneMinus()).mul(undercut.w.oneMinus()),
+    )
+    const layerCoverage: N = mix(stack, 0.85, sharp)
+    const inBand: N = grows.mul(select(shell, shellCoverage, layerCoverage))
+    density = select(band, inBand, select(shell, 0, density))
+    const facing: N = abs(dot(normalViewGeometry, positionViewDirection))
+    // Denser at a slant, as stubble is; a buzz keeps most of its density face on.
+    density = density.mul(mix(select(band, 0.85, 0.65), 1, float(1).sub(facing)))
+    const detail = value('detail', 'float')
+    density = mix(density, grows, saturate(float(0.6).sub(detail).div(0.4)))
     const speckle = smoothstep(float(0.95).sub(density), float(1.05).sub(density), cellHash)
     const coverage = mix(density, speckle, sharp)
     const jitter = hash(cell.x.add(cell.y.mul(157)).add(cell.z.mul(113)).add(31))
       .sub(0.5)
       .mul(0.16)
       .add(1)
+    // The root layer's tint follows how dense the roots are; a buzz is all hair.
+    const toHair: N = select(band.or(shell), 0.85, density.mul(0.3).add(0.55))
     const albedo: N = saturate(
-      mix(value('skin', 'color'), value('base', 'color'), density.mul(0.3).add(0.55)).mul(jitter),
+      mix(value('skin', 'color'), value('base', 'color'), toHair).mul(jitter),
     )
     this.colorNode = vec4(albedo, coverage)
     this.maskNode = coverage.greaterThan(max(MIN_COVERAGE, hardEdges.mul(0.5)))
