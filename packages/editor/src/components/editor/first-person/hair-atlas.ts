@@ -94,7 +94,14 @@ const SPECS: Record<
     fibreWidth: [1, 1.8],
     curl: 0,
   },
-  stray: { locks: [1, 2], half: [0.2, 0.26], wander: 0.03, fibres: 6, fibreWidth: [8, 14], curl: 0 },
+  stray: {
+    locks: [1, 2],
+    half: [0.2, 0.26],
+    wander: 0.03,
+    fibres: 6,
+    fibreWidth: [8, 14],
+    curl: 0,
+  },
   curlyDense: {
     locks: [6, 7],
     half: [0.07, 0.085],
@@ -111,7 +118,14 @@ const SPECS: Record<
     fibreWidth: [1.1, 2],
     curl: 8,
   },
-  solid: { locks: [1, 1], half: [0.47, 0.47], wander: 0, fibres: 100, fibreWidth: [1.1, 2.2], curl: 0 },
+  solid: {
+    locks: [1, 1],
+    half: [0.47, 0.47],
+    wander: 0,
+    fibres: 100,
+    fibreWidth: [1.1, 2.2],
+    curl: 0,
+  },
 }
 
 /** A periodic wave along the strand: `turns` whole periods per repeat, starting at `phase` (rows). */
@@ -146,7 +160,9 @@ function random(seed: number) {
   }
 }
 
-const SINE = Float64Array.from({ length: ATLAS_HEIGHT }, (_, i) => Math.sin((2 * Math.PI * i) / ATLAS_HEIGHT))
+const SINE = Float64Array.from({ length: ATLAS_HEIGHT }, (_, i) =>
+  Math.sin((2 * Math.PI * i) / ATLAS_HEIGHT),
+)
 
 /** A wave's value at row `y`: whole periods over the repeat, so row y and row y + 1024 agree exactly. */
 function wave(w: Wave, y: number) {
@@ -173,15 +189,28 @@ function plan(layer: number): LayerPlan {
         : 0.5 + (slot - 0.5) * span + (next() - 0.5) * (span / Math.max(count, 2)) * 0.35
     const path: Wave[] = []
     if (spec.wander > 0) {
-      path.push({ amp: spec.wander * between(0.5, 1), turns: 1 + Math.floor(next() * 3), phase: phase() })
-      path.push({ amp: spec.wander * between(0.2, 0.5), turns: 3 + Math.floor(next() * 4), phase: phase() })
+      path.push({
+        amp: spec.wander * between(0.5, 1),
+        turns: 1 + Math.floor(next() * 3),
+        phase: phase(),
+      })
+      path.push({
+        amp: spec.wander * between(0.2, 0.5),
+        turns: 3 + Math.floor(next() * 4),
+        phase: phase(),
+      })
     }
-    if (spec.curl > 0) path.push({ amp: spec.wander * between(0.8, 1.2), turns: spec.curl, phase: phase() })
+    if (spec.curl > 0)
+      path.push({ amp: spec.wander * between(0.8, 1.2), turns: spec.curl, phase: phase() })
     locks.push({
       centre,
       half,
       path,
-      breathe: { amp: kind === 'solid' ? 0 : 0.12, turns: 1 + Math.floor(next() * 3), phase: phase() },
+      breathe: {
+        amp: kind === 'solid' ? 0 : 0.12,
+        turns: 1 + Math.floor(next() * 3),
+        phase: phase(),
+      },
     })
   }
   const fibres: Fibre[] = []
@@ -225,7 +254,13 @@ function pathAt(path: readonly Wave[], y: number) {
 }
 
 /** A layer's row `y` (any integer: the repeat wraps), as RGBA floats 0–1 across its 256 texels. */
-function layerRow(layer: LayerPlan, y: number, out: Float32Array, centres: Float64Array, halves: Float64Array) {
+function layerRow(
+  layer: LayerPlan,
+  y: number,
+  out: Float32Array,
+  centres: Float64Array,
+  halves: Float64Array,
+) {
   const W = ATLAS_TILE_WIDTH
   const curl = SPECS[layer.kind].curl
   const solid = layer.kind === 'solid'
@@ -364,7 +399,11 @@ export function strandAtlas(): AtlasMip[] {
           r[y * nw + x] = (src[a + x2]! + src[a + x2 + 1]! + src[b + x2]! + src[b + x2 + 1]!) / 4
           for (let ch = 1; ch < 4; ch++) {
             const k = x2 * 4 + ch
-            const sum = prev.data[pa + k]! + prev.data[pa + k + 4]! + prev.data[pb + k]! + prev.data[pb + k + 4]!
+            const sum =
+              prev.data[pa + k]! +
+              prev.data[pa + k + 4]! +
+              prev.data[pb + k]! +
+              prev.data[pb + k + 4]!
             data[o + x * 4 + ch] = Math.round(sum / 4)
           }
         }
