@@ -74,6 +74,8 @@ export const npcFloorplanMoveTarget: FloorplanMoveTarget<NpcNode> = ({ node, nod
       })
       sceneRegistry.nodes.get(npcId)?.position.set(...visualPosition)
       useLiveTransforms.getState().set(npcId, { position: next, rotation: node.rotation })
+      // The live transform re-renders the marker at base Y; the mark lifts it again.
+      useScene.getState().markDirty(npcId)
     },
     canCommit() {
       const live = useScene.getState().nodes[npcId] as { type: string } | undefined

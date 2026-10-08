@@ -5,9 +5,10 @@ import {
   useLiveNodeOverrides,
   useLiveTransforms,
   useRegistry,
+  useScene,
 } from '@pascal-app/core'
 import { useNodeEvents, useViewer } from '@pascal-app/viewer'
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Group } from 'three'
 import { NpcEditOverlay } from './body/edit-overlay'
 import { NpcBody } from './body/npc-body'
@@ -57,6 +58,12 @@ export default function NpcRenderer({ node }: { node: NpcNode }) {
   const selected = useViewer((state) => state.selection.selectedIds.includes(node.id as AnyNodeId))
   const ready = useStaggeredMount()
   useRegistry(node.id, 'npc', markerRef)
+
+  // A marker mounts at its stored base Y; the mark has FloorElevationSystem
+  // lift it onto its slab (a fresh viewer, such as the preview, remounts it).
+  useLayoutEffect(() => {
+    useScene.getState().markDirty(node.id as AnyNodeId)
+  }, [node.id])
 
   const position =
     liveTransform?.position ??
