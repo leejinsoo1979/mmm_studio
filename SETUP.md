@@ -55,19 +55,25 @@ The editor works fully without any environment variables.
 The editor's `dev` script runs `next dev` under `apps/editor/scripts/dev-supervisor.ts`. When the
 server process dies (out of memory, killed by the OS, a native crash), `next dev` itself neither
 restarts nor reports it; the supervisor prints a `[개발 서버 감시]` line and starts it again with
-backoff. After five deaths in ten minutes it stops and prints what to try. Only a refused
-connection, after the port had been open, counts as death; slow answers during long compiles do
-not. A process that already listens on the port is left alone and waited out. Stop with Ctrl+C:
-`bun kill` alone is now undone by a restart.
+backoff. Besides `next dev` exiting, only a refused connection after the port had been open counts
+as death; slow answers during long compiles do not. After a restart it also checks that the scene
+API routes answer: if Next serves its 404 page for `/api/scenes/[id]/…` (seen after crash restarts
+with a stale Turbopack cache), it restarts once more, and if that does not help it tells you to run
+`bun clean:cache`. It restarts at most five times within ten minutes; the sixth death stops it,
+prints what to try and exits with an error, and turbo then stops the rest of `bun dev` too. A
+process that already listens on the port is left alone and waited out.
+
+Stop `bun dev` with Ctrl+C. While it runs, `bun kill` (and so `bun restart`) only kills the server,
+which the supervisor starts again; both are meant for a server left behind after `bun dev` ended.
 
 Next restarts its dev server once the JS heap passes 80% of its limit, but only checks when an
 HTTP request completes, which open scene event streams never do. `apps/editor/instrumentation.ts`
-checks on a timer in the dev server and asks for the same restart (`[힙 감시]`). It never runs in
-`next start` or the desktop app's standalone server.
+checks on a timer in the dev server and asks for the same restart (`[힙 감시]`), from a minute
+after the server starts. It never runs in `next start` or the desktop app's standalone server.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EDITOR_DEV_HEAP_RESTART_RATIO` | `0.8` | Heap fraction that triggers the clean restart; a low value such as `0.05` makes it fire for testing |
+| `EDITOR_DEV_HEAP_RESTART_RATIO` | `0.8` | Heap fraction that triggers the clean restart; a low value such as `0.03` makes it fire a minute after each start, for testing |
 | `DEV_SUPERVISOR_REFUSED_MS` | `30000` | How long the port may refuse connections while `next dev` still runs |
 | `DEV_SUPERVISOR_MAX_RESTARTS` | `5` | Restarts allowed within `DEV_SUPERVISOR_WINDOW_MS` (default `600000`) |
 
