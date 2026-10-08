@@ -36,8 +36,8 @@ export type StoredHairHead = {
   boneIndex: BaseInput['boneIndex']
   marks: BaseInput['marks']
   ears: Packed | null
-  /** The flattened head: the points it moved (index, then x y z), and the triangles it dropped. */
-  flat: { moved: Packed; points: Packed; dropped: Packed }
+  /** The flattened head: the points it moved (index, then x y z), the triangles it dropped and those it closed holes with. */
+  flat: { moved: Packed; points: Packed; dropped: Packed; added: Packed }
 }
 
 const ARRAYS = {
@@ -119,6 +119,7 @@ export function readHairHead(stored: StoredHairHead): HairHead {
   for (let t = 0; t < index.length / 3; t++) {
     if (!dropped.has(t)) kept.push(index[t * 3]!, index[t * 3 + 1]!, index[t * 3 + 2]!)
   }
+  kept.push(...unpack(stored.flat.added))
   return { input, who: stored.who, flat: { points: flatPoints, index: Uint32Array.from(kept) } }
 }
 

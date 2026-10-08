@@ -240,6 +240,13 @@ for (const id of HAIR_HEADS) {
   for (let t = 0; t < base.head.index.length; t += 3) {
     keptTriangles.add(`${base.head.index[t]},${base.head.index[t + 1]},${base.head.index[t + 2]}`)
   }
+  const loaded = new Set<string>()
+  for (let t = 0; t < index.length; t += 3) loaded.add(`${index[t]},${index[t + 1]},${index[t + 2]}`)
+  const added: number[] = []
+  for (let t = 0; t < base.head.index.length; t += 3) {
+    const corners = [base.head.index[t]!, base.head.index[t + 1]!, base.head.index[t + 2]!]
+    if (!loaded.has(corners.join())) added.push(...corners)
+  }
   const dropped: number[] = []
   for (let t = 0; t < index.length / 3; t++) {
     if (!keptTriangles.has(`${index[t * 3]},${index[t * 3 + 1]},${index[t * 3 + 2]}`)) dropped.push(t)
@@ -274,10 +281,11 @@ for (const id of HAIR_HEADS) {
       moved: pack(moved, 'u16'),
       points: pack(movedPoints, 'i16', POINT),
       dropped: pack(dropped, 'u16'),
+      added: pack(added, 'u16'),
     },
   }
   writeFileSync(hairHeadFile(id), `${JSON.stringify(stored, null, 2)}\n`)
   console.log(
-    `${id}: ${points.length / 3} points, ${index.length / 3} triangles; flattened ${moved.length} points, dropped ${dropped.length} triangles in ${ms.toFixed(0)} ms; body ${trimmedPoints.length / 3} points`,
+    `${id}: ${points.length / 3} points, ${index.length / 3} triangles; flattened ${moved.length} points, dropped ${dropped.length} triangles, closed holes with ${added.length / 3} in ${ms.toFixed(0)} ms; body ${trimmedPoints.length / 3} points`,
   )
 }

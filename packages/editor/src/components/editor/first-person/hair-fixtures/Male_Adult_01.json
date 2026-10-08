@@ -183,6 +183,10 @@
     "dropped": {
       "type": "u16",
       "data": "6AA="
+    },
+    "added": {
+      "type": "u16",
+      "data": "SACcAJ0A"
     }
   }
 }

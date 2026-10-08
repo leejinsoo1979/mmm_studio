@@ -131,9 +131,13 @@ const MIDDLE_PASSES = 4
 const LAY_PASSES = 3
 /** Guides are walked this far (cm) past the lowest their strips are cut at. */
 const WALK_PAST = 2
+/** A strand lies along the scalp at least this far (cm) before it may leave it. */
+const LEAVE_AFTER = 1
 /** Strips are laid and collided in this many passes; their volume read every so many points. */
 const STRIP_PASSES = 2
 const VOLUME_EVERY = 3
+/** How far below the head's middle (bind units) the envelope turns from round O to round its vertical axis. */
+const ENVELOPE_TURN = 0.08
 /** Where each layer stands in the hair's volume, as a share of the regional clearance. */
 const LAYER_DEPTH: Record<'inner' | 'mid' | 'outer', number> = { inner: 0.3, mid: 0.75, outer: 1 }
 /** The share of strips in the inner and mid layers (the rest are the outer layer). */
@@ -160,10 +164,14 @@ const SEE_THROUGH = 0.35
 /** The fringe's width (cm) at 앞머리 0 and 1, and its density. */
 const FRINGE_WIDTH: readonly [number, number] = [0.25, 0.55]
 const FRINGE_DENSITY: readonly [number, number] = [0.4, 1]
-/** Within a lock, ends stray by this (cm) round the lock's own. */
-const IN_LOCK = 0.1
+/** Within a lock, ends stray by this (mm) round the lock's own. */
+const IN_LOCK = 1
 /** Blunt ends: the lock's pull lets go over this last share of the strip. */
 const BLUNT_RELEASE = 0.15
+/** 단발's ends turn under over this last share of the strip. */
+const END_CURL_FROM = 0.75
+/** Strands shorter than these (cm) turn under less, none under the first. */
+const END_CURL_LENGTH: readonly [number, number] = [3, 8]
 /** A short style's hair arches round the ear: this far over its top (mm). */
 const OVER_EAR = 6
 /** A short style's nape: strands rooted at the nape line are this long (cm), longer higher up. */
@@ -248,7 +256,7 @@ class HeadState implements HeadData {
   /** The last guides grown: a drag's game-tier preview and its release's studio grow share them. */
   lastGuides: { key: string; guides: Guides } | null = null
 
-  constructor(input: BaseInput, base: BaseResult, library: HairLibrary) {
+  constructor(input: BaseInput, base: Pick<BaseResult, 'head'>, library: HairLibrary) {
     this.avatar = input.avatar
     this.cm = 0.01 / input.metresPerUnit
     this.mm = 0.001 / input.metresPerUnit
@@ -393,7 +401,11 @@ const SHAPES_KEPT = 6
 
 const stateOf = (head: HeadData) => head as HeadState
 
-export function headData(input: BaseInput, base: BaseResult, library: HairLibrary): HeadData {
+export function headData(
+  input: BaseInput,
+  base: Pick<BaseResult, 'head'>,
+  library: HairLibrary,
+): HeadData {
   return new HeadState(input, base, library)
 }
 
@@ -708,7 +720,8 @@ function collideMiddle(g: Grower, p: Float32Array, a: number, b: number, clear: 
   const inside = R + clear - r
   if (R <= 0 || inside <= 0) return
   const [ux, uy, uz] = [mx / r, my / r, mz / r]
-  for (const o of [a, b]) {
+  // Never the root (a strip's first point).
+  for (const o of a === 0 ? [b] : [a, b]) {
     p[o]! += ux * inside
     p[o + 1]! += uy * inside
     p[o + 2]! += uz * inside
@@ -826,7 +839,8 @@ function growGuides(g: Grower, roots: Roots, seed: number): Guides {
       dir[1] = dy / r
       dir[2] = dz / r
       const [a, e] = angles(dx, dy, dz)
-      if (onHeadNow && e < leaveElevation(a)) onHeadNow = false
+      // Even a root under the head's widest line combs along the scalp before it falls.
+      if (onHeadNow && travelled >= LEAVE_AFTER * cmHs && e < leaveElevation(a)) onHeadNow = false
       let sx: number
       let sy: number
       let sz: number
@@ -1173,7 +1187,7 @@ function growStripPaths(g: Grower, guides: Guides, roots: Roots, count: number, 
       root: c,
       layer,
       lock: lockOf[c]!,
-      cut: 0,
+      cut: length < field ? 3 : 0,
       level: Number.NaN,
       field,
     })
@@ -1215,9 +1229,11 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
     const lock = strip.lock
     const jitter =
       (lockRandom(lock) - 0.5) * 2 * groom.ends.jitter * cmHs +
-      (unitHash(seed ^ 0x5717, c) - 0.5) * 2 * IN_LOCK * cmHs
+      (unitHash(seed ^ 0x5717, c) - 0.5) * 2 * IN_LOCK * mm
     if (roots.group[c] === GROUP.fringe) strip.level = fringeY + jitter
-    else if (groom.cut) strip.level = state.eyeY - cutDepth(groom.cut, roots.a[c]!) * cmHs + jitter
+    // The lock's leader's depth for all of it: its ends are cut together.
+    else if (groom.cut)
+      strip.level = state.eyeY - cutDepth(groom.cut, roots.a[lock]!) * cmHs + jitter
   }
   // Pulled toward the lock's leader, toward the tips.
   const amount = groom.clump.amount
@@ -1285,25 +1301,25 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
       }
     }
   }
-  // Each layer laid at its depth in the volume, and out of the head.
+  // Each layer set at its depth in the volume. The guides lie at the mid
+  // layer's, so every point moves out of the hair's middle by the
+  // difference (none at the root, where the clearance has yet to grow):
+  // the hanging part goes with the lying part it leaves the head from, so
+  // no strip kinks there. Then out of the head and the eyes, eased.
+  const smoothed: number[] = []
+  const [ox, oy, oz] = state.origin
   for (const strip of strips) {
     const standoff = standoffOf(seed, strip.lock, mm)
     const depth = layerDepth(strip.layer)
-    const pull =
-      strip.layer === LAYER.inner
-        ? groom.layPull.inner
-        : strip.layer === LAYER.mid
-          ? groom.layPull.mid
-          : groom.layPull.outer
     const n = strip.count
     const seg = strip.length / (n - 1)
-    const clears = new Float32Array(n)
+    const volumes = new Float32Array(n)
     // The volume's noise is coarse (VOLUME_CELL): read every few points, between them in line.
     const sampled: number[] = []
     for (let k = 1; k < n; k += VOLUME_EVERY) sampled.push(k)
     if (sampled[sampled.length - 1] !== n - 1) sampled.push(n - 1)
     for (const k of sampled) {
-      clears[k] = volumeAt(
+      volumes[k] = volumeAt(
         g,
         strip.points[k * 3]!,
         strip.points[k * 3 + 1]!,
@@ -1313,36 +1329,48 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
     for (let j = 0; j + 1 < sampled.length; j++) {
       const [from, to] = [sampled[j]!, sampled[j + 1]!]
       for (let k = from + 1; k < to; k++) {
-        clears[k] = clears[from]! + ((clears[to]! - clears[from]!) * (k - from)) / (to - from)
+        volumes[k] = volumes[from]! + ((volumes[to]! - volumes[from]!) * (k - from)) / (to - from)
       }
     }
+    const clears = new Float32Array(n)
     for (let k = 1; k < n; k++) {
-      clears[k] = clearance(g, clears[k]!, k * seg, standoff, depth)
-      if (strip.layer === LAYER.inner) clears[k] = Math.max(clears[k]!, INNER_CLEAR * mm)
+      const o = k * 3
+      let want = clearance(g, volumes[k]!, k * seg, standoff, depth)
+      if (strip.layer === LAYER.inner) want = Math.max(want, INNER_CLEAR * mm)
+      clears[k] = want
+      const shift = want - clearance(g, volumes[k]!, k * seg, 0, LAYER_DEPTH.mid)
+      const y = strip.points[o + 1]!
+      const below = smooth(oy, oy - ENVELOPE_TURN, y)
+      const dx = strip.points[o]! - ox
+      const dy = (y - oy) * (1 - below)
+      const dz = strip.points[o + 2]! - oz
+      const dl = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
+      strip.points[o]! += (dx / dl) * shift
+      strip.points[o + 1]! += (dy / dl) * shift
+      strip.points[o + 2]! += (dz / dl) * shift
     }
     for (let pass = 0; pass < STRIP_PASSES; pass++) {
+      for (let k = 1; k < n; k++) collide(g, strip.points, k * 3, clears[k]!)
+      smoothPath(strip.points, n, smoothed)
+      // Its segments back to their length, from the root out, each its own
+      // way (as eased): a strip drawn in toward the head is shorter round
+      // it, and a chain restored from the moved points would fold back.
       for (let k = 1; k < n; k++) {
         const o = k * 3
-        const clear = clears[k]!
-        if (strip.lying[k]) {
-          layOn(g, strip.points, o, clear, pull)
-          outOfEyes(state.keepOut, strip.points, o)
-        } else collide(g, strip.points, o, clear)
-        if (pass === STRIP_PASSES - 1) collideMiddle(g, strip.points, o - 3, o, clear)
-      }
-      // Its segments back to their length, from the root out.
-      for (let k = 1; k < n; k++) {
-        const o = k * 3
-        const dx = strip.points[o]! - strip.points[o - 3]!
-        const dy = strip.points[o + 1]! - strip.points[o - 2]!
-        const dz = strip.points[o + 2]! - strip.points[o - 1]!
+        const dx = smoothed[o]! - smoothed[o - 3]!
+        const dy = smoothed[o + 1]! - smoothed[o - 2]!
+        const dz = smoothed[o + 2]! - smoothed[o - 1]!
         const dl = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
         strip.points[o] = strip.points[o - 3]! + (dx / dl) * seg
         strip.points[o + 1] = strip.points[o - 2]! + (dy / dl) * seg
         strip.points[o + 2] = strip.points[o - 1]! + (dz / dl) * seg
       }
     }
-    for (let k = 1; k < n; k++) collide(g, strip.points, k * 3, LEAST_CLEAR * state.cm)
+    for (let k = 1; k < n; k++) {
+      collide(g, strip.points, k * 3, LEAST_CLEAR * state.cm)
+      collideMiddle(g, strip.points, k * 3 - 3, k * 3, LEAST_CLEAR * state.cm)
+    }
+    for (let k = 1; k < n; k++) outOfEyes(state.keepOut, strip.points, k * 3)
     arcLengths(strip.points, n, strip.s)
   }
   // Cut: at the first crossing below the level, by a short style's ear, nape and block.
@@ -1372,8 +1400,9 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
         if (crossed >= 0) {
           end = crossed
           how = 1
-        } else if (isFringe) {
-          end = Math.min(end, FRINGE_MOST * cmHs)
+        } else if (isFringe && end > FRINGE_MOST * cmHs) {
+          end = FRINGE_MOST * cmHs
+          how = 2
         }
       }
     }
@@ -1407,8 +1436,14 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
       }
     }
     void table
-    strip.cut = how
-    if (end < strip.s[n - 1]! - 1e-9) truncate(strip, end)
+    strip.cut = how || strip.cut
+    if (end < strip.s[n - 1]! - 1e-9) {
+      truncate(strip, end)
+      // Its new end, between two points clear of the eyes, may not be.
+      if (outOfEyes(state.keepOut, strip.points, (strip.count - 1) * 3)) {
+        arcLengths(strip.points, strip.count, strip.s)
+      }
+    }
     strip.length = strip.s[strip.count - 1]!
   }
   // 단발's ends turned under, over the last quarter.
@@ -1416,12 +1451,16 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
     for (const strip of strips) {
       if (roots.group[strip.root] === GROUP.fringe || strip.cut !== 1) continue
       const n = strip.count
-      for (let k = Math.floor(n * 0.75); k < n; k++) {
-        const u = (k - n * 0.75) / (n * 0.25)
+      const from = END_CURL_FROM * strip.length
+      const fullCurl = smooth(END_CURL_LENGTH[0] * cmHs, END_CURL_LENGTH[1] * cmHs, strip.length)
+      for (let k = 1; k < n; k++) {
+        if (strip.s[k]! <= from) continue
+        const u = (strip.s[k]! - from) / (strip.length - from || 1)
         const hx = strip.points[k * 3]! - state.origin[0]
         const hz = strip.points[k * 3 + 2]! - state.origin[2]
         const hl = Math.sqrt(hx * hx + hz * hz) || 1
-        const pull = groom.endCurl * 1.1 * state.cm * u * u
+        // A short strand (by the nape, under the cut) barely turns: no hook on it.
+        const pull = groom.endCurl * 1.1 * state.cm * u * u * fullCurl
         strip.points[k * 3]! -= (hx / hl) * pull
         strip.points[k * 3 + 2]! -= (hz / hl) * pull
         strip.points[k * 3 + 1]! += pull * 0.5
@@ -1429,6 +1468,24 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
       }
       arcLengths(strip.points, n, strip.s)
       strip.length = strip.s[n - 1]!
+    }
+  }
+}
+
+/**
+ * A polyline's inner points halfway to their neighbours' middle, into
+ * `out` (flat; the polyline itself is left as it was).
+ */
+function smoothPath(points: Float32Array, count: number, out: number[]) {
+  out.length = count * 3
+  for (let i = 0; i < 3; i++) {
+    out[i] = points[i]!
+    out[(count - 1) * 3 + i] = points[(count - 1) * 3 + i]!
+  }
+  for (let k = 1; k < count - 1; k++) {
+    for (let axis = 0; axis < 3; axis++) {
+      const o = k * 3 + axis
+      out[o] = points[o]! * 0.5 + (points[o - 3]! + points[o + 3]!) * 0.25
     }
   }
 }
@@ -1662,6 +1719,7 @@ function layOut(g: Grower, strips: Strip[], roots: Roots, tier: Tier, seed: numb
         copy[o]! += (dx / r) * lift
         copy[o + 1]! += (dy / r) * lift
         copy[o + 2]! += (dz / r) * lift
+        outOfEyes(state.keepOut, copy, o)
       }
       const stray: Path = {
         points: copy,

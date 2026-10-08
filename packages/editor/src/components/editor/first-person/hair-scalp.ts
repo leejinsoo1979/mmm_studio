@@ -367,9 +367,9 @@ export const RADIUS_MAP_SIZE = 160
 /**
  * The outermost hit of each ray from a head's middle (`origin`), over an
  * octahedral map (`y` up: the crown in the middle, nothing singular): of
- * the surfaces it was built from (`radius`; 0 where the head is open, at
- * the neck), and of the first surface alone (`headRadius`, `headTri` its
- * triangle there or −1), which roots stand on.
+ * the first surface (the head roots stand on: `headRadius`, `headTri` its
+ * triangle there or −1), and in `radius` that, or where the head has no
+ * hit the other surfaces' (0 where all are open, at the neck).
  */
 export type RadiusMap = {
   size: number
@@ -548,11 +548,12 @@ export function radiusMap(
     if (v < -1e-7 || u + v > 1 + 1e-7) return
     const d = (e2x * qx + e2y * qy + e2z * qz) * inv
     if (d <= 0) return
-    if (d > radius[at]!) radius[at] = d
-    if (head && d > headRadius[at]!) {
-      headRadius[at] = d
-      headTri[at] = tri
-    }
+    if (head) {
+      if (d > headRadius[at]!) {
+        headRadius[at] = d
+        headTri[at] = tri
+      }
+    } else if (d > radius[at]!) radius[at] = d
   }
   const place = [0, 0]
   const placeOf = (x: number, y: number, z: number) => {
@@ -629,12 +630,15 @@ export function radiusMap(
       cover(ax, ay, az, bx, by, bz, cx, cy, cz, 0)
     }
   })
+  // The head where it is there; the other surfaces only where it is open.
+  for (let at = 0; at < size * size; at++) if (headRadius[at]! > 0) radius[at] = headRadius[at]!
   return { size, origin, radius, headRadius, headTri }
 }
 
 /**
- * The map's radius toward unit (dx, dy, dz), bilinear: 0 where any texel
- * round it is open (the neck's rim), so nothing is pushed into the hole.
+ * The map's radius toward unit (dx, dy, dz), bilinear over the texels
+ * round it that are closed (by the neck's rim, its open ones left out), 0
+ * where all are open.
  */
 export function radiusAt(map: RadiusMap, dx: number, dy: number, dz: number) {
   const { size, radius } = map
@@ -668,8 +672,13 @@ export function radiusAt(map: RadiusMap, dx: number, dy: number, dz: number) {
     r01 = radius[texel(size, ix, iy + 1)]!
     r11 = radius[texel(size, ix + 1, iy + 1)]!
   }
-  if (r00 === 0 || r10 === 0 || r01 === 0 || r11 === 0) return 0
-  return (r00 * (1 - tx) + r10 * tx) * (1 - ty) + (r01 * (1 - tx) + r11 * tx) * ty
+  // By the rim of the opening, the texels round it that are closed.
+  const w00 = r00 > 0 ? (1 - tx) * (1 - ty) : 0
+  const w10 = r10 > 0 ? tx * (1 - ty) : 0
+  const w01 = r01 > 0 ? (1 - tx) * ty : 0
+  const w11 = r11 > 0 ? tx * ty : 0
+  const weight = w00 + w10 + w01 + w11
+  return weight > 0 ? (r00 * w00 + r10 * w10 + r01 * w01 + r11 * w11) / weight : 0
 }
 
 /**
