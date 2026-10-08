@@ -3,6 +3,7 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 import { BufferGeometry, Float32BufferAttribute, Mesh, Scene } from 'three'
 import type { WebGPURenderer } from 'three/webgpu'
+import { SheenSafePhysicalNodeMaterial } from './sheen-safe-material'
 import { prepareWebGPURenderer, rendererForCanvas, watchGpuDevice } from './webgpu-renderer'
 
 function triangle(count = 3) {
@@ -35,12 +36,13 @@ function fakeDevice() {
   }
 }
 
-/** The renderer's surface the guards use: render(), the render-object hook, renderObject(). */
+/** The renderer's surface the guards use: render(), the render-object hook, renderObject(), its node library. */
 function fakeRenderer(device: object | null) {
   const drawn: object[] = []
   let renderObjectFunction: ((...args: any[]) => void) | null = null
   const renderer = {
     backend: { device },
+    library: { materialNodes: new Map<string, unknown>() },
     renders: 0,
     render(scene: Scene) {
       renderer.renders++
@@ -81,6 +83,15 @@ describe('prepareWebGPURenderer', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+
+  test('draws physical materials sheen-safe', () => {
+    const { renderer, asRenderer } = fakeRenderer(fakeDevice().device)
+    const release = prepareWebGPURenderer(asRenderer, 'studio')
+    expect(renderer.library.materialNodes.get('MeshPhysicalMaterial')).toBe(
+      SheenSafePhysicalNodeMaterial,
+    )
+    release()
   })
 
   test('holds back the dispose of a drawn geometry, and lets it through once released', () => {

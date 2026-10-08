@@ -7,6 +7,7 @@ import {
   type InUseDisposeGuard,
 } from './drawable-geometry'
 import { createGpuErrorReporter } from './gpu-error-log'
+import { installSheenSafeMaterial } from './sheen-safe-material'
 
 const warnedEmptyDraw = process.env.NODE_ENV === 'production' ? null : new WeakSet<object>()
 
@@ -138,12 +139,14 @@ export function watchGpuDevice(renderer: WebGPURenderer, scope = 'viewer'): () =
 
 /**
  * Gives a WebGPURenderer made outside the viewer (after `await
- * renderer.init()`) the viewer's safety nets: the draw guards and the device
- * watch. `scope` names it in the log. Returns what undoes them; call it
- * before `renderer.dispose()`, so the geometries it drew, which may live on
- * in another renderer, no longer hold on to its meshes.
+ * renderer.init()`) the viewer's safety nets: the draw guards, the
+ * sheen-safe physical material and the device watch. `scope` names it in
+ * the log. Returns what undoes them; call it before `renderer.dispose()`,
+ * so the geometries it drew, which may live on in another renderer, no
+ * longer hold on to its meshes.
  */
 export function prepareWebGPURenderer(renderer: WebGPURenderer, scope: string): () => void {
+  installSheenSafeMaterial(renderer)
   const guard = installDrawGuards(renderer, scope)
   const stop = watchGpuDevice(renderer, scope)
   return () => {
@@ -171,7 +174,7 @@ const renderersByCanvas = new WeakMap<object, Promise<unknown>>()
  * dropped, so a later mount on the same canvas can try again.
  */
 export function rendererForCanvas<R>(
-  canvas: HTMLCanvasElement | OffscreenCanvas | undefined,
+  canvas: object | undefined,
   create: () => Promise<R>,
 ): Promise<R> {
   const known = canvas ? (renderersByCanvas.get(canvas) as Promise<R> | undefined) : undefined
