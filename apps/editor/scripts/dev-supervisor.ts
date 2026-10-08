@@ -1,5 +1,8 @@
-// Dev-only wrapper: `bun scripts/dev-supervisor.ts next dev --port 3002` (the editor's `dev`
-// script). `next build`, `next start` and the standalone server never go through it.
+// Dev-only wrapper: `bun --env-file=/dev/null scripts/dev-supervisor.ts next dev --port 3002` (the
+// editor's `dev` script). `next build`, `next start` and the standalone server never go through it.
+// `--env-file=/dev/null` stops Bun from loading apps/editor/.env* into process.env before Next
+// does: Next never overrides an inherited key, so edits to those files would stop applying on its
+// env reload. (`--no-env-file` says the same, but Bun 1.3.0 ignores it.)
 //
 // `next dev` forks the real server (next-server). When that child dies by a signal (V8 heap
 // abort, a macOS memory-pressure SIGKILL, a native crash), `next dev` ignores the death and
