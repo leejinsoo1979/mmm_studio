@@ -17,19 +17,14 @@ import {
   useState,
 } from 'react'
 import * as THREE from 'three/webgpu'
-import {
-  createInUseDisposeGuard,
-  ensureSecondaryUv,
-  flushBeforeRender,
-  hasDrawableGeometry,
-} from '../../lib/drawable-geometry'
-import { createGpuErrorReporter } from '../../lib/gpu-error-log'
 import { PERF_OVERLAY_ENABLED, pushGpuSample } from '../../lib/gpu-perf'
 import { applyIsolation, clearIsolation } from '../../lib/isolation'
 import { ensureKtx2Support } from '../../lib/ktx2-loader'
 import type { ColorPreset, RenderShading } from '../../lib/materials'
 import { getSceneTheme } from '../../lib/scene-themes'
+import { installSheenSafeMaterial } from '../../lib/sheen-safe-material'
 import { toneMappingFor } from '../../lib/tone-mapping'
+import { installDrawGuards, rendererForCanvas, watchGpuDevice } from '../../lib/webgpu-renderer'
 import useViewer, { type RenderContext } from '../../store/use-viewer'
 import { FloorElevationSystem } from '../../systems/floor-elevation/floor-elevation-system'
 import { GeometrySystem } from '../../systems/geometry/geometry-system'
@@ -64,21 +59,6 @@ declare module '@react-three/fiber' {
 
 extend(THREE as any)
 
-// R3F's <Canvas> useLayoutEffect has no deps, so any re-render (theme switch,
-// parent re-render, StrictMode double-mount) re-invokes `configure()`. With a
-// sync `gl` factory that's harmless — the renderer is created once and reused.
-// With an async factory (WebGPURenderer needs `await init()`), two configure
-// calls can race: both see `state.gl == null` and both create a renderer. The
-// first to resolve gets `setSize`/`setDpr` called on it; the second overwrites
-// `state.gl` but R3F's store already holds the new size/dpr, so the new
-// renderer is never resized and stays at the canvas's 300×150 default.
-//
-// Caching by canvas guarantees both branches return the same instance, so
-// "duplicate" configure calls become no-ops on an already-sized renderer.
-// We cache the in-flight Promise (not just the resolved renderer) so two
-// concurrent configure() calls await the same init instead of creating two
-// renderers in parallel and only caching the second.
-const WEBGPU_RENDERER_CACHE = new WeakMap<HTMLCanvasElement, Promise<THREE.WebGPURenderer>>()
 const SCENE_READY_SETTLED_FRAMES = 2
 const SCENE_READY_MAX_WAIT_FRAMES = 180
 const DIRTY_BUILD_KINDS = new Set([
@@ -92,8 +72,6 @@ const DIRTY_BUILD_KINDS = new Set([
   'wall',
   'window',
 ])
-
-const warnedEmptyDraw = process.env.NODE_ENV === 'production' ? null : new WeakSet<object>()
 
 function canCreateWebGLContext() {
   if (typeof document === 'undefined') return false
@@ -127,94 +105,7 @@ function UnsupportedGpuViewerFallback() {
   )
 }
 
-/**
- * Renderer-level safety net against the empty-vertex-buffer crash.
- *
- * Wraps the per-object render function so any draw whose geometry has a count-0
- * `position` attribute is skipped instead of submitted. One such draw leaves
- * WebGPU vertex buffer slot 0 unbound, which the validator rejects and which
- * poisons the *whole* command encoder — so a single stray empty mesh (e.g. a
- * transient placeholder, or a derived edge/outline geometry) flickers the entire
- * canvas, not just itself. See `hasDrawableGeometry`.
- *
- * Draws whose group or draw range is empty (the placeholders' count-0 groups)
- * are skipped too, silently: they draw nothing by design.
- *
- * It also keeps a drawn geometry's `dispose()` from freeing buffers a mesh in
- * the scene still draws, which binds a freed buffer on the next draw with the
- * same consequence. Held-back disposes are settled at the start of every
- * `render()`, before any render object can move on to a mesh's new geometry.
- * See `createInUseDisposeGuard`.
- *
- * The custom render-object function is the documented three.js hook for this
- * (`Renderer.setRenderObjectFunction`); it must call `renderObject()` for
- * everything it keeps. `MergedOutlineNode` captures and restores this function
- * around its passes, so the guard survives outline rendering (its own passes
- * carry the same check inline).
- */
-function installEmptyDrawGuard(renderer: THREE.WebGPURenderer) {
-  const disposeGuard = createInUseDisposeGuard()
-  flushBeforeRender(renderer, disposeGuard)
-  renderer.setRenderObjectFunction(
-    (
-      object: any,
-      scene: any,
-      camera: any,
-      geometry: any,
-      material: any,
-      group: any,
-      lightsNode: any,
-      clippingContext: any,
-      passId: any,
-    ) => {
-      if (!hasDrawableGeometry(geometry, group)) {
-        const emptyBuffer = !(geometry?.attributes?.position?.count > 0)
-        if (emptyBuffer && warnedEmptyDraw && !warnedEmptyDraw.has(geometry ?? object)) {
-          warnedEmptyDraw.add(geometry ?? object)
-          console.warn(
-            '[viewer] skipped a draw with an empty position buffer (would poison the WebGPU command encoder)',
-            { name: object?.name, type: object?.type, material: material?.name },
-          )
-        }
-        return
-      }
-      ensureSecondaryUv(geometry)
-      disposeGuard.track(object, geometry)
-      ;(renderer as any).renderObject(
-        object,
-        scene,
-        camera,
-        geometry,
-        material,
-        group,
-        lightsNode,
-        clippingContext,
-        passId,
-      )
-    },
-  )
-}
-
-/**
- * Monitors the WebGPU device for loss / uncaptured errors and logs them.
- * WebGPU device loss can happen when:
- *  - Tab is backgrounded and OS reclaims GPU
- *  - Driver crash or GPU reset
- *  - Browser security policy kills the context
- */
-type WebGPUDeviceLossInfo = {
-  reason?: string
-  message?: string
-}
-
-type WebGPUDeviceLike = {
-  lost: Promise<WebGPUDeviceLossInfo>
-  label?: string
-  features?: Set<string>
-  addEventListener?: (type: string, listener: EventListener) => void
-  removeEventListener?: (type: string, listener: EventListener) => void
-}
-
+/** Monitors the WebGPU device for loss and uncaptured errors (see `watchGpuDevice`). */
 function GPUDeviceWatcher() {
   const gl = useThree((s) => s.gl)
 
@@ -224,46 +115,16 @@ function GPUDeviceWatcher() {
     // loader would otherwise be the only thing to call this).
     ensureKtx2Support(gl)
 
-    const backend = (gl as any).backend
-    const device = backend?.device as WebGPUDeviceLike | undefined
-
-    if (!device) {
-      console.warn('[viewer] No WebGPU device on backend — running on a fallback renderer.', {
-        backend: backend?.constructor?.name ?? 'unknown',
-        rendererType: (gl as any).constructor?.name ?? 'unknown',
+    const device = (gl as any).backend?.device as
+      | { label?: string; features?: Set<string> }
+      | undefined
+    if (device) {
+      console.log('[viewer] WebGPU device ready', {
+        label: device.label,
+        features: Array.from(device.features ?? []),
       })
-      return
     }
-
-    console.log('[viewer] WebGPU device ready', {
-      label: device.label,
-      features: Array.from(device.features ?? []),
-    })
-
-    device.lost.then((info: WebGPUDeviceLossInfo) => {
-      console.error(
-        `[viewer] WebGPU device lost: reason="${info.reason ?? 'unknown'}", message="${info.message ?? ''}". ` +
-          'The page must be reloaded to recover the GPU context.',
-      )
-    })
-
-    // Uncaptured errors are normally silent (only console-warned by Chrome at
-    // best). Pipe them to console.error so silent mobile crashes show up, once
-    // per distinct message plus a periodic count while they repeat.
-    const errors = createGpuErrorReporter(
-      (...args) => console.error(...args),
-      (run, ms) => {
-        const timer = setTimeout(run, ms)
-        return () => clearTimeout(timer)
-      },
-    )
-    const onUncapturedError = (event: any) => errors.report(event?.error)
-    device.addEventListener?.('uncapturederror', onUncapturedError)
-
-    return () => {
-      device.removeEventListener?.('uncapturederror', onUncapturedError)
-      errors.dispose()
-    }
+    return watchGpuDevice(gl as unknown as THREE.WebGPURenderer)
   }, [gl])
 
   return null
@@ -545,11 +406,8 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       dpr={[1, maxDpr]}
       frameloop="never"
       gl={
-        ((props: { canvas?: HTMLCanvasElement }) => {
-          const canvas = props.canvas
-          const cached = canvas ? WEBGPU_RENDERER_CACHE.get(canvas) : undefined
-          if (cached) return cached
-          const promise = (async () => {
+        ((props: { canvas?: HTMLCanvasElement }) =>
+          rendererForCanvas(props.canvas, async () => {
             try {
               const renderer = new THREE.WebGPURenderer({ ...(props as any), alpha: true })
               renderer.toneMapping = toneMappingFor(useViewer.getState().shading)
@@ -557,21 +415,15 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
                 useViewer.getState().sceneTheme,
               ).toneMappingExposure
               await renderer.init()
-              installEmptyDrawGuard(renderer)
+              installDrawGuards(renderer)
+              installSheenSafeMaterial(renderer)
               return renderer
             } catch (err) {
-              // Drop the failed promise from the cache so a future Canvas
-              // mount on the same DOM can retry instead of inheriting the
-              // rejection forever.
-              if (canvas) WEBGPU_RENDERER_CACHE.delete(canvas)
               console.error('[viewer] WebGPURenderer init failed', err)
               setRendererInitFailed(true)
               throw err
             }
-          })()
-          if (canvas) WEBGPU_RENDERER_CACHE.set(canvas, promise)
-          return promise
-        }) as any
+          })) as any
       }
       resize={{
         debounce: 100,

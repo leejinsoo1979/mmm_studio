@@ -53,6 +53,11 @@ export interface InUseDisposeGuard {
   track(object: Object3D, geometry: BufferGeometry): void
   /** Settles every held-back `dispose()`; call before every render. */
   flush(): void
+  /**
+   * For a renderer that is going away: runs the held-back disposes, lets
+   * every later one straight through and forgets the meshes it knew.
+   */
+  release(): void
 }
 
 /**
@@ -81,17 +86,24 @@ export interface InUseDisposeGuard {
  * flushed after a frame) cannot be ordered. When one runs, the geometries its
  * meshes have since drawn are marked for upload, so their render objects
  * refresh and rebuild whatever buffers three freed by mistake.
+ *
+ * A geometry keeps the guard's `dispose` for good (it may be shared with
+ * another renderer, which wraps it in turn), so `release()` — for a renderer
+ * that is disposed while the geometries it drew live on — makes the guard
+ * let disposes through and drops the meshes it held on to.
  */
 export function createInUseDisposeGuard(
   schedule: (run: () => void) => void = (run) => {
     setTimeout(run, 0)
   },
 ): InUseDisposeGuard {
-  const drawnBy = new WeakMap<BufferGeometry, Set<Object3D>>()
+  let drawnBy = new WeakMap<BufferGeometry, Set<Object3D>>()
   const held = new Map<BufferGeometry, () => void>()
   let scheduled = false
+  let released = false
 
-  const settle = (geometry: BufferGeometry, objects: Set<Object3D>, dispose: () => void) => {
+  const settle = (geometry: BufferGeometry, dispose: () => void) => {
+    const objects = drawnBy.get(geometry) ?? new Set<Object3D>()
     const geometryOf = (object: Object3D) => (object as { geometry?: BufferGeometry }).geometry
     for (const object of objects) {
       if (geometryOf(object) === geometry && isInScene(object)) return
@@ -112,29 +124,34 @@ export function createInUseDisposeGuard(
     }
   }
 
+  const run = (dispose: () => void) => {
+    try {
+      dispose()
+    } catch (error) {
+      console.error('[viewer] a geometry dispose listener threw', error)
+    }
+  }
+
   const flush = () => {
-    for (const [geometry, run] of held) {
+    for (const [geometry, dispose] of held) {
       held.delete(geometry)
-      try {
-        run()
-      } catch (error) {
-        console.error('[viewer] a geometry dispose listener threw', error)
-      }
+      run(() => settle(geometry, dispose))
     }
   }
 
   const track = (object: Object3D, geometry: BufferGeometry) => {
+    if (released) return
     const known = drawnBy.get(geometry)
     if (known) {
       known.add(object)
       return
     }
-    const objects = new Set([object])
-    drawnBy.set(geometry, objects)
+    drawnBy.set(geometry, new Set([object]))
     const dispose = geometry.dispose.bind(geometry)
     geometry.dispose = () => {
+      if (released) return dispose()
       if (held.has(geometry)) return
-      held.set(geometry, () => settle(geometry, objects, dispose))
+      held.set(geometry, dispose)
       if (scheduled) return
       scheduled = true
       schedule(() => {
@@ -144,7 +161,16 @@ export function createInUseDisposeGuard(
     }
   }
 
-  return { track, flush }
+  const release = () => {
+    released = true
+    for (const [geometry, dispose] of held) {
+      held.delete(geometry)
+      run(dispose)
+    }
+    drawnBy = new WeakMap()
+  }
+
+  return { track, flush, release }
 }
 
 /**

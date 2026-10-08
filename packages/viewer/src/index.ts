@@ -105,6 +105,7 @@ export {
 } from './lib/materials'
 export { mergedOutline } from './lib/merged-outline-node'
 export { unionPolygons } from './lib/polygon-union'
+export { readRenderTargetImage } from './lib/render-target-pixels'
 export {
   getSceneTheme,
   SCENE_THEME_IDS,
@@ -112,6 +113,9 @@ export {
   type SceneTheme,
 } from './lib/scene-themes'
 export { WEATHERS, type Weather } from './lib/weather'
+// For a canvas outside <Viewer> that renders with three's WebGPURenderer: the
+// viewer's safety nets and its one-renderer-per-canvas R3F factory.
+export { prepareWebGPURenderer, rendererForCanvas } from './lib/webgpu-renderer'
 export { useItemLightPool } from './store/use-item-light-pool'
 export { default as useViewer, type ViewerUnit } from './store/use-viewer'
 export { CeilingSystem } from './systems/ceiling/ceiling-system'

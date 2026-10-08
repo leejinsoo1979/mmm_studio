@@ -10,7 +10,6 @@ import {
   useEmoteClips,
   useFaceTarget,
 } from '@pascal-app/editor'
-import { ContactShadows } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import {
   type PointerEvent as ReactPointerEvent,
@@ -18,16 +17,13 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
 import {
   AnimationMixer,
-  BufferGeometry,
   DirectionalLight,
-  Float32BufferAttribute,
   type Group,
   type Material,
   type Mesh,
@@ -35,17 +31,13 @@ import {
   NeutralToneMapping,
   type Object3D,
   type PerspectiveCamera,
-  PMREMGenerator,
-  ShaderMaterial,
   type SkinnedMesh,
   Source,
   type Texture,
-  Mesh as ThreeMesh,
-  Vector2,
   Vector3,
-  Vector4,
 } from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { PMREMGenerator, type WebGPURenderer } from 'three/webgpu'
 import {
   createHandleBoard,
   dragHandle,
@@ -70,10 +62,19 @@ import type {
   StudioStageApi,
   StudioStageProps,
 } from './stage-contract'
-import { type CaptureRig, captureAiShot, captureSnapshot, placeCamera } from './studio-capture'
+import { createBackdrop, floorGlowEllipse, freeRoomCentre } from './studio-backdrop'
+import {
+  type CaptureRig,
+  captureAiShot,
+  captureSnapshot,
+  drawStage,
+  placeCamera,
+} from './studio-capture'
+import { ContactShadow } from './studio-contact-shadow'
 import { grainDataUrl, overlayBackground, overlayBlend, STUDIO_FILTER } from './studio-filters'
 import { StudioPose } from './studio-pose'
-import { drawWebglGeometries } from './webgl-geometry'
+import { useStudioRenderer } from './studio-renderer'
+import { untonedColor } from './studio-tone'
 
 type HeadFocus = 'hair' | 'face' | 'eyes' | 'mouth'
 
@@ -453,7 +454,7 @@ const ENVIRONMENT_INTENSITY = 0.35
 
 /** Soft image-based light from a studio room, made here (no picture to download). */
 function StudioEnvironment() {
-  const gl = useThree((state) => state.gl)
+  const gl = useThree((state) => state.gl) as unknown as WebGPURenderer
   const scene = useThree((state) => state.scene)
   useEffect(() => {
     const generator = new PMREMGenerator(gl)
@@ -471,119 +472,44 @@ function StudioEnvironment() {
   return null
 }
 
-/**
- * The backdrop: a dark studio, lightest behind the character (the free
- * room's middle) and falling off to near black at the edges, with a faint
- * glow on the floor round the platform. It works in the view's own uv, so
- * any render size draws the same picture; a snapshot of part of the view
- * (`window`) draws its part of it.
- */
-const BACKDROP_VERTEX = /* glsl */ `
-varying vec2 vUv;
-
-void main() {
-  vUv = position.xy * 0.5 + 0.5;
-  gl_Position = vec4(position.xy, 1.0, 1.0);
-}
-`
-
-const BACKDROP_FRAGMENT = /* glsl */ `
-uniform vec4 window;
-uniform float aspect;
-uniform vec2 centre;
-uniform vec4 floorGlow;
-varying vec2 vUv;
-
-const vec3 CENTRE = vec3(42.0, 46.0, 53.0) / 255.0;
-const vec3 MIDDLE = vec3(20.0, 22.0, 26.0) / 255.0;
-const vec3 EDGE = vec3(7.0, 8.0, 10.0) / 255.0;
-const vec3 FLOOR = vec3(29.0, 34.0, 41.0) / 255.0;
-
-float noise(vec2 at) {
-  return fract(52.9829189 * fract(dot(at, vec2(0.06711056, 0.00583715))));
-}
-
-void main() {
-  vec2 uv = window.xy + vUv * window.zw;
-  // An ellipse 1.3 times as wide as it is tall, in the view's heights.
-  float t = length((uv - centre) * vec2(aspect / 1.3, 1.0)) / 0.75;
-  vec3 colour = t < 0.55
-    ? mix(CENTRE, MIDDLE, t / 0.55)
-    : mix(MIDDLE, EDGE, clamp((t - 0.55) / 0.45, 0.0, 1.0));
-  vec2 floorAt = (uv - floorGlow.xy) * vec2(aspect, 1.0) / max(floorGlow.zw * 1.6, vec2(1e-4));
-  colour = mix(colour, FLOOR, (1.0 - smoothstep(0.0, 1.0, length(floorAt))) * 0.25);
-  gl_FragColor = vec4(colour + (noise(gl_FragCoord.xy) - 0.5) / 255.0, 1.0);
-}
-`
-
 /** The platform's radius (m), which the floor glow spreads round. */
 const PLATFORM_RADIUS = 0.95
 
 const origin = new Vector3()
-const rim = new Vector3()
+const rimX = new Vector3()
+const rimZ = new Vector3()
 
+/** The studio's backdrop (studio-backdrop.ts), its light following the free room and its floor glow the platform. */
 function Backdrop({ state }: { state: StageState }) {
   const size = useThree((three) => three.size)
   const camera = useThree((three) => three.camera)
-  const mesh = useMemo(() => {
-    const geometry = new BufferGeometry()
-    geometry.setAttribute(
-      'position',
-      new Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3),
-    )
-    const material = new ShaderMaterial({
-      vertexShader: BACKDROP_VERTEX,
-      fragmentShader: BACKDROP_FRAGMENT,
-      uniforms: {
-        window: { value: new Vector4(0, 0, 1, 1) },
-        aspect: { value: 1 },
-        centre: { value: new Vector2(0.5, 0.5) },
-        floorGlow: { value: new Vector4(0.5, -1, 0, 0) },
-      },
-      depthTest: false,
-      depthWrite: false,
-    })
-    const backdrop = new ThreeMesh(geometry, material)
-    backdrop.frustumCulled = false
-    backdrop.renderOrder = -1000
-    return backdrop
-  }, [])
+  const backdrop = useMemo(createBackdrop, [])
   useEffect(() => {
     const { rig } = state
-    rig.backdrop = mesh
-    rig.setBackdropWindow = (x, y, width, height) =>
-      mesh.material.uniforms.window!.value.set(x, y, width, height)
+    rig.backdrop = backdrop.mesh
+    rig.setBackdropWindow = (x, y, width, height) => backdrop.view.set(x, y, width, height)
     return () => {
-      if (rig.backdrop === mesh) rig.backdrop = null
-      mesh.geometry.dispose()
-      mesh.material.dispose()
+      if (rig.backdrop === backdrop.mesh) rig.backdrop = null
+      backdrop.mesh.geometry.dispose()
+      backdrop.mesh.material.dispose()
     }
-  }, [mesh, state])
+  }, [backdrop, state])
   const started = useRef(false)
   useFrame((_, delta) => {
-    const { uniforms } = mesh.material
     const { width, height } = size
-    const { insets } = state
-    const freeWidth = Math.max(1, width - insets.left - insets.right)
-    const freeHeight = Math.max(1, height - insets.top - insets.bottom)
-    const cx = (insets.left + freeWidth / 2) / width
-    const cy = 1 - (insets.top + freeHeight / 2) / height
-    const centre = uniforms.centre!.value as Vector2
+    const target = freeRoomCentre(size, state.insets)
     const step = started.current ? 1 - Math.exp((-2 / EASE_TIME) * Math.min(delta, 0.1)) : 1
     started.current = true
-    centre.x += (cx - centre.x) * step
-    centre.y += (cy - centre.y) * step
-    uniforms.aspect!.value = width / Math.max(1, height)
+    backdrop.centre.x += (target.x - backdrop.centre.x) * step
+    backdrop.centre.y += (target.y - backdrop.centre.y) * step
+    const aspect = width / Math.max(1, height)
+    backdrop.aspect.value = aspect
     origin.set(0, 0, 0).project(camera)
-    const ox = origin.x * 0.5 + 0.5
-    const oy = origin.y * 0.5 + 0.5
-    rim.set(PLATFORM_RADIUS, 0, 0).project(camera)
-    const rx = Math.abs(rim.x * 0.5 + 0.5 - ox) * uniforms.aspect!.value
-    rim.set(0, 0, PLATFORM_RADIUS).project(camera)
-    const ry = Math.abs(rim.y * 0.5 + 0.5 - oy)
-    ;(uniforms.floorGlow!.value as Vector4).set(ox, oy, rx, ry)
+    rimX.set(PLATFORM_RADIUS, 0, 0).project(camera)
+    rimZ.set(0, 0, PLATFORM_RADIUS).project(camera)
+    backdrop.floorGlow.set(...floorGlowEllipse(origin, rimX, rimZ, aspect))
   })
-  return <primitive object={mesh} />
+  return <primitive object={backdrop.mesh} />
 }
 
 /** Marks what the studio made its own (a clone's userData goes with it, so the look's copies of ours count too). */
@@ -782,7 +708,7 @@ function StudioAvatar({
   onCueEnd: () => void
 }) {
   const { avatar, model, clips } = useAvatarBody(avatarId)
-  const anisotropy = useThree((three) => three.gl.capabilities.getMaxAnisotropy())
+  const anisotropy = useThree((three) => (three.gl as unknown as WebGPURenderer).getMaxAnisotropy())
   const camera = useThree((three) => three.camera)
   // Before the look sees the body (its effects run after this render).
   useMemo(() => takeOwnership(model, anisotropy), [model, anisotropy])
@@ -832,6 +758,15 @@ function StudioAvatar({
   )
 }
 
+/**
+ * The ring round the disc: steel blue at 55 % over the disc, as WebGL blended
+ * it in display colours. The frame blends in linear light before it is tone
+ * mapped, so the ring is drawn solid in the colour that blend showed.
+ */
+const RING = untonedColor('#3c5a73')
+/** The faint white halo on the floor past the disc, 5 % white over the backdrop in WebGL's blend: as much in a linear one. */
+const HALO_OPACITY = 0.015
+
 /** A dark disc the character stands on, ringed in steel blue. */
 function Platform({ state }: { state: StageState }) {
   const ref = useRef<Group>(null)
@@ -850,39 +785,28 @@ function Platform({ state }: { state: StageState }) {
       </mesh>
       <mesh position-z={0.001}>
         <ringGeometry args={[PLATFORM_RADIUS, 0.975, 128]} />
-        <meshBasicMaterial color="#5b8fb9" opacity={0.55} toneMapped={false} transparent />
+        <meshBasicMaterial color={RING} />
       </mesh>
       <mesh position-z={0.0005}>
         <ringGeometry args={[1.05, 1.9, 128]} />
-        <meshBasicMaterial color="#ffffff" opacity={0.05} toneMapped={false} transparent />
+        <meshBasicMaterial color="#ffffff" opacity={HALO_OPACITY} transparent />
       </mesh>
     </group>
   )
 }
 
-/** The soft shadow under the feet: shown for the whole and upper body (and kept for the AI's whole-body shot). */
+/** The soft shadow under the feet (studio-contact-shadow.ts): shown for the whole and upper body (and kept for the AI's whole-body shot). */
 function FloorShadow({ state, shown }: { state: StageState; shown: boolean }) {
-  const ref = useRef<Group>(null)
+  const shadow = useMemo(() => new ContactShadow(), [])
   useEffect(() => {
     const { rig } = state
-    rig.contact = ref.current
+    rig.contact = shadow
     return () => {
-      rig.contact = null
+      if (rig.contact === shadow) rig.contact = null
+      shadow.dispose()
     }
-  }, [state])
-  return (
-    <group ref={ref} visible={shown}>
-      <ContactShadows
-        blur={2.4}
-        color="#000"
-        far={1.2}
-        opacity={0.6}
-        position={[0, 0.003, 0]}
-        resolution={512}
-        scale={2.6}
-      />
-    </group>
-  )
+  }, [shadow, state])
+  return <primitive object={shadow.group} visible={shown} />
 }
 
 /** Hands the capture the renderer, the scene and the live camera. */
@@ -893,18 +817,11 @@ function RigBridge({ state }: { state: StageState }) {
   const size = useThree((three) => three.size)
   useEffect(() => {
     const { rig } = state
-    rig.gl = gl
+    rig.gl = gl as unknown as WebGPURenderer
     rig.scene = scene
     rig.camera = camera as PerspectiveCamera
     rig.size = { width: size.width, height: size.height }
   }, [state, gl, scene, camera, size.width, size.height])
-  return null
-}
-
-/** Draws the bodies the game's WebGPU renderer has drawn as WebGL reads them (see webgl-geometry.ts). */
-function WebglGeometries() {
-  const scene = useThree((three) => three.scene)
-  useLayoutEffect(() => drawWebglGeometries(scene), [scene])
   return null
 }
 
@@ -913,8 +830,11 @@ function WebglGeometries() {
  * priority 1), and a frame callback with a priority takes the drawing over
  * from the canvas.
  */
-function FrameRender() {
-  useFrame(({ gl, scene, camera }) => gl.render(scene, camera), 2)
+function FrameRender({ state }: { state: StageState }) {
+  useFrame(
+    ({ gl, scene, camera }) => drawStage(gl as unknown as WebGPURenderer, scene, camera, state.rig),
+    2,
+  )
   return null
 }
 
@@ -1294,6 +1214,7 @@ export function StudioStage({
     return () => window.removeEventListener('keydown', onKey, true)
   }, [board, state, tell, setView])
 
+  const renderer = useStudioRenderer()
   const css = STUDIO_FILTER[filter].css
   return (
     <div
@@ -1319,7 +1240,7 @@ export function StudioStage({
       <Canvas
         camera={CAMERA}
         dpr={dpr}
-        gl={{ antialias: true, powerPreference: 'high-performance' }}
+        gl={renderer}
         onCreated={({ gl }) => {
           gl.toneMapping = NeutralToneMapping
           gl.toneMappingExposure = 1
@@ -1338,8 +1259,7 @@ export function StudioStage({
         <CameraRig state={state} stature={stature} />
         <HandleProjector board={board} model={state.model} />
         <RigBridge state={state} />
-        <WebglGeometries />
-        <FrameRender />
+        <FrameRender state={state} />
       </Canvas>
       <FilterOverlays box={box} filter={filter} insets={insets} />
       <FaceHandles board={board} sculpt={sculpt} />

@@ -221,6 +221,60 @@ describe('createInUseDisposeGuard', () => {
   })
 })
 
+describe('createInUseDisposeGuard release', () => {
+  test('runs the held disposes, even of a geometry a mesh in the scene still draws', () => {
+    const { guard, geometry, mesh, disposed } = setup()
+    guard.track(mesh, geometry)
+    geometry.dispose()
+    expect(disposed()).toBe(0)
+    guard.release()
+    expect(disposed()).toBe(1)
+  })
+
+  test('lets every later dispose straight through', () => {
+    const { guard, queue, geometry, mesh, disposed } = setup()
+    guard.track(mesh, geometry)
+    guard.release()
+    geometry.dispose()
+    expect(disposed()).toBe(1)
+    expect(queue.length).toBe(0)
+    geometry.dispose()
+    expect(disposed()).toBe(2)
+  })
+
+  test('tracks nothing more', () => {
+    const { guard, scene, disposed } = setup()
+    guard.release()
+    const other = triangle()
+    const twin = new Mesh(other)
+    scene.add(twin)
+    let otherDisposed = 0
+    other.addEventListener('dispose', () => {
+      otherDisposed++
+    })
+    guard.track(twin, other)
+    other.dispose()
+    expect(otherDisposed).toBe(1)
+    expect(disposed()).toBe(0)
+  })
+
+  test('a second guard wrapping the same geometry still holds its own draws', () => {
+    const { guard, geometry, mesh, disposed } = setup()
+    const queue: Array<() => void> = []
+    const game = createInUseDisposeGuard((run) => queue.push(run))
+    game.track(mesh, geometry)
+    guard.track(mesh, geometry)
+    guard.release()
+    geometry.dispose()
+    game.flush()
+    expect(disposed()).toBe(0)
+    mesh.geometry = triangle()
+    geometry.dispose()
+    game.flush()
+    expect(disposed()).toBe(1)
+  })
+})
+
 describe('flushBeforeRender', () => {
   test('settles the held disposes before every render, nested ones included', () => {
     const calls: string[] = []
