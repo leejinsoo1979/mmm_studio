@@ -140,7 +140,9 @@ function UnsupportedGpuViewerFallback() {
  *
  * It also keeps a drawn geometry's `dispose()` from freeing buffers a mesh in
  * the scene still draws, which binds a freed buffer on the next draw with the
- * same consequence. See `createInUseDisposeGuard`.
+ * same consequence. Held-back disposes are settled at the start of every
+ * `render()`, before any render object can move on to a mesh's new geometry.
+ * See `createInUseDisposeGuard`.
  *
  * The custom render-object function is the documented three.js hook for this
  * (`Renderer.setRenderObjectFunction`); it must call `renderObject()` for
@@ -149,7 +151,12 @@ function UnsupportedGpuViewerFallback() {
  * carry the same check inline).
  */
 function installEmptyDrawGuard(renderer: THREE.WebGPURenderer) {
-  const trackDrawnGeometry = createInUseDisposeGuard()
+  const disposeGuard = createInUseDisposeGuard()
+  const render = renderer.render.bind(renderer)
+  renderer.render = (scene, camera) => {
+    disposeGuard.flush()
+    render(scene, camera)
+  }
   renderer.setRenderObjectFunction(
     (
       object: any,
@@ -174,7 +181,7 @@ function installEmptyDrawGuard(renderer: THREE.WebGPURenderer) {
         return
       }
       ensureSecondaryUv(geometry)
-      trackDrawnGeometry(object, geometry)
+      disposeGuard.track(object, geometry)
       ;(renderer as any).renderObject(
         object,
         scene,
