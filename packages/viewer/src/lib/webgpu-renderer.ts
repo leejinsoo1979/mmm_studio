@@ -137,21 +137,88 @@ export function watchGpuDevice(renderer: WebGPURenderer, scope = 'viewer'): () =
   }
 }
 
+type DisposeListenable = {
+  addEventListener(type: 'dispose', listener: () => void): void
+  removeEventListener(type: 'dispose', listener: () => void): void
+}
+
+type RenderObjectLike = {
+  geometry: DisposeListenable
+  onGeometryDispose: () => void
+  onDispose: () => void
+  setGeometry(geometry: DisposeListenable): void
+  dispose(): void
+}
+
+/**
+ * three's `renderer.dispose()` drops its render objects without disposing
+ * them, so each keeps listening for its material's and geometry's `dispose`
+ * events, and through the listener holds the renderer and the scene it drew.
+ * Materials and geometries that outlive the renderer (shared or cached ones,
+ * and the one geometry every QuadMesh shares) would keep every renderer ever
+ * made, with its scene, alive. This follows the render objects the renderer
+ * makes, weakly, and returns what disposes the ones still around.
+ *
+ * A render object whose mesh swaps geometry leaves its listener on the old
+ * one too (`setGeometry`); here the listener moves with it.
+ */
+export function trackRenderObjects(renderer: WebGPURenderer): () => void {
+  const objects = (renderer as any)._objects as
+    | { createRenderObject: (...args: unknown[]) => RenderObjectLike }
+    | undefined
+  if (typeof objects?.createRenderObject !== 'function') return () => {}
+  const create = objects.createRenderObject
+  const live = new Set<WeakRef<RenderObjectLike>>()
+  const gone = new FinalizationRegistry<WeakRef<RenderObjectLike>>((ref) => live.delete(ref))
+  objects.createRenderObject = (...args: unknown[]) => {
+    const renderObject = create.apply(objects, args)
+    const ref = new WeakRef(renderObject)
+    live.add(ref)
+    gone.register(renderObject, ref, ref)
+    const setGeometry = renderObject.setGeometry
+    renderObject.setGeometry = (geometry) => {
+      renderObject.geometry.removeEventListener('dispose', renderObject.onGeometryDispose)
+      setGeometry.call(renderObject, geometry)
+      geometry.addEventListener('dispose', renderObject.onGeometryDispose)
+    }
+    const onDispose = renderObject.onDispose
+    renderObject.onDispose = () => {
+      live.delete(ref)
+      gone.unregister(ref)
+      onDispose()
+    }
+    return renderObject
+  }
+  return () => {
+    objects.createRenderObject = create
+    for (const ref of [...live]) {
+      try {
+        ref.deref()?.dispose()
+      } catch (error) {
+        console.error('[viewer] disposing a render object threw', error)
+      }
+    }
+    live.clear()
+  }
+}
+
 /**
  * Gives a WebGPURenderer made outside the viewer (after `await
  * renderer.init()`) the viewer's safety nets: the draw guards, the
  * sheen-safe physical material and the device watch. `scope` names it in
  * the log. Returns what undoes them; call it before `renderer.dispose()`,
- * so the geometries it drew, which may live on in another renderer, no
- * longer hold on to its meshes.
+ * so the geometries and materials it drew, which may live on in another
+ * renderer, no longer hold on to it, its meshes or its scenes.
  */
 export function prepareWebGPURenderer(renderer: WebGPURenderer, scope: string): () => void {
   installSheenSafeMaterial(renderer)
   const guard = installDrawGuards(renderer, scope)
   const stop = watchGpuDevice(renderer, scope)
+  const disposeRenderObjects = trackRenderObjects(renderer)
   return () => {
     stop()
     guard.release()
+    disposeRenderObjects()
   }
 }
 

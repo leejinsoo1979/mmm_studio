@@ -62,6 +62,34 @@ function fakeRenderer(device: object | null) {
   return { renderer, drawn, asRenderer: renderer as unknown as WebGPURenderer }
 }
 
+/**
+ * The renderer's render-object factory as three's is: each listens for its
+ * geometry's `dispose`, keeps that listener on a geometry swap and removes
+ * it on dispose before calling the factory's `onDispose`.
+ */
+function fakeRenderObjects(onDisposed: (name: string) => void = () => {}) {
+  return {
+    createRenderObject(name: string) {
+      const renderObject = {
+        geometry: triangle(),
+        onGeometryDispose: () => {},
+        onDispose: () => onDisposed(name),
+        setGeometry(geometry: BufferGeometry) {
+          renderObject.geometry = geometry
+        },
+        dispose() {
+          renderObject.geometry.removeEventListener('dispose', renderObject.onGeometryDispose)
+          renderObject.onDispose()
+        },
+        listening: (geometry: BufferGeometry) =>
+          geometry.hasEventListener('dispose', renderObject.onGeometryDispose),
+      }
+      renderObject.geometry.addEventListener('dispose', renderObject.onGeometryDispose)
+      return renderObject
+    },
+  }
+}
+
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 describe('prepareWebGPURenderer', () => {
@@ -112,6 +140,38 @@ describe('prepareWebGPURenderer', () => {
     expect(disposed).toBe(1)
     geometry.dispose()
     expect(disposed).toBe(2)
+  })
+
+  test('disposes the render objects still around once released', () => {
+    const { renderer, asRenderer } = fakeRenderer(fakeDevice().device)
+    const disposed: string[] = []
+    const objects = fakeRenderObjects((name) => disposed.push(name))
+    Object.assign(renderer, { _objects: objects })
+    const create = objects.createRenderObject
+    const release = prepareWebGPURenderer(asRenderer, 'studio')
+    const made = ['quad', 'body', 'hair'].map((name) => objects.createRenderObject(name))
+    made[1]?.dispose()
+    expect(disposed).toEqual(['body'])
+    release()
+    expect(disposed).toEqual(['body', 'quad', 'hair'])
+    expect(made.every((made) => !made.listening(made.geometry))).toBe(true)
+    expect(objects.createRenderObject).toBe(create)
+  })
+
+  test("moves a render object's geometry listener along when its mesh swaps geometry", () => {
+    const { renderer, asRenderer } = fakeRenderer(fakeDevice().device)
+    const objects = fakeRenderObjects()
+    Object.assign(renderer, { _objects: objects })
+    const release = prepareWebGPURenderer(asRenderer, 'studio')
+    const made = objects.createRenderObject('body')
+    const first = made.geometry
+    const second = triangle()
+    made.setGeometry(second)
+    expect(made.geometry).toBe(second)
+    expect(made.listening(first)).toBe(false)
+    expect(made.listening(second)).toBe(true)
+    release()
+    expect(made.listening(second)).toBe(false)
   })
 
   test('logs uncaptured errors under its scope until released', () => {
