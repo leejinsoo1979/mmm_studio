@@ -133,6 +133,17 @@ function toBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Prom
   )
 }
 
+/**
+ * Makes every pixel opaque, as the stage is: a backdrop is under every one.
+ * Hair and lash edges drawn with alpha to coverage leave their fragment's
+ * alpha in the frame over colour already blended by coverage; read as
+ * straight alpha, it would darken those edges in a JPEG and leave them
+ * see-through in a PNG.
+ */
+export function makeOpaque(image: { data: Uint8ClampedArray }) {
+  for (let i = 3; i < image.data.length; i += 4) image.data[i] = 255
+}
+
 function canvasOf(image: ImageData): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = image.width
@@ -171,7 +182,9 @@ async function renderOnce(
       undo()
       rig.aimLights(rig.view)
     }
-    return await readRenderTargetImage(renderer, target)
+    const image = await readRenderTargetImage(renderer, target)
+    makeOpaque(image)
+    return image
   } finally {
     target.dispose()
   }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { AI_PHOTO_SHOTS } from '@/lib/ai-photo/shared'
-import { shotSize, snapshotFrame } from './studio-capture'
+import { makeOpaque, shotSize, snapshotFrame } from './studio-capture'
 
 const NONE = { top: 0, right: 0, bottom: 0, left: 0 }
 
@@ -51,5 +51,13 @@ describe('snapshotFrame', () => {
     expect(frame.h).toBe(1)
     expect(frame.width).toBe(2)
     expect(frame.height).toBe(2)
+  })
+})
+
+describe('makeOpaque', () => {
+  test('makes every pixel opaque and keeps its colour', () => {
+    const image = { data: new Uint8ClampedArray([200, 100, 50, 162, 10, 20, 30, 255, 0, 0, 0, 0]) }
+    makeOpaque(image)
+    expect([...image.data]).toEqual([200, 100, 50, 255, 10, 20, 30, 255, 0, 0, 0, 255])
   })
 })
