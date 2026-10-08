@@ -36,9 +36,17 @@ export class RendererKeeper<R extends Disposable> {
     this.later(() => this.letGoIfClosed())
   }
 
-  keep(renderer: R, release: () => void) {
+  /**
+   * Keeps `renderer` (`release` undoes its safety nets) and hands it on
+   * while the stage is open. One that finished starting after the stage
+   * closed is never handed on: R3F would mount the stage into the root it
+   * already unmounted, where nothing would ever unmount it.
+   */
+  keep(renderer: R, release: () => void): Promise<R> {
     this.held.set(renderer, release)
-    if (!this.open) this.later(() => this.letGoIfClosed())
+    if (this.open) return Promise.resolve(renderer)
+    this.later(() => this.letGoIfClosed())
+    return new Promise<R>(() => {})
   }
 
   get size() {
@@ -76,8 +84,7 @@ export function useStudioRenderer() {
           powerPreference: 'high-performance',
         })
         await renderer.init()
-        keeper.keep(renderer, prepareWebGPURenderer(renderer, 'studio'))
-        return renderer
+        return keeper.keep(renderer, prepareWebGPURenderer(renderer, 'studio'))
       }),
     [keeper],
   )

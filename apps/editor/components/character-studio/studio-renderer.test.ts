@@ -15,11 +15,26 @@ function setup() {
   return { keeper, log, renderer, elapse }
 }
 
+/** Whether `promise` settles within a few turns of the event loop. */
+async function settles(promise: Promise<unknown>) {
+  let settled = false
+  promise.then(
+    () => {
+      settled = true
+    },
+    () => {
+      settled = true
+    },
+  )
+  for (let i = 0; i < 3; i++) await new Promise((resolve) => setTimeout(resolve, 0))
+  return settled
+}
+
 describe('RendererKeeper', () => {
-  test('keeps the renderer while the stage is open', () => {
+  test('keeps the renderer while the stage is open, and hands it on', async () => {
     const { keeper, log, renderer, elapse } = setup()
     const a = renderer('a')
-    keeper.keep(a.renderer, a.release)
+    expect(await keeper.keep(a.renderer, a.release)).toBe(a.renderer)
     elapse()
     expect(log).toEqual([])
     expect(keeper.size).toBe(1)
@@ -49,15 +64,16 @@ describe('RendererKeeper', () => {
     expect(log).toEqual(['release a', 'dispose a'])
   })
 
-  test('lets go of a renderer that finished starting after the stage closed', () => {
+  test('never hands on, and lets go of, a renderer that finished starting after the stage closed', async () => {
     const { keeper, log, renderer, elapse } = setup()
     keeper.closed()
     elapse()
     const late = renderer('late')
-    keeper.keep(late.renderer, late.release)
+    const handed = keeper.keep(late.renderer, late.release)
     expect(log).toEqual([])
     elapse()
     expect(log).toEqual(['release late', 'dispose late'])
+    expect(await settles(handed)).toBe(false)
   })
 
   test('disposes each renderer once', () => {
