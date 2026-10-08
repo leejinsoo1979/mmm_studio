@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   type AvatarFace,
   type AvatarLook,
+  BALD,
   FACE_POINT_COUNT,
   type HairStyleEntry,
   NO_LOOK,
@@ -47,8 +48,8 @@ const LOOK: AvatarLook = {
   paint: { ...NO_PAINT, eyes: '#3E6AA8', lips: '#B3202E' },
 }
 
-const draws = (avatar: string, styles: HairStyleEntry[] | null = STYLES) =>
-  Array.from({ length: 200 }, (_, i) => randomLook(LOOK, avatar, styles, seeded(i + 1)))
+const draws = (avatar: string, styles: HairStyleEntry[] | null = STYLES, look: AvatarLook = LOOK) =>
+  Array.from({ length: 200 }, (_, i) => randomLook(look, avatar, styles, seeded(i + 1)))
 
 describe('a random look', () => {
   test('keeps the skin, the photo fit and the chosen iris colour', () => {
@@ -82,17 +83,18 @@ describe('a random look', () => {
     expect(Object.keys(look!.body.sliders).length).toBeGreaterThan(6)
   })
 
-  test('borrows only hairstyles of the character’s sex, sometimes keeping its own', () => {
-    const styles = draws('Male_Adult_03').map((look) => look.hairStyle)
-    expect(styles).toContain(null)
-    expect(styles).toContain('Male_Adult_09')
-    for (const style of styles) expect([null, 'Male_Adult_07', 'Male_Adult_09']).toContain(style)
+  test('borrows no hairstyle though the library offers some, keeping the one it has', () => {
+    for (const look of draws('Male_Adult_03')) expect(look.hairStyle).toBe('Female_Adult_04')
   })
 
   test('keeps the character’s own hair as its own, never borrowing it from itself', () => {
-    const styles = draws('Male_Adult_07').map((look) => look.hairStyle)
-    expect(styles).toContain(null)
-    expect(styles).not.toContain('Male_Adult_07')
+    const own = { ...LOOK, hairStyle: null }
+    for (const look of draws('Male_Adult_07', STYLES, own)) expect(look.hairStyle).toBeNull()
+  })
+
+  test('keeps a saved bald head named, for the hair that replaces it to take over', () => {
+    const bald = { ...LOOK, hairStyle: BALD }
+    for (const look of draws('Female_Adult_07', STYLES, bald)) expect(look.hairStyle).toBe(BALD)
   })
 
   test('keeps the hairstyle it has while the library is unavailable', () => {
