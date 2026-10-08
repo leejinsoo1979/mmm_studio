@@ -67,7 +67,12 @@ export type HairBuild = {
   touchesBody: boolean
   /** The groom's hairline table (see hair-groom.ts's `hairlineTable`), for the root layer. */
   hairline: Float32Array
-  part: { x: number; fade: number }
+  /**
+   * Where the strands part, in template units round the scalp's middle: at
+   * x = `x`·(1 − smoothstep(fade[0], fade[1], −z)) for z ≥ `crown`; behind
+   * that the crown's whorl has no part. The root layer opens its roots there.
+   */
+  part: { x: number; fade: [number, number]; crown: number }
   undercut: { line: number; shells: [number, number, number] } | null
   /** Where an ombré tip colour starts and is full (bind height). */
   ombre: { earY: number; cutY: number }

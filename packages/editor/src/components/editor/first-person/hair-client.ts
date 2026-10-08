@@ -11,14 +11,10 @@ import type { RibbonArrays } from './hair-grow'
 import { CORE_COVERAGE, type HairValues, hairMaterials, holdHairValues } from './hair-material'
 
 /**
- * Generated hair on the page: a build's arrays as geometry with the one
- * fixed layout every strip geometry shares (so they all share one
- * pipeline), and the meshes that draw them on a character's skeleton.
- */
-
-/**
- * A build's strips as geometry. `uv2` is the very attribute `uv` is, so a
- * viewer that adds a second uv where one is missing copies nothing.
+ * A build's strips as geometry, in the one layout every strip geometry
+ * shares, so they all share one pipeline. `uv2` is the very attribute `uv`
+ * is: the viewer adds a second uv only where one is missing, so it copies
+ * nothing.
  */
 export function ribbonGeometry(arrays: RibbonArrays): BufferGeometry {
   const geometry = new BufferGeometry()
@@ -37,11 +33,7 @@ export function ribbonGeometry(arrays: RibbonArrays): BufferGeometry {
   return geometry
 }
 
-/**
- * The scalp's root layer and undercut shells as geometry. The shells,
- * after `shellStart` indices, are drawn only under a cut with an undercut
- * (see `showShells`).
- */
+/** The root layer, then the undercut shells after `shellStart` indices (see `showShells`). */
 export function rootsGeometry(roots: BaseResult['roots']): BufferGeometry {
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new BufferAttribute(roots.position, 3))
@@ -57,7 +49,6 @@ export function rootsGeometry(roots: BaseResult['roots']): BufferGeometry {
   return geometry
 }
 
-/** Draws a root layer's undercut shells, or leaves them out. */
 export function showShells(geometry: BufferGeometry, shown: boolean) {
   geometry.setDrawRange(
     0,
@@ -68,7 +59,6 @@ export function showShells(geometry: BufferGeometry, shown: boolean) {
 /** Which of a character's hair meshes this is (its name is `hair:<part>`). */
 export type HairPart = 'inner' | 'outer' | 'strays' | 'soft' | 'roots'
 
-/** How each part is drawn: its material, order after the head, shadows, and which coverage it draws. */
 const PARTS: Record<
   HairPart,
   { order: number; casts: boolean; core: (studio: boolean) => number | undefined }
@@ -88,19 +78,22 @@ const materialOf = (part: HairPart): Material =>
       : hairMaterials.strands
 
 /**
- * A hair mesh on a character's skeleton (the head's, with its bind matrix),
- * carrying the character's values. Hair is never picked. In the studio the
- * outer strips draw their solid cores here and their soft edges in the soft
- * pass.
+ * A hair mesh on a character's skeleton, carrying the character's values,
+ * or null for a geometry with nothing to draw. `headBone` is the Head's
+ * index in the skeleton: camera-facing strips turn in its frame, whatever
+ * bone a strip's first vertex leans on. In the studio the outer strips
+ * draw their solid cores here and their soft edges in the soft pass.
  */
 export function hairMesh(
   part: HairPart,
   geometry: BufferGeometry,
   skeleton: Skeleton,
   bindMatrix: Matrix4,
+  headBone: number,
   values: HairValues,
   studio: boolean,
-): SkinnedMesh {
+): SkinnedMesh | null {
+  if (!geometry.index?.count) return null
   const { order, casts, core } = PARTS[part]
   const mesh = new SkinnedMesh(geometry, materialOf(part))
   mesh.name = `hair:${part}`
@@ -110,8 +103,7 @@ export function hairMesh(
   mesh.receiveShadow = true
   mesh.frustumCulled = false
   mesh.raycast = () => {}
-  // The bone the strips follow (the head's): camera-facing strips turn in its frame.
-  mesh.userData.hairBone = geometry.getAttribute('skinIndex').getX(0)
+  mesh.userData.hairBone = headBone
   holdHairValues(mesh, values, core(studio))
   return mesh
 }

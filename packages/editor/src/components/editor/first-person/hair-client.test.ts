@@ -89,14 +89,24 @@ describe('hairMesh', () => {
   const bones = [0, 1, 2, 3].map(() => new Bone())
   const skeleton = new Skeleton(bones)
   const values = newHairValues()
+  const HEAD = 2
 
   test('is unpickable, drawn after the head, and carries the shared values', () => {
-    const mesh = hairMesh('inner', ribbonGeometry(strip(4)), skeleton, new Matrix4(), values, true)
+    const mesh = hairMesh(
+      'inner',
+      ribbonGeometry(strip(4)),
+      skeleton,
+      new Matrix4(),
+      HEAD,
+      values,
+      true,
+    )!
     expect(mesh.name).toBe('hair:inner')
     expect(mesh.renderOrder).toBe(2)
     expect(mesh.castShadow).toBe(true)
     expect(mesh.userData.hair).toBe(values)
-    expect(mesh.userData.hairBone).toBe(3)
+    // The head bone as given, not the bone the first vertex leans on (3 here).
+    expect(mesh.userData.hairBone).toBe(HEAD)
     const hits: unknown[] = []
     mesh.updateMatrixWorld()
     new Raycaster(new Vector3(0, 0, 5), new Vector3(0, 0, -1)).intersectObject(
@@ -110,17 +120,32 @@ describe('hairMesh', () => {
   test("draws the outer strips' solid cores only in the studio, and never casts strays or roots", () => {
     const geometry = ribbonGeometry(strip(4))
     expect(
-      hairMesh('outer', geometry, skeleton, new Matrix4(), values, true).userData.hairCore,
+      hairMesh('outer', geometry, skeleton, new Matrix4(), HEAD, values, true)!.userData.hairCore,
     ).toBe(CORE_COVERAGE)
     expect(
-      hairMesh('outer', geometry, skeleton, new Matrix4(), values, false).userData.hairCore,
+      hairMesh('outer', geometry, skeleton, new Matrix4(), HEAD, values, false)!.userData.hairCore,
     ).toBe(0.02)
-    expect(hairMesh('strays', geometry, skeleton, new Matrix4(), values, true).castShadow).toBe(
-      false,
-    )
-    const root = hairMesh('roots', rootsGeometry(roots()), skeleton, new Matrix4(), values, true)
+    expect(
+      hairMesh('strays', geometry, skeleton, new Matrix4(), HEAD, values, true)!.castShadow,
+    ).toBe(false)
+    const root = hairMesh(
+      'roots',
+      rootsGeometry(roots()),
+      skeleton,
+      new Matrix4(),
+      HEAD,
+      values,
+      true,
+    )!
     expect(root.castShadow).toBe(false)
     expect(root.renderOrder).toBe(1)
-    expect(hairMesh('soft', geometry, skeleton, new Matrix4(), values, true).renderOrder).toBe(3)
+    expect(
+      hairMesh('soft', geometry, skeleton, new Matrix4(), HEAD, values, true)!.renderOrder,
+    ).toBe(3)
+  })
+
+  test('makes no mesh for a geometry with nothing to draw', () => {
+    const empty = ribbonGeometry({ ...strip(4), index: new Uint32Array(0) })
+    expect(hairMesh('strays', empty, skeleton, new Matrix4(), HEAD, values, true)).toBeNull()
   })
 })

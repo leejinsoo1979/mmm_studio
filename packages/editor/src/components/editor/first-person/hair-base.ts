@@ -46,7 +46,10 @@ export type BaseResult = {
   /**
    * The root layer, then the undercut's three shells from `shellStart` on
    * in the index. Each point copies its head point's (`srcVertex`) skinning
-   * and stands `height` (bind units) off it along its normal.
+   * and stands `height` (bind units) off it along its normal. `scalpDir`
+   * is its point's offset from the template's middle in template units, not
+   * normalised (the root layer reads its part in those units), with the
+   * height in mm as w.
    */
   roots: {
     position: Float32Array

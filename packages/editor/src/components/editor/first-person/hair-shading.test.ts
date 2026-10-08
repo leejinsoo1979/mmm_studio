@@ -3,21 +3,19 @@ import {
   DEFAULT_HAIR,
   HAIRLINE_STEPS,
   hairLookValues,
-  hairlineAt,
-  highlightExponent,
+  hairlineWobble,
   linearOf,
   lodWidthScale,
   NO_UNDERCUT,
-  packLayers,
   ROOT_SHADE,
   rootsStyleValues,
-  STRIP_LAYER,
   sortedIndex,
   stripKeys,
   stripRanges,
   TIP_LIFT,
   turnedSince,
-  unpackLayers,
+  WOBBLE_OCTAVES,
+  wobbleCorners,
 } from './hair-shading'
 
 function close(a: number[], b: number[], digits = 6) {
@@ -67,45 +65,11 @@ describe('hairLookValues', () => {
   })
 
   test('maps shine onto the highlights, clamped', () => {
-    expect(hairLookValues({ ...look, shine: 0 })).toMatchObject({ expR: 60, expTRT: 16, kR: 0.12 })
-    expect(hairLookValues({ ...look, shine: 1 })).toMatchObject({ expR: 260, expTRT: 48, kR: 0.3 })
+    expect(hairLookValues({ ...look, shine: 0 })).toMatchObject({ expR: 30, expTRT: 16, kR: 0.12 })
+    expect(hairLookValues({ ...look, shine: 1 })).toMatchObject({ expR: 120, expTRT: 48, kR: 0.3 })
     expect(hairLookValues({ ...look, shine: 0.5 }).kR).toBeCloseTo(0.21)
-    expect(hairLookValues({ ...look, shine: 7 }).expR).toBe(260)
-    expect(hairLookValues({ ...look, shine: Number.NaN }).expR).toBe(160)
-  })
-})
-
-describe('packLayers', () => {
-  test('round-trips every atlas layer and strip layer', () => {
-    for (const layer of Object.values(STRIP_LAYER)) {
-      for (let atlas = 0; atlas < 12; atlas++) {
-        expect(unpackLayers(packLayers(atlas, layer))).toEqual({ atlasLayer: atlas, layer })
-      }
-    }
-  })
-
-  test('survives float rounding on the way through the GPU', () => {
-    expect(unpackLayers(packLayers(11, STRIP_LAYER.mid) - 1e-4)).toEqual({
-      atlasLayer: 11,
-      layer: 1,
-    })
-    expect(unpackLayers(packLayers(0, STRIP_LAYER.outer) + 1e-4)).toEqual({
-      atlasLayer: 0,
-      layer: 2,
-    })
-  })
-})
-
-describe('highlightExponent', () => {
-  test('keeps the exponent on strips 6 pixels wide or more at full detail', () => {
-    expect(highlightExponent(200, 6, 1)).toBe(200)
-    expect(highlightExponent(200, 40, 1)).toBe(200)
-  })
-
-  test('eases toward 16 on narrower strips and halves at the lowest detail', () => {
-    expect(highlightExponent(200, 0, 1)).toBe(16)
-    expect(highlightExponent(200, 3, 1)).toBe(108)
-    expect(highlightExponent(200, 6, 0)).toBe(100)
+    expect(hairLookValues({ ...look, shine: 7 }).expR).toBe(120)
+    expect(hairLookValues({ ...look, shine: Number.NaN }).expR).toBe(75)
   })
 })
 
@@ -122,26 +86,66 @@ describe('rootsStyleValues', () => {
   test('passes the hairline, part and undercut through', () => {
     const v = rootsStyleValues({
       hairline,
-      part: { x: 0.02, fade: -0.3 },
+      part: { x: 0.02, fade: [-0.04, 0.08], crown: -0.02 },
       undercut: { line: 0.35, shells: [0.85, 0.55, 0.3] },
     })
     expect(v.hairline).toEqual(hairline)
     expect(v.hairline).not.toBe(hairline)
-    expect(v.part).toEqual([0.02, -0.3])
+    expect(v.part).toEqual([0.02, -0.04, 0.08, -0.02])
     expect(v.undercut).toEqual([0.35, 0.85, 0.55, 0.3])
   })
 
   test('puts no undercut below the whole head', () => {
-    const v = rootsStyleValues({ hairline, part: { x: 0, fade: 0 }, undercut: null })
+    const v = rootsStyleValues({
+      hairline,
+      part: { x: 0, fade: [-0.04, 0.08], crown: -0.02 },
+      undercut: null,
+    })
     expect(v.undercut).toEqual([NO_UNDERCUT, 0, 0, 0])
     expect(NO_UNDERCUT).toBeLessThan(-Math.PI / 2)
   })
+})
 
-  test('reads the hairline as the shader does', () => {
-    expect(hairlineAt(hairline, 0)).toBeCloseTo(0.7)
-    expect(hairlineAt(hairline, -Math.PI)).toBeCloseTo(0.7 - 32 * 0.05)
-    expect(hairlineAt(hairline, Math.PI / 64)).toBeCloseTo(0.7 - 0.025)
-    expect(hairlineAt(hairline, 9)).toBeCloseTo(hairlineAt(hairline, Math.PI))
+describe('hairlineWobble', () => {
+  test("is the generator's: its values at fixed azimuths, taken from hair-scalp.ts's hairlineWobble", () => {
+    const generator: [number, number][] = [
+      [-3.1, -0.0102314],
+      [-2.2, 0.0330569],
+      [-1.37, -0.0128135],
+      [-0.5, -0.0136398],
+      [0, 0.0115147],
+      [0.123, 0.0351857],
+      [0.77, -0.0040452],
+      [1.65, 0.0201444],
+      [2.9, -0.0335478],
+      [Math.PI, 0.0188228],
+    ]
+    for (const [a, w] of generator) expect(hairlineWobble(a)).toBeCloseTo(w, 6)
+  })
+
+  test('the noise corners the shader reads rebuild it over the whole circle', () => {
+    for (let a = -Math.PI; a <= Math.PI; a += 0.0137) {
+      let sum = 0
+      for (const octave of WOBBLE_OCTAVES) {
+        const { first, values } = wobbleCorners(octave)
+        const x = a * octave.freq
+        const i = Math.floor(x)
+        const f = x - i
+        const t = f * f * (3 - 2 * f)
+        const k = i - first
+        expect(k).toBeGreaterThanOrEqual(0)
+        expect(k + 1).toBeLessThan(values.length)
+        sum += octave.amp * (values[k]! + (values[k + 1]! - values[k]!) * t)
+      }
+      expect(sum).toBeCloseTo(hairlineWobble(a), 6)
+    }
+  })
+
+  test('stays within its amplitude', () => {
+    const most = WOBBLE_OCTAVES.reduce((s, o) => s + o.amp, 0)
+    for (let a = -Math.PI; a <= Math.PI; a += 0.01) {
+      expect(Math.abs(hairlineWobble(a))).toBeLessThanOrEqual(most)
+    }
   })
 })
 
