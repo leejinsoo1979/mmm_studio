@@ -99,6 +99,7 @@ const look = (key: string, change: Partial<Omit<LookJob, 'body'>>) => ({
   face: null,
   paint: NO_PAINT,
   scalp: null,
+  scalpMode: 'wig' as const,
   stubble: null,
   wig: null,
   shave: 0.35,
@@ -312,6 +313,7 @@ describe('the same look', () => {
       },
       paint: { ...NO_PAINT, lips: '#aa3344' },
       scalp,
+      scalpMode: 'wig',
       stubble: [40, 30, 25],
       wig,
       shave: 0.35,
@@ -336,6 +338,7 @@ describe('the same look', () => {
     expect(sameLookJob(job(), job({ face: { ...job().face!, light: 0.6 } }))).toBe(false)
     expect(sameLookJob(job(), job({ feet: { wear: 'bare', color: null } }))).toBe(false)
     expect(sameLookJob(job(), job({ scalp: null }))).toBe(false)
+    expect(sameLookJob(job(), job({ scalpMode: 'generated' }))).toBe(false)
     expect(sameLookJob(job(), job({ stubble: [41, 30, 25] }))).toBe(false)
     expect(sameLookJob(job(), job({ shave: 0.8 }))).toBe(false)
   })

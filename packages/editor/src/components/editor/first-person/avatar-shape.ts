@@ -439,6 +439,24 @@ export function applyShape(model: Object3D, shapers: readonly Shaper[]): () => v
   }
 }
 
+/**
+ * Reshapes a mesh at once by the shapers its body was last shaped by,
+ * after what it is shaped from changed under it (generated hair lays the
+ * head's own hair flat: see hair-base.ts), so it never shows unshaped in
+ * between. Moves already worked out for points that stayed are reused.
+ */
+export function reshapeNow(mesh: Mesh): void {
+  throw new Error('reshapeNow: generated hair is not built yet')
+}
+
+/**
+ * Calls `listener` after each shape applyShape puts on `model`, with a
+ * version that rises with every one. Returns what stops it.
+ */
+export function onShaped(model: Object3D, listener: (version: number) => void): () => void {
+  throw new Error('onShaped: generated hair is not built yet')
+}
+
 /** The face's shaper last made for a body, and what it was made from. */
 type FaceShaping = {
   head: Mesh

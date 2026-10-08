@@ -250,7 +250,9 @@ export function categoryChanged(tab: StudioTab, category: string, context: Chang
       return entry.sliders.some((id) => (look.body.sliders[id] ?? 0) !== 0)
     }
     case 'hair':
-      return category === 'style' ? wornHairStyle(look.hairStyle) !== null : look.hair !== null
+      return category === 'style'
+        ? look.hairCut !== null || wornHairStyle(look.hairStyle) !== null
+        : look.hair !== null || Boolean(look.hairCut?.tip)
     case 'makeup':
       return makeupChanged(category as MakeupCategory, look.paint)
     case 'skin':
@@ -269,8 +271,8 @@ export function lookChips(look: AvatarLook): string[] {
     look.face && '내 얼굴',
     hasFaceShape(look.shape) && '얼굴형',
     hasBodyShape(look.body) && '체형',
-    hairStyle && (hairStyle === BALD ? '민머리' : '헤어스타일'),
-    look.hair && '염색',
+    look.hairCut ? '헤어스타일' : hairStyle && (hairStyle === BALD ? '민머리' : '헤어스타일'),
+    (look.hair || look.hairCut?.tip) && '염색',
     hasFacePaint(look.paint) && '메이크업',
     look.skin && '피부 톤',
     look.feet.wear !== 'shoes' && (look.feet.wear === 'socks' ? '양말' : '맨발'),

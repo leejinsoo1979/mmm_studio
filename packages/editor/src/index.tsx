@@ -125,6 +125,18 @@ export {
   SHOD,
 } from './components/editor/first-person/footwear'
 export {
+  DEFAULT_CUT_PARAMS,
+  DEFAULT_SHINE,
+  HAIR_CUT_RANGES,
+  HAIR_CUT_STYLES,
+  type HairCut,
+  type HairCutSlider,
+  type HairCutStyle,
+  type HairGrowEntry,
+  type HairGrowFile,
+  readHairCut,
+} from './components/editor/first-person/hair-cut'
+export {
   BALD,
   BORROWED_HAIRSTYLES,
   type HairStyle,
