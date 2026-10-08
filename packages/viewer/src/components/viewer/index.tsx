@@ -22,6 +22,7 @@ import {
   ensureSecondaryUv,
   hasDrawableGeometry,
 } from '../../lib/drawable-geometry'
+import { createGpuErrorReporter } from '../../lib/gpu-error-log'
 import { PERF_OVERLAY_ENABLED, pushGpuSample } from '../../lib/gpu-perf'
 import { applyIsolation, clearIsolation } from '../../lib/isolation'
 import { ensureKtx2Support } from '../../lib/ktx2-loader'
@@ -250,14 +251,21 @@ function GPUDeviceWatcher() {
     })
 
     // Uncaptured errors are normally silent (only console-warned by Chrome at
-    // best). Pipe them to console.error so silent mobile crashes show up.
-    const onUncapturedError = (event: any) => {
-      console.error('[viewer] WebGPU uncaptured error:', event?.error?.message, event?.error)
-    }
+    // best). Pipe them to console.error so silent mobile crashes show up, once
+    // per distinct message plus a periodic count while they repeat.
+    const errors = createGpuErrorReporter(
+      (...args) => console.error(...args),
+      (run, ms) => {
+        const timer = setTimeout(run, ms)
+        return () => clearTimeout(timer)
+      },
+    )
+    const onUncapturedError = (event: any) => errors.report(event?.error)
     device.addEventListener?.('uncapturederror', onUncapturedError)
 
     return () => {
       device.removeEventListener?.('uncapturederror', onUncapturedError)
+      errors.dispose()
     }
   }, [gl])
 
