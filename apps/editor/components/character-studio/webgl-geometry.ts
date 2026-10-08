@@ -30,7 +30,14 @@ const isInterleaved = (attribute: Attribute): attribute is InterleavedBufferAttr
 const versionOf = (attribute: Attribute) =>
   isInterleaved(attribute) ? attribute.data.version : attribute.version
 
-/** Whether WebGL would read an attribute as integers where three's shaders read floats. */
+/**
+ * Whether WebGL would read a non-normalized attribute as integers where
+ * three's shaders read floats. A normalized one in an interleaved buffer
+ * the widening reached would be read so too, but is left as it is: its
+ * values were fractions of the 8 or 16 bits the widening threw away, and
+ * read back against 32 bits they come out near 0, so no float copy of it
+ * would be right.
+ */
 function readAsIntegers(attribute: Attribute): boolean {
   if (attribute.normalized) return false
   if (!isInterleaved(attribute) && attribute.gpuType === IntType) return false
