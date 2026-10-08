@@ -3,6 +3,9 @@
 @import "../../../styles/elevation.css";
 @source "../../../packages/editor/src";
 @source "../../../packages/nodes/src";
+/* public/ holds ~150 MB of models and textures: scanning them took the cold CSS build from
+   0.4 s to 12-23 s and up to 2.8 GB of memory, for identical output. */
+@source not "../public";
 
 @custom-variant dark (&:is(.dark *));
 
