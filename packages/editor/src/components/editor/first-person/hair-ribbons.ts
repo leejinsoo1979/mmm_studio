@@ -47,7 +47,6 @@ export type StripSet = {
   weights: Float32Array
 }
 
-/** Bins round a volume's middle for depth in the hair: by azimuth, by height. */
 const DEPTH_BINS = 48
 
 /** How far below the head's middle (bind units) the envelope turns from round O to round its vertical axis. */

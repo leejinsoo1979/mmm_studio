@@ -37,7 +37,6 @@ export const HEADS_KEPT = 12
 
 type Grow = Extract<HairRequest, { kind: 'grow' }>
 
-/** Whose head an avatar's is, by the catalogue. */
 const whoOf = (avatar: string): Who => ({
   sex: avatarGender(avatar),
   child: findAvatar(avatar).group === 'Children',

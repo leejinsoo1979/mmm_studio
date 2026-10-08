@@ -149,7 +149,6 @@ const MIN_GROWS = 1e-3
 const ROOT_LAYER = 0.8
 const SHELLS = [1.5, 3, 4.5] as const
 
-/** The bump mask's texels across. */
 export const BUMP_MASK = 1024
 
 /** Points of a mesh this near (bind units) are one spot (a texture seam splits them). */
@@ -201,7 +200,6 @@ export function templateAngles(
   )
 }
 
-/** Lays a head's own hair flat and builds what generated hair stands on (see BaseResult). */
 export function flattenHead(input: BaseInput, library: HairLibrary): BaseResult {
   const own = library.bald.get(input.material)
   const { points, normals, uvs, index } = input.head

@@ -199,7 +199,6 @@ const RESAMPLE: Record<Tier, { turn: number; spacing: number }> = {
   game: { turn: (20 * Math.PI) / 180, spacing: 5 },
   far: { turn: (20 * Math.PI) / 180, spacing: 5 },
 }
-/** Each tier's share of the studio's roots, in root order. */
 const TIER_SHARE: Record<Tier, number> = { studio: 1, game: 0.5, far: 0.2 }
 /** The cranium is skinned to the head bone alone this far over its bind height (bind units). */
 const CRANIUM_RIGID = 0.03
@@ -211,13 +210,11 @@ const WHORL_AXIS: V3 = [
   Math.sin(WHORL[1]),
   Math.cos(WHORL[1]) * Math.cos(WHORL[0]),
 ]
-/** Groups guides blend within. */
 const GROUP = { right: 0, left: 1, fringe: 2, crown: 3, tied: 4 } as const
 const acrossPart = (a: number, b: number) =>
   (a === GROUP.left && b === GROUP.right) || (a === GROUP.right && b === GROUP.left)
 /** How far (cm) into its group a strip still takes a neighbouring group's guides. */
 const BORDER = 1.5
-/** Sub-seeds of a grow's stages. */
 const SEED = { roots: 0xa, guides: 0xb, strips: 0xc, tails: 0xd, noise: 0xe } as const
 
 const smooth = smoothstep
@@ -407,7 +404,6 @@ function arcOver(map: RadiusMap) {
 
 const templateArcs = new WeakMap<HairLibrary['skull'], number>()
 
-/** The template's own arc (see `arcOver`), once per skull. */
 function templateArc(library: HairLibrary) {
   let arc = templateArcs.get(library.skull)
   if (arc === undefined) {
@@ -420,10 +416,8 @@ function templateArc(library: HairLibrary) {
   return arc
 }
 
-/** Shaped heads a worker keeps per avatar. */
 const SHAPES_KEPT = 6
 
-/** FNV-1a over an array's bits. */
 function hashArray(array: Float32Array | Uint32Array, h = 0x811c9dc5) {
   const words = new Uint32Array(array.buffer, array.byteOffset, array.length)
   for (let i = 0; i < words.length; i++) h = Math.imul(h ^ words[i]!, 0x01000193)
@@ -786,7 +780,6 @@ function layOn(g: Grower, p: Float32Array, o: number, clear: number, pull: numbe
   p[o + 2] = oz + dz * k
 }
 
-/** Arc lengths along a polyline (into `s`), and its whole length. */
 function arcLengths(points: Float32Array, count: number, s: Float32Array) {
   s[0] = 0
   for (let k = 1; k < count; k++) {
@@ -833,7 +826,6 @@ function pointAt(path: Path, at: number, out: number[], lying?: number[]) {
 
 type Guides = { roots: Roots; paths: Path[]; index: Int32Array }
 
-/** Walks and settles the guides: the roots of the first pass. */
 /**
  * One guide walked over the head from root `i` and settled. Its own
  * function: inlined into the guides' loop it ran several times slower.
@@ -1268,7 +1260,6 @@ const standoffOf = (seed: number, lock: number, mm: number) => {
   return (unitHash(seed ^ 0x57a1, lock) < 0.5 ? -1 : 1) * size * mm
 }
 
-/** The depth in the volume a strip's layer stands at. */
 const layerDepth = (layer: StripLayer) =>
   layer === STRIP_LAYER.inner
     ? LAYER_DEPTH.inner
@@ -1569,7 +1560,6 @@ function smoothPath(points: Float32Array, count: number, out: number[]) {
   }
 }
 
-/** A strip cut back to arc length `end` (in place). */
 function truncate(strip: Strip, end: number) {
   const n = strip.count
   let k = 1
@@ -1997,7 +1987,6 @@ export function growStrips(
   }
 }
 
-/** The seed a character's style is grown with. */
 export const growSeed = (avatar: string, style: string) => fnv1a(`${avatar}|${style}`)
 
 /**

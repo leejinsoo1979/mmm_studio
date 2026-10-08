@@ -374,7 +374,6 @@ export function rootCandidates(
 // ---------------------------------------------------------------------------
 // A head's radius round its middle.
 
-/** Texels across an octahedral radius map. */
 export const RADIUS_MAP_SIZE = 160
 
 /**
@@ -392,7 +391,6 @@ export type RadiusMap = {
   headTri: Int32Array
 }
 
-/** A direction's place on the octahedral map, each in [−1, 1]. */
 export function octEncode(x: number, y: number, z: number, out: number[]) {
   const s = Math.abs(x) + Math.abs(y) + Math.abs(z) || 1
   let px = x / s
@@ -407,7 +405,6 @@ export function octEncode(x: number, y: number, z: number, out: number[]) {
   out[1] = pz
 }
 
-/** The unit direction at a place on the octahedral map. */
 export function octDecode(px: number, pz: number, out: number[]) {
   let x = px
   let z = pz
@@ -803,7 +800,6 @@ export function eyeKeepOut(
   return { spheres, box, bounds: { min, max } }
 }
 
-/** Whether a point is inside the keep-out. */
 export function inEyes(keep: EyeKeepOut, x: number, y: number, z: number) {
   for (const { centre, radius } of keep.spheres) {
     const dx = x - centre[0]

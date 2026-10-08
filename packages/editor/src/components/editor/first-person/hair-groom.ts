@@ -37,7 +37,6 @@ export type Region = { crown: number; top: number; sides: number; back: number; 
 export type CutEnds = { mode: 'blunt' | 'point' | 'v' | 'layered'; jitter: number }
 
 export type StyleDef = {
-  /** cm from the root, by region. */
   length: Region & { front: number }
   /** cm below eye level, or null for no cut. */
   cut: { front: number; side: number; back: number } | null
@@ -65,7 +64,6 @@ export type StyleDef = {
   gather: Gather | null
   strips: number
   width: { inner: number; mid: number; outer: number }
-  /** Triangle caps by tier. */
   caps: Record<Tier, number>
 }
 
