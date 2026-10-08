@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import type {
+import {
   BufferAttribute,
   BufferGeometry,
-  InterleavedBufferAttribute,
-  Mesh,
-  Object3D,
-  SkinnedMesh,
+  Float32BufferAttribute,
+  type InterleavedBufferAttribute,
+  type Mesh,
+  type Object3D,
+  type SkinnedMesh,
 } from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
@@ -247,4 +248,16 @@ describe('a loaded geometry with plain vertices', () => {
     expect(plain.getAttribute('uv')).toBe(loaded.getAttribute('uv'))
     expect(plain.getAttribute('skinIndex')).toBe(loaded.getAttribute('skinIndex'))
   }, 30000)
+
+  test('keeps the blend shapes', () => {
+    const loaded = new BufferGeometry()
+    loaded.setAttribute('position', new BufferAttribute(new Int16Array(9), 3, true))
+    const smile = new Float32BufferAttribute(new Float32Array(9), 3)
+    loaded.morphAttributes.position = [smile]
+    loaded.morphTargetsRelative = true
+    const plain = withPlainVertices(loaded)
+    expect(plain).not.toBe(loaded)
+    expect(plain.morphAttributes.position).toEqual([smile])
+    expect(plain.morphTargetsRelative).toBe(true)
+  })
 })

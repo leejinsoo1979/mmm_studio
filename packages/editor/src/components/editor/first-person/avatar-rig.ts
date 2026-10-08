@@ -85,6 +85,8 @@ export function withPlainVertices(geometry: BufferGeometry): BufferGeometry {
     plain.setAttribute(name, new BufferAttribute(values, itemSize))
   }
   plain.setIndex(geometry.index)
+  plain.morphAttributes = geometry.morphAttributes
+  plain.morphTargetsRelative = geometry.morphTargetsRelative
   for (const { start, count, materialIndex } of geometry.groups) {
     plain.addGroup(start, count, materialIndex)
   }
