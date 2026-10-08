@@ -39,6 +39,6 @@ describe('the generated hairstyles', () => {
   test('every slider of a cut is offered once, length first', () => {
     const ids = HAIR_CUT_SLIDERS.map(({ id }) => id)
     expect(ids).toEqual(['length', 'volume', 'curl', 'part', 'fringe'])
-    expect([...ids].sort()).toEqual(Object.keys(HAIR_CUT_RANGES).sort())
+    expect(Object.keys(HAIR_CUT_RANGES).sort()).toEqual([...ids].sort())
   })
 })
