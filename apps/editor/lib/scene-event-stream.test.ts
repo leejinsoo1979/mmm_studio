@@ -67,12 +67,22 @@ test('streams events after the cursor and advances it', async () => {
     pollMs: POLL_MS,
   })
 
-  const { text, reader } = await readAll(stream, (t) => t.includes('id: 7'))
-  expect(text.startsWith('retry: 1000\n\n')).toBe(true)
-  expect(text).toContain('id: 4\nevent: scene\ndata: {"eventId":4,"kind":"a"}\n\n')
-  expect(calls.slice(0, 3)).toEqual([3, 5, 5])
+  const { text: head, done, reader } = await readAll(stream, (t) => t.includes('id: 7'))
+  expect(done).toBe(false)
   controller.abort()
-  expect((await reader.read()).done).toBe(true)
+  let text = head
+  for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+    text += decoder.decode(chunk.value)
+  }
+  expect(calls.slice(0, 3)).toEqual([3, 5, 5])
+  expect(text).toBe(
+    [
+      'retry: 1000\n\n',
+      'id: 4\nevent: scene\ndata: {"eventId":4,"kind":"a"}\n\n',
+      'id: 5\nevent: scene\ndata: {"eventId":5,"kind":"b"}\n\n',
+      'id: 7\nevent: scene\ndata: {"eventId":7,"kind":"c"}\n\n',
+    ].join(''),
+  )
 })
 
 test('stops polling when the client aborts or cancels', async () => {

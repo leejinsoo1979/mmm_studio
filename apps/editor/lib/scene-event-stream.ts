@@ -2,9 +2,7 @@ export const SCENE_EVENT_POLL_MS = 250
 export const SCENE_EVENT_HEARTBEAT_MS = 15_000
 
 export interface SceneEventStreamOptions<Event extends { eventId: number }> {
-  /** The request's signal; aborts when the client goes away. */
   signal: AbortSignal
-  /** Last event id the client has seen. */
   cursor: number
   listEvents: (afterEventId: number) => Promise<Event[]>
   pollMs?: number
