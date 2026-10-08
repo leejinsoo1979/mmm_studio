@@ -834,132 +834,137 @@ function pointAt(path: Path, at: number, out: number[], lying?: number[]) {
 type Guides = { roots: Roots; paths: Path[]; index: Int32Array }
 
 /** Walks and settles the guides: the roots of the first pass. */
-function growGuides(g: Grower, roots: Roots, seed: number): Guides {
+/**
+ * One guide walked over the head from root `i` and settled. Its own
+ * function: inlined into the guides' loop it ran several times slower.
+ */
+function walkGuide(g: Grower, roots: Roots, i: number, seed: number): Path {
   const { state, groom, cmHs } = g
-  const ids: number[] = []
-  for (let i = 0; i < roots.count; i++) if (roots.pass[i] === 0) ids.push(i)
   const step = WALK_STEP * cmHs
   const lift0 = groom.lift
   const flow = [0, 0, 0]
-  const paths: Path[] = []
   const passes = groom.touchesBody ? SETTLE_LONG : SETTLE
   const stiff = groom.stiffness
   const [ox, oy, oz] = state.origin
-  for (const i of ids) {
-    const group = roots.group[i]!
-    const length =
-      rootLength(groom, roots.a[i]!, roots.e[i]!, group, cmHs) *
-      (1 + 0.08 * (unitHash(seed, i) - 0.5))
-    const steps = Math.max(2, Math.ceil(length / step))
-    const points = new Float32Array((steps + 1) * 3)
-    const lying = new Uint8Array(steps + 1)
-    const volume = new Float32Array(steps + 1)
-    points.set(roots.pos.subarray(i * 3, i * 3 + 3))
-    lying[0] = 1
-    const lift = Math.min(1, lift0 * (roots.density[i]! < 1 ? BAND_LIFT : 1))
-    // Hair the cut takes off is not walked: a little past the lowest its strips are cut at.
-    const stopY =
-      group === GROUP.fringe
-        ? fringeLevel(g) - WALK_PAST * cmHs
-        : groom.cut
-          ? state.eyeY - (cutDepth(groom.cut, roots.a[i]!) + groom.ends.jitter + WALK_PAST) * cmHs
-          : Number.NEGATIVE_INFINITY
-    let count = steps + 1
-    let onHeadNow = true
-    let travelled = 0
-    for (let k = 1; k <= steps; k++) {
-      const px = points[k * 3 - 3]!
-      const py = points[k * 3 - 2]!
-      const pz = points[k * 3 - 1]!
-      const dx = px - ox
-      const dy = py - oy
-      const dz = pz - oz
-      const r = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
-      dir[0] = dx / r
-      dir[1] = dy / r
-      dir[2] = dz / r
-      const [a, e] = angles(dx, dy, dz)
-      // Even a root under the head's widest line combs along the scalp before it falls.
-      if (onHeadNow && travelled >= LEAVE_AFTER * cmHs && e < leaveElevation(a)) onHeadNow = false
-      let sx: number
-      let sy: number
-      let sz: number
-      if (onHeadNow) {
-        comb(groom, dir, group, flow)
-        const up = lift * (1 - smooth(0, LIFT_RAMP * cmHs, travelled))
-        sx = flow[0]! * (1 - up) + dir[0] * up
-        sy = flow[1]! * (1 - up) + dir[1] * up
-        sz = flow[2]! * (1 - up) + dir[2] * up
-      } else {
-        // Off the head it keeps its way, falling.
-        const back = Math.max(0, k - 2)
-        sx = px - points[back * 3]!
-        sy = py - points[back * 3 + 1]! - step * (1 - stiff)
-        sz = pz - points[back * 3 + 2]!
-      }
-      const sl = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1
-      points[k * 3] = px + (sx / sl) * step
-      points[k * 3 + 1] = py + (sy / sl) * step
-      points[k * 3 + 2] = pz + (sz / sl) * step
-      travelled += step
-      volume[k] = volumeAt(g, points[k * 3]!, points[k * 3 + 1]!, points[k * 3 + 2]!)
-      const clear = clearance(g, volume[k]!, travelled, 0, LAYER_DEPTH.mid)
-      if (onHeadNow) layOn(g, points, k * 3, clear, groom.layPull.mid)
-      collide(g, points, k * 3, clear)
-      lying[k] = onHeadNow ? 1 : 0
-      if (k >= 2 && points[k * 3 + 1]! < stopY) {
-        count = k + 1
-        break
-      }
+  const group = roots.group[i]!
+  const length =
+    rootLength(groom, roots.a[i]!, roots.e[i]!, group, cmHs) *
+    (1 + 0.08 * (unitHash(seed, i) - 0.5))
+  const steps = Math.max(2, Math.ceil(length / step))
+  const points = new Float32Array((steps + 1) * 3)
+  const lying = new Uint8Array(steps + 1)
+  const volume = new Float32Array(steps + 1)
+  points.set(roots.pos.subarray(i * 3, i * 3 + 3))
+  lying[0] = 1
+  const lift = Math.min(1, lift0 * (roots.density[i]! < 1 ? BAND_LIFT : 1))
+  // Hair the cut takes off is not walked: a little past the lowest its strips are cut at.
+  const stopY =
+    group === GROUP.fringe
+      ? fringeLevel(g) - WALK_PAST * cmHs
+      : groom.cut
+        ? state.eyeY - (cutDepth(groom.cut, roots.a[i]!) + groom.ends.jitter + WALK_PAST) * cmHs
+        : Number.NEGATIVE_INFINITY
+  let count = steps + 1
+  let onHeadNow = true
+  let travelled = 0
+  for (let k = 1; k <= steps; k++) {
+    const px = points[k * 3 - 3]!
+    const py = points[k * 3 - 2]!
+    const pz = points[k * 3 - 1]!
+    const dx = px - ox
+    const dy = py - oy
+    const dz = pz - oz
+    const r = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
+    dir[0] = dx / r
+    dir[1] = dy / r
+    dir[2] = dz / r
+    const [a, e] = angles(dx, dy, dz)
+    // Even a root under the head's widest line combs along the scalp before it falls.
+    if (onHeadNow && travelled >= LEAVE_AFTER * cmHs && e < leaveElevation(a)) onHeadNow = false
+    let sx: number
+    let sy: number
+    let sz: number
+    if (onHeadNow) {
+      comb(groom, dir, group, flow)
+      const up = lift * (1 - smooth(0, LIFT_RAMP * cmHs, travelled))
+      sx = flow[0]! * (1 - up) + dir[0] * up
+      sy = flow[1]! * (1 - up) + dir[1] * up
+      sz = flow[2]! * (1 - up) + dir[2] * up
+    } else {
+      // Off the head it keeps its way, falling.
+      const back = Math.max(0, k - 2)
+      sx = px - points[back * 3]!
+      sy = py - points[back * 3 + 1]! - step * (1 - stiff)
+      sz = pz - points[back * 3 + 2]!
     }
-    const seg = step
-    // Settled: gravity and stiffness on what hangs, the lay pull on what lies.
-    for (let pass = 0; pass < passes; pass++) {
-      for (let k = 2; k < count; k++) {
-        // What lies on the head has settled after a few passes: only what hangs moves on.
-        if (lying[k] && pass >= LAY_PASSES) continue
-        const p = k * 3
-        if (!lying[k]) {
-          points[p + 1]! -= seg * 0.25 * (1 - 0.8 * stiff)
-          const ax = points[p - 3]! - points[p - 6]!
-          const ay = points[p - 2]! - points[p - 5]!
-          const az = points[p - 1]! - points[p - 4]!
-          const al = Math.sqrt(ax * ax + ay * ay + az * az) || 1
-          const w = stiff * (1 - (0.5 * k) / count)
-          points[p] = points[p]! * (1 - w) + (points[p - 3]! + (ax / al) * seg) * w
-          points[p + 1] = points[p + 1]! * (1 - w) + (points[p - 2]! + (ay / al) * seg) * w
-          points[p + 2] = points[p + 2]! * (1 - w) + (points[p - 1]! + (az / al) * seg) * w
-          if (groom.spread > 0) {
-            const below = smooth(state.eyeY, state.eyeY - 0.12, points[p + 1]!)
-            const hx = points[p]! - ox
-            const hz = points[p + 2]! - oz
-            const hl = Math.sqrt(hx * hx + hz * hz) || 1
-            const push = groom.spread * cmHs * 0.02 * below
-            points[p]! += (hx / hl) * push
-            points[p + 2]! += (hz / hl) * push
-          }
-        }
-        const dx = points[p]! - points[p - 3]!
-        const dy = points[p + 1]! - points[p - 2]!
-        const dz = points[p + 2]! - points[p - 1]!
-        const dl = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
-        points[p] = points[p - 3]! + (dx / dl) * seg
-        points[p + 1] = points[p - 2]! + (dy / dl) * seg
-        points[p + 2] = points[p - 1]! + (dz / dl) * seg
-        const clear = clearance(g, volume[k]!, k * seg, 0, LAYER_DEPTH.mid)
-        if (lying[k]) {
-          layOn(g, points, p, clear, groom.layPull.mid)
-          outOfEyes(state.keepOut, points, p)
-        } else {
-          collide(g, points, p, clear)
-          if (pass >= passes - MIDDLE_PASSES) collideMiddle(g, points, p - 3, p, clear)
-        }
-      }
+    const sl = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1
+    points[k * 3] = px + (sx / sl) * step
+    points[k * 3 + 1] = py + (sy / sl) * step
+    points[k * 3 + 2] = pz + (sz / sl) * step
+    travelled += step
+    volume[k] = volumeAt(g, points[k * 3]!, points[k * 3 + 1]!, points[k * 3 + 2]!)
+    const clear = clearance(g, volume[k]!, travelled, 0, LAYER_DEPTH.mid)
+    if (onHeadNow) layOn(g, points, k * 3, clear, groom.layPull.mid)
+    collide(g, points, k * 3, clear)
+    lying[k] = onHeadNow ? 1 : 0
+    if (k >= 2 && points[k * 3 + 1]! < stopY) {
+      count = k + 1
+      break
     }
-    const s = new Float32Array(count)
-    const total = arcLengths(points, count, s)
-    paths.push({ points: points.subarray(0, count * 3), s, lying, count, length: total })
   }
+  const seg = step
+  // Settled: gravity and stiffness on what hangs, the lay pull on what lies.
+  for (let pass = 0; pass < passes; pass++) {
+    for (let k = 2; k < count; k++) {
+      // What lies on the head has settled after a few passes: only what hangs moves on.
+      if (lying[k] && pass >= LAY_PASSES) continue
+      const p = k * 3
+      if (!lying[k]) {
+        points[p + 1]! -= seg * 0.25 * (1 - 0.8 * stiff)
+        const ax = points[p - 3]! - points[p - 6]!
+        const ay = points[p - 2]! - points[p - 5]!
+        const az = points[p - 1]! - points[p - 4]!
+        const al = Math.sqrt(ax * ax + ay * ay + az * az) || 1
+        const w = stiff * (1 - (0.5 * k) / count)
+        points[p] = points[p]! * (1 - w) + (points[p - 3]! + (ax / al) * seg) * w
+        points[p + 1] = points[p + 1]! * (1 - w) + (points[p - 2]! + (ay / al) * seg) * w
+        points[p + 2] = points[p + 2]! * (1 - w) + (points[p - 1]! + (az / al) * seg) * w
+        if (groom.spread > 0) {
+          const below = smooth(state.eyeY, state.eyeY - 0.12, points[p + 1]!)
+          const hx = points[p]! - ox
+          const hz = points[p + 2]! - oz
+          const hl = Math.sqrt(hx * hx + hz * hz) || 1
+          const push = groom.spread * cmHs * 0.02 * below
+          points[p]! += (hx / hl) * push
+          points[p + 2]! += (hz / hl) * push
+        }
+      }
+      const dx = points[p]! - points[p - 3]!
+      const dy = points[p + 1]! - points[p - 2]!
+      const dz = points[p + 2]! - points[p - 1]!
+      const dl = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
+      points[p] = points[p - 3]! + (dx / dl) * seg
+      points[p + 1] = points[p - 2]! + (dy / dl) * seg
+      points[p + 2] = points[p - 1]! + (dz / dl) * seg
+      const clear = clearance(g, volume[k]!, k * seg, 0, LAYER_DEPTH.mid)
+      if (lying[k]) {
+        layOn(g, points, p, clear, groom.layPull.mid)
+        outOfEyes(state.keepOut, points, p)
+      } else {
+        collide(g, points, p, clear)
+        if (pass >= passes - MIDDLE_PASSES) collideMiddle(g, points, p - 3, p, clear)
+      }
+    }
+  }
+  const s = new Float32Array(count)
+  const total = arcLengths(points, count, s)
+  return { points: points.subarray(0, count * 3), s, lying, count, length: total }
+}
+
+function growGuides(g: Grower, roots: Roots, seed: number): Guides {
+  const ids: number[] = []
+  for (let i = 0; i < roots.count; i++) if (roots.pass[i] === 0) ids.push(i)
+  const paths = ids.map((i) => walkGuide(g, roots, i, seed))
   return { roots, paths, index: Int32Array.from(ids) }
 }
 
@@ -1015,6 +1020,66 @@ type Strip = Path & {
   cut: number
   level: number
   field: number
+}
+
+/**
+ * A guide's offsets from its root, turned by `turn` (row-major 3×3) and
+ * weighted, added into a strip's points (`path`, evenly over `length`) and
+ * into how much of each lies on the head. Its own function: inlined into
+ * the strip loop it ran several times slower.
+ */
+function addGuide(
+  guide: Path,
+  turn: number[],
+  w: number,
+  length: number,
+  path: Float32Array,
+  lyingShare: Float32Array,
+) {
+  const points = lyingShare.length
+  const gs = guide.s
+  const gp = guide.points
+  const gl = guide.lying
+  const last = guide.count - 1
+  const [rx, ry, rz] = [gp[0]!, gp[1]!, gp[2]!]
+  const [t0, t1, t2, t3, t4, t5, t6, t7, t8] = turn as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ]
+  const tail = gs[last]! - gs[last - 1]! || 1
+  let lo = 0
+  for (let k = 0; k < points; k++) {
+    const at = (k / (points - 1)) * length
+    let qx: number
+    let qy: number
+    let qz: number
+    let lies: number
+    if (at >= gs[last]!) {
+      const over = (at - gs[last]!) / tail
+      qx = gp[last * 3]! + (gp[last * 3]! - gp[last * 3 - 3]!) * over - rx
+      qy = gp[last * 3 + 1]! + (gp[last * 3 + 1]! - gp[last * 3 - 2]!) * over - ry
+      qz = gp[last * 3 + 2]! + (gp[last * 3 + 2]! - gp[last * 3 - 1]!) * over - rz
+      lies = gl[last]!
+    } else {
+      while (lo < last - 1 && gs[lo + 1]! <= at) lo++
+      const t = (at - gs[lo]!) / (gs[lo + 1]! - gs[lo]! || 1)
+      qx = gp[lo * 3]! + (gp[lo * 3 + 3]! - gp[lo * 3]!) * t - rx
+      qy = gp[lo * 3 + 1]! + (gp[lo * 3 + 4]! - gp[lo * 3 + 1]!) * t - ry
+      qz = gp[lo * 3 + 2]! + (gp[lo * 3 + 5]! - gp[lo * 3 + 2]!) * t - rz
+      lies = t < 0.5 ? gl[lo]! : gl[lo + 1]!
+    }
+    path[k * 3]! += (t0 * qx + t1 * qy + t2 * qz) * w
+    path[k * 3 + 1]! += (t3 * qx + t4 * qy + t5 * qz) * w
+    path[k * 3 + 2]! += (t6 * qx + t7 * qy + t8 * qz) * w
+    lyingShare[k]! += lies * w
+  }
 }
 
 /**
@@ -1125,9 +1190,10 @@ function growStripPaths(g: Grower, guides: Guides, roots: Roots, count: number, 
         weights.push(1 / (distances[j]! + 1e-6))
       }
       const own = Math.sqrt(distances[0]!)
+      const reach = own + BORDER * cmHs
       for (const [other, near] of byGroup) {
         if (other === group || acrossPart(group, other)) continue
-        if (near.grid.nearest(px, py, pz, 1, found, distances) === 0) continue
+        if (near.grid.nearest(px, py, pz, 1, found, distances, reach) === 0) continue
         const ramp = 1 - smooth(0, BORDER * cmHs, Math.sqrt(distances[0]!) - own)
         if (ramp <= 0) continue
         ids.push(near.ids[found[0]!]!)
@@ -1153,57 +1219,12 @@ function growStripPaths(g: Grower, guides: Guides, roots: Roots, count: number, 
     // Each guide's offsets from its root, turned from its root's normal to this one's, weighted.
     for (let j = 0; j < ids.length; j++) {
       const qi = ids[j]!
-      const guide = guides.paths[qi]!
       const gi = guides.index[qi]!
       guideNormal[0] = roots.nrm[gi * 3]!
       guideNormal[1] = roots.nrm[gi * 3 + 1]!
       guideNormal[2] = roots.nrm[gi * 3 + 2]!
       rotation(guideNormal, rootNormal, turn)
-      const w = weights[j]! / total
-      // Along the guide at the strip's own arc lengths (rising, so a cursor walks it).
-      const gs = guide.s
-      const gp = guide.points
-      const last = guide.count - 1
-      const rx = gp[0]!
-      const ry = gp[1]!
-      const rz = gp[2]!
-      const gl = guide.lying
-      const t0 = turn[0]!
-      const t1 = turn[1]!
-      const t2 = turn[2]!
-      const t3 = turn[3]!
-      const t4 = turn[4]!
-      const t5 = turn[5]!
-      const t6 = turn[6]!
-      const t7 = turn[7]!
-      const t8 = turn[8]!
-      const tail = gs[last]! - gs[last - 1]! || 1
-      let lo = 0
-      for (let k = 0; k < points; k++) {
-        const at = (k / (points - 1)) * length
-        let qx: number
-        let qy: number
-        let qz: number
-        let lies: number
-        if (at >= gs[last]!) {
-          const over = (at - gs[last]!) / tail
-          qx = gp[last * 3]! + (gp[last * 3]! - gp[last * 3 - 3]!) * over - rx
-          qy = gp[last * 3 + 1]! + (gp[last * 3 + 1]! - gp[last * 3 - 2]!) * over - ry
-          qz = gp[last * 3 + 2]! + (gp[last * 3 + 2]! - gp[last * 3 - 1]!) * over - rz
-          lies = gl[last]!
-        } else {
-          while (lo < last - 1 && gs[lo + 1]! <= at) lo++
-          const t = (at - gs[lo]!) / (gs[lo + 1]! - gs[lo]! || 1)
-          qx = gp[lo * 3]! + (gp[lo * 3 + 3]! - gp[lo * 3]!) * t - rx
-          qy = gp[lo * 3 + 1]! + (gp[lo * 3 + 4]! - gp[lo * 3 + 1]!) * t - ry
-          qz = gp[lo * 3 + 2]! + (gp[lo * 3 + 5]! - gp[lo * 3 + 2]!) * t - rz
-          lies = t < 0.5 ? gl[lo]! : gl[lo + 1]!
-        }
-        path[k * 3]! += (t0 * qx + t1 * qy + t2 * qz) * w
-        path[k * 3 + 1]! += (t3 * qx + t4 * qy + t5 * qz) * w
-        path[k * 3 + 2]! += (t6 * qx + t7 * qy + t8 * qz) * w
-        lyingShare[k]! += lies * w
-      }
+      addGuide(guides.paths[qi]!, turn, weights[j]! / total, length, path, lyingShare)
     }
     for (let k = 0; k < points; k++) {
       path[k * 3]! += roots.pos[c * 3]!
@@ -1352,72 +1373,7 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
   // the hanging part goes with the lying part it leaves the head from, so
   // no strip kinks there. Then out of the head and the eyes, eased.
   const smoothed: number[] = []
-  const [ox, oy, oz] = state.origin
-  for (const strip of strips) {
-    const standoff = standoffOf(seed, strip.lock, mm)
-    const depth = layerDepth(strip.layer)
-    const n = strip.count
-    const seg = strip.length / (n - 1)
-    const volumes = new Float32Array(n)
-    // The volume's noise is coarse (VOLUME_CELL): read every few points, between them in line.
-    const sampled: number[] = []
-    for (let k = 1; k < n; k += VOLUME_EVERY) sampled.push(k)
-    if (sampled[sampled.length - 1] !== n - 1) sampled.push(n - 1)
-    for (const k of sampled) {
-      volumes[k] = volumeAt(
-        g,
-        strip.points[k * 3]!,
-        strip.points[k * 3 + 1]!,
-        strip.points[k * 3 + 2]!,
-      )
-    }
-    for (let j = 0; j + 1 < sampled.length; j++) {
-      const [from, to] = [sampled[j]!, sampled[j + 1]!]
-      for (let k = from + 1; k < to; k++) {
-        volumes[k] = volumes[from]! + ((volumes[to]! - volumes[from]!) * (k - from)) / (to - from)
-      }
-    }
-    const clears = new Float32Array(n)
-    for (let k = 1; k < n; k++) {
-      const o = k * 3
-      let want = clearance(g, volumes[k]!, k * seg, standoff, depth)
-      if (strip.layer === STRIP_LAYER.inner) want = Math.max(want, INNER_CLEAR * mm)
-      clears[k] = want
-      const shift = want - clearance(g, volumes[k]!, k * seg, 0, LAYER_DEPTH.mid)
-      const y = strip.points[o + 1]!
-      const below = smooth(oy, oy - ENVELOPE_TURN, y)
-      const dx = strip.points[o]! - ox
-      const dy = (y - oy) * (1 - below)
-      const dz = strip.points[o + 2]! - oz
-      const dl = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
-      strip.points[o]! += (dx / dl) * shift
-      strip.points[o + 1]! += (dy / dl) * shift
-      strip.points[o + 2]! += (dz / dl) * shift
-    }
-    for (let pass = 0; pass < STRIP_PASSES; pass++) {
-      for (let k = 1; k < n; k++) collide(g, strip.points, k * 3, clears[k]!)
-      smoothPath(strip.points, n, smoothed)
-      // Its segments back to their length, from the root out, each its own
-      // way (as eased): a strip drawn in toward the head is shorter round
-      // it, and a chain restored from the moved points would fold back.
-      for (let k = 1; k < n; k++) {
-        const o = k * 3
-        const dx = smoothed[o]! - smoothed[o - 3]!
-        const dy = smoothed[o + 1]! - smoothed[o - 2]!
-        const dz = smoothed[o + 2]! - smoothed[o - 1]!
-        const dl = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
-        strip.points[o] = strip.points[o - 3]! + (dx / dl) * seg
-        strip.points[o + 1] = strip.points[o - 2]! + (dy / dl) * seg
-        strip.points[o + 2] = strip.points[o - 1]! + (dz / dl) * seg
-      }
-    }
-    for (let k = 1; k < n; k++) {
-      collide(g, strip.points, k * 3, LEAST_CLEAR * state.cm)
-      collideMiddle(g, strip.points, k * 3 - 3, k * 3, LEAST_CLEAR * state.cm)
-    }
-    for (let k = 1; k < n; k++) outOfEyes(state.keepOut, strip.points, k * 3)
-    arcLengths(strip.points, n, strip.s)
-  }
+  for (const strip of strips) layStrip(g, strip, standoffOf(seed, strip.lock, mm), smoothed)
   // Cut: at the first crossing below the level, by a short style's ear, nape and block.
   const table = hairlineTable(groom)
   for (const strip of strips) {
@@ -1520,6 +1476,79 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
       strip.length = strip.s[n - 1]!
     }
   }
+}
+
+/**
+ * A strip set at its layer's depth in the volume, out of the head and the
+ * eyes, eased (see shapeStrips). Its own function: inlined into the strips'
+ * loop it ran several times slower.
+ */
+function layStrip(g: Grower, strip: Strip, standoff: number, smoothed: number[]) {
+  const { state } = g
+  const mm = state.mm
+  const [ox, oy, oz] = state.origin
+  const depth = layerDepth(strip.layer)
+  const n = strip.count
+  const seg = strip.length / (n - 1)
+  const volumes = new Float32Array(n)
+  // The volume's noise is coarse (VOLUME_CELL): read every few points, between them in line.
+  const sampled: number[] = []
+  for (let k = 1; k < n; k += VOLUME_EVERY) sampled.push(k)
+  if (sampled[sampled.length - 1] !== n - 1) sampled.push(n - 1)
+  for (const k of sampled) {
+    volumes[k] = volumeAt(
+      g,
+      strip.points[k * 3]!,
+      strip.points[k * 3 + 1]!,
+      strip.points[k * 3 + 2]!,
+    )
+  }
+  for (let j = 0; j + 1 < sampled.length; j++) {
+    const [from, to] = [sampled[j]!, sampled[j + 1]!]
+    for (let k = from + 1; k < to; k++) {
+      volumes[k] = volumes[from]! + ((volumes[to]! - volumes[from]!) * (k - from)) / (to - from)
+    }
+  }
+  const clears = new Float32Array(n)
+  for (let k = 1; k < n; k++) {
+    const o = k * 3
+    let want = clearance(g, volumes[k]!, k * seg, standoff, depth)
+    if (strip.layer === STRIP_LAYER.inner) want = Math.max(want, INNER_CLEAR * mm)
+    clears[k] = want
+    const shift = want - clearance(g, volumes[k]!, k * seg, 0, LAYER_DEPTH.mid)
+    const y = strip.points[o + 1]!
+    const below = smooth(oy, oy - ENVELOPE_TURN, y)
+    const dx = strip.points[o]! - ox
+    const dy = (y - oy) * (1 - below)
+    const dz = strip.points[o + 2]! - oz
+    const dl = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
+    strip.points[o]! += (dx / dl) * shift
+    strip.points[o + 1]! += (dy / dl) * shift
+    strip.points[o + 2]! += (dz / dl) * shift
+  }
+  for (let pass = 0; pass < STRIP_PASSES; pass++) {
+    for (let k = 1; k < n; k++) collide(g, strip.points, k * 3, clears[k]!)
+    smoothPath(strip.points, n, smoothed)
+    // Its segments back to their length, from the root out, each its own
+    // way (as eased): a strip drawn in toward the head is shorter round
+    // it, and a chain restored from the moved points would fold back.
+    for (let k = 1; k < n; k++) {
+      const o = k * 3
+      const dx = smoothed[o]! - smoothed[o - 3]!
+      const dy = smoothed[o + 1]! - smoothed[o - 2]!
+      const dz = smoothed[o + 2]! - smoothed[o - 1]!
+      const dl = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
+      strip.points[o] = strip.points[o - 3]! + (dx / dl) * seg
+      strip.points[o + 1] = strip.points[o - 2]! + (dy / dl) * seg
+      strip.points[o + 2] = strip.points[o - 1]! + (dz / dl) * seg
+    }
+  }
+  for (let k = 1; k < n; k++) {
+    collide(g, strip.points, k * 3, LEAST_CLEAR * state.cm)
+    collideMiddle(g, strip.points, k * 3 - 3, k * 3, LEAST_CLEAR * state.cm)
+  }
+  for (let k = 1; k < n; k++) outOfEyes(state.keepOut, strip.points, k * 3)
+  arcLengths(strip.points, n, strip.s)
 }
 
 /**

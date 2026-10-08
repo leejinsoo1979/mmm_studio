@@ -18,10 +18,10 @@ import { earsOf } from '../../packages/editor/src/components/editor/first-person
 import { type BaseInput, flattenHead } from '../../packages/editor/src/components/editor/first-person/hair-base'
 import {
   HAIR_HEADS,
-  hairHeadFile,
   pack,
   type StoredHairHead,
 } from '../../packages/editor/src/components/editor/first-person/hair-fixtures'
+import { hairHeadFile } from '../../packages/editor/src/components/editor/first-person/hair-test-utils'
 import { loadHairLibrary } from '../../packages/editor/src/components/editor/first-person/hair-styles'
 
 const root = resolve(import.meta.dir, '../..')

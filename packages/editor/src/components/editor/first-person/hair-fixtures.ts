@@ -1,4 +1,3 @@
-import { join } from 'node:path'
 import type { BaseInput } from './hair-base'
 import type { Who } from './hair-groom'
 
@@ -125,10 +124,3 @@ export function readHairHead(stored: StoredHairHead): HairHead {
 
 /** The heads frozen for the tests. */
 export const HAIR_HEADS = ['Female_Adult_01', 'Male_Adult_01'] as const
-
-export const hairHeadFile = (id: string) => join(import.meta.dir, 'hair-fixtures', `${id}.json`)
-
-/** A frozen head (bun only: the tests and scripts read it from disk). */
-export async function loadHairHead(id: (typeof HAIR_HEADS)[number]): Promise<HairHead> {
-  return readHairHead((await Bun.file(hairHeadFile(id)).json()) as StoredHairHead)
-}

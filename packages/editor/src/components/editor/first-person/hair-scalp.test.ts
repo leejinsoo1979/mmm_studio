@@ -1,7 +1,6 @@
 import { beforeAll, describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { headFits } from './hair-base'
-import { loadHairHead } from './hair-fixtures'
 import { groomOf, hairlineTable, unionHairline } from './hair-groom'
 import { headData, headFrame } from './hair-grow'
 import {
@@ -19,6 +18,7 @@ import {
   TEMPLATE_CM,
 } from './hair-scalp'
 import { type HairLibrary, loadHairLibrary } from './hair-styles'
+import { loadHairHead } from './hair-test-utils'
 import { fitBald } from './head-skull'
 
 const ROCKETBOX = join(import.meta.dir, '../../../../../../apps/editor/public/characters/rocketbox')

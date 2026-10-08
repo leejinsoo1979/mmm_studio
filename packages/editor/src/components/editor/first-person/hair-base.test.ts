@@ -11,10 +11,11 @@ import {
   newHoles,
   templateAngles,
 } from './hair-base'
-import { HAIR_HEADS, type HairHead, loadHairHead } from './hair-fixtures'
+import { HAIR_HEADS, type HairHead } from './hair-fixtures'
 import { unionHairline } from './hair-groom'
 import { hairlineAt, templateFrame } from './hair-scalp'
 import { type HairLibrary, loadHairLibrary } from './hair-styles'
+import { loadHairHead } from './hair-test-utils'
 import { fitBald, fitSkull, standingOver, standOn } from './head-skull'
 
 const ROCKETBOX = join(import.meta.dir, '../../../../../../apps/editor/public/characters/rocketbox')

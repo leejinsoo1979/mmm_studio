@@ -1,10 +1,11 @@
 import { beforeAll, describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { DEFAULT_CUT_PARAMS, type GrowCut, type HairCutStyle } from './hair-cut'
-import { type HairHead, loadHairHead } from './hair-fixtures'
+import type { HairHead } from './hair-fixtures'
 import { type HairReply, type HairRequest, shapeKey } from './hair-grow'
 import { HairJobs } from './hair-jobs'
 import { type HairLibrary, loadHairLibrary } from './hair-styles'
+import { loadHairHead } from './hair-test-utils'
 
 const ROCKETBOX = join(import.meta.dir, '../../../../../../apps/editor/public/characters/rocketbox')
 

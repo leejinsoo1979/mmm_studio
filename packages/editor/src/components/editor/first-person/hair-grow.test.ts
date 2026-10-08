@@ -9,7 +9,7 @@ import {
 } from './hair-atlas'
 import { headFits } from './hair-base'
 import { DEFAULT_CUT_PARAMS, type HairCut, type HairCutStyle } from './hair-cut'
-import { HAIR_HEADS, type HairHead, loadHairHead } from './hair-fixtures'
+import { HAIR_HEADS, type HairHead } from './hair-fixtures'
 import { type Groom, groomOf, regional, STYLES } from './hair-groom'
 import {
   type Grown,
@@ -29,6 +29,7 @@ import { RIBBON_ITEM_SIZES } from './hair-ribbons'
 import { angles, inEyes, radiusAt, rayTriangle } from './hair-scalp'
 import { STRIP_LAYER, unpackLayers } from './hair-shading'
 import { type HairLibrary, loadHairLibrary } from './hair-styles'
+import { loadHairHead } from './hair-test-utils'
 import { fitBald } from './head-skull'
 
 const ROCKETBOX = join(import.meta.dir, '../../../../../../apps/editor/public/characters/rocketbox')
