@@ -30,11 +30,12 @@ export function heapOverThreshold(heap: HeapUsage, ratio: number): boolean {
 
 export function heapRestartMessage(heap: HeapUsage, ratio: number): string {
   const mb = (bytes: number) => Math.round(bytes / 1024 / 1024)
-  const percent = Math.round((heap.used_heap_size / heap.heap_size_limit) * 100)
+  const percent = Number((ratio * 100).toFixed(1))
   return (
-    `[힙 감시] 서버 JS 힙이 ${mb(heap.used_heap_size)} / ${mb(heap.heap_size_limit)} MB(${percent}%)로 ` +
-    `기준(${Math.round(ratio * 100)}%)을 넘어서 개발 서버를 깨끗하게 다시 시작합니다. ` +
-    '힙 한계에 부딪혀 서버가 죽기 전에 Next가 새 서버 프로세스를 띄웁니다.'
+    `[힙 감시] 서버 JS 힙 사용량 ${mb(heap.used_heap_size)} MB가 기준 ` +
+    `${mb(ratio * heap.heap_size_limit)} MB(힙 한계 ${mb(heap.heap_size_limit)} MB의 ${percent}%)를 ` +
+    '넘어서 개발 서버를 깨끗하게 다시 시작합니다. 한계에 부딪혀 죽기 전에 Next가 새 서버 프로세스를 ' +
+    '띄우고, 열린 페이지는 다시 연결되면 새로고침됩니다.'
   )
 }
 

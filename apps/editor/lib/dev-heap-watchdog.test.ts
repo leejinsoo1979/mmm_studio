@@ -43,8 +43,10 @@ test('heapOverThreshold compares used heap with the ratio of the limit', () => {
 
 test('the warning says how full the heap is', () => {
   const message = heapRestartMessage({ used_heap_size: 6600 * MB, heap_size_limit: 8192 * MB }, 0.8)
-  expect(message).toContain('6600 / 8192 MB(81%)')
-  expect(message).toContain('기준(80%)')
+  expect(message).toContain('사용량 6600 MB가 기준 6554 MB(힙 한계 8192 MB의 80%)')
+  expect(
+    heapRestartMessage({ used_heap_size: 290 * MB, heap_size_limit: 8240 * MB }, 0.035),
+  ).toContain('기준 288 MB(힙 한계 8240 MB의 3.5%)')
 })
 
 test('only arms in the server child of `next dev`', () => {
@@ -73,5 +75,5 @@ test('exits with the restart code once the heap passes the threshold', () => {
   heap.used_heap_size = 650 * MB
   tick()
   expect(calls.exits).toEqual([NEXT_RESTART_EXIT_CODE])
-  expect(calls.warnings[0]).toContain('기준(60%)')
+  expect(calls.warnings[0]).toContain('기준 600 MB(힙 한계 1000 MB의 60%)')
 })
