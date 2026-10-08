@@ -2,6 +2,9 @@ import { useGLTF } from '@react-three/drei/core/Gltf'
 import { useMemo } from 'react'
 import {
   AnimationClip,
+  BufferAttribute,
+  BufferGeometry,
+  type InterleavedBufferAttribute,
   type Material,
   type Mesh,
   type MeshStandardMaterial,
@@ -36,11 +39,66 @@ export function fitClips(clips: AnimationClip[], scale: number): AnimationClip[]
   })
 }
 
-function prepareModel(source: Object3D): Object3D {
+/** The attributes a look writes anew, as plain floats, in a body's geometry (see withPlainVertices). */
+const REWRITTEN = new Set(['position', 'normal'])
+
+const plainGeometries = new WeakMap<BufferGeometry, BufferGeometry>()
+
+const isPlain = (attribute: BufferAttribute | InterleavedBufferAttribute) =>
+  attribute instanceof BufferAttribute &&
+  attribute.array instanceof Float32Array &&
+  !attribute.normalized
+
+/**
+ * A loaded geometry with its positions and normals as plain floats, all
+ * else shared with it; the same one for every character drawn from it.
+ *
+ * The WebGPU renderer builds a mesh's pipeline for the vertex formats of the
+ * geometry it draws with a material, and keeps it whenever the mesh shows
+ * that material, whatever geometry the mesh was given since: one laid out
+ * otherwise is read in the old formats, its points thrown about the body's
+ * bounds as a ball of shards. The Rocketbox files store positions and
+ * normals quantized (16- and 8-bit, interleaved), while every geometry a
+ * look puts in a mesh's place writes them as floats: reshaped
+ * (avatar-shape.ts), made bald (avatar-hair.ts) or without its shoes
+ * (avatar-feet.ts). Floats from the start, a mesh's geometries are all laid
+ * out alike.
+ */
+export function withPlainVertices(geometry: BufferGeometry): BufferGeometry {
+  const known = plainGeometries.get(geometry)
+  if (known) return known
+  const rewritten = Object.entries(geometry.attributes).filter(
+    ([name, attribute]) => REWRITTEN.has(name) && !isPlain(attribute),
+  )
+  if (rewritten.length === 0) return geometry
+  const plain = new BufferGeometry()
+  plain.name = geometry.name
+  for (const [name, attribute] of Object.entries(geometry.attributes)) {
+    plain.setAttribute(name, attribute)
+  }
+  for (const [name, attribute] of rewritten) {
+    const { count, itemSize } = attribute
+    const values = new Float32Array(count * itemSize)
+    for (let i = 0; i < count; i++) {
+      for (let c = 0; c < itemSize; c++) values[i * itemSize + c] = attribute.getComponent(i, c)
+    }
+    plain.setAttribute(name, new BufferAttribute(values, itemSize))
+  }
+  plain.setIndex(geometry.index)
+  for (const { start, count, materialIndex } of geometry.groups) {
+    plain.addGroup(start, count, materialIndex)
+  }
+  plain.setDrawRange(geometry.drawRange.start, geometry.drawRange.count)
+  plainGeometries.set(geometry, plain)
+  return plain
+}
+
+export function prepareModel(source: Object3D): Object3D {
   const model = cloneSkinned(source)
   model.traverse((object) => {
     const mesh = object as Mesh
     if (!mesh.isMesh) return
+    mesh.geometry = withPlainVertices(mesh.geometry)
     mesh.castShadow = true
     mesh.receiveShadow = true
     // Skinned bounds follow the bind pose, not the animated body.
