@@ -18,6 +18,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -72,6 +73,7 @@ import type {
 import { type CaptureRig, captureAiShot, captureSnapshot, placeCamera } from './studio-capture'
 import { grainDataUrl, overlayBackground, overlayBlend, STUDIO_FILTER } from './studio-filters'
 import { StudioPose } from './studio-pose'
+import { drawWebglGeometries } from './webgl-geometry'
 
 type HeadFocus = 'hair' | 'face' | 'eyes' | 'mouth'
 
@@ -899,6 +901,13 @@ function RigBridge({ state }: { state: StageState }) {
   return null
 }
 
+/** Draws the bodies the game's WebGPU renderer has drawn as WebGL reads them (see webgl-geometry.ts). */
+function WebglGeometries() {
+  const scene = useThree((three) => three.scene)
+  useLayoutEffect(() => drawWebglGeometries(scene), [scene])
+  return null
+}
+
 /**
  * Draws the frame, last: the handles' projector runs after the pose (at
  * priority 1), and a frame callback with a priority takes the drawing over
@@ -1329,6 +1338,7 @@ export function StudioStage({
         <CameraRig state={state} stature={stature} />
         <HandleProjector board={board} model={state.model} />
         <RigBridge state={state} />
+        <WebglGeometries />
         <FrameRender />
       </Canvas>
       <FilterOverlays box={box} filter={filter} insets={insets} />
