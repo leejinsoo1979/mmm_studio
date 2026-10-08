@@ -176,8 +176,12 @@ const END_CURL_LENGTH: readonly [number, number] = [3, 8]
 const OVER_EAR = 6
 /** A short style's nape: strands rooted at the nape line are this long (cm), longer higher up. */
 const NAPE_LENGTH = 1.25
-/** An undercut's top hair drapes this far (rad) below the block line. */
-const BLOCK_DRAPE = 0.12
+/**
+ * An undercut's top hair drapes this far (rad) below the block line: a
+ * little over the temples, further down the back, so the hem tapers to
+ * the nape instead of ringing the head like a bowl.
+ */
+const BLOCK_DRAPE: readonly [number, number] = [0.1, 0.3]
 /** How far down (cm) from the head bone strands stop following the head's shape. */
 const FOLLOW_FADE = 10
 /** Bind units per atlas repeat along a strand (cm). */
@@ -1424,7 +1428,10 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
         }
         if (groom.undercut && !isFringe) {
           const [a, e] = state.templateAngles(x, y, z)
-          const line = groom.undercut.line - BLOCK_DRAPE
+          const line =
+            groom.undercut.line -
+            BLOCK_DRAPE[0] -
+            (BLOCK_DRAPE[1] - BLOCK_DRAPE[0]) * smooth(1.6, 2.8, Math.abs(a))
           if (e < line && smooth(0.75, 1.05, Math.abs(a)) > 0.5) stop = true
         }
         if (stop) {

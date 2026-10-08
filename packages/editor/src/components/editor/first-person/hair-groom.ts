@@ -150,7 +150,8 @@ export const STYLES: Record<HairCutStyle, StyleDef> = {
     short: SHORT_ENDS,
     flow: { back: 0.1, down: 0.7, part: 0.5, swirl: 0.5 },
     fringe: { depth: 0.5, cut: 0 },
-    volume: { crown: 1.8, top: 2.2, sides: 1.7, back: 1.4, nape: 0.5 },
+    // Tuned against the outline (design §6.11 had sides 1.7, back 1.4: a mushroom over the block).
+    volume: { crown: 1.8, top: 2.0, sides: 1.1, back: 1.0, nape: 0.5 },
     lift: 0.4,
     spread: 0,
     stiffness: 0.7,
