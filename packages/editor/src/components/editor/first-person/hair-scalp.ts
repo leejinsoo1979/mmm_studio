@@ -496,6 +496,16 @@ function directionsOf(size: number) {
 /** A triangle's pieces are tested apart where its corners spread this far over the map (its folds). */
 const PIECE_SPAN = 1 / 8
 const PIECE_DEPTH = 4
+/** Where a triangle's places on the map are read (its corners' shares). */
+const COVER_SAMPLES: readonly (readonly [number, number, number])[] = [
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+  [0.5, 0.5, 0],
+  [0, 0.5, 0.5],
+  [0.5, 0, 0.5],
+  [1 / 3, 1 / 3, 1 / 3],
+]
 
 /**
  * A head's radius map round `origin` from surfaces of triangles (flat
@@ -574,16 +584,19 @@ export function radiusMap(
     z2: number,
     depth: number,
   ) => {
-    placeOf(x0, y0, z0)
-    const [u0, v0] = [place[0]!, place[1]!]
-    placeOf(x1, y1, z1)
-    const [u1, v1] = [place[0]!, place[1]!]
-    placeOf(x2, y2, z2)
-    const [u2, v2] = [place[0]!, place[1]!]
-    const lu = Math.min(u0, u1, u2)
-    const hu = Math.max(u0, u1, u2)
-    const lv = Math.min(v0, v1, v2)
-    const hv = Math.max(v0, v1, v2)
+    // Its corners' places, and its edges' middles' and its own: across an
+    // octant's edge the map bends a straight edge outward, past its corners.
+    let lu = Number.POSITIVE_INFINITY
+    let hu = Number.NEGATIVE_INFINITY
+    let lv = Number.POSITIVE_INFINITY
+    let hv = Number.NEGATIVE_INFINITY
+    for (const [wa, wb, wc] of COVER_SAMPLES) {
+      placeOf(x0 * wa + x1 * wb + x2 * wc, y0 * wa + y1 * wb + y2 * wc, z0 * wa + z1 * wb + z2 * wc)
+      lu = Math.min(lu, place[0]!)
+      hu = Math.max(hu, place[0]!)
+      lv = Math.min(lv, place[1]!)
+      hv = Math.max(hv, place[1]!)
+    }
     if (depth < PIECE_DEPTH && Math.max(hu - lu, hv - lv) > size * PIECE_SPAN) {
       const [ax1, ay1, az1] = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2]
       const [bx1, by1, bz1] = [(x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2]

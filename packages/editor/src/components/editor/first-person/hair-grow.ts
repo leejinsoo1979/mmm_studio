@@ -274,7 +274,8 @@ class HeadState implements HeadData {
     this.keepOut = eyeKeepOut(input.marks.eyes, input.lashes, this.cm)
     const bald = fitBald(library.skull, cranium)
     this.bald = { points: bald.points, index: library.skull.triangles }
-    this.index = base.head.index
+    // Its own copy: the base itself is handed on to the page.
+    this.index = Uint32Array.from(base.head.index)
     const { spots, count } = spotsOf(input.head.points)
     this.spots = spots
     this.spotCount = count
