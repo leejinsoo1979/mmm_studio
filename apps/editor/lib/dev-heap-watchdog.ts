@@ -9,6 +9,9 @@ import { getHeapStatistics } from 'node:v8'
 export const NEXT_RESTART_EXIT_CODE = 77
 export const DEFAULT_HEAP_RESTART_RATIO = 0.8
 const CHECK_INTERVAL_MS = 5_000
+// A threshold below a fresh server's working heap (a low ratio, a small --max-old-space-size)
+// would otherwise restart every server within one check, forever; this bounds that loop.
+export const STARTUP_GRACE_MS = 60_000
 const ARMED = Symbol.for('mmm-studio.dev-heap-watchdog')
 
 export interface HeapUsage {
@@ -44,6 +47,7 @@ interface WatchdogDeps {
   warn: (message: string) => void
   exit: (code: number) => void
   repeat: (run: () => void, ms: number) => void
+  now: () => number
 }
 
 const defaultDeps: WatchdogDeps = {
@@ -51,6 +55,7 @@ const defaultDeps: WatchdogDeps = {
   warn: (message) => console.warn(message),
   exit: (code) => process.exit(code),
   repeat: (run, ms) => setInterval(run, ms).unref(),
+  now: Date.now,
 }
 
 /**
@@ -66,7 +71,9 @@ export function startDevHeapWatchdog(
   if (env.__NEXT_DEV_SERVER !== '1' || scope[ARMED]) return false
   scope[ARMED] = true
   const ratio = heapRestartRatio(env.EDITOR_DEV_HEAP_RESTART_RATIO)
+  const armedAt = deps.now()
   deps.repeat(() => {
+    if (deps.now() - armedAt < STARTUP_GRACE_MS) return
     const heap = deps.readHeap()
     if (!heapOverThreshold(heap, ratio)) return
     deps.warn(heapRestartMessage(heap, ratio))
