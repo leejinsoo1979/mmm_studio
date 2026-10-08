@@ -95,8 +95,11 @@ export function webglGeometry(geometry: BufferGeometry): BufferGeometry {
   twin.morphTargetsRelative = geometry.morphTargetsRelative
   twin.groups = geometry.groups
   twin.drawRange = geometry.drawRange
-  twin.boundingBox = geometry.boundingBox
-  twin.boundingSphere = geometry.boundingSphere
+  // Where the geometry has no bounds yet, the twin keeps the ones the
+  // renderer works out on it to cull it: put back to null, they would be
+  // worked out again on every render.
+  if (geometry.boundingBox) twin.boundingBox = geometry.boundingBox
+  if (geometry.boundingSphere) twin.boundingSphere = geometry.boundingSphere
   return twin
 }
 

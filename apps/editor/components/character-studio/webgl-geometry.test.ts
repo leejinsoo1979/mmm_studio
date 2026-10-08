@@ -4,6 +4,7 @@ import {
   BufferGeometry,
   type Camera,
   Float32BufferAttribute,
+  Frustum,
   Group,
   InterleavedBuffer,
   InterleavedBufferAttribute,
@@ -220,6 +221,34 @@ describe('the stage drawing the twins', () => {
 
     stop()
     render(scene, () => expect(widened.geometry).toBe(drawn))
+  })
+
+  test('keeps the bounds three works out on a twin to cull it', () => {
+    const scene = new Scene()
+    const drawn = body()
+    drawWithWebGPU(drawn)
+    const mesh = new Mesh(drawn)
+    scene.add(mesh)
+    const twin = webglGeometry(drawn)
+    let worked = 0
+    const work = twin.computeBoundingSphere
+    twin.computeBoundingSphere = function () {
+      worked++
+      work.call(this)
+    }
+    const stop = drawWebglGeometries(scene)
+    // As WebGLRenderer culls each mesh, in every render: the frame's, the shadows'.
+    const frustum = new Frustum()
+    for (let i = 0; i < 3; i++) render(scene, () => frustum.intersectsObject(mesh))
+    expect(worked).toBe(1)
+    expect(drawn.boundingSphere).toBeNull()
+
+    drawn.computeBoundingSphere()
+    drawn.computeBoundingBox()
+    render(scene, () => {})
+    expect(twin.boundingSphere).toBe(drawn.boundingSphere)
+    expect(twin.boundingBox).toBe(drawn.boundingBox)
+    stop()
   })
 
   test('stopping mid-render puts the meshes back', () => {
