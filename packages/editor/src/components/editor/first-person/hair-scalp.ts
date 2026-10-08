@@ -190,6 +190,19 @@ export const hairlineWobble = (a: number) =>
 export const hairlineDensity = (table: ArrayLike<number>, a: number, e: number) =>
   smoothstep(-0.04, 0.05, e - hairlineAt(table, a) + hairlineWobble(a))
 
+/**
+ * The part on the template (template units): its line's x for a 가르마 of
+ * `part` at depth tz (z from the template's middle), 0.045·part at the
+ * front, fading to the middle from −tz = PART_FADE[0] to PART_FADE[1].
+ * Hair behind PART_CROWN is the crown's, so the part ends there. The root
+ * layer's material draws the part from these.
+ */
+export const PART_SHIFT = 0.045
+export const PART_FADE: readonly [number, number] = [-0.04, 0.08]
+export const PART_CROWN = -0.02
+export const partLine = (part: number, tz: number) =>
+  PART_SHIFT * part * (1 - smoothstep(PART_FADE[0], PART_FADE[1], -tz))
+
 // ---------------------------------------------------------------------------
 // Root candidates.
 

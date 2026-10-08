@@ -143,15 +143,15 @@ export const STYLES: Record<HairCutStyle, StyleDef> = {
   twoBlock: {
     length: { front: 10, crown: 7.5, top: 8.5, sides: 8, back: 7, nape: 5 },
     cut: null,
-    ends: { mode: 'point', jitter: 0.4 },
-    tipTaper: 0.3,
+    ends: { mode: 'point', jitter: 0.7 },
+    tipTaper: 0.5,
     undercut: { line: 0.35, shells: [0.85, 0.55, 0.3] },
     hairline: NO_HAIRLINE,
     short: SHORT_ENDS,
     flow: { back: 0.1, down: 0.7, part: 0.5, swirl: 0.5 },
     fringe: { depth: 0.5, cut: 0 },
-    // Tuned against the outline (design §6.11 had sides 1.7, back 1.4: a mushroom over the block).
-    volume: { crown: 1.8, top: 2.0, sides: 1.1, back: 1.0, nape: 0.5 },
+    // Tuned against the outline (design §6.11 had top 2.2, sides 1.7, back 1.4: a mushroom over the block).
+    volume: { crown: 1.8, top: 1.6, sides: 1.1, back: 1.0, nape: 0.5 },
     lift: 0.4,
     spread: 0,
     stiffness: 0.7,
@@ -159,7 +159,7 @@ export const STYLES: Record<HairCutStyle, StyleDef> = {
     curl: STRAIGHT,
     atlasCurl: 0,
     endCurl: 0,
-    clump: { amount: 0.6, size: 0.9 },
+    clump: { amount: 0.75, size: 0.7 },
     gather: null,
     strips: 2400,
     width: WIDTH,
@@ -175,9 +175,10 @@ export const STYLES: Record<HairCutStyle, StyleDef> = {
     short: LONG_ENDS,
     flow: { back: 0.15, down: 1, part: 1, swirl: 0.2 },
     fringe: { depth: 0.45, cut: 0 },
-    volume: { crown: 1.5, top: 1.8, sides: 2.5, back: 2.2, nape: 1.5 },
+    // Tuned against the outline (design §6.11 had sides 2.5, back 2.2, spread 0.6: a flared bell).
+    volume: { crown: 1.5, top: 1.8, sides: 1.6, back: 1.7, nape: 1.5 },
     lift: 0.25,
-    spread: 0.6,
+    spread: 0.3,
     stiffness: 0.5,
     layPull: LAY,
     curl: STRAIGHT,
@@ -443,13 +444,21 @@ export function regionShares(a: number, e: number, out: Region) {
   return out
 }
 
-/** A regional value at (a, e). */
+/**
+ * A regional value at (a, e). Sides fuller than the top (a 단발's, set for
+ * cheek height) rise from the top's value only below the temples, so the
+ * sides never stand out over the top as a slab.
+ */
 export function regional(region: Region, a: number, e: number, shares: Region) {
   regionShares(a, e, shares)
+  const sides =
+    region.sides > region.top
+      ? region.top + (region.sides - region.top) * smoothstep(0.35, -0.3, e)
+      : region.sides
   return (
     region.crown * shares.crown +
     region.top * shares.top +
-    region.sides * shares.sides +
+    sides * shares.sides +
     region.back * shares.back +
     region.nape * shares.nape
   )

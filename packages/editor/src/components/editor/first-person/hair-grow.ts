@@ -13,8 +13,13 @@ import {
   fnv1a,
   hairlineAt,
   hairlineDensity,
+  noise1,
   onHead,
   outOfEyes,
+  PART_CROWN,
+  PART_FADE,
+  PART_SHIFT,
+  partLine,
   type RadiusMap,
   radiusAt,
   radiusMap,
@@ -148,6 +153,10 @@ const BABY_TURN = (40 * Math.PI) / 180
 const BAND_LIFT = 1.5
 /** Roots below the cut, and fringe strips that never reach theirs, are this long at most (cm). */
 const BELOW_CUT = 2.2
+/** Under a blunt cut those lie flat in the inner layer, this long at most (cm), hidden by the hem. */
+const BELOW_BLUNT = 1.2
+/** How often (per radian round the head) a blunt hem wanders up and down. */
+const HEM_WANDER = 5
 const FRINGE_MOST = 9
 /** The fringe's cut: this far over the brows (cm) with 앞머리 at 0, and at 1. */
 const FRINGE_CUT: readonly [number, number] = [2.5, 0.3]
@@ -169,11 +178,17 @@ const OVER_EAR = 6
 /** A short style's nape: strands rooted at the nape line are this long (cm), longer higher up. */
 const NAPE_LENGTH = 1.25
 /**
- * An undercut's top hair drapes this far (rad) below the block line: a
- * little over the temples, further down the back, so the hem tapers to
- * the nape instead of ringing the head like a bowl.
+ * An undercut's top hair drapes this far (rad) below the block line: none
+ * over the temples (it stops a little above), far down the back, so the
+ * hem steps up over the temples and falls toward the nape instead of
+ * ringing the head like a bowl.
  */
-const BLOCK_DRAPE: readonly [number, number] = [0.1, 0.3]
+const BLOCK_DRAPE: readonly [number, number] = [-0.05, 0.45]
+/** The block's hem runs from this azimuth (rad) back. */
+const BLOCK_FROM = 0.7
+/** Depth in the hair (cm) at which a strip counts as fully deep, without and with a cut below the ears. */
+const DEPTH_SHORT = 2.5
+const DEPTH_LONG = 4
 /** How far down (cm) from the head bone strands stop following the head's shape. */
 const FOLLOW_FADE = 10
 /** Bind units per atlas repeat along a strand (cm). */
@@ -196,11 +211,12 @@ const WHORL_AXIS: V3 = [
   Math.sin(WHORL[1]),
   Math.cos(WHORL[1]) * Math.cos(WHORL[0]),
 ]
-/** The part's offset per unit of 가르마 (template units) at the front, gone by the crown. */
-const PART_SHIFT = 0.045
-const PART_FADE: readonly [number, number] = [-0.04, 0.08]
 /** Groups guides blend within. */
 const GROUP = { right: 0, left: 1, fringe: 2, crown: 3, tied: 4 } as const
+const acrossPart = (a: number, b: number) =>
+  (a === GROUP.left && b === GROUP.right) || (a === GROUP.right && b === GROUP.left)
+/** How far (cm) into its group a strip still takes a neighbouring group's guides. */
+const BORDER = 1.5
 /** Sub-seeds of a grow's stages. */
 const SEED = { roots: 0xa, guides: 0xb, strips: 0xc, tails: 0xd, noise: 0xe } as const
 
@@ -496,7 +512,9 @@ function comb(groom: Groom, d: V3, group: number, out: number[]) {
   if (group === GROUP.fringe) {
     add(0, -0.4, 1, 1.2)
     add(0, -1, 0, 0.6)
-    add(-Math.sign(part || 1e-4) * 0.4 * Math.abs(part), 0, 0, 1)
+    // Swept away from a part, as far as the style combs from it, so it never lies as a level band.
+    const sweep = 0.4 * Math.abs(part) + flow.part * smooth(0, 0.2, Math.abs(part))
+    add(-Math.sign(part || 1e-4) * sweep, 0, 0, 1)
   } else {
     add(0, -1, 0, flow.down)
     add(0, 0, -1, flow.back)
@@ -579,7 +597,7 @@ function styleRoots(state: HeadState, groom: Groom): StyleRoots {
     const fringe =
       fringeOn && Math.abs(a) < 0.95 && e > 0.2 && e < hairlineAt(table, a) + groom.fringe.depth
     if (c.rand[i]! >= d) continue
-    const partX = PART_SHIFT * groom.sliders.part * (1 - smooth(PART_FADE[0], PART_FADE[1], -tz))
+    const partX = partLine(groom.sliders.part, tz)
     cand.push(i)
     density.push(d)
     group.push(
@@ -587,7 +605,7 @@ function styleRoots(state: HeadState, groom: Groom): StyleRoots {
         ? GROUP.tied
         : fringe
           ? GROUP.fringe
-          : tz < -0.02
+          : tz < PART_CROWN
             ? GROUP.crown
             : tx > partX
               ? GROUP.left
@@ -1093,32 +1111,33 @@ function growStripPaths(g: Grower, guides: Guides, roots: Roots, count: number, 
       )
       length = Math.min(length, over * r + NAPE_LENGTH * cmHs)
     }
-    // Blended from the nearest guides of its group.
+    // Blended from the nearest guides of its group, and near a border with
+    // another group (never across the part) from that group's nearest too,
+    // fading in over BORDER, so no group reads as a slab of its own.
     const entry = byGroup.get(group)
-    let n = 0
+    const [px, py, pz] = [roots.pos[c * 3]!, roots.pos[c * 3 + 1]!, roots.pos[c * 3 + 2]!]
     const ids: number[] = []
+    const weights: number[] = []
     if (entry) {
-      n = entry.grid.nearest(
-        roots.pos[c * 3]!,
-        roots.pos[c * 3 + 1]!,
-        roots.pos[c * 3 + 2]!,
-        4,
-        found,
-        distances,
-      )
-      for (let j = 0; j < n; j++) ids.push(entry.ids[found[j]!]!)
+      const n = entry.grid.nearest(px, py, pz, 4, found, distances)
+      for (let j = 0; j < n; j++) {
+        ids.push(entry.ids[found[j]!]!)
+        weights.push(1 / (distances[j]! + 1e-6))
+      }
+      const own = Math.sqrt(distances[0]!)
+      for (const [other, near] of byGroup) {
+        if (other === group || acrossPart(group, other)) continue
+        if (near.grid.nearest(px, py, pz, 1, found, distances) === 0) continue
+        const ramp = 1 - smooth(0, BORDER * cmHs, Math.sqrt(distances[0]!) - own)
+        if (ramp <= 0) continue
+        ids.push(near.ids[found[0]!]!)
+        weights.push(ramp / (distances[0]! + 1e-6))
+      }
     } else {
-      n = anyGrid.nearest(
-        roots.pos[c * 3]!,
-        roots.pos[c * 3 + 1]!,
-        roots.pos[c * 3 + 2]!,
-        1,
-        found,
-        distances,
-      )
+      anyGrid.nearest(px, py, pz, 1, found, distances)
       ids.push(found[0]!)
+      weights.push(1)
     }
-    const weights = ids.map((_, j) => 1 / (distances[j]! + 1e-6))
     const total = weights.reduce((sum, w) => sum + w, 0)
     // No further than its guides were walked (past their cut).
     if (groom.cut || group === GROUP.fringe) {
@@ -1249,9 +1268,13 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
   for (const strip of strips) {
     const c = strip.root
     const lock = strip.lock
+    // Blunt hems wander smoothly round the head as well as lock by lock, so
+    // neighbouring locks never stand as a row of equal steps.
+    const byLock = blunt
+      ? 0.5 * noise1(roots.a[lock]! * HEM_WANDER, seed ^ 0x4e3) + (lockRandom(lock) - 0.5)
+      : (lockRandom(lock) - 0.5) * 2
     const jitter =
-      (lockRandom(lock) - 0.5) * 2 * groom.ends.jitter * cmHs +
-      (unitHash(seed ^ 0x5717, c) - 0.5) * 2 * IN_LOCK * mm
+      byLock * groom.ends.jitter * cmHs + (unitHash(seed ^ 0x5717, c) - 0.5) * 2 * IN_LOCK * mm
     if (roots.group[c] === GROUP.fringe) strip.level = fringeY + jitter
     // The lock's leader's depth for all of it: its ends are cut together.
     else if (groom.cut)
@@ -1405,7 +1428,8 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
     const isFringe = roots.group[c] === GROUP.fringe
     if (Number.isFinite(strip.level)) {
       if (strip.points[1]! < strip.level + 0.5 * state.cm && !isFringe) {
-        end = Math.min(end, BELOW_CUT * cmHs)
+        end = Math.min(end, (blunt ? BELOW_BLUNT : BELOW_CUT) * cmHs)
+        if (blunt) strip.layer = STRIP_LAYER.inner
         how = 2
       } else {
         let crossed = -1
@@ -1443,13 +1467,14 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
             if (ez * ez + ey * ey < 1) stop = true
           }
         }
-        if (groom.undercut && !isFringe) {
+        if (groom.undercut) {
+          // From the temples back (the fringe's ends too, so it steps up over them).
           const [a, e] = state.templateAngles(x, y, z)
           const line =
             groom.undercut.line -
             BLOCK_DRAPE[0] -
             (BLOCK_DRAPE[1] - BLOCK_DRAPE[0]) * smooth(1.6, 2.8, Math.abs(a))
-          if (e < line && smooth(0.75, 1.05, Math.abs(a)) > 0.5) stop = true
+          if (e < line && Math.abs(a) > BLOCK_FROM) stop = true
         }
         if (stop) {
           if (strip.s[k - 1]! < end) {
@@ -1973,7 +1998,8 @@ export async function growHair(
   let clock = performance.now()
   const { strips, info } = grown
   const cmHs = state.cm * state.hs
-  const depth = depthInHair(strips, state.origin, 2.5 * cmHs)
+  // Hair cut below the ears is deep over more of its length: read over a deeper scale.
+  const depth = depthInHair(strips, state.origin, (groom.cut ? DEPTH_LONG : DEPTH_SHORT) * cmHs)
   const frame: RibbonFrame = {
     origin: state.origin,
     repeat: ATLAS_REPEAT * cmHs,
