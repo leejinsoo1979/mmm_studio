@@ -482,7 +482,8 @@ export function flattenHead(input: BaseInput, library: HairLibrary): BaseResult 
     const share = usedKept[i] ? 0.5 : 1
     let length = 0
     const n = [0, 0, 0]
-    const l = Math.sqrt(bySpot[s * 3]! ** 2 + bySpot[s * 3 + 1]! ** 2 + bySpot[s * 3 + 2]! ** 2) || 1
+    const l =
+      Math.sqrt(bySpot[s * 3]! ** 2 + bySpot[s * 3 + 1]! ** 2 + bySpot[s * 3 + 2]! ** 2) || 1
     for (let axis = 0; axis < 3; axis++) {
       n[axis] = normals[i * 3 + axis]! * (1 - share) + (bySpot[s * 3 + axis]! / l) * share
       length += n[axis]! ** 2

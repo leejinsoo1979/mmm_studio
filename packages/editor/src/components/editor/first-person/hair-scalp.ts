@@ -475,6 +475,28 @@ export function rayTriangle(
   return t
 }
 
+/** Each texel's direction (x, y, z) on an octahedral map of a size, worked out once. */
+const texelDirections = new Map<number, Float32Array>()
+
+function directionsOf(size: number) {
+  let found = texelDirections.get(size)
+  if (!found) {
+    found = new Float32Array(size * size * 3)
+    for (let j = 0; j < size; j++) {
+      for (let i = 0; i < size; i++) {
+        octDecode(((i + 0.5) / size) * 2 - 1, ((j + 0.5) / size) * 2 - 1, decoded)
+        found.set(decoded, (j * size + i) * 3)
+      }
+    }
+    texelDirections.set(size, found)
+  }
+  return found
+}
+
+/** A triangle's pieces are tested apart where its corners spread this far over the map (its folds). */
+const PIECE_SPAN = 1 / 8
+const PIECE_DEPTH = 4
+
 /**
  * A head's radius map round `origin` from surfaces of triangles (flat
  * points and corners): the first is the head roots stand on. Each triangle
@@ -491,67 +513,120 @@ export function radiusMap(
   const headTri = new Int32Array(size * size).fill(-1)
   const [ox, oy, oz] = origin
   const seen = new Int32Array(size * size).fill(-1)
-  const corner = [0, 0, 0]
-  surfaces.forEach(({ points, index }, s) => {
-    const texelOf = (x: number, y: number, z: number, out: number[]) => {
-      octEncode(x - ox, y - oy, z - oz, encoded)
-      out[0] = ((encoded[0]! + 1) / 2) * size - 0.5
-      out[1] = ((encoded[1]! + 1) / 2) * size - 0.5
+  const directions = directionsOf(size)
+  let stamp = 0
+  // The triangle under test: a corner (from the middle) and two edges.
+  let ax = 0
+  let ay = 0
+  let az = 0
+  let e1x = 0
+  let e1y = 0
+  let e1z = 0
+  let e2x = 0
+  let e2y = 0
+  let e2z = 0
+  let head = false
+  let tri = 0
+  const test = (at: number) => {
+    if (seen[at] === stamp) return
+    seen[at] = stamp
+    const dx = directions[at * 3]!
+    const dy = directions[at * 3 + 1]!
+    const dz = directions[at * 3 + 2]!
+    const px = dy * e2z - dz * e2y
+    const py = dz * e2x - dx * e2z
+    const pz = dx * e2y - dy * e2x
+    const det = e1x * px + e1y * py + e1z * pz
+    if (det > -1e-14 && det < 1e-14) return
+    const inv = 1 / det
+    const u = -(ax * px + ay * py + az * pz) * inv
+    if (u < -1e-7 || u > 1 + 1e-7) return
+    const qx = -ay * e1z + az * e1y
+    const qy = -az * e1x + ax * e1z
+    const qz = -ax * e1y + ay * e1x
+    const v = (dx * qx + dy * qy + dz * qz) * inv
+    if (v < -1e-7 || u + v > 1 + 1e-7) return
+    const d = (e2x * qx + e2y * qy + e2z * qz) * inv
+    if (d <= 0) return
+    if (d > radius[at]!) radius[at] = d
+    if (head && d > headRadius[at]!) {
+      headRadius[at] = d
+      headTri[at] = tri
     }
-    const uv = [0, 0]
+  }
+  const place = [0, 0]
+  const placeOf = (x: number, y: number, z: number) => {
+    octEncode(x, y, z, encoded)
+    place[0] = ((encoded[0]! + 1) / 2) * size - 0.5
+    place[1] = ((encoded[1]! + 1) / 2) * size - 0.5
+  }
+  // Corners relative to the middle; pieces split at their edges' middles.
+  const cover = (
+    x0: number,
+    y0: number,
+    z0: number,
+    x1: number,
+    y1: number,
+    z1: number,
+    x2: number,
+    y2: number,
+    z2: number,
+    depth: number,
+  ) => {
+    placeOf(x0, y0, z0)
+    const [u0, v0] = [place[0]!, place[1]!]
+    placeOf(x1, y1, z1)
+    const [u1, v1] = [place[0]!, place[1]!]
+    placeOf(x2, y2, z2)
+    const [u2, v2] = [place[0]!, place[1]!]
+    const lu = Math.min(u0, u1, u2)
+    const hu = Math.max(u0, u1, u2)
+    const lv = Math.min(v0, v1, v2)
+    const hv = Math.max(v0, v1, v2)
+    if (depth < PIECE_DEPTH && Math.max(hu - lu, hv - lv) > size * PIECE_SPAN) {
+      const [ax1, ay1, az1] = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2]
+      const [bx1, by1, bz1] = [(x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2]
+      const [cx1, cy1, cz1] = [(x2 + x0) / 2, (y2 + y0) / 2, (z2 + z0) / 2]
+      cover(x0, y0, z0, ax1, ay1, az1, cx1, cy1, cz1, depth + 1)
+      cover(ax1, ay1, az1, x1, y1, z1, bx1, by1, bz1, depth + 1)
+      cover(cx1, cy1, cz1, bx1, by1, bz1, x2, y2, z2, depth + 1)
+      cover(ax1, ay1, az1, bx1, by1, bz1, cx1, cy1, cz1, depth + 1)
+      return
+    }
+    const i0 = Math.floor(lu) - 1
+    const i1 = Math.ceil(hu) + 1
+    const j0 = Math.floor(lv) - 1
+    const j1 = Math.ceil(hv) + 1
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        test(i >= 0 && j >= 0 && i < size && j < size ? j * size + i : texel(size, i, j))
+      }
+    }
+  }
+  surfaces.forEach(({ points, index }, s) => {
+    head = s === 0
     for (let t = 0; t < index.length / 3; t++) {
-      const [ia, ib, ic] = [index[t * 3]!, index[t * 3 + 1]!, index[t * 3 + 2]!]
-      const stamp = s * 1e7 + t
-      const test = (i: number, j: number) => {
-        const at = texel(size, i, j)
-        if (seen[at] === stamp) return
-        seen[at] = stamp
-        const tx = at % size
-        const ty = Math.floor(at / size)
-        octDecode(((tx + 0.5) / size) * 2 - 1, ((ty + 0.5) / size) * 2 - 1, decoded)
-        const d = rayTriangle(points, ia, ib, ic, ox, oy, oz, decoded[0]!, decoded[1]!, decoded[2]!)
-        if (d <= 0) return
-        if (d > radius[at]!) radius[at] = d
-        if (s === 0 && d > headRadius[at]!) {
-          headRadius[at] = d
-          headTri[at] = t
-        }
-      }
-      const cover = (
-        p: readonly number[],
-        q: readonly number[],
-        r: readonly number[],
-        depth: number,
-      ) => {
-        const places = [p, q, r].map((v) => {
-          texelOf(v[0]!, v[1]!, v[2]!, uv)
-          return [uv[0]!, uv[1]!]
-        })
-        const lo = [0, 1].map((k) => Math.min(...places.map((v) => v[k]!)))
-        const hi = [0, 1].map((k) => Math.max(...places.map((v) => v[k]!)))
-        if (depth < 4 && Math.max(hi[0]! - lo[0]!, hi[1]! - lo[1]!) > size / 8) {
-          const mid = (u: readonly number[], v: readonly number[]) =>
-            u.map((x, k) => (x + v[k]!) / 2)
-          const pq = mid(p, q)
-          const qr = mid(q, r)
-          const rp = mid(r, p)
-          cover(p, pq, rp, depth + 1)
-          cover(pq, q, qr, depth + 1)
-          cover(rp, qr, r, depth + 1)
-          cover(pq, qr, rp, depth + 1)
-          return
-        }
-        for (let j = Math.floor(lo[1]!) - 1; j <= Math.ceil(hi[1]!) + 1; j++) {
-          for (let i = Math.floor(lo[0]!) - 1; i <= Math.ceil(hi[0]!) + 1; i++) test(i, j)
-        }
-      }
-      const pointOf = (v: number) => {
-        corner[0] = points[v * 3]!
-        corner[1] = points[v * 3 + 1]!
-        corner[2] = points[v * 3 + 2]!
-        return [corner[0], corner[1], corner[2]]
-      }
-      cover(pointOf(ia), pointOf(ib), pointOf(ic), 0)
+      const ia = index[t * 3]! * 3
+      const ib = index[t * 3 + 1]! * 3
+      const ic = index[t * 3 + 2]! * 3
+      ax = points[ia]! - ox
+      ay = points[ia + 1]! - oy
+      az = points[ia + 2]! - oz
+      const bx = points[ib]! - ox
+      const by = points[ib + 1]! - oy
+      const bz = points[ib + 2]! - oz
+      const cx = points[ic]! - ox
+      const cy = points[ic + 1]! - oy
+      const cz = points[ic + 2]! - oz
+      e1x = bx - ax
+      e1y = by - ay
+      e1z = bz - az
+      e2x = cx - ax
+      e2y = cy - ay
+      e2z = cz - az
+      tri = t
+      stamp++
+      cover(ax, ay, az, bx, by, bz, cx, cy, cz, 0)
     }
   })
   return { size, origin, radius, headRadius, headTri }
@@ -563,17 +638,36 @@ export function radiusMap(
  */
 export function radiusAt(map: RadiusMap, dx: number, dy: number, dz: number) {
   const { size, radius } = map
-  octEncode(dx, dy, dz, encoded)
-  const fx = ((encoded[0]! + 1) / 2) * size - 0.5
-  const fy = ((encoded[1]! + 1) / 2) * size - 0.5
+  const s = Math.abs(dx) + Math.abs(dy) + Math.abs(dz) || 1
+  let px = dx / s
+  let pz = dz / s
+  if (dy < 0) {
+    const fx = (1 - Math.abs(pz)) * (px >= 0 ? 1 : -1)
+    pz = (1 - Math.abs(px)) * (pz >= 0 ? 1 : -1)
+    px = fx
+  }
+  const fx = ((px + 1) / 2) * size - 0.5
+  const fy = ((pz + 1) / 2) * size - 0.5
   const ix = Math.floor(fx)
   const iy = Math.floor(fy)
   const tx = fx - ix
   const ty = fy - iy
-  const r00 = radius[texel(size, ix, iy)]!
-  const r10 = radius[texel(size, ix + 1, iy)]!
-  const r01 = radius[texel(size, ix, iy + 1)]!
-  const r11 = radius[texel(size, ix + 1, iy + 1)]!
+  let r00: number
+  let r10: number
+  let r01: number
+  let r11: number
+  if (ix >= 0 && iy >= 0 && ix < size - 1 && iy < size - 1) {
+    const at = iy * size + ix
+    r00 = radius[at]!
+    r10 = radius[at + 1]!
+    r01 = radius[at + size]!
+    r11 = radius[at + size + 1]!
+  } else {
+    r00 = radius[texel(size, ix, iy)]!
+    r10 = radius[texel(size, ix + 1, iy)]!
+    r01 = radius[texel(size, ix, iy + 1)]!
+    r11 = radius[texel(size, ix + 1, iy + 1)]!
+  }
   if (r00 === 0 || r10 === 0 || r01 === 0 || r11 === 0) return 0
   return (r00 * (1 - tx) + r10 * tx) * (1 - ty) + (r01 * (1 - tx) + r11 * tx) * ty
 }
@@ -635,6 +729,8 @@ export function onHead(
 export type EyeKeepOut = {
   spheres: { centre: V3; radius: number }[]
   box: { min: V3; max: V3 } | null
+  /** Everything of it, for a quick miss. */
+  bounds: { min: V3; max: V3 }
 }
 
 /** An eyeball's radius (cm), and how far past it and past the lashes' box hair keeps. */
@@ -647,18 +743,29 @@ export function eyeKeepOut(
   lashes: { min: V3; max: V3 } | null,
   cm: number,
 ): EyeKeepOut {
-  return {
-    spheres: eyes.map((eye) => ({
-      centre: [eye[0]!, eye[1]!, eye[2]!] as V3,
-      radius: (EYEBALL + PAST_EYE) * cm,
-    })),
-    box: lashes
-      ? {
-          min: lashes.min.map((v) => v - PAST_LASHES * cm) as V3,
-          max: lashes.max.map((v) => v + PAST_LASHES * cm) as V3,
-        }
-      : null,
-  }
+  const spheres = eyes.map((eye) => ({
+    centre: [eye[0]!, eye[1]!, eye[2]!] as V3,
+    radius: (EYEBALL + PAST_EYE) * cm,
+  }))
+  const box = lashes
+    ? {
+        min: lashes.min.map((v) => v - PAST_LASHES * cm) as V3,
+        max: lashes.max.map((v) => v + PAST_LASHES * cm) as V3,
+      }
+    : null
+  const min = [0, 1, 2].map((axis) =>
+    Math.min(
+      ...spheres.map((s) => s.centre[axis]! - s.radius),
+      box?.min[axis] ?? Number.POSITIVE_INFINITY,
+    ),
+  ) as V3
+  const max = [0, 1, 2].map((axis) =>
+    Math.max(
+      ...spheres.map((s) => s.centre[axis]! + s.radius),
+      box?.max[axis] ?? Number.NEGATIVE_INFINITY,
+    ),
+  ) as V3
+  return { spheres, box, bounds: { min, max } }
 }
 
 /** Whether a point is inside the keep-out. */
@@ -687,6 +794,17 @@ export function inEyes(keep: EyeKeepOut, x: number, y: number, z: number) {
  * Returns whether it moved.
  */
 export function outOfEyes(keep: EyeKeepOut, p: Float32Array, o: number) {
+  const { min, max } = keep.bounds
+  if (
+    p[o]! < min[0] ||
+    p[o]! > max[0] ||
+    p[o + 1]! < min[1] ||
+    p[o + 1]! > max[1] ||
+    p[o + 2]! < min[2] ||
+    p[o + 2]! > max[2]
+  ) {
+    return false
+  }
   let moved = false
   for (const { centre, radius } of keep.spheres) {
     const dx = p[o]! - centre[0]
