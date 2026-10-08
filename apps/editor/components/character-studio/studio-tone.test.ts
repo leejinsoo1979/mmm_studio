@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { NEUTRAL_COMPRESSION, neutralUntone, type Rgb, untonedColor } from './studio-tone'
+import { CONTACT } from './studio-contact-shadow'
+import {
+  NEUTRAL_COMPRESSION,
+  neutralUntone,
+  type Rgb,
+  SHADOW_POWER,
+  untonedColor,
+} from './studio-tone'
 
 /** three's NeutralToneMapping (src/nodes/display/ToneMappingFunctions.js), on the CPU. */
 function neutral([r, g, b]: Rgb, exposure = 1): Rgb {
@@ -76,5 +83,45 @@ describe('untonedColor', () => {
   test('is brighter than the colour itself, which Neutral would darken', () => {
     const color = untonedColor('#5b8fb9')
     expect(color.r).toBeGreaterThan(toLinear(0x5b / 255))
+  })
+})
+
+describe('SHADOW_POWER', () => {
+  /**
+   * How far (8-bit levels) the shadow, at any opacity up to the contact
+   * shadow's, shows from WebGL's black blended over `css` in display colours.
+   */
+  const furthest = (css: Rgb, power: number) => {
+    const drawn = neutralUntone(css.map((c) => toLinear(c / 255)) as Rgb)
+    let furthest = 0
+    for (let a = 0; a <= CONTACT.opacity + 1e-9; a += 0.025) {
+      const gpu = shown(drawn.map((c) => c * (1 - a) ** power) as Rgb)
+      for (let i = 0; i < 3; i++)
+        furthest = Math.max(furthest, Math.abs(gpu[i]! - css[i]! * (1 - a)))
+    }
+    return furthest
+  }
+
+  test('darkens the platform round the feet as WebGL did, within 4 levels', () => {
+    for (const tone of [
+      [23, 24, 26],
+      [33, 36, 40],
+      [40, 42, 46],
+      [45, 46, 48],
+    ] as Rgb[]) {
+      expect(furthest(tone, SHADOW_POWER.platform)).toBeLessThanOrEqual(4)
+    }
+  })
+
+  test('darkens the AI photo grey as WebGL did, within 5 levels', () => {
+    expect(furthest([0xc9, 0xcd, 0xd3], SHADOW_POWER.light)).toBeLessThanOrEqual(5)
+  })
+
+  test('takes a power of its own for each: one for both is out by a dozen levels or more', () => {
+    for (const power of [SHADOW_POWER.platform, SHADOW_POWER.light]) {
+      expect(
+        Math.max(furthest([40, 42, 46], power), furthest([0xc9, 0xcd, 0xd3], power)),
+      ).toBeGreaterThan(12)
+    }
   })
 })

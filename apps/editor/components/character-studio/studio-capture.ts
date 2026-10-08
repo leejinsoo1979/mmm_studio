@@ -7,7 +7,7 @@ import { AI_SHOT, aiShotFraming, type HeadFraming } from './head-frame'
 import type { StageInsets, StudioFilterId } from './stage-contract'
 import type { ContactShadow } from './studio-contact-shadow'
 import { drawFiltered } from './studio-filters'
-import { untonedColor } from './studio-tone'
+import { SHADOW_POWER, untonedColor } from './studio-tone'
 
 /**
  * Pictures of the stage: a snapshot of what the free room shows, filtered
@@ -206,16 +206,24 @@ export async function captureAiShot(
     const { scene, backdrop, platform, contact } = rig
     const background = scene!.background
     const shown = [backdrop?.visible, platform?.visible, contact?.group.visible]
+    const power = contact?.power.value
     scene!.background = AI_BACKDROP
     if (backdrop) backdrop.visible = false
     if (platform) platform.visible = false
-    if (contact) contact.group.visible = framing === 'full'
+    // The whole body keeps its floor shadow, which here lies on the light grey.
+    if (contact) {
+      contact.group.visible = framing === 'full'
+      contact.power.value = SHADOW_POWER.light
+    }
     rig.aimLights(aim)
     return () => {
       scene!.background = background
       if (backdrop) backdrop.visible = shown[0]!
       if (platform) platform.visible = shown[1]!
-      if (contact) contact.group.visible = shown[2]!
+      if (contact) {
+        contact.group.visible = shown[2]!
+        contact.power.value = power!
+      }
     }
   })
   const canvas = canvasOf(image)

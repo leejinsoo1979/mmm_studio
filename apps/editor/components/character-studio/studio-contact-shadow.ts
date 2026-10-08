@@ -2,11 +2,14 @@ import {
   Color,
   Group,
   HalfFloatType,
+  type InstancedMesh,
   Mesh,
+  NoBlending,
   type Object3D,
   OrthographicCamera,
   PlaneGeometry,
   type Scene,
+  type SkinnedMesh,
 } from 'three'
 import {
   cameraFar,
@@ -32,15 +35,16 @@ import {
   type Texture,
   type WebGPURenderer,
 } from 'three/webgpu'
+import { SHADOW_POWER } from './studio-tone'
 
 /**
  * The soft shadow under the feet, as drei's ContactShadows drew it on the
  * WebGL stage: what stands within `far` of the floor, seen from below by an
  * orthographic camera, darker the nearer the floor, blurred twice and laid
- * on the floor in black. Here the nearest surface sets each texel (drei's
- * draws without a depth test, so whichever triangle came last did), the
- * blur runs in half floats, and the shadow is darkened by its blend being
- * linear: see SHADOW_GAMMA.
+ * on the floor in black. As drei's, the depth pass draws without a depth
+ * test or blending, so whichever triangle comes last sets a texel, and in
+ * WebGL's order (webglOpaqueOrder). The blur runs in half floats, and the
+ * shadow's blend is linear: see SHADOW_POWER.
  */
 export const CONTACT = {
   /** The shadow map's size (texels), the square of floor it covers (m) and how high it looks (m). */
@@ -55,17 +59,41 @@ export const CONTACT = {
   lift: 0.003,
 } as const
 
-/**
- * The frame blends in linear light before Neutral tone maps it, where WebGL
- * blended the encoded colours. On the platform's dark tones Neutral goes as
- * the square of the light and the encoding as its 1/2.4 power, so a shadow
- * that lets k of the light through shows as k^(2/2.4) of it: letting
- * (1 − a)^1.2 through shows as 1 − a, as the WebGL shadow did.
- */
-const SHADOW_GAMMA = 1.2
-
 /** The renderer's clear colour with its alpha (three's Color4, which it does not export). */
 type ClearColor = Parameters<WebGPURenderer['getClearColor']>[0]
+
+/** What the renderer sorts its opaque draws by (`material` is the object's own, with three's running id). */
+export type DrawItem = {
+  id: number
+  object: Object3D
+  material: { id: number }
+  groupOrder: number
+  renderOrder: number
+  z: number
+}
+
+const variant = (object: Object3D) =>
+  ((object as InstancedMesh).isInstancedMesh ? 2 : 0) +
+  ((object as SkinnedMesh).isSkinnedMesh ? 1 : 0)
+
+/**
+ * The order WebGL draws opaque objects in (three's WebGLRenderLists): by
+ * material before depth, where WebGPU goes by depth alone. Without a depth
+ * test the last draw sets a texel, so the depth pass keeps WebGL's order to
+ * shade the floor as drei's did.
+ */
+export function webglOpaqueOrder(a: DrawItem, b: DrawItem): number {
+  return (
+    a.groupOrder - b.groupOrder ||
+    a.renderOrder - b.renderOrder ||
+    a.material.id - b.material.id ||
+    variant(a.object) - variant(b.object) ||
+    a.z - b.z ||
+    a.id - b.id
+  )
+}
+
+type OpaqueSort = Parameters<WebGPURenderer['setOpaqueSort']>[0]
 
 /** Weights of drei's (three's) 9-tap Gaussian blur, from the middle out. */
 const TAPS = [0.1633, 0.1531, 0.12245, 0.0918, 0.051] as const
@@ -92,6 +120,8 @@ function blurMaterial(source: Texture, direction: 'x' | 'y') {
 export class ContactShadow {
   /** What the stage shows: the shadow on the floor. Hide it to hide the shadow (and skip drawing it). */
   readonly group = new Group()
+  /** What the shadow's transmittance is raised to: SHADOW_POWER for what it lies on. */
+  readonly power = uniform(SHADOW_POWER.platform)
   private readonly camera: OrthographicCamera
   private readonly map: RenderTarget
   private readonly blurred: RenderTarget
@@ -103,9 +133,9 @@ export class ContactShadow {
 
   constructor() {
     const { resolution, scale, far, lift, opacity } = CONTACT
-    const options = { type: HalfFloatType, generateMipmaps: false }
+    const options = { type: HalfFloatType, generateMipmaps: false, depthBuffer: false }
     this.map = new RenderTarget(resolution, resolution, options)
-    this.blurred = new RenderTarget(resolution, resolution, { ...options, depthBuffer: false })
+    this.blurred = new RenderTarget(resolution, resolution, options)
 
     // Looking up from the floor: its x is the world's x and its up the world's z.
     this.camera = new OrthographicCamera(-scale / 2, scale / 2, scale / 2, -scale / 2, 0, far)
@@ -113,7 +143,11 @@ export class ContactShadow {
     this.camera.rotation.x = Math.PI / 2
     this.camera.updateMatrixWorld()
 
-    this.depth = new MeshBasicNodeMaterial()
+    this.depth = new MeshBasicNodeMaterial({
+      depthTest: false,
+      depthWrite: false,
+      blending: NoBlending,
+    })
     this.depth.fragmentNode = vec4(
       vec3(0),
       viewZToOrthographicDepth(positionView.z, cameraNear, cameraFar).oneMinus(),
@@ -129,7 +163,7 @@ export class ContactShadow {
       this.map.texture,
       vec2(float(0.5).add(positionLocal.x.div(scale)), float(0.5).sub(positionLocal.z.div(scale))),
     ).a
-    material.opacityNode = float(1).sub(pow(shade.mul(opacity).oneMinus(), SHADOW_GAMMA))
+    material.opacityNode = float(1).sub(pow(shade.mul(opacity).oneMinus(), this.power))
     this.plane = new Mesh(new PlaneGeometry(scale, scale).rotateX(-Math.PI / 2), material)
     this.plane.position.y = lift
     this.group.add(this.plane)
@@ -154,6 +188,7 @@ export class ContactShadow {
       scene.overrideMaterial = this.depth
       renderer.setClearColor(0x000000, 0)
       renderer.setRenderTarget(this.map)
+      renderer.setOpaqueSort(webglOpaqueOrder as unknown as OpaqueSort)
       renderer.render(scene, this.camera)
       scene.overrideMaterial = overrideMaterial
       this.blur(renderer, CONTACT.blur)
@@ -165,6 +200,7 @@ export class ContactShadow {
         if (object) object.visible = shown[index]!
       })
       this.group.visible = true
+      renderer.setOpaqueSort(null)
       renderer.setClearColor(this.clear, clearAlpha)
       renderer.setRenderTarget(target)
     }

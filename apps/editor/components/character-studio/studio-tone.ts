@@ -34,3 +34,13 @@ export function untonedColor(css: string, exposure = 1): Color {
   const [ur, ug, ub] = neutralUntone([r, g, b], exposure)
   return new Color().setRGB(ur, ug, ub, LinearSRGBColorSpace)
 }
+
+/**
+ * What the contact shadow's transmittance is raised to, by what it lies on,
+ * for the frame's linear blend to darken it as WebGL's blend of the encoded
+ * colours did (to 1 − a of it). Neutral is quadratic in the darkest tones
+ * and an offset in the light ones, and the sRGB encoding bends them further
+ * apart, so no one power does for both: these are fitted to the platform's
+ * tones round the feet (sRGB 23–46) and to the AI photo's light grey.
+ */
+export const SHADOW_POWER = { platform: 0.85, light: 1.88 } as const
