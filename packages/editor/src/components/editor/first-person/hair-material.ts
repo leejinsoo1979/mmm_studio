@@ -1,10 +1,9 @@
-import type { DirectionalLight, Mesh } from 'three'
+import type { DirectionalLight, Mesh, SkinnedMesh } from 'three'
 import {
   abs,
   asin,
   atan,
   attribute,
-  cameraPosition,
   cameraViewMatrix,
   clamp,
   cross,
@@ -26,7 +25,6 @@ import {
   min,
   mix,
   modelViewMatrix,
-  modelWorldMatrixInverse,
   mrt,
   mx_noise_float,
   normalLocal,
@@ -63,6 +61,7 @@ import {
   DoubleSide,
   LinearFilter,
   LinearMipmapLinearFilter,
+  Matrix4,
   MeshStandardNodeMaterial,
   NoColorSpace,
   type NodeBuilder,
@@ -279,17 +278,39 @@ function strandInputs() {
   return { data, shape, layer, atlasUv, texel, coverage, shadowCoverage, tangentView }
 }
 
+const toBind = new Matrix4()
+
 /**
- * Turns the strip from its centreline to its width after skinning: inner
- * strips lie flat on the head (the side across `out`); the others face the
- * camera — in the shadow pass, the light — so they never turn edge-on.
+ * The camera (in the shadow pass, the light's) in a hair mesh's bind space,
+ * through the bone its strips follow (`userData.hairBone`, the head's).
+ */
+function cameraInBind({ object, camera }: N, self: N) {
+  const mesh = object as SkinnedMesh
+  const bone = (mesh.userData.hairBone as number | undefined) ?? 0
+  const { bones, boneInverses } = mesh.skeleton
+  toBind
+    .multiplyMatrices(mesh.matrixWorld, mesh.bindMatrixInverse)
+    .multiply(bones[bone]!.matrixWorld)
+    .multiply(boneInverses[bone]!)
+    .multiply(mesh.bindMatrix)
+    .invert()
+  return self.value.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(toBind)
+}
+const bindCamera = uniform(new Vector3()).onObjectUpdate(cameraInBind as N)
+
+/**
+ * Turns the strip from its centreline to its width. three runs a
+ * material's position before skinning, so this works in bind space, with
+ * the camera brought there through the strips' bone: inner strips lie flat
+ * on the head (the side across `out`); the others face the camera — in
+ * the shadow pass, the light — so they never turn edge-on.
  */
 function expandStrip(shape: N, layer: N) {
   return Fn(() => {
     const along: N = tangentLocal.normalize()
-    const camera = modelWorldMatrixInverse.mul(vec4(cameraPosition, 1)).xyz
-    const toCamera = camera.sub(positionLocal).normalize()
-    const facing = select(layer.lessThan(0.5), normalLocal, toCamera)
+    const toCamera = bindCamera.sub(positionLocal).normalize()
+    // Arithmetic, not a branch: a branch would set up the normal only on its own side.
+    const facing = mix(toCamera, normalLocal, step(layer, 0.5))
     // A strip pointing at the camera (or along its own normal) has no side: any across it will do.
     const upright: N = step(0.9, abs(along.y))
     const axis = vec3(upright, upright.oneMinus(), 0)
@@ -440,6 +461,7 @@ class HairLightingModel extends PhysicalLightingModel {
 // --- Deep opacity ------------------------------------------------------------
 
 let deepLight: DirectionalLight | null = null
+let byDepth = true
 /** How fast light dies inside hair behind the first strands it meets (per metre): 1 cm in, 37% is left. */
 const DEEP_DENSITY = 100
 
@@ -454,7 +476,7 @@ function deepShadow(builder: NodeBuilder, shadow: N): N {
   const map = light?.shadow.map?.depthTexture
   const webgpu = (builder.renderer as unknown as { backend: { isWebGPUBackend?: boolean } }).backend
     .isWebGPUBackend
-  if (!light || !map || !webgpu) return shadow
+  if (!light || !map || !webgpu || !byDepth) return shadow
   const camera = light.shadow.camera
   const at: N = lightShadowMatrix(light).mul(vec4(positionWorld, 1))
   const coord: N = at.xyz.div(at.w)
@@ -471,11 +493,12 @@ function deepShadow(builder: NodeBuilder, shadow: N): N {
 
 /**
  * Tells the hair materials which light's shadow is theirs (null: none):
- * its normal bias is cancelled for hair's own, and, where it can be read,
- * its depth gives hair its self-shadow by depth.
+ * its normal bias is cancelled for hair's own, and, where it can be read
+ * and `depth` is on, its depth gives hair its self-shadow by depth.
  */
-export function setHairKeyLight(light: DirectionalLight | null) {
+export function setHairKeyLight(light: DirectionalLight | null, depth = true) {
   deepLight = light
+  byDepth = depth
   shadowCancel.value = light?.shadow.normalBias ?? 0
   for (const material of built) material.needsUpdate = true
 }
@@ -603,9 +626,11 @@ export class HairNodeMaterial extends MeshStandardNodeMaterial {
       expTRT: ease(shine.y),
       kR: shine.z,
       kTRT: hash(strand.add(5)).mul(0.8).add(0.6).mul(0.6),
+      // The highlight breaks into lengths along the strand and into its fibres across it.
       rNoise: mx_noise_float(vec3(shape.y.div(period), strand.mul(0.37), 0))
         .mul(0.25)
-        .add(1),
+        .add(1)
+        .mul(s.texel.g.mul(1.2).add(0.4)),
       scatter: float(0.5),
     }
     built.push(this)

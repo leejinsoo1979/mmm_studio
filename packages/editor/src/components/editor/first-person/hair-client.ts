@@ -110,6 +110,8 @@ export function hairMesh(
   mesh.receiveShadow = true
   mesh.frustumCulled = false
   mesh.raycast = () => {}
+  // The bone the strips follow (the head's): camera-facing strips turn in its frame.
+  mesh.userData.hairBone = geometry.getAttribute('skinIndex').getX(0)
   holdHairValues(mesh, values, core(studio))
   return mesh
 }

@@ -71,7 +71,7 @@ export function hairLookValues(look: {
     skin: linearOf(look.skin, '#c8987a'),
     expR: mix(60, 260, shine),
     expTRT: mix(16, 48, shine),
-    kR: mix(0.2, 0.5, shine),
+    kR: mix(0.12, 0.3, shine),
   }
 }
 

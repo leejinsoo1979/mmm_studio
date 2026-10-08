@@ -67,9 +67,9 @@ describe('hairLookValues', () => {
   })
 
   test('maps shine onto the highlights, clamped', () => {
-    expect(hairLookValues({ ...look, shine: 0 })).toMatchObject({ expR: 60, expTRT: 16, kR: 0.2 })
-    expect(hairLookValues({ ...look, shine: 1 })).toMatchObject({ expR: 260, expTRT: 48, kR: 0.5 })
-    expect(hairLookValues({ ...look, shine: 0.5 }).kR).toBeCloseTo(0.35)
+    expect(hairLookValues({ ...look, shine: 0 })).toMatchObject({ expR: 60, expTRT: 16, kR: 0.12 })
+    expect(hairLookValues({ ...look, shine: 1 })).toMatchObject({ expR: 260, expTRT: 48, kR: 0.3 })
+    expect(hairLookValues({ ...look, shine: 0.5 }).kR).toBeCloseTo(0.21)
     expect(hairLookValues({ ...look, shine: 7 }).expR).toBe(260)
     expect(hairLookValues({ ...look, shine: Number.NaN }).expR).toBe(160)
   })
