@@ -17,10 +17,12 @@ import type { HairLibrary } from './hair-styles'
  * What a hair worker does with the page's requests (see hair-worker.ts):
  * builds a head's base and keeps what grows on it, and grows hair for
  * each character (`slot`) in stages, a newer request for a slot replacing
- * one still waiting and stopping one under way at its next stage. A grow
- * for a head it no longer keeps answers `missing`, and the page sends the
- * base again. Pure: the worker hands it a way to post, to yield and to
- * load the hair library.
+ * one still waiting and stopping one under way at its next stage (a
+ * re-sent request that differs only in priority stops nothing). A grow
+ * waits for its head's base while that is being built; for a head the
+ * worker no longer keeps it answers `missing`, and the page sends the base
+ * again. Pure: the worker hands it a way to post, to yield and to load the
+ * hair library.
  */
 
 export type HairJobsHost = {
@@ -43,12 +45,15 @@ const whoOf = (avatar: string): Who => ({
 
 export class HairJobs {
   private readonly heads = new Map<string, { head: HeadData; who: Who }>()
-  private readonly waiting = new Map<string, Grow>()
-  /** Per slot, how many requests it has had: a grow under way stops once its slot's has moved on. */
-  private readonly asked = new Map<string, number>()
-  private running = false
+  /** Avatars whose base is being built: their grows wait for it instead of answering `missing`. */
+  private readonly building = new Set<string>()
+  /** Avatars whose base failed: their grows answer with the failure until a base is sent again. */
+  private readonly failed = new Map<string, string>()
+  private readonly waiting = new Map<string, { grow: Grow; order: number }>()
+  /** Per slot, the request it wants now: a grow under way stops at its next stage once it is not. */
+  private readonly latest = new Map<string, Grow>()
+  private pumping = false
   private order = 0
-  private readonly arrived = new Map<string, number>()
 
   constructor(
     private readonly host: HairJobsHost,
@@ -57,16 +62,30 @@ export class HairJobs {
 
   handle(request: HairRequest) {
     if (request.kind === 'base') {
+      this.building.add(request.avatar)
+      this.failed.delete(request.avatar)
       void this.base(request.avatar, request.input)
       return
     }
-    this.asked.set(request.slot, (this.asked.get(request.slot) ?? 0) + 1)
+    const { slot } = request
     if (request.kind === 'cancel') {
-      this.waiting.delete(request.slot)
+      this.waiting.delete(slot)
+      this.latest.delete(slot)
       return
     }
-    this.waiting.set(request.slot, request)
-    this.arrived.set(request.slot, this.order++)
+    const now = this.latest.get(slot)
+    const queued = this.waiting.get(slot)
+    if (now && sameGrow(now, request)) {
+      // Only its priority moved (the background worker re-sends it as the camera moves):
+      // reorder a waiting grow, and never restart one under way.
+      if (queued) {
+        this.waiting.set(slot, { grow: request, order: queued.order })
+        this.latest.set(slot, request)
+      }
+      return
+    }
+    this.latest.set(slot, request)
+    this.waiting.set(slot, { grow: request, order: this.order++ })
     void this.pump()
   }
 
@@ -80,45 +99,55 @@ export class HairJobs {
       this.heads.set(avatar, { head, who: whoOf(avatar) })
       while (this.heads.size > this.kept) this.heads.delete(this.heads.keys().next().value!)
       this.host.post({ kind: 'base', avatar, base }, baseBuffers(base))
-      void this.pump()
     } catch (error) {
-      this.host.post({ kind: 'error', avatar, message: messageOf(error) }, [])
+      const message = messageOf(error)
+      this.failed.set(avatar, message)
+      this.host.post({ kind: 'error', avatar, message }, [])
+    } finally {
+      this.building.delete(avatar)
+      void this.pump()
     }
   }
 
-  /** The next grow: the most urgent (lowest priority), the first to arrive among equals. */
+  /** The next grow: the most urgent (lowest priority), the first to arrive among equals; none whose base is still being built. */
   private next(): Grow | null {
-    let best: Grow | null = null
-    for (const grow of this.waiting.values()) {
+    let best: { grow: Grow; order: number } | null = null
+    for (const entry of this.waiting.values()) {
+      if (this.building.has(entry.grow.avatar)) continue
       if (
         !best ||
-        grow.priority < best.priority ||
-        (grow.priority === best.priority &&
-          this.arrived.get(grow.slot)! < this.arrived.get(best.slot)!)
+        entry.grow.priority < best.grow.priority ||
+        (entry.grow.priority === best.grow.priority && entry.order < best.order)
       ) {
-        best = grow
+        best = entry
       }
     }
-    return best
+    return best?.grow ?? null
   }
 
   private async pump() {
-    if (this.running) return
-    this.running = true
+    if (this.pumping) return
+    this.pumping = true
     try {
       for (;;) {
         const grow = this.next()
         if (!grow) return
         this.waiting.delete(grow.slot)
         await this.grow(grow)
+        if (this.latest.get(grow.slot) === grow) this.latest.delete(grow.slot)
       }
     } finally {
-      this.running = false
+      this.pumping = false
     }
   }
 
   private async grow(request: Grow) {
     const { slot, avatar, cut, tier, shape } = request
+    const failure = this.failed.get(avatar)
+    if (failure !== undefined) {
+      this.host.post({ kind: 'error', slot, avatar, message: failure }, [])
+      return
+    }
     const known = this.heads.get(avatar)
     if (!known) {
       this.host.post({ kind: 'missing', avatar }, [])
@@ -127,7 +156,7 @@ export class HairJobs {
     // Used again: the last to be let go.
     this.heads.delete(avatar)
     this.heads.set(avatar, known)
-    const asked = this.asked.get(slot)
+    const superseded = () => this.latest.get(slot) !== request
     try {
       const groom = groomOf({ ...cut, tip: null, shine: 0 }, known.who)
       const build = await growHair(
@@ -138,19 +167,23 @@ export class HairJobs {
         growSeed(avatar, cut.style),
         async () => {
           await this.host.tick()
-          return this.asked.get(slot) !== asked
+          return superseded()
         },
       )
-      if (!build || this.asked.get(slot) !== asked) return
-      this.host.post(
-        { kind: 'grow', slot, key: `${avatar}|${cutKey(cut)}|${tier}|${shape.version}`, build },
-        buildBuffers(build),
-      )
+      if (!build || superseded()) return
+      this.host.post({ kind: 'grow', slot, key: build.key, build }, buildBuffers(build))
     } catch (error) {
       this.host.post({ kind: 'error', slot, avatar, message: messageOf(error) }, [])
     }
   }
 }
+
+/** Whether two grows for a slot would build the same hair (they may differ in priority). */
+const sameGrow = (a: Grow, b: Grow) =>
+  a.avatar === b.avatar &&
+  a.tier === b.tier &&
+  a.shape.version === b.shape.version &&
+  cutKey(a.cut) === cutKey(b.cut)
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 

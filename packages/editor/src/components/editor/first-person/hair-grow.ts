@@ -1,18 +1,9 @@
 import { vertexNormals } from './bald-head'
+import { ATLAS_LAYER } from './hair-atlas'
 import { type BaseInput, type BaseResult, headFits, spotsOf } from './hair-base'
 import { cutKey, type GrowCut } from './hair-cut'
 import { type Groom, hairlineTable, type Region, regional, unionHairline } from './hair-groom'
-import {
-  ATLAS,
-  ATLAS_VARIANTS,
-  depthInHair,
-  joinRibbons,
-  LAYER,
-  type Layer,
-  type RibbonFrame,
-  ribbons,
-  type StripSet,
-} from './hair-ribbons'
+import { depthInHair, joinRibbons, type RibbonFrame, ribbons, type StripSet } from './hair-ribbons'
 import {
   angles,
   type Candidates,
@@ -33,6 +24,7 @@ import {
   unitHash,
   type V3,
 } from './hair-scalp'
+import { STRIP_LAYER, type StripLayer } from './hair-shading'
 import type { HairLibrary } from './hair-styles'
 import { fitBald, PointGrid, smoothstep } from './head-skull'
 
@@ -162,8 +154,8 @@ const FRINGE_CUT: readonly [number, number] = [2.5, 0.3]
 /** 앞머리 under this uses the wispy layer and narrow strips: a see-through fringe. */
 const SEE_THROUGH = 0.35
 /** The fringe's width (cm) at 앞머리 0 and 1, and its density. */
-const FRINGE_WIDTH: readonly [number, number] = [0.25, 0.55]
-const FRINGE_DENSITY: readonly [number, number] = [0.4, 1]
+const FRINGE_WIDTH: readonly [number, number] = [0.35, 0.8]
+const FRINGE_DENSITY: readonly [number, number] = [0.6, 1]
 /** Within a lock, ends stray by this (mm) round the lock's own. */
 const IN_LOCK = 1
 /** Blunt ends: the lock's pull lets go over this last share of the strip. */
@@ -218,7 +210,7 @@ const smooth = smoothstep
 // The head as the worker keeps it.
 
 type ShapeData = {
-  version: number
+  key: string
   points: Float32Array
   normals: Float32Array
   map: RadiusMap
@@ -330,15 +322,26 @@ class HeadState implements HeadData {
     )
     // The head's scale: its arc from the front hairline over the top to the
     // nape, against the template's (an adult man's, where cm are cm).
-    const shape = this.shape({ version: Number.NaN, head: base.head.points, body: null })
+    const shape = this.shape({
+      version: Number.NaN,
+      head: Float32Array.from(base.head.points),
+      body: null,
+    })
     this.hs = arcOver(shape.map) / this.cm / (templateArc(library) / TEMPLATE_CM)
-    this.shapes.length = 0
   }
 
   /** The flattened head as shaped, its normals and radius map (the last few kept). */
   shape(input: ShapeInput): ShapeData {
-    const known = this.shapes.find((s) => s.version === input.version && s.points === input.head)
-    if (known) return known
+    // By content, not version or identity: versions are counted per model, so two characters of
+    // one avatar share them, and every message to the worker brings a fresh copy of the arrays.
+    const key = shapeKey(input)
+    const at = this.shapes.findIndex((s) => s.key === key)
+    if (at >= 0) {
+      const known = this.shapes[at]!
+      this.shapes.splice(at, 1)
+      this.shapes.unshift(known)
+      return known
+    }
     const raw = vertexNormals(input.head, this.index)
     // Alike at every spot, so a root on a texture seam isn't lit apart.
     const sum = new Float32Array(this.spotCount * 3)
@@ -352,7 +355,7 @@ class HeadState implements HeadData {
       for (let axis = 0; axis < 3; axis++) normals[i * 3 + axis] = sum[s * 3 + axis]! / l
     }
     const map = radiusMap(this.origin, [{ points: input.head, index: this.index }, this.bald])
-    const data = { version: input.version, points: input.head, normals, map }
+    const data = { key, points: input.head, normals, map }
     this.shapes.unshift(data)
     if (this.shapes.length > SHAPES_KEPT) this.shapes.pop()
     return data
@@ -403,6 +406,20 @@ function templateArc(library: HairLibrary) {
 
 /** Shaped heads a worker keeps per avatar. */
 const SHAPES_KEPT = 6
+
+/** FNV-1a over an array's bits. */
+function hashArray(array: Float32Array | Uint32Array, h = 0x811c9dc5) {
+  const words = new Uint32Array(array.buffer, array.byteOffset, array.length)
+  for (let i = 0; i < words.length; i++) h = Math.imul(h ^ words[i]!, 0x01000193)
+  return h >>> 0
+}
+
+/** What a shape is, by its content: the shaped head's and body's points (and the body's index). */
+export function shapeKey(shape: ShapeInput) {
+  let h = hashArray(shape.head)
+  if (shape.body) h = hashArray(shape.body.index, hashArray(shape.body.points, h))
+  return `${shape.head.length}.${h.toString(36)}`
+}
 
 const stateOf = (head: HeadData) => head as HeadState
 
@@ -975,7 +992,7 @@ function rotation(a: number[], b: number[], out: number[]) {
 
 type Strip = Path & {
   root: number
-  layer: Layer
+  layer: StripLayer
   lock: number
   cut: number
   level: number
@@ -1177,12 +1194,12 @@ function growStripPaths(g: Grower, guides: Guides, roots: Roots, count: number, 
     }
     lying[0] = 1
     const layerPick = unitHash(seed ^ 0x1a7e, c)
-    const layer: Layer =
+    const layer: StripLayer =
       layerPick < INNER_SHARE
-        ? LAYER.inner
+        ? STRIP_LAYER.inner
         : layerPick < INNER_SHARE + MID_SHARE
-          ? LAYER.mid
-          : LAYER.outer
+          ? STRIP_LAYER.mid
+          : STRIP_LAYER.outer
     strips.push({
       points: path,
       s: new Float32Array(points),
@@ -1212,10 +1229,10 @@ const standoffOf = (seed: number, lock: number, mm: number) => {
 }
 
 /** The depth in the volume a strip's layer stands at. */
-const layerDepth = (layer: Layer) =>
-  layer === LAYER.inner
+const layerDepth = (layer: StripLayer) =>
+  layer === STRIP_LAYER.inner
     ? LAYER_DEPTH.inner
-    : layer === LAYER.mid
+    : layer === STRIP_LAYER.mid
       ? LAYER_DEPTH.mid
       : LAYER_DEPTH.outer
 
@@ -1341,7 +1358,7 @@ function shapeStrips(g: Grower, strips: Strip[], roots: Roots, seed: number) {
     for (let k = 1; k < n; k++) {
       const o = k * 3
       let want = clearance(g, volumes[k]!, k * seg, standoff, depth)
-      if (strip.layer === LAYER.inner) want = Math.max(want, INNER_CLEAR * mm)
+      if (strip.layer === STRIP_LAYER.inner) want = Math.max(want, INNER_CLEAR * mm)
       clears[k] = want
       const shift = want - clearance(g, volumes[k]!, k * seg, 0, LAYER_DEPTH.mid)
       const y = strip.points[o + 1]!
@@ -1593,7 +1610,7 @@ function* growStages(
   const roots = placeRoots(state, shape, picked, tierRoots)
   lap('roots')
   yield 'roots'
-  const guidesKey = `${shapeInput.version}|${cutKey(groom.sliders)}|${groom.who.sex}|${seed}`
+  const guidesKey = `${shape.key}|${cutKey(groom.sliders)}|${groom.who.sex}|${seed}`
   let guides: Guides
   if (state.lastGuides?.key === guidesKey) guides = { ...state.lastGuides.guides, roots }
   else {
@@ -1643,15 +1660,18 @@ function layOut(g: Grower, strips: Strip[], roots: Roots, tier: Tier, seed: numb
   const start: number[] = [0]
   const meta: {
     strip: Strip
-    layer: Layer
+    layer: StripLayer
     width: number
     taper: number
     atlas: number
   }[] = []
   const fringeSlider = groom.sliders.fringe
   const curly = groom.atlasCurl > 0 || groom.sliders.curl > 0.6
-  const atlasOf = (kind: keyof typeof ATLAS, c: number) =>
-    ATLAS[kind] + Math.floor(unitHash(seed ^ 0xa71a, c) * ATLAS_VARIANTS[kind])
+  const atlasOf = (kind: keyof typeof ATLAS_LAYER, c: number) => {
+    const layers: number | readonly number[] = ATLAS_LAYER[kind]
+    if (typeof layers === 'number') return layers
+    return layers[Math.floor(unitHash(seed ^ 0xa71a, c) * layers.length)]!
+  }
   let triangles = 0
   const cap = groom.caps[tier]
   const push = (path: Path, entry: (typeof meta)[number]) => {
@@ -1672,32 +1692,34 @@ function layOut(g: Grower, strips: Strip[], roots: Roots, tier: Tier, seed: numb
     const c = strip.root
     const fringe = roots.group[c] === GROUP.fringe
     if (fringe && unitHash(seed ^ 0xf719, c) >= fringeDensity) continue
-    const band = roots.density[c]! < 1
+    // A full fringe covers the bare hairline edge, so the band's thin, wispy strips are not for it.
+    const sheer = fringe ? fringeSlider < SEE_THROUGH : roots.density[c]! < 1
     let width =
-      (strip.layer === LAYER.inner
+      (strip.layer === STRIP_LAYER.inner
         ? groom.width.inner
-        : strip.layer === LAYER.mid
+        : strip.layer === STRIP_LAYER.mid
           ? groom.width.mid
           : groom.width.outer) *
       cmHs *
       (0.8 + 0.4 * unitHash(seed ^ 0x3d17, c)) *
       widen
-    if (band) width *= 0.4 + 0.6 * roots.density[c]!
+    if (sheer && roots.density[c]! < 1) width *= 0.4 + 0.6 * roots.density[c]!
     if (fringe) {
       const fringeWidth =
         (FRINGE_WIDTH[0] + (FRINGE_WIDTH[1] - FRINGE_WIDTH[0]) * fringeSlider) * cmHs
       width = Math.min(width, fringeWidth * widen)
     }
-    const kind: keyof typeof ATLAS =
-      band || (fringe && fringeSlider < SEE_THROUGH)
-        ? 'wispy'
-        : curly && strip.layer !== LAYER.inner
-          ? 'curly'
-          : strip.layer === LAYER.inner
-            ? 'dense'
-            : strip.layer === LAYER.mid
-              ? 'medium'
-              : 'wispy'
+    const kind: keyof typeof ATLAS_LAYER = sheer
+      ? 'wispy'
+      : strip.layer === STRIP_LAYER.inner
+        ? 'dense'
+        : strip.layer === STRIP_LAYER.mid
+          ? curly
+            ? 'curlyDense'
+            : 'medium'
+          : curly
+            ? 'curlyMedium'
+            : 'wispy'
     if (
       !push(strip, {
         strip,
@@ -1712,7 +1734,7 @@ function layOut(g: Grower, strips: Strip[], roots: Roots, tier: Tier, seed: numb
   if (tier === 'studio') {
     // Strays: a few outer strips again, thinner, standing a little off the hair.
     for (const strip of strips) {
-      if (strip.layer === LAYER.inner || unitHash(seed ^ 0x57a7, strip.root) >= STRAY_SHARE)
+      if (strip.layer === STRIP_LAYER.inner || unitHash(seed ^ 0x57a7, strip.root) >= STRAY_SHARE)
         continue
       const out = (0.3 + 0.7 * unitHash(seed ^ 0x57a8, strip.root)) * STRAY_OUT * cmHs
       const copy = Float32Array.from(strip.points.subarray(0, strip.count * 3))
@@ -1742,7 +1764,7 @@ function layOut(g: Grower, strips: Strip[], roots: Roots, tier: Tier, seed: numb
       if (
         !push(stray, {
           strip,
-          layer: LAYER.stray,
+          layer: STRIP_LAYER.stray,
           width,
           taper: 0.5,
           atlas: atlasOf('stray', strip.root),
@@ -1800,7 +1822,7 @@ function layOut(g: Grower, strips: Strip[], roots: Roots, tier: Tier, seed: numb
       if (
         !push(baby, {
           strip,
-          layer: LAYER.baby,
+          layer: STRIP_LAYER.baby,
           width: BABY_WIDTH * cmHs,
           taper: 0.6,
           atlas: atlasOf('stray', c + b),
@@ -1851,7 +1873,7 @@ function layOut(g: Grower, strips: Strip[], roots: Roots, tier: Tier, seed: numb
     set.atlas[i] = atlas
     set.lock[i] = unitHash(seed ^ 0x10c4, strip.lock)
     set.strand[i] = c
-    set.twist[i] = layer === LAYER.inner ? (unitHash(seed ^ 0x7e15, c) - 0.5) * 0.7 : 0
+    set.twist[i] = layer === STRIP_LAYER.inner ? (unitHash(seed ^ 0x7e15, c) - 0.5) * 0.7 : 0
     set.flip[i] = unitHash(seed ^ 0xf11b, c + 31 * i) < 0.5 ? 1 : 0
     set.vOffset[i] = unitHash(seed ^ 0x0ff5, c + 17 * i) * ATLAS_REPEAT * cmHs
     skinOf(g, roots, c, pair)
@@ -1864,7 +1886,7 @@ function layOut(g: Grower, strips: Strip[], roots: Roots, tier: Tier, seed: numb
     info.lock[i] = strip.lock
     info.layer[i] = layer
     info.field[i] = strip.field
-    info.cut[i] = layer === LAYER.baby || layer === LAYER.stray ? 255 : strip.cut
+    info.cut[i] = layer === STRIP_LAYER.baby || layer === STRIP_LAYER.stray ? 255 : strip.cut
     info.level[i] = strip.level
     info.standoff[i] = standoffOf(seed, strip.lock, state.mm)
   })
@@ -1966,9 +1988,9 @@ export async function growHair(
   const ms: Record<string, number> = { ...grown.ms, depth: performance.now() - clock }
   clock = performance.now()
   if (yieldTo && (await yieldTo())) return null
-  const innerIds = pick([LAYER.inner, LAYER.mid])
-  const outerIds = pick([LAYER.outer, LAYER.baby])
-  const strayIds = pick([LAYER.stray])
+  const innerIds = pick([STRIP_LAYER.inner, STRIP_LAYER.mid])
+  const outerIds = pick([STRIP_LAYER.outer, STRIP_LAYER.baby])
+  const strayIds = pick([STRIP_LAYER.stray])
   const inner = ribbons(strips, innerIds, depth, frame)
   const outer = ribbons(strips, outerIds, depth, frame)
   const strays = tier === 'studio' ? ribbons(strips, strayIds, depth, frame) : undefined
@@ -1990,7 +2012,7 @@ export async function growHair(
   ends.sort((x, y) => x - y)
   const triangles = (inner.index.length + outer.index.length + (strays?.index.length ?? 0)) / 3
   return {
-    key: `${state.avatar}|${cutKey(groom.sliders)}|${tier}|${shape.version}`,
+    key: `${state.avatar}|${cutKey(groom.sliders)}|${tier}|${shapeKey(shape)}`,
     tier,
     geometries: { inner, outer, ...(strays ? { strays } : {}), ...(soft ? { soft } : {}) },
     strips: { inner: innerIds.length, outer: outerIds.length, strays: strayIds.length },

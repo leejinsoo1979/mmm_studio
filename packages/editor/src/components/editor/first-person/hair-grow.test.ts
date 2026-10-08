@@ -1,5 +1,12 @@
 import { beforeAll, describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
+import {
+  ATLAS_LAYER,
+  ATLAS_LAYERS,
+  ATLAS_TILE_WIDTH,
+  coverageShare,
+  strandAtlas,
+} from './hair-atlas'
 import { headFits } from './hair-base'
 import { DEFAULT_CUT_PARAMS, type HairCut, type HairCutStyle } from './hair-cut'
 import { HAIR_HEADS, type HairHead, loadHairHead } from './hair-fixtures'
@@ -18,8 +25,9 @@ import {
   type ShapeInput,
   type Tier,
 } from './hair-grow'
-import { LAYER, RIBBON_ITEM_SIZES } from './hair-ribbons'
+import { RIBBON_ITEM_SIZES } from './hair-ribbons'
 import { angles, inEyes, radiusAt, rayTriangle } from './hair-scalp'
+import { STRIP_LAYER, unpackLayers } from './hair-shading'
 import { type HairLibrary, loadHairLibrary } from './hair-styles'
 import { fitBald } from './head-skull'
 
@@ -418,7 +426,7 @@ describe.each([...HAIR_HEADS])('%s', (id) => {
       const shares = { crown: 0, top: 0, sides: 0, back: 0, nape: 0 }
       const regions = new Map<string, { got: number; want: number; n: number }>()
       for (let i = 0; i < g.strips.count; i++) {
-        if (g.info.layer[i] !== LAYER.outer || g.info.group[i] === 2) continue
+        if (g.info.layer[i] !== STRIP_LAYER.outer || g.info.group[i] === 2) continue
         for (let k = g.strips.start[i]!; k < g.strips.start[i + 1]!; k++) {
           // Past the clearance's ramp, still over the head (above its widest line).
           if (g.strips.s[k]! < 3.5 * cmHs) continue
@@ -488,4 +496,159 @@ describe('the vertex layout', () => {
       game.strips.inner + game.strips.outer,
     )
   }, 30000)
+})
+
+describe('what a head keeps between grows', () => {
+  const fresh = (id: string) => {
+    const { fixture } = heads.get(id)!
+    return headData(
+      fixture.input,
+      { head: { ...fixture.flat, normals: new Float32Array() } },
+      library,
+    )
+  }
+
+  test('never grows one character’s hair on another’s shape of the same version', async () => {
+    const id = 'Male_Adult_01'
+    const { fixture } = heads.get(id)!
+    const groom = groomFor(id, cutOf('bob'))
+    const seed = growSeed(id, 'bob')
+    const head = fresh(id)
+    const o = headFrame(head).origin
+    // Another character of the avatar: its cranium 6% larger, sent with the same version.
+    const larger = Float32Array.from(fixture.flat.points)
+    for (let i = 0; i < larger.length; i += 3) {
+      if (larger[i + 1]! < o[1]) continue
+      for (let axis = 0; axis < 3; axis++)
+        larger[i + axis] = o[axis]! + (larger[i + axis]! - o[axis]!) * 1.06
+    }
+    const own = { version: 1, head: fixture.flat.points, body: null }
+    const other = { version: 1, head: larger, body: null }
+    const first = (await growHair(head, groom, 'game', own, seed))!
+    const after = (await growHair(head, groom, 'game', other, seed))!
+    const alone = (await growHair(fresh(id), groom, 'game', other, seed))!
+    expect(Buffer.from(after.geometries.outer.position.buffer)).toEqual(
+      Buffer.from(alone.geometries.outer.position.buffer),
+    )
+    expect(after.key).not.toBe(first.key)
+  }, 60000)
+
+  test('knows a shape again from a copy of it', () => {
+    const { fixture } = heads.get('Female_Adult_01')!
+    const frame = headFrame(fresh('Female_Adult_01'))
+    const copy = () => ({ version: 3, head: Float32Array.from(fixture.flat.points), body: null })
+    expect(frame.radiusMap(copy())).toBe(frame.radiusMap(copy()))
+  })
+})
+
+describe('the strand atlas each strip draws from', () => {
+  const kindOf = new Map<number, string>()
+  for (const [kind, layers] of Object.entries(ATLAS_LAYER)) {
+    for (const layer of [layers].flat()) kindOf.set(layer, kind)
+  }
+  const top = strandAtlas()[0]!
+  const coverage = Array.from({ length: ATLAS_LAYERS }, (_, layer) =>
+    coverageShare(top, layer * ATLAS_TILE_WIDTH, (layer + 1) * ATLAS_TILE_WIDTH),
+  )
+
+  describe.each([...HAIR_HEADS])('%s', (id) => {
+    test.each([
+      ...SLICE,
+    ])('%s: as the material decodes it, the kind its layer wants', async (style) => {
+      for (const curl of [0, 1]) {
+        const cut = cutOf(style, { curl })
+        const b = await build(id, cut, 'studio')
+        const g = grown(id, cut, 'studio')
+        const curly = curl > 0.6
+        const wanted = new Map<string, string>()
+        for (let i = 0; i < g.strips.count; i++) {
+          const root = g.info.root[i]!
+          const layer = g.strips.layer[i]!
+          const fringe = g.info.group[i] === 2
+          const sheer = fringe ? cut.fringe < 0.35 : g.roots.density[root]! < 1
+          wanted.set(
+            `${root}|${layer}`,
+            layer === STRIP_LAYER.stray || layer === STRIP_LAYER.baby
+              ? 'stray'
+              : sheer
+                ? 'wispy'
+                : layer === STRIP_LAYER.inner
+                  ? 'dense'
+                  : layer === STRIP_LAYER.mid
+                    ? curly
+                      ? 'curlyDense'
+                      : 'medium'
+                    : curly
+                      ? 'curlyMedium'
+                      : 'wispy',
+          )
+        }
+        let checked = 0
+        for (const geometry of [b.geometries.inner, b.geometries.outer, b.geometries.strays!]) {
+          for (let v = 0; v < geometry.hairShape.length / 4; v += 2) {
+            const { atlasLayer, layer } = unpackLayers(geometry.hairShape[v * 4 + 2]!)
+            const strand = geometry.hairData[v * 4 + 3]!
+            expect(kindOf.get(atlasLayer)).toBe(wanted.get(`${strand}|${layer}`)!)
+            checked++
+          }
+        }
+        expect(checked).toBeGreaterThan(1000)
+      }
+    }, 60000)
+
+    test.each([...SLICE])('%s: a default fringe hides the forehead', (style) => {
+      const cut = cutOf(style)
+      const g = grown(id, cut, 'studio')
+      const groom = groomFor(id, cut)
+      const frame = headFrame(heads.get(id)!.head)
+      const cmHs = frame.cm * frame.hs
+      // Seen from the front, over 6 cm·hs across, from just under the fringe's cut to 1.5 cm·hs over it.
+      const cutY =
+        frame.browY + (2.5 + (0.3 - 2.5) * cut.fringe + groom.fringe.cut) * cmHs + 0.1 * cmHs
+      const x0 = frame.origin[0] - 3 * cmHs
+      const cell = 0.5 * frame.mm
+      const W = Math.ceil((6 * cmHs) / cell)
+      const H = Math.ceil((1.4 * cmHs) / cell)
+      const through = new Float32Array(W * H).fill(1)
+      const best = new Float32Array(W * H)
+      const p = g.strips.points
+      for (let i = 0; i < g.strips.count; i++) {
+        const first = g.strips.start[i]!
+        const end = g.strips.start[i + 1]!
+        const length = g.strips.s[end - 1]! - g.strips.s[first]! || 1
+        const c = coverage[g.strips.atlas[i]!]!
+        for (let k = first; k + 1 < end; k++) {
+          if (p[k * 3 + 2]! < frame.origin[2]) continue
+          const [ax, ay, bx, by] = [p[k * 3]!, p[k * 3 + 1]!, p[k * 3 + 3]!, p[k * 3 + 4]!]
+          const u = (g.strips.s[k]! - g.strips.s[first]!) / length
+          const half = (g.strips.width[i]! / 2) * (1 - g.strips.taper[i]! * u ** 1.5)
+          const [dx, dy] = [bx - ax, by - ay]
+          const dd = dx * dx + dy * dy || 1
+          const xa = Math.max(0, Math.floor((Math.min(ax, bx) - half - x0) / cell))
+          const xb = Math.min(W - 1, Math.ceil((Math.max(ax, bx) + half - x0) / cell))
+          const ya = Math.max(0, Math.floor((Math.min(ay, by) - half - cutY) / cell))
+          const yb = Math.min(H - 1, Math.ceil((Math.max(ay, by) + half - cutY) / cell))
+          for (let y = ya; y <= yb; y++) {
+            for (let x = xa; x <= xb; x++) {
+              const px = x0 + (x + 0.5) * cell - ax
+              const py = cutY + (y + 0.5) * cell - ay
+              const t = Math.max(0, Math.min(1, (px * dx + py * dy) / dd))
+              if (Math.hypot(px - dx * t, py - dy * t) > half) continue
+              through[y * W + x]! *= 1 - c
+              best[y * W + x] = Math.max(best[y * W + x]!, c)
+            }
+          }
+        }
+      }
+      let hidden = 0
+      let solid = 0
+      for (let j = 0; j < W * H; j++) {
+        hidden += 1 - through[j]!
+        // Under a dense or medium strip, not only wispy or stray ones.
+        if (best[j]! >= 0.6) solid++
+      }
+      expect(hidden / (W * H)).toBeGreaterThanOrEqual(0.95)
+      expect(solid / (W * H)).toBeGreaterThanOrEqual(0.9)
+    }, 30000)
+  })
 })

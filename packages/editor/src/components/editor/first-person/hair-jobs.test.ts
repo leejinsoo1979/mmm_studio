@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { DEFAULT_CUT_PARAMS, type GrowCut, type HairCutStyle } from './hair-cut'
 import { type HairHead, loadHairHead } from './hair-fixtures'
-import type { HairReply, HairRequest } from './hair-grow'
+import { type HairReply, type HairRequest, shapeKey } from './hair-grow'
 import { HairJobs } from './hair-jobs'
 import { type HairLibrary, loadHairLibrary } from './hair-styles'
 
@@ -62,15 +62,24 @@ const baseOf = (head: HairHead): HairRequest => ({
   input: structuredClone(head.input),
 })
 
-const growOf = (head: HairHead, slot: string, cut: GrowCut, version = 0): HairRequest => ({
+const growOf = (
+  head: HairHead,
+  slot: string,
+  cut: GrowCut,
+  version = 0,
+  priority = 0,
+): HairRequest => ({
   kind: 'grow',
   slot,
   avatar: head.input.avatar,
   cut,
   tier: 'game',
-  shape: { version, head: head.flat.points, body: null },
-  priority: 0,
+  // A copy, as a message to the worker brings one.
+  shape: { version, head: Float32Array.from(head.flat.points), body: null },
+  priority,
 })
+
+const flatKey = (head: HairHead) => shapeKey({ version: 0, head: head.flat.points, body: null })
 
 describe('a hair worker', () => {
   test('answers a grow for a head it has no base for with missing', async () => {
@@ -93,7 +102,8 @@ describe('a hair worker', () => {
     expect(grown.reply.kind).toBe('grow')
     if (grown.reply.kind !== 'grow') return
     expect(grown.reply.slot).toBe('a')
-    expect(grown.reply.key).toBe('Male_Adult_01|twoBlock|0|0|0|20|60|game|0')
+    expect(grown.reply.key).toBe(`Male_Adult_01|twoBlock|0|0|0|20|60|game|${flatKey(male)}`)
+    expect(grown.reply.key).toBe(grown.reply.build.key)
     expect(grown.reply.build.tier).toBe('game')
     // Every array of the build is handed on, each buffer once.
     const buffers = new Set(grown.transfer)
@@ -127,7 +137,7 @@ describe('a hair worker', () => {
     const grows = replies.filter((r) => r.reply.kind === 'grow')
     expect(grows.length).toBe(1)
     expect(grows[0]!.reply.kind === 'grow' && grows[0]!.reply.key).toBe(
-      'Female_Adult_01|bob|100|0|0|0|50|game|1',
+      `Female_Adult_01|bob|100|0|0|0|50|game|${flatKey(female)}`,
     )
   }, 30000)
 
@@ -163,5 +173,64 @@ describe('a hair worker', () => {
     await settle(() => replies.length > 1)
     expect(replies[1]!.reply.kind).toBe('error')
     expect(replies[1]!.reply.kind === 'error' && replies[1]!.reply.slot).toBe('a')
+  }, 30000)
+
+  test('holds a grow sent right after its base until the base lands', async () => {
+    const { jobs, replies, settle } = worker()
+    jobs.handle(baseOf(male))
+    jobs.handle(growOf(male, 'a', cutOf('twoBlock')))
+    await settle(() => replies.length > 1)
+    expect(replies.map((r) => r.reply.kind)).toEqual(['base', 'grow'])
+  }, 30000)
+
+  test('answers grows for a head whose base failed with that failure, not missing', async () => {
+    const { jobs, replies, settle } = worker()
+    const broken = structuredClone(male.input)
+    broken.material = 'no such material'
+    jobs.handle({ kind: 'base', avatar: male.input.avatar, input: broken })
+    jobs.handle(growOf(male, 'a', cutOf('twoBlock')))
+    await settle(() => replies.length > 1)
+    expect(replies.map((r) => r.reply.kind)).toEqual(['error', 'error'])
+    expect(replies[0]!.reply.kind === 'error' && replies[0]!.reply.slot).toBeUndefined()
+    expect(replies[1]!.reply.kind === 'error' && replies[1]!.reply.slot).toBe('a')
+    // A base sent again clears it.
+    jobs.handle(baseOf(male))
+    jobs.handle(growOf(male, 'a', cutOf('twoBlock')))
+    await settle(() => replies.length > 3)
+    expect(replies.slice(2).map((r) => r.reply.kind)).toEqual(['base', 'grow'])
+  }, 30000)
+
+  test('keeps a grow under way when only its priority is sent again', async () => {
+    const { jobs, replies, settle, onTick } = worker()
+    jobs.handle(baseOf(female))
+    await settle(() => replies.length > 0)
+    jobs.handle(growOf(female, 'a', cutOf('bob'), 0, 5))
+    // At every stage it gives way: a grow restarted by each would never finish.
+    let resent = 0
+    const resend = () => {
+      if (resent++ > 1000) return
+      jobs.handle(growOf(female, 'a', cutOf('bob'), 0, resent % 7))
+      onTick.push(resend)
+    }
+    onTick.push(resend)
+    await settle(() => replies.some((r) => r.reply.kind === 'grow'))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(resent).toBeGreaterThan(2)
+    expect(replies.filter((r) => r.reply.kind === 'grow').length).toBe(1)
+  }, 30000)
+
+  test('tells two characters of one avatar apart by their shapes', async () => {
+    const { jobs, replies, settle } = worker()
+    jobs.handle(baseOf(male))
+    await settle(() => replies.length > 0)
+    const a = growOf(male, 'a', cutOf('twoBlock'), 1)
+    const b = growOf(male, 'b', cutOf('twoBlock'), 1)
+    if (b.kind !== 'grow') return
+    b.shape.head[1]! += 1e-3
+    jobs.handle(a)
+    jobs.handle(b)
+    await settle(() => replies.length > 2)
+    const keys = replies.slice(1).map((r) => r.reply.kind === 'grow' && r.reply.key)
+    expect(keys[0]).not.toBe(keys[1])
   }, 30000)
 })

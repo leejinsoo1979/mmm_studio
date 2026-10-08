@@ -1,5 +1,6 @@
 import type { RibbonArrays } from './hair-grow'
 import type { V3 } from './hair-scalp'
+import { packLayers, type StripLayer } from './hair-shading'
 import { smoothstep } from './head-skull'
 
 /**
@@ -10,26 +11,6 @@ import { smoothstep } from './head-skull'
  * how deep in the hair each point lies, worked out once per build. Pure.
  */
 
-/** Which layer of the hair a strip is: written into `hairShape.z` (× 16) for the material. */
-export const LAYER = { inner: 0, mid: 1, outer: 2, stray: 3, baby: 4 } as const
-export type Layer = (typeof LAYER)[keyof typeof LAYER]
-
-/**
- * The strand atlas's layers (see the hair material): the first of each
- * kind, its variants after it. A strip's is written into `hairShape.z`.
- */
-export const ATLAS = { dense: 0, medium: 2, wispy: 4, stray: 6, curly: 8, solid: 11 } as const
-/** Variants of each kind, after its first layer. */
-export const ATLAS_VARIANTS = {
-  dense: 2,
-  medium: 2,
-  wispy: 2,
-  stray: 2,
-  curly: 3,
-  solid: 1,
-} as const
-
-/** Numbers per vertex of each attribute. */
 export const RIBBON_ITEM_SIZES = {
   position: 3,
   normal: 3,
@@ -193,7 +174,7 @@ export function ribbons(
     const twist = strips.twist[c]!
     const cosT = Math.cos(twist)
     const sinT = Math.sin(twist)
-    const shape = strips.atlas[c]! + 16 * strips.layer[c]!
+    const shape = packLayers(strips.atlas[c]!, strips.layer[c]! as StripLayer)
     const flip = strips.flip[c]!
     const base = v
     for (let k = 0; k < n; k++) {
