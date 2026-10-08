@@ -15,10 +15,12 @@ export interface GpuErrorReporter {
   dispose(): void
 }
 
+/** `scope` names the canvas in the log (the viewer, or another canvas that renders with WebGPU). */
 export function createGpuErrorReporter(
   print: (...args: unknown[]) => void,
   schedule: (run: () => void, ms: number) => () => void,
   intervalMs = GPU_ERROR_SUMMARY_INTERVAL_MS,
+  scope = 'viewer',
 ): GpuErrorReporter {
   const logged = new Set<string>()
   const repeats = new Map<string, number>()
@@ -27,7 +29,7 @@ export function createGpuErrorReporter(
   const summarise = () => {
     cancel = null
     if (repeats.size === 0) return
-    print(formatRepeatSummary(repeats, intervalMs))
+    print(formatRepeatSummary(repeats, intervalMs, scope))
     repeats.clear()
   }
 
@@ -36,7 +38,7 @@ export function createGpuErrorReporter(
       const message = error?.message || 'unknown error'
       if (!logged.has(message) && logged.size < MAX_DISTINCT_MESSAGES) {
         logged.add(message)
-        print('[viewer] WebGPU uncaptured error:', message, error)
+        print(`[${scope}] WebGPU uncaptured error:`, message, error)
         return
       }
       repeats.set(message, (repeats.get(message) ?? 0) + 1)
@@ -49,12 +51,16 @@ export function createGpuErrorReporter(
   }
 }
 
-export function formatRepeatSummary(repeats: Map<string, number>, intervalMs: number): string {
+export function formatRepeatSummary(
+  repeats: Map<string, number>,
+  intervalMs: number,
+  scope = 'viewer',
+): string {
   const lines = [...repeats]
     .sort((a, b) => b[1] - a[1])
     .map(([message, count]) => `  ${count}× ${message.split('\n')[0]}`)
   const shown = lines.slice(0, MAX_SUMMARY_LINES)
   if (lines.length > shown.length) shown.push(`  …and ${lines.length - shown.length} more messages`)
   const seconds = Math.round(intervalMs / 1000)
-  return `[viewer] WebGPU uncaptured errors still occurring (repeats within ${seconds} s; the first ${MAX_DISTINCT_MESSAGES} distinct messages were each logged in full once):\n${shown.join('\n')}`
+  return `[${scope}] WebGPU uncaptured errors still occurring (repeats within ${seconds} s; the first ${MAX_DISTINCT_MESSAGES} distinct messages were each logged in full once):\n${shown.join('\n')}`
 }
