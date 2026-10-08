@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { PAINTED, READ, SCALP, SHADED, SKIN_REF } from './bald-head'
 import {
   type BaseResult,
+  BUMP_MASK,
   earSide,
   flattenHead,
   headFits,
@@ -11,7 +12,8 @@ import {
   templateAngles,
 } from './hair-base'
 import { HAIR_HEADS, type HairHead, loadHairHead } from './hair-fixtures'
-import { templateFrame } from './hair-scalp'
+import { unionHairline } from './hair-groom'
+import { hairlineAt, templateFrame } from './hair-scalp'
 import { type HairLibrary, loadHairLibrary } from './hair-styles'
 import { fitBald, fitSkull, standingOver, standOn } from './head-skull'
 
@@ -191,5 +193,90 @@ describe.each([...HAIR_HEADS])('%s flattened', (id) => {
     expect(again.head.points).toEqual(base.head.points)
     expect(again.head.index).toEqual(base.head.index)
     expect(again.roots.position).toEqual(base.roots.position)
+  })
+})
+
+describe.each([...HAIR_HEADS])('%s flattened, its own hair', (id) => {
+  test('stands no more than 6 mm over the cranium anywhere over the hairline, moved or not', () => {
+    const { head, base } = heads.get(id)!
+    const mm = 0.001 / head.input.metresPerUnit
+    const { cranium } = headFits(head.input, library)
+    const fitted = fitBald(library.skull, cranium)
+    const origin = templateFrame(library.skull).origin
+    const flags = library.bald.get(head.input.material)!
+    const { index } = head.input.head
+    const kept = new Set<string>()
+    for (let t = 0; t < base.head.index.length; t += 3) {
+      kept.add([0, 1, 2].map((k) => base.head.index[t + k]).join())
+    }
+    const union = unionHairline()
+    const ids = new Set<number>()
+    for (let t = 0; t < index.length / 3; t++) {
+      const corners = [0, 1, 2].map((k) => index[t * 3 + k]!)
+      if (!flags[t] || !kept.has(corners.join())) continue
+      for (const i of corners) {
+        const [x, y, z] = base.head.points.subarray(i * 3, i * 3 + 3)
+        const [a, e] = templateAngles(cranium, origin, x!, y!, z!)
+        if (e > hairlineAt(union, a)) ids.add(i)
+      }
+    }
+    expect(ids.size).toBeGreaterThan(100)
+    const at = Float32Array.from(
+      [...ids].flatMap((i) => [...base.head.points.subarray(i * 3, i * 3 + 3)]),
+    )
+    const { height } = standingOver(at, fitted)
+    expect(Math.max(...height) / mm).toBeLessThanOrEqual(6.02)
+  })
+
+  test('grows its root layer up to the ears, fading out over their last millimetres', () => {
+    const { head, base } = heads.get(id)!
+    const mm = 0.001 / head.input.metresPerUnit
+    const { points } = head.input.head
+    const ears = head.input.ears!
+    const earPoints: number[][] = []
+    for (let i = 0; i < ears.length; i++) {
+      if (ears[i]) earPoints.push([...points.subarray(i * 3, i * 3 + 3)])
+    }
+    const { roots } = base
+    let reaching = 0
+    for (let v = 0; v < roots.shellStart / 3; v++) {
+      const i = roots.srcVertex[v]!
+      const [x, y, z] = base.head.points.subarray(i * 3, i * 3 + 3)
+      const near =
+        Math.min(...earPoints.map((q) => Math.hypot(q[0]! - x!, q[1]! - y!, q[2]! - z!))) / mm
+      const grows = Math.hypot(...roots.scalpDir.subarray(v * 4, v * 4 + 3))
+      expect(grows).toBeLessThanOrEqual(1 + 1e-6)
+      if (near < 2) expect(grows).toBeLessThan(2e-3)
+      if (near < 10 && grows > 0.05) reaching++
+    }
+    // Not a bald ring round the ear: roots grow within a centimetre of it.
+    expect(reaching).toBeGreaterThan(3)
+  })
+
+  test('masks the texels of every flattened and hole-closing triangle for the bumps', () => {
+    const { head, base } = heads.get(id)!
+    const mask = base.bumpMask!
+    expect(mask.length).toBe(BUMP_MASK * BUMP_MASK)
+    const { uvs, index } = head.input.head
+    const original = new Set<string>()
+    for (let t = 0; t < index.length; t += 3)
+      original.add([0, 1, 2].map((k) => index[t + k]).join())
+    let masked = 0
+    let checked = 0
+    for (let t = 0; t < base.head.index.length; t += 3) {
+      const corners = [0, 1, 2].map((k) => base.head.index[t + k]!)
+      const filled = !original.has(corners.join())
+      if (!filled) continue
+      const u = corners.reduce((sum, i) => sum + uvs[i * 2]!, 0) / 3
+      const v = corners.reduce((sum, i) => sum + uvs[i * 2 + 1]!, 0) / 3
+      checked++
+      if (mask[Math.floor(v * BUMP_MASK) * BUMP_MASK + Math.floor(u * BUMP_MASK)]) masked++
+    }
+    expect(masked).toBe(checked)
+    let set = 0
+    for (const texel of mask) set += texel
+    // Some, never the whole texture (the face keeps its bumps).
+    expect(set).toBeGreaterThan(1000)
+    expect(set).toBeLessThan(mask.length / 2)
   })
 })

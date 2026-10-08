@@ -692,7 +692,8 @@ export class RootsNodeMaterial extends MeshStandardNodeMaterial {
     const line = mix(table.element(int(i0)), table.element(int(i0).add(1)), step.sub(i0))
     const bind = positionGeometry
     const inside = e.sub(line).add(wobble(bind))
-    const grows = smoothstep(-0.04, 0.05, inside)
+    // The base fades the layer out toward the ears and its lower edge in scalpDir's length.
+    const grows = smoothstep(-0.04, 0.05, inside).mul(length(scalp.xyz))
     // In the hairline band the roots never close over the skin.
     let density: N = min(grows, mix(0.8, 1, smoothstep(0.05, 0.25, inside)))
     const part = value('part', 'vec2')

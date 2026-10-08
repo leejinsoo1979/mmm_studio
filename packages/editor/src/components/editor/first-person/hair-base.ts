@@ -9,6 +9,7 @@ import {
   TONE_RINGS,
   vertexNormals,
 } from './bald-head'
+import { rasterise } from './front-render'
 import { unionHairline } from './hair-groom'
 import { angles, hairlineAt, templateFrame, type V3 } from './hair-scalp'
 import type { HairLibrary } from './hair-styles'
@@ -20,6 +21,7 @@ import {
   fitSkull,
   PointGrid,
   SKULL_CELL,
+  smoothstep,
   standingOver,
   standOn,
   type Triples,
@@ -72,7 +74,10 @@ export type BaseResult = {
   /**
    * The root layer, then the undercut's three shells from `shellStart` on
    * in the index. Each point copies its head point's (`srcVertex`) skinning
-   * and stands `height` (bind units) off it along its normal.
+   * and stands `height` (bind units) off it along its normal. `scalpDir` is
+   * its direction on the template, as long as roots grow there (0–1): they
+   * fade out toward the ears and the layer's lower edge, point by point, so
+   * no edge follows the head's triangles.
    */
   roots: {
     position: Float32Array
@@ -88,7 +93,12 @@ export type BaseResult = {
   }
   /** How the look paints the skin where the head's own hair was (skin only, the same for any cut). */
   paint: ScalpPaint
-  /** The taken texels (1024²) whose normal-map bumps the look worker flattens, or null. */
+  /**
+   * The texels (BUMP_MASK², row by row from v = 0, as the painter reads
+   * uvs) of every flattened and hole-closing triangle, 1 where the look
+   * worker flattens the head's normal map: the old hair's strand bumps and
+   * a closed tail's relief must not show on the bald surface.
+   */
   bumpMask: Uint8Array | null
 }
 
@@ -130,9 +140,17 @@ export const inUndercutBand = (a: number, e: number) =>
 
 /** How far below the union hairline (rad) the root layer reaches: the hairline's wobble and an 8 mm fade. */
 const ROOTS_BELOW = 0.14
+/** Over how much elevation (rad) the root layer fades in from its lower edge, and over what (mm) from the ears' own points. */
+const ROOTS_EDGE = 0.06
+const ROOTS_EAR: readonly [number, number] = [2, 8]
+/** `scalpDir`'s least length, so a shader can still normalise it where nothing grows. */
+const MIN_GROWS = 1e-3
 /** The root layer's height over the head, and the undercut shells' (mm). */
 const ROOT_LAYER = 0.8
 const SHELLS = [1.5, 3, 4.5] as const
+
+/** The bump mask's texels across. */
+export const BUMP_MASK = 1024
 
 /** Points of a mesh this near (bind units) are one spot (a texture seam splits them). */
 const SPOT = 1e-4
@@ -506,6 +524,23 @@ export function flattenHead(input: BaseInput, library: HairLibrary): BaseResult 
     if (taken[t] && !drop[t]) for (let k = 0; k < 3; k++) painted(index[t * 3 + k]!)
   }
   for (const i of filled) painted(i)
+  const bumpMask = new Uint8Array(BUMP_MASK * BUMP_MASK)
+  for (let k = 0; k < scalpUvs.length; k += 6) {
+    rasterise(
+      scalpUvs[k]! * BUMP_MASK,
+      scalpUvs[k + 1]! * BUMP_MASK,
+      scalpUvs[k + 2]! * BUMP_MASK,
+      scalpUvs[k + 3]! * BUMP_MASK,
+      scalpUvs[k + 4]! * BUMP_MASK,
+      scalpUvs[k + 5]! * BUMP_MASK,
+      BUMP_MASK,
+      BUMP_MASK,
+      1,
+      (texel) => {
+        bumpMask[texel] = 1
+      },
+    )
+  }
   const hairPoints: number[] = []
   for (let t = 0; t < triangles; t++) {
     if (!taken[t]) continue
@@ -532,7 +567,7 @@ export function flattenHead(input: BaseInput, library: HairLibrary): BaseResult 
     head: { points: flat, normals: flatNormals, index: keptIndex },
     roots,
     paint,
-    bumpMask: null,
+    bumpMask,
   }
 }
 
@@ -550,11 +585,33 @@ function rootLayer(
   const { skinIndex, skinWeight } = input.head
   const ears = input.ears
   const marks = input.marks
+  const count = flat.length / 3
+  const earPoints: number[] = []
+  for (let i = 0; ears && i < count; i++) {
+    if (ears[i]) earPoints.push(flat[i * 3]!, flat[i * 3 + 1]!, flat[i * 3 + 2]!)
+  }
+  const earGrid = earPoints.length > 0 ? new PointGrid(earPoints, SKULL_CELL) : null
+  const found: number[] = []
+  const distances: number[] = []
+  const growsAt = new Float32Array(count).fill(-1)
+  const grows = (i: number) => {
+    if (growsAt[i]! >= 0) return growsAt[i]!
+    const [x, y, z] = [flat[i * 3]!, flat[i * 3 + 1]!, flat[i * 3 + 2]!]
+    const [a, e] = templateAngles(cranium, origin, x, y, z)
+    const low = hairlineAt(union, a) - ROOTS_BELOW
+    let at = smoothstep(low, low + ROOTS_EDGE, e)
+    if (earGrid) {
+      const near = earGrid.nearest(x, y, z, 1, found, distances, ROOTS_EAR[1] * mm)
+      if (near > 0) at *= smoothstep(ROOTS_EAR[0] * mm, ROOTS_EAR[1] * mm, Math.sqrt(distances[0]!))
+    }
+    growsAt[i] = at
+    return at
+  }
   const layer: number[] = []
   const band: number[] = []
   for (let t = 0; t < index.length / 3; t++) {
     const ids = [index[t * 3]!, index[t * 3 + 1]!, index[t * 3 + 2]!]
-    if (ears && ids.some((i) => ears[i])) continue
+    if (ids.every((i) => grows(i) <= 0)) continue
     let cx = 0
     let cy = 0
     let cz = 0
@@ -571,7 +628,6 @@ function rootLayer(
     }
     if (!ears && nearEar(cx, cy, cz, marks)) continue
     const [a, e] = templateAngles(cranium, origin, cx, cy, cz)
-    if (e < hairlineAt(union, a) - ROOTS_BELOW) continue
     // Facing out of the head, not into a fold.
     const rx = cx - (origin[0] * cranium.scale[0] + cranium.shift[0])
     const ry = cy - (origin[1] * cranium.scale[1] + cranium.shift[1])
@@ -615,7 +671,8 @@ function rootLayer(
           const ty = (y - cranium.shift[1]) / cranium.scale[1] - origin[1]
           const tz = (z - cranium.shift[2]) / cranium.scale[2] - origin[2]
           const tl = Math.sqrt(tx * tx + ty * ty + tz * tz) || 1
-          scalpDir.push(tx / tl, ty / tl, tz / tl, heights[s]!)
+          const length = Math.max(MIN_GROWS, grows(i)) / tl
+          scalpDir.push(tx * length, ty * length, tz * length, heights[s]!)
           // Combed down and back over the head, along its surface.
           let gx = 0
           let gy = -1
