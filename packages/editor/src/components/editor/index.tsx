@@ -27,6 +27,7 @@ import {
   writePersistedSelection,
 } from '../../lib/scene'
 import { computeSceneBoundsXZ } from '../../lib/scene-bounds'
+import { isViewerLaidOut, sceneLoadWait } from '../../lib/scene-readiness'
 import { initSFXBus } from '../../lib/sfx-bus'
 import { cn } from '../../lib/utils'
 import useEditor from '../../store/use-editor'
@@ -1126,6 +1127,7 @@ export default function Editor({
   const [sceneReadyKey, setSceneReadyKey] = useState(0)
   const [isViewerSceneReady, setIsViewerSceneReady] = useState(false)
   const isPreviewMode = useEditor((s) => s.isPreviewMode)
+  const viewerLaidOut = useEditor((s) => isViewerLaidOut(s.viewMode, s.isPreviewMode))
   const isCaptureMode = useEditor((s) => s.isCaptureMode)
   const uiTheme = useUiTheme((s) => s.theme)
 
@@ -1222,8 +1224,16 @@ export default function Editor({
     setIsViewerSceneReady(ready)
   }, [])
 
+  const loadWait = sceneLoadWait({
+    isLoading,
+    isSceneLoading,
+    hasLoadedInitialScene,
+    isViewerSceneReady,
+    viewerLaidOut,
+  })
+
   useEffect(() => {
-    if (isLoading || isSceneLoading || !hasLoadedInitialScene || isViewerSceneReady) return
+    if (loadWait !== 'viewer') return
 
     const timer = window.setTimeout(() => {
       console.warn('[editor] viewer scene readiness timed out; showing editor shell anyway', {
@@ -1233,9 +1243,9 @@ export default function Editor({
     }, SCENE_READY_FALLBACK_MS)
 
     return () => window.clearTimeout(timer)
-  }, [hasLoadedInitialScene, isLoading, isSceneLoading, isViewerSceneReady, sceneReadyKey])
+  }, [loadWait, sceneReadyKey])
 
-  const showLoader = isLoading || isSceneLoading || !hasLoadedInitialScene || !isViewerSceneReady
+  const showLoader = loadWait !== null
 
   useEffect(() => {
     onLoaderChange?.(showLoader)
@@ -1281,7 +1291,9 @@ export default function Editor({
     <Viewer
       defaultRender={EDITOR_DEFAULT_RENDER}
       hoverStyles={EDITOR_HOVER_STYLES}
+      onSceneReadyChange={handleSceneReadyChange}
       renderContext="editor"
+      sceneReadyKey={sceneReadyKey}
       selectionManager="default"
       selectionStyle={EDITOR_SELECTION_STYLE}
     >
