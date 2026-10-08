@@ -6,20 +6,27 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 // Stands in for `next dev`: forks a server child and, like next-dev.js, ignores that child dying
-// by a signal, so the parent then exits 0 on its own.
+// by a signal, so the parent then exits 0 on its own (or, with --linger, stays alive).
 const FAKE_NEXT_DEV = `
 import { fork } from 'node:child_process'
 const port = process.argv[process.argv.indexOf('--port') + 1]
 const server = fork(new URL('./fake-server.mjs', import.meta.url).pathname, [port])
 server.on('exit', (code, signal) => { if (!signal) process.exit(code ?? 0) })
+if (process.argv.includes('--linger')) setInterval(() => {}, 1000)
 for (const name of ['SIGINT', 'SIGTERM']) {
-  process.on(name, () => { server.kill(name); server.once('exit', () => process.exit(0)) })
+  process.on(name, () => {
+    if (server.exitCode !== null || server.signalCode !== null) process.exit(0)
+    server.kill(name)
+    server.once('exit', () => process.exit(0))
+  })
 }
 `
+// SIGUSR2 closes the listener but keeps the process alive.
 const FAKE_SERVER = `
 import http from 'node:http'
-http.createServer((req, res) => res.end('ok'))
+const server = http.createServer((req, res) => res.end('ok'))
   .listen(Number(process.argv[2]), '127.0.0.1', () => console.log('SERVER_PID=' + process.pid))
+process.on('SIGUSR2', () => { server.close(); setInterval(() => {}, 1000) })
 `
 
 const dir = mkdtempSync(path.join(tmpdir(), 'dev-supervisor-'))
@@ -30,14 +37,20 @@ const supervisorPath = path.join(import.meta.dir, 'dev-supervisor.ts')
 const FAST = {
   DEV_SUPERVISOR_PROBE_MS: '100',
   DEV_SUPERVISOR_BACKOFF_MS: '100',
-  DEV_SUPERVISOR_REFUSED_MS: '2000',
+  DEV_SUPERVISOR_REFUSED_MS: '1000',
   DEV_SUPERVISOR_ORPHAN_REFUSED_MS: '500',
 }
 
 const running: ChildProcess[] = []
 
-afterEach(() => {
-  for (const proc of running.splice(0)) proc.kill('SIGKILL')
+afterEach(async () => {
+  for (const proc of running.splice(0)) {
+    if (proc.exitCode !== null || proc.signalCode !== null) continue
+    const exited = new Promise((resolve) => proc.once('exit', resolve))
+    proc.kill('SIGTERM')
+    await Promise.race([exited, Bun.sleep(5_000)])
+    proc.kill('SIGKILL')
+  }
 })
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
@@ -117,6 +130,37 @@ test('restarts after the server child is SIGKILLed and stops the whole tree on S
   expect(await run.exited).toBe(0)
   expect(await portOpen(port)).toBe(false)
   expect(alive(second)).toBe(false)
+}, 30_000)
+
+test('restarts when the server stays alive but stops listening', async () => {
+  const port = await freePort()
+  const run = supervise(['node', path.join(dir, 'fake-next-dev.mjs'), '--port', String(port)])
+  await until(() => run.serverPids().length === 1, 'first server')
+  await until(() => portOpen(port), 'port open')
+  await Bun.sleep(300) // the supervisor only counts refusals once it has seen the port open
+  const [first] = run.serverPids()
+  process.kill(first!, 'SIGUSR2')
+
+  await until(() => run.serverPids().length === 2, 'restarted server')
+  expect(run.out.stderr).toContain('서버 프로세스는 남아 있지만 포트를 열지 않습니다')
+  expect(alive(first!)).toBe(false)
+  run.proc.kill('SIGTERM')
+  expect(await run.exited).toBe(0)
+}, 30_000)
+
+test('restarts quickly when next dev outlives its server child', async () => {
+  const port = await freePort()
+  const args = ['node', path.join(dir, 'fake-next-dev.mjs'), '--port', String(port), '--linger']
+  const run = supervise(args)
+  await until(() => run.serverPids().length === 1, 'first server')
+  await until(() => portOpen(port), 'port open')
+  await Bun.sleep(300)
+  process.kill(run.serverPids()[0]!, 'SIGKILL')
+
+  await until(() => run.serverPids().length === 2, 'restarted server')
+  expect(run.out.stderr).toContain('next-server 프로세스가 사라졌습니다')
+  run.proc.kill('SIGTERM')
+  expect(await run.exited).toBe(0)
 }, 30_000)
 
 test('leaves a foreign listener alone and starts once the port is free', async () => {

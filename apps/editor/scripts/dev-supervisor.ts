@@ -77,6 +77,8 @@ function signal(pid: number, name: NodeJS.Signals) {
 const hasExited = (proc: ChildProcess) => proc.exitCode !== null || proc.signalCode !== null
 
 let child: ChildProcess | null = null
+/** A `next dev` that is being killed because its port stayed closed; its exit is expected. */
+let tearingDown: ChildProcess | null = null
 let liveness: Liveness = INITIAL_LIVENESS
 let deaths: number[] = []
 let restarts = 0
@@ -84,6 +86,7 @@ let awaitingRecovery = false
 let stopping = false
 let treeAtStop: number[] = []
 let waitingForPort = false
+let watching = false
 let startTimer: ReturnType<typeof setTimeout> | null = null
 
 // Descendants are listed before anything is signalled: once `next dev` is gone, its children are
@@ -98,8 +101,7 @@ async function stopTree(proc: ChildProcess, graceMs: number) {
   for (const pid of [proc.pid!, ...tree]) signal(pid, 'SIGKILL')
 }
 
-function onDeath(reason: string) {
-  say(reason)
+function scheduleRestart() {
   const decision = decideRestart(deaths, Date.now(), timing)
   deaths = decision.deaths
   if (decision.action === 'give-up') {
@@ -133,22 +135,25 @@ async function start() {
     process.exit(1)
   })
   proc.once('exit', (code, sig) => {
-    if (child !== proc) return
-    child = null
+    if (child === proc) child = null
     if (stopping) {
       // `next dev` stops next-server itself; anything of the tree still alive now would keep
       // the port, so it goes too.
       for (const pid of treeAtStop) signal(pid, 'SIGKILL')
       process.exit(exitStatusOf(code, sig, constants.signals))
     }
-    onDeath(messages.exited(code, sig))
+    if (tearingDown === proc) return
+    say(messages.exited(code, sig))
+    scheduleRestart()
   })
 }
 
 async function watch() {
   const proc = child
-  if (!proc || stopping) return
+  if (!proc || stopping || watching || tearingDown) return
+  watching = true
   const result = await probe()
+  watching = false
   if (proc !== child || stopping) return
   liveness = nextLiveness(liveness, result, Date.now())
   if (result === 'open' && awaitingRecovery) {
@@ -158,10 +163,11 @@ async function watch() {
   if (liveness.refusedSince === null) return
   const hasServer = descendants(proc.pid!).length > 0
   if (!refusedTooLong(liveness, Date.now(), hasServer, timing)) return
-  const refusedFor = Date.now() - liveness.refusedSince
-  child = null
+  say(messages.refused(port, Date.now() - liveness.refusedSince, hasServer))
+  tearingDown = proc
   await stopTree(proc, 5_000)
-  if (!stopping) onDeath(messages.refused(port, refusedFor, hasServer))
+  tearingDown = null
+  if (!stopping) scheduleRestart()
 }
 
 const watcher = setInterval(watch, timing.probeMs)
@@ -178,7 +184,8 @@ for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
     signal(proc.pid!, name)
     setTimeout(() => {
       say(messages.stopTimedOut(), 'error')
-      void stopTree(proc, 0).then(() => process.exit(1))
+      for (const pid of [proc.pid!, ...treeAtStop]) signal(pid, 'SIGKILL')
+      process.exit(1)
     }, 10_000).unref()
   })
 }
