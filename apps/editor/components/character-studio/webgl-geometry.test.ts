@@ -148,6 +148,7 @@ describe('a body the game has drawn, in the studio', () => {
     const geometry = body()
     drawWithWebGPU(geometry)
     const twin = webglGeometry(geometry)
+    expect(twin).not.toBe(geometry)
     const slots = twin.getAttribute('skinIndex')
     expect(webglGeometry(geometry)).toBe(twin)
     expect(twin.getAttribute('skinIndex')).toBe(slots)
@@ -202,6 +203,7 @@ describe('the stage drawing the twins', () => {
     const own = plain.geometry
     const stop = drawWebglGeometries(scene)
     render(scene, () => {
+      expect(widened.geometry).not.toBe(drawn)
       expect(widened.geometry).toBe(webglGeometry(drawn))
       expect(plain.geometry).toBe(own)
       expect(hidden.geometry).toBe(drawn)
@@ -210,7 +212,10 @@ describe('the stage drawing the twins', () => {
 
     // A render that never finished is put right by the next.
     before(scene)
-    render(scene, () => expect(widened.geometry).toBe(webglGeometry(drawn)))
+    render(scene, () => {
+      expect(widened.geometry).not.toBe(drawn)
+      expect(widened.geometry).toBe(webglGeometry(drawn))
+    })
     expect(widened.geometry).toBe(drawn)
 
     stop()
