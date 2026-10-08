@@ -1,6 +1,6 @@
 'use client'
 
-import { type AnyNode, type AnyNodeId, useScene } from '@pascal-app/core'
+import { type AnyNode, type AnyNodeId, sceneRegistry, useScene } from '@pascal-app/core'
 import {
   registerWalkthroughDynamicCollider,
   registerWalkthroughInteraction,
@@ -10,6 +10,7 @@ import { useFrame } from '@react-three/fiber'
 import { useEffect } from 'react'
 import { CapsuleGeometry, Mesh, MeshBasicMaterial, Vector3 } from 'three'
 import { useNpcDialogue } from './dialogue/store'
+import { liftedNpcIds } from './dirty-marks'
 import { localPlayerOn, type NpcFrame, resetNpcBrains, stepNpc } from './runtime/brain'
 import { ensureNpcEpoch, npcNow } from './runtime/clock'
 import { effectiveEngagement, heldByOther } from './runtime/engagement'
@@ -222,6 +223,16 @@ function NpcRuntime() {
   return <NpcSocialStage />
 }
 
+/** Drops NPC dirty marks once FloorElevationSystem (frame priority 1, before this) has lifted the markers. */
+function NpcDirtyMarks() {
+  useFrame(() => {
+    const { dirtyNodes, nodes, clearDirty } = useScene.getState()
+    if (dirtyNodes.size === 0) return
+    for (const id of liftedNpcIds(dirtyNodes, nodes, sceneRegistry.nodes)) clearDirty(id)
+  }, 2)
+  return null
+}
+
 /**
  * The NPC kind's system. While the scene is walked it runs every NPC: the
  * shared schedule or the engagement holding it, then this player's own
@@ -230,5 +241,10 @@ function NpcRuntime() {
  */
 export default function NpcSystem() {
   const walkthrough = useViewer((state) => state.walkthroughMode)
-  return walkthrough ? <NpcRuntime /> : null
+  return (
+    <>
+      <NpcDirtyMarks />
+      {walkthrough ? <NpcRuntime /> : null}
+    </>
+  )
 }
