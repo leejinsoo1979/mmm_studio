@@ -10,8 +10,8 @@ presence, and chat remain identical between web and desktop exports.
 is listening. Unpackaged, the shell shows a "에디터 서버를 기다리는 중…" page and polls
 `<origin>/api/health` with backoff (up to 5 minutes), then checks `GET /api/scenes/<id>` for the
 scene in `runtime-config.json` `playUrl` (or `MMM_PLAY_URL`). A scene that does not exist on this
-server opens `<origin>/dashboard` instead, with one `[runtime]` log line saying so. A main-frame
-load that fails later is retried once.
+server opens `<origin>/dashboard` instead, with one `[runtime]` log line saying so. The first
+main-frame load that fails in a window's life is retried once; later failures are only logged.
 
 Packaged builds skip all of this and open their published `playUrl` directly, retrying a failed
 load once.

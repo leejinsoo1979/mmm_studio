@@ -53,9 +53,13 @@ async function launch(window) {
   window.webContents.on(
     'did-fail-load',
     (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
-      if (!shouldRetryLoad({ errorCode, isMainFrame, retried })) return
-      retried = true
+      if (!shouldRetryLoad({ errorCode, isMainFrame, retried: false })) return
       const url = validatedURL || plan.url
+      if (retried) {
+        console.warn(`[runtime] ${url} failed to load (${errorDescription}); not retrying again`)
+        return
+      }
+      retried = true
       console.warn(`[runtime] ${url} failed to load (${errorDescription}); retrying once`)
       setTimeout(async () => {
         if (plan.origin) {
