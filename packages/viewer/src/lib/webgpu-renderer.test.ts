@@ -1,7 +1,7 @@
 // @ts-expect-error — bun:test is provided by the Bun runtime; viewer does not
 // depend on @types/bun so the import type is unresolved at compile time.
 import { describe, expect, spyOn, test } from 'bun:test'
-import { BufferGeometry, Float32BufferAttribute, Mesh, Scene } from 'three'
+import { BufferGeometry, Float32BufferAttribute, Mesh, Scene, Texture } from 'three'
 import type { WebGPURenderer } from 'three/webgpu'
 import { SheenSafePhysicalNodeMaterial } from './sheen-safe-material'
 import { prepareWebGPURenderer, rendererForCanvas, watchGpuDevice } from './webgpu-renderer'
@@ -90,6 +90,34 @@ function fakeRenderObjects(onDisposed: (name: string) => void = () => {}) {
   }
 }
 
+/**
+ * The renderer's texture manager as three's is: a texture's first upload
+ * adds a `dispose` listener kept in its data, which takes itself off when
+ * the texture is disposed and is otherwise never removed.
+ */
+function fakeTextures() {
+  const data = new WeakMap<object, { initialized?: boolean; onDispose?: () => void }>()
+  const textures = {
+    get(texture: Texture) {
+      const entry = data.get(texture) ?? {}
+      data.set(texture, entry)
+      return entry
+    },
+    updateTexture(texture: Texture) {
+      const entry = textures.get(texture)
+      if (entry.initialized === true) return
+      entry.initialized = true
+      const onDispose = () => {
+        texture.removeEventListener('dispose', onDispose)
+        data.delete(texture)
+      }
+      entry.onDispose = onDispose
+      texture.addEventListener('dispose', onDispose)
+    },
+  }
+  return textures
+}
+
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 describe('prepareWebGPURenderer', () => {
@@ -98,7 +126,7 @@ describe('prepareWebGPURenderer', () => {
     const { renderer, drawn, asRenderer } = fakeRenderer(device)
     const warn = spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      const release = prepareWebGPURenderer(asRenderer, 'studio')
+      const release = prepareWebGPURenderer(asRenderer, 'canvas')
       const scene = new Scene()
       const full = new Mesh(triangle())
       const empty = new Mesh(triangle(0))
@@ -106,7 +134,7 @@ describe('prepareWebGPURenderer', () => {
       renderer.render(scene)
       expect(drawn).toEqual([full])
       expect(full.geometry.getAttribute('position')).toBeDefined()
-      expect(String(warn.mock.calls[0]?.[0])).toStartWith('[studio] skipped a draw')
+      expect(String(warn.mock.calls[0]?.[0])).toStartWith('[canvas] skipped a draw')
       release()
     } finally {
       warn.mockRestore()
@@ -115,7 +143,7 @@ describe('prepareWebGPURenderer', () => {
 
   test('draws physical materials sheen-safe', () => {
     const { renderer, asRenderer } = fakeRenderer(fakeDevice().device)
-    const release = prepareWebGPURenderer(asRenderer, 'studio')
+    const release = prepareWebGPURenderer(asRenderer, 'canvas')
     expect(renderer.library.materialNodes.get('MeshPhysicalMaterial')).toBe(
       SheenSafePhysicalNodeMaterial,
     )
@@ -125,7 +153,7 @@ describe('prepareWebGPURenderer', () => {
   test('holds back the dispose of a drawn geometry, and lets it through once released', () => {
     const { device } = fakeDevice()
     const { renderer, asRenderer } = fakeRenderer(device)
-    const release = prepareWebGPURenderer(asRenderer, 'studio')
+    const release = prepareWebGPURenderer(asRenderer, 'canvas')
     const scene = new Scene()
     const geometry = triangle()
     scene.add(new Mesh(geometry))
@@ -148,7 +176,7 @@ describe('prepareWebGPURenderer', () => {
     const objects = fakeRenderObjects((name) => disposed.push(name))
     Object.assign(renderer, { _objects: objects })
     const create = objects.createRenderObject
-    const release = prepareWebGPURenderer(asRenderer, 'studio')
+    const release = prepareWebGPURenderer(asRenderer, 'canvas')
     const made = ['quad', 'body', 'hair'].map((name) => objects.createRenderObject(name))
     made[1]?.dispose()
     expect(disposed).toEqual(['body'])
@@ -162,7 +190,7 @@ describe('prepareWebGPURenderer', () => {
     const { renderer, asRenderer } = fakeRenderer(fakeDevice().device)
     const objects = fakeRenderObjects()
     Object.assign(renderer, { _objects: objects })
-    const release = prepareWebGPURenderer(asRenderer, 'studio')
+    const release = prepareWebGPURenderer(asRenderer, 'canvas')
     const made = objects.createRenderObject('body')
     const first = made.geometry
     const second = triangle()
@@ -174,14 +202,36 @@ describe('prepareWebGPURenderer', () => {
     expect(made.listening(second)).toBe(false)
   })
 
+  test('takes the dispose listeners of the textures it uploaded off them once released', () => {
+    const { renderer, asRenderer } = fakeRenderer(fakeDevice().device)
+    const textures = fakeTextures()
+    Object.assign(renderer, { _textures: textures })
+    const update = textures.updateTexture
+    const release = prepareWebGPURenderer(asRenderer, 'canvas')
+    const shared = new Texture()
+    const reused = new Texture()
+    textures.updateTexture(shared)
+    textures.updateTexture(shared)
+    textures.updateTexture(reused)
+    reused.dispose()
+    textures.updateTexture(reused)
+    const listeners = [shared, reused].map((texture) => textures.get(texture).onDispose!)
+    expect(shared.hasEventListener('dispose', listeners[0]!)).toBe(true)
+    expect(reused.hasEventListener('dispose', listeners[1]!)).toBe(true)
+    release()
+    expect(shared.hasEventListener('dispose', listeners[0]!)).toBe(false)
+    expect(reused.hasEventListener('dispose', listeners[1]!)).toBe(false)
+    expect(textures.updateTexture).toBe(update)
+  })
+
   test('logs uncaptured errors under its scope until released', () => {
     const { device, listeners, error } = fakeDevice()
     const { asRenderer } = fakeRenderer(device)
     const printed = spyOn(console, 'error').mockImplementation(() => {})
     try {
-      const release = prepareWebGPURenderer(asRenderer, 'studio')
+      const release = prepareWebGPURenderer(asRenderer, 'canvas')
       error('Vertex buffer slot 0 was not set.')
-      expect(printed.mock.calls[0]?.[0]).toBe('[studio] WebGPU uncaptured error:')
+      expect(printed.mock.calls[0]?.[0]).toBe('[canvas] WebGPU uncaptured error:')
       release()
       expect(listeners.size).toBe(0)
     } finally {
@@ -195,13 +245,13 @@ describe('watchGpuDevice', () => {
     const printed = spyOn(console, 'error').mockImplementation(() => {})
     try {
       const lost = fakeDevice()
-      watchGpuDevice(fakeRenderer(lost.device).asRenderer, 'studio')
+      watchGpuDevice(fakeRenderer(lost.device).asRenderer, 'canvas')
       lost.lose({ reason: 'unknown', message: 'GPU reset' })
       await tick()
-      expect(String(printed.mock.calls[0]?.[0])).toStartWith('[studio] WebGPU device lost')
+      expect(String(printed.mock.calls[0]?.[0])).toStartWith('[canvas] WebGPU device lost')
 
       const destroyed = fakeDevice()
-      watchGpuDevice(fakeRenderer(destroyed.device).asRenderer, 'studio')
+      watchGpuDevice(fakeRenderer(destroyed.device).asRenderer, 'canvas')
       destroyed.lose({ reason: 'destroyed' })
       await tick()
       expect(printed.mock.calls.length).toBe(1)
@@ -213,8 +263,8 @@ describe('watchGpuDevice', () => {
   test('says so when the renderer runs on the WebGL fallback', () => {
     const warn = spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      const stop = watchGpuDevice(fakeRenderer(null).asRenderer, 'studio')
-      expect(String(warn.mock.calls[0]?.[0])).toStartWith('[studio] No WebGPU device')
+      const stop = watchGpuDevice(fakeRenderer(null).asRenderer, 'canvas')
+      expect(String(warn.mock.calls[0]?.[0])).toStartWith('[canvas] No WebGPU device')
       stop()
     } finally {
       warn.mockRestore()

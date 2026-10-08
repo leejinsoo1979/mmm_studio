@@ -202,23 +202,67 @@ export function trackRenderObjects(renderer: WebGPURenderer): () => void {
   }
 }
 
+type TexturesLike = {
+  updateTexture(texture: DisposeListenable, options?: unknown): void
+  get(texture: DisposeListenable): { initialized?: boolean; onDispose?: () => void }
+}
+
+type TextureListener = { texture: WeakRef<DisposeListenable>; onDispose: WeakRef<() => void> }
+
+/**
+ * Each texture the renderer uploads listens for its own `dispose` through a
+ * closure over the renderer's texture manager, and three's
+ * `renderer.dispose()` leaves those listeners in place, so a texture that
+ * outlives the renderer (a cached or module-level one, a body's shared
+ * maps) keeps the renderer alive. This notes each listener as the texture
+ * is first uploaded, weakly, and returns what removes the ones still in
+ * place.
+ */
+export function trackTextureListeners(renderer: WebGPURenderer): () => void {
+  const textures = (renderer as any)._textures as TexturesLike | undefined
+  if (typeof textures?.updateTexture !== 'function') return () => {}
+  const update = textures.updateTexture
+  const listening = new Set<TextureListener>()
+  const gone = new FinalizationRegistry<TextureListener>((entry) => listening.delete(entry))
+  textures.updateTexture = (texture, options) => {
+    const fresh = textures.get(texture).initialized !== true
+    update.call(textures, texture, options)
+    const { onDispose } = textures.get(texture)
+    if (!(fresh && onDispose)) return
+    const entry = { texture: new WeakRef(texture), onDispose: new WeakRef(onDispose) }
+    listening.add(entry)
+    gone.register(texture, entry, entry)
+  }
+  return () => {
+    textures.updateTexture = update
+    for (const entry of listening) {
+      gone.unregister(entry)
+      const onDispose = entry.onDispose.deref()
+      if (onDispose) entry.texture.deref()?.removeEventListener('dispose', onDispose)
+    }
+    listening.clear()
+  }
+}
+
 /**
  * Gives a WebGPURenderer made outside the viewer (after `await
  * renderer.init()`) the viewer's safety nets: the draw guards, the
  * sheen-safe physical material and the device watch. `scope` names it in
  * the log. Returns what undoes them; call it before `renderer.dispose()`,
- * so the geometries and materials it drew, which may live on in another
- * renderer, no longer hold on to it, its meshes or its scenes.
+ * so the geometries, materials and textures it drew, which may live on in
+ * another renderer, no longer hold on to it, its meshes or its scenes.
  */
 export function prepareWebGPURenderer(renderer: WebGPURenderer, scope: string): () => void {
   installSheenSafeMaterial(renderer)
   const guard = installDrawGuards(renderer, scope)
   const stop = watchGpuDevice(renderer, scope)
   const disposeRenderObjects = trackRenderObjects(renderer)
+  const forgetTextures = trackTextureListeners(renderer)
   return () => {
     stop()
     guard.release()
     disposeRenderObjects()
+    forgetTextures()
   }
 }
 
