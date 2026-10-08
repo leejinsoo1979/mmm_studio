@@ -495,7 +495,7 @@ class HairLightingModel extends PhysicalLightingModel {
         materialEnvIntensity,
       )
       reflectedLight.indirectSpecular!.addAssign(
-        sheen.mul(h.albedo.mul(0.3).add(h.rTint.mul(0.02))).mul(ambientOcclusion!),
+        sheen.mul(h.albedo.mul(0.3).add(h.rTint.mul(0.05))).mul(ambientOcclusion!),
       )
     }
   }
