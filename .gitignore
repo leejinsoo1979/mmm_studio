@@ -36,6 +36,10 @@ dist
 # Local persistent editor database
 apps/editor/data/
 
+# The owner's own 실사 characters, whose licences keep them off a public repo
+apps/editor/public/characters/photoreal-local/*
+!apps/editor/public/characters/photoreal-local/README.md
+
 
 # Debug
 npm-debug.log*

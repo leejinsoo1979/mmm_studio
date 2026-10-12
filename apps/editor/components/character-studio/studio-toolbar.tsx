@@ -223,6 +223,7 @@ function FilterMenu({
 export function StudioToolbar({
   randomizing,
   onRandom,
+  canRandom = true,
   snapshotting,
   onSnapshot,
   onAi,
@@ -237,6 +238,8 @@ export function StudioToolbar({
 }: {
   randomizing: boolean
   onRandom: () => void
+  /** False where the look tools don't apply (a 실사 character). */
+  canRandom?: boolean
   snapshotting: boolean
   onSnapshot: () => void
   onAi: () => void
@@ -255,7 +258,7 @@ export function StudioToolbar({
       <div className="pointer-events-auto absolute top-4 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-full bg-black/45 p-1 ring-1 ring-white/10 backdrop-blur-xl">
         <ToolButton
           busy={randomizing}
-          disabled={randomizing}
+          disabled={randomizing || !canRandom}
           icon={Dices}
           label="무작위"
           onClick={onRandom}

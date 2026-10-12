@@ -1,4 +1,11 @@
-import type { AvatarLook, EmoteCue, FaceHandleId, FacePin, FaceRegion } from '@pascal-app/editor'
+import type {
+  AvatarLook,
+  EmoteCue,
+  FaceHandleId,
+  FacePin,
+  FaceRegion,
+  PhotorealCharacter,
+} from '@pascal-app/editor'
 import type { Ref } from 'react'
 import type { AiPhotoFraming } from '@/lib/ai-photo/client'
 
@@ -63,6 +70,8 @@ export type StudioStageApi = {
 export type StudioStageProps = {
   ref?: Ref<StudioStageApi>
   avatarId: string
+  /** The 실사 character shown instead of the Rocketbox one (its look not applied), or null. */
+  real: PhotorealCharacter | null
   /** The look to show (already throttled by the UI). */
   look: AvatarLook
   focus: CameraFocus

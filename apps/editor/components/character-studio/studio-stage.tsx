@@ -2,14 +2,19 @@
 
 import {
   type AvatarLook,
+  Blinker,
   bodyHeightScale,
   EmoteLayer,
   findAvatar,
+  type PhotorealCharacter,
   useAvatarBody,
   useAvatarLook,
   useEmoteClips,
   useFaceTarget,
+  usePhotorealBody,
+  usePhotorealEmoteClips,
 } from '@pascal-app/editor'
+import { ErrorBoundary } from '@pascal-app/viewer'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import {
   type PointerEvent as ReactPointerEvent,
@@ -22,6 +27,7 @@ import {
   useState,
 } from 'react'
 import {
+  type AnimationClip,
   AnimationMixer,
   DirectionalLight,
   type Group,
@@ -141,6 +147,8 @@ const UNDER_FLOOR = 0.03
 
 /** A Rocketbox body stands about 1.95 of its hip height tall. */
 const HEIGHT_PER_HIP = 1.95
+/** How tall the stage frames a body until it knows: an adult's height. */
+const DEFAULT_STATURE = 1.75
 const HIPS_BONE = /Pelvis$/
 /**
  * How many times its own height the tallest look makes a body: the whole
@@ -203,6 +211,8 @@ type StageState = {
   insets: StageInsets
   pose: StagePose
   cue: StudioStageProps['cue']
+  /** How tall the body stands (m) before the look's scale; a 실사 body's is measured once it loads. */
+  stature: number
   /** The look's height scale. */
   scale: number
   zoom: number
@@ -324,7 +334,7 @@ const point = new Vector3()
  * the panel opening glides there. While a handle is held the framing
  * stays put, so the face doesn't slide from under the pointer.
  */
-function CameraRig({ state, stature }: { state: StageState; stature: number }) {
+function CameraRig({ state }: { state: StageState }) {
   const camera = useThree((three) => three.camera) as PerspectiveCamera
   const size = useThree((three) => three.size)
   const springs = useMemo(
@@ -339,7 +349,8 @@ function CameraRig({ state, stature }: { state: StageState; stature: number }) {
     [state],
   )
   useFrame((_, delta) => {
-    const target = state.board.drag && state.held ? state.held : framingFor(state, size, stature)
+    const target =
+      state.board.drag && state.held ? state.held : framingFor(state, size, state.stature)
     state.held = target
     const fov = LENS[state.focus].fov
     if (springs.focus !== state.focus) {
@@ -691,28 +702,27 @@ function keepOwnership(model: Object3D, anisotropy: number) {
 }
 
 /**
- * The character: idling, playing the emote being previewed, or holding
- * still facing the camera (studio-pose.ts); its model is put in the
- * state for the camera and the handles to go by, and it turns with the
- * turntable.
+ * A body on the turntable: idling, playing the emote being previewed, or
+ * holding still facing the camera (studio-pose.ts); its model is put in
+ * the state for the camera and the handles to go by. `onFrame` runs each
+ * frame before it is posed.
  */
-function StudioAvatar({
-  avatarId,
-  look,
+function StagedBody({
+  model,
+  clips,
+  emoteClips,
   state,
   onCueEnd,
+  onFrame,
 }: {
-  avatarId: string
-  look: AvatarLook
+  model: Object3D
+  clips: AnimationClip[]
+  emoteClips: AnimationClip[] | null
   state: StageState
   onCueEnd: () => void
+  onFrame?: (delta: number) => void
 }) {
-  const { avatar, model, clips } = useAvatarBody(avatarId)
-  const anisotropy = useThree((three) => (three.gl as unknown as WebGPURenderer).getMaxAnisotropy())
   const camera = useThree((three) => three.camera)
-  // Before the look sees the body (its effects run after this render).
-  useMemo(() => takeOwnership(model, anisotropy), [model, anisotropy])
-  useAvatarLook(model, look, avatar.id)
   useEffect(() => {
     const shown = state.model
     shown.current = model
@@ -720,7 +730,6 @@ function StudioAvatar({
       if (shown.current === model) shown.current = null
     }
   }, [model, state])
-  const emoteClips = useEmoteClips(avatar, true)
   const groupRef = useRef<Group>(null)
   const endRef = useRef(onCueEnd)
   endRef.current = onCueEnd
@@ -735,7 +744,7 @@ function StudioAvatar({
   }, [clips, pose])
 
   useFrame((_, delta) => {
-    keepOwnership(model, anisotropy)
+    onFrame?.(delta)
     const group = groupRef.current
     if (group) {
       group.rotation.y += (state.yaw - group.rotation.y) * (1 - Math.exp(-TURN_RESPONSE * delta))
@@ -755,6 +764,68 @@ function StudioAvatar({
     <group ref={groupRef}>
       <primitive object={model} />
     </group>
+  )
+}
+
+/** A Rocketbox character in its look, its materials the studio's own (tuned for the close-up). */
+function StudioAvatar({
+  avatarId,
+  look,
+  state,
+  onCueEnd,
+}: {
+  avatarId: string
+  look: AvatarLook
+  state: StageState
+  onCueEnd: () => void
+}) {
+  const { avatar, model, clips } = useAvatarBody(avatarId)
+  const anisotropy = useThree((three) => (three.gl as unknown as WebGPURenderer).getMaxAnisotropy())
+  // Before the look sees the body (its effects run after this render).
+  useMemo(() => takeOwnership(model, anisotropy), [model, anisotropy])
+  useAvatarLook(model, look, avatar.id)
+  const emoteClips = useEmoteClips(avatar, true)
+  return (
+    <StagedBody
+      clips={clips}
+      emoteClips={emoteClips}
+      model={model}
+      onCueEnd={onCueEnd}
+      onFrame={() => keepOwnership(model, anisotropy)}
+      state={state}
+    />
+  )
+}
+
+/**
+ * A 실사 character (photoreal-body.ts): its own shading and the shared clips
+ * on its rig, blinking; no look. Its height, measured as it loads, frames it.
+ */
+function PhotorealAvatar({
+  character,
+  state,
+  onCueEnd,
+}: {
+  character: PhotorealCharacter
+  state: StageState
+  onCueEnd: () => void
+}) {
+  const anisotropy = useThree((three) => (three.gl as unknown as WebGPURenderer).getMaxAnisotropy())
+  const body = usePhotorealBody(character, { anisotropy })
+  const emoteClips = usePhotorealEmoteClips(body, true)
+  const blinker = useMemo(() => new Blinker(body.model), [body.model])
+  useEffect(() => {
+    state.stature = body.stature
+  }, [state, body.stature])
+  return (
+    <StagedBody
+      clips={body.clips}
+      emoteClips={emoteClips}
+      model={body.model}
+      onCueEnd={onCueEnd}
+      onFrame={(delta) => blinker.update(delta)}
+      state={state}
+    />
   )
 }
 
@@ -897,6 +968,7 @@ const CAMERA = { fov: LENS.full.fov, near: 0.05, far: 50, position: [0, 1, 4] as
 export function StudioStage({
   ref,
   avatarId,
+  real,
   look,
   focus,
   insets,
@@ -909,7 +981,6 @@ export function StudioStage({
   onHandleHover,
   onViewChange,
 }: StudioStageProps) {
-  const stature = findAvatar(avatarId).hip * HEIGHT_PER_HIP
   const [board] = useState(createHandleBoard)
   // Made once; the props are copied in below on every render.
   const [state] = useState<StageState>(() => ({
@@ -917,6 +988,7 @@ export function StudioStage({
     insets,
     pose,
     cue,
+    stature: DEFAULT_STATURE,
     scale: 1,
     zoom: 1,
     yaw: 0,
@@ -946,7 +1018,9 @@ export function StudioStage({
   state.insets = insets
   state.pose = pose
   state.cue = cue
-  state.scale = bodyHeightScale(look.body)
+  // A 실사 body is drawn as it comes: the look's height is the Rocketbox body's.
+  state.scale = real ? 1 : bodyHeightScale(look.body)
+  if (!real) state.stature = findAvatar(avatarId).hip * HEIGHT_PER_HIP
   const target = useFaceTarget(avatarId)
   board.sculpt = sculpt
   board.target = target
@@ -989,14 +1063,14 @@ export function StudioStage({
         }
         try {
           return request.kind === 'ai'
-            ? captureAiShot(state.rig, request.framing, model, stature, state.scale)
+            ? captureAiShot(state.rig, request.framing, model, state.stature, state.scale)
             : captureSnapshot(state.rig, request.filter, state.insets)
         } catch (error) {
           return Promise.reject(error)
         }
       },
     }),
-    [setView, frame, state, stature],
+    [setView, frame, state],
   )
 
   // A handle in hand is put back when the handles go (another tab, the UI
@@ -1254,9 +1328,21 @@ export function StudioStage({
         <Platform state={state} />
         <FloorShadow shown={!HEAD_FOCUS.has(focus)} state={state} />
         <Suspense fallback={null}>
-          <StudioAvatar avatarId={avatarId} look={look} onCueEnd={onCueEnd} state={state} />
+          {real ? (
+            <ErrorBoundary
+              fallback={
+                <StudioAvatar avatarId={avatarId} look={look} onCueEnd={onCueEnd} state={state} />
+              }
+              key={real.id}
+              scope="studio-photoreal"
+            >
+              <PhotorealAvatar character={real} onCueEnd={onCueEnd} state={state} />
+            </ErrorBoundary>
+          ) : (
+            <StudioAvatar avatarId={avatarId} look={look} onCueEnd={onCueEnd} state={state} />
+          )}
         </Suspense>
-        <CameraRig state={state} stature={stature} />
+        <CameraRig state={state} />
         <HandleProjector board={board} model={state.model} />
         <RigBridge state={state} />
         <FrameRender state={state} />

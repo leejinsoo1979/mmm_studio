@@ -10,6 +10,7 @@ import {
   avatarTab,
   avatarThumbnailUrl,
   BORROWED_HAIRSTYLES,
+  type CharacterEdition,
   canBindKey,
   DEFAULT_EMOTE_KEYS,
   EMOTE_CATEGORIES,
@@ -22,12 +23,18 @@ import {
   type FaceHandleId,
   type FaceRegion,
   type FaceShape,
+  findPhotoreal,
   keyLabel,
+  LocalPhotorealHint,
   loadHairStyles,
   MAX_CHARACTER_NAME,
   NO_LOOK,
+  PHOTOREAL_CHARACTERS,
+  PHOTOREAL_LOOK_NOTE,
+  PhotorealThumbnail,
   useAvatarProfile,
   useFaceTarget,
+  useLocalPhotoreal,
   useWalkthroughView,
   wornHairStyle,
 } from '@pascal-app/editor'
@@ -39,7 +46,7 @@ import { cn } from '@/lib/utils'
 import { AiPhotoDialog } from './ai-photo-dialog'
 import { download, stampedName } from './ai-photo-label'
 import { lookOn } from './avatar-counterpart'
-import { BasicInfoPanel } from './basic-info-panel'
+import { BasicInfoPanel, EditionToggle } from './basic-info-panel'
 import { BodyBody, BodyFooter } from './body-panel'
 import { CategoryRail } from './category-rail'
 import { FaceEditor } from './face-editor'
@@ -80,6 +87,7 @@ import {
   lookChips,
   type MakeupCategory,
   panelPushes,
+  REAL_CATEGORY,
   regionOfCategory,
   SHORT,
   STILL_TABS,
@@ -96,7 +104,13 @@ import { StudioTabs } from './studio-tabs'
 import { StudioToolbar } from './studio-toolbar'
 import { type StudioTarget, useCharacterStudio } from './use-character-studio'
 
-type Draft = { avatar: string; look: AvatarLook; keys: Record<string, EmoteId> }
+/** The body (a Rocketbox avatar, or a 실사 character in its place), its look, the emote keys. */
+type Draft = {
+  avatar: string
+  look: AvatarLook
+  keys: Record<string, EmoteId>
+  real: string | null
+}
 
 /** The longest NPC name (its node's schema). */
 const MAX_NPC_NAME = 24
@@ -240,6 +254,69 @@ function AvatarGallery({
           </button>
         )
       })}
+    </div>
+  )
+}
+
+/**
+ * The 실사 set as tall cards: those shipped, then the owner's own from the
+ * local folder (with how to add them when there are none), and what a 실사
+ * character can't take from the look tabs.
+ */
+function RealGallery({ real, onPick }: { real: string | null; onPick: (id: string) => void }) {
+  const local = useLocalPhotoreal()
+  const characters = [...PHOTOREAL_CHARACTERS, ...(local ?? [])]
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-3 gap-x-2.5 gap-y-3">
+        {characters.map((entry) => {
+          const selected = entry.id === real
+          return (
+            <button
+              aria-pressed={selected}
+              className={cn(
+                'group flex min-w-0 flex-col items-center gap-1 rounded-2xl',
+                FOCUS_RING,
+              )}
+              key={entry.id}
+              onClick={() => onPick(entry.id)}
+              title={`${entry.label} · ${entry.credit}`}
+              type="button"
+            >
+              <span
+                className={cn(
+                  'relative w-full overflow-hidden rounded-2xl bg-gradient-to-b from-white/[0.09] to-white/[0.02] transition duration-200 ease-out motion-reduce:transition-none',
+                  selected
+                    ? 'shadow-[0_0_0_4px_rgba(56,189,248,0.15)] ring-2 ring-sky-400'
+                    : 'ring-1 ring-white/10 group-hover:ring-white/40',
+                )}
+              >
+                <PhotorealThumbnail
+                  character={entry}
+                  className="aspect-[128/208] h-auto w-full object-contain text-white/40"
+                />
+              </span>
+              <span
+                className={cn(
+                  'w-full truncate text-center text-[11px]',
+                  selected ? 'font-semibold text-white' : 'text-white/70',
+                )}
+              >
+                {entry.label}
+              </span>
+              <span className="w-full truncate text-center text-[10px] text-white/40">
+                {entry.credit}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      {local !== null && local.length === 0 && (
+        <LocalPhotorealHint className="border-white/15 text-white/80" />
+      )}
+      <p className="rounded-xl bg-white/[0.05] px-3 py-2 text-[11px] text-white/55 leading-4">
+        {PHOTOREAL_LOOK_NOTE}
+      </p>
     </div>
   )
 }
@@ -510,17 +587,21 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const initial = useMemo<Draft>(() => {
     if (studioTarget.kind === 'npc') {
       const look = { ...(studioTarget.look ?? NO_LOOK), face: null }
-      return { avatar: studioTarget.avatar, look: lookOn(look, studioTarget.avatar), keys: {} }
+      return {
+        avatar: studioTarget.avatar,
+        look: lookOn(look, studioTarget.avatar),
+        keys: {},
+        real: null,
+      }
     }
     const avatar = useWalkthroughView.getState().character
-    const { look, keys } = useAvatarProfile.getState()
-    return { avatar, look: lookOn(look, avatar), keys }
+    const { look, keys, real } = useAvatarProfile.getState()
+    return { avatar, look: lookOn(look, avatar), keys, real }
   }, [studioTarget])
   const initialName = useMemo(
     () => (studioTarget.kind === 'npc' ? studioTarget.name : useAvatarProfile.getState().name),
     [studioTarget],
   )
-  const tabs = studioTabs(isNpc)
   const viewport = useViewport()
   const wide = cardBeside(viewport)
   const pushes = panelPushes(viewport)
@@ -532,7 +613,9 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const [future, setFuture] = useState<Draft[]>([])
   const [name, setName] = useState(initialName)
   const [tab, setTab] = useState<StudioTab>('preset')
-  const [category, setCategory] = useState(() => firstCategory('preset', isNpc, initial.avatar))
+  const [category, setCategory] = useState(() =>
+    firstCategory('preset', isNpc, initial.avatar, initial.real !== null),
+  )
   const [subs, setSubs] = useState<Record<string, string>>({})
   const [panelOpen, setPanelOpen] = useState(() => window.innerWidth >= WIDE)
   const [hovered, setHovered] = useState<string | null>(null)
@@ -558,6 +641,9 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const rootRef = useRef<HTMLDivElement>(null)
 
   const shown = preview ?? draft
+  // A 실사 character takes no look: only 프리셋 and 동작 apply to it.
+  const real = findPhotoreal(shown.real)
+  const tabs = studioTabs(isNpc, real !== null)
   const stageLook = useThrottled(shown.look, 90)
   const faceTarget = useFaceTarget(shown.avatar)
   const dirty =
@@ -626,6 +712,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
       useAvatarProfile.getState().setLook(draft.look)
       useAvatarProfile.getState().setKeys(draft.keys)
       useAvatarProfile.getState().setName(trimmed)
+      useAvatarProfile.getState().setReal(draft.real)
     }
     close()
   }
@@ -660,8 +747,29 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   }
   const pickAvatar = (avatar: string) => {
     const current = draftRef.current
-    if (avatar !== current.avatar)
-      commit({ ...current, avatar, look: lookOn(current.look, avatar) })
+    if (avatar !== current.avatar || current.real)
+      commit({ ...current, avatar, look: lookOn(current.look, avatar), real: null })
+  }
+  // The 실사 character last shown, so 기본 and back returns to it.
+  const lastReal = useRef(initial.real)
+  const pickReal = (id: string) => {
+    lastReal.current = id
+    const current = draftRef.current
+    if (id !== current.real) commit({ ...current, real: id })
+  }
+  /** 기본 | 실사: the Rocketbox body, or the 실사 character last shown (the first, at first). */
+  const pickEdition = (edition: CharacterEdition) => {
+    const current = draftRef.current
+    if ((edition === 'real') === (current.real !== null)) return
+    setTab('preset')
+    if (viewport.width >= WIDE) setPanelOpen(true)
+    if (edition === 'basic') {
+      setCategory(firstCategory('preset', isNpc, current.avatar))
+      commit({ ...current, real: null })
+      return
+    }
+    setCategory(REAL_CATEGORY.id)
+    commit({ ...current, real: lastReal.current ?? PHOTOREAL_CHARACTERS[0]!.id })
   }
   // The hairstyle library may still be loading (or fail to): the random
   // look is made once it answers, on the draft as it is by then, and the
@@ -704,7 +812,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
     if (viewport.width >= WIDE) setPanelOpen(true)
     if (next === tab) return
     setTab(next)
-    setCategory(firstCategory(next, isNpc, shown.avatar))
+    setCategory(firstCategory(next, isNpc, shown.avatar, real !== null))
     setHovered(null)
     setHandleHover(null)
     setListening(null)
@@ -718,7 +826,15 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
     if (tab === 'face' && id === 'ears') stageRef.current?.setView('angle')
   }
 
-  const categories = categoriesOf(tab, isNpc)
+  // Undoing back to (or from) a 실사 character may leave a tab it hasn't.
+  useEffect(() => {
+    if (!tabs.some(({ id }) => id === tab)) {
+      setTab('preset')
+      setCategory(firstCategory('preset', isNpc, shown.avatar, real !== null))
+    }
+  }, [tabs, tab, isNpc, shown.avatar, real])
+
+  const categories = categoriesOf(tab, isNpc, real !== null)
   const current = categories.find(({ id }) => id === category) ?? categories[0]!
   const subKey = `${tab}/${current.id}`
   const sub = subs[subKey] ?? current.subTabs[0]?.id ?? ''
@@ -982,11 +1098,18 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
       case 'preset':
         return {
           body: (
-            <AvatarGallery
-              avatar={shown.avatar}
-              group={current.id as AvatarTab}
-              onPick={pickAvatar}
-            />
+            <div className="flex flex-col gap-4">
+              {!isNpc && <EditionToggle onEdition={pickEdition} value={real ? 'real' : 'basic'} />}
+              {real ? (
+                <RealGallery onPick={pickReal} real={real.id} />
+              ) : (
+                <AvatarGallery
+                  avatar={shown.avatar}
+                  group={current.id as AvatarTab}
+                  onPick={pickAvatar}
+                />
+              )}
+            </div>
           ),
         }
       case 'face': {
@@ -1141,6 +1264,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const changeContext = {
     look: shown.look,
     avatar: shown.avatar,
+    real: shown.real,
     keys: draft.keys,
     target: faceTarget,
   }
@@ -1167,6 +1291,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
           onAi={() => setAiOpen(true)}
           onFilter={pickFilter}
           onFrame={() => stageRef.current?.frame()}
+          canRandom={!real}
           onRandom={() => void randomize()}
           onRedo={redo}
           onSnapshot={() => void snapshot()}
@@ -1179,6 +1304,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
 
       <StudioStage
         avatarId={shown.avatar}
+        real={real}
         cue={cue}
         filter={filter}
         focus={focusOf(tab, current.id, panelOpen)}
@@ -1204,14 +1330,16 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
         />
         <BasicInfoPanel
           avatar={shown.avatar}
-          chips={lookChips(shown.look)}
+          chips={real ? [] : lookChips(shown.look)}
           compact={!wide}
           maxName={isNpc ? MAX_NPC_NAME : MAX_CHARACTER_NAME}
           name={name}
           npc={isNpc}
           onAvatar={pickAvatar}
+          onEdition={pickEdition}
           onName={setName}
           onReset={resetAll}
+          real={real}
         />
         <CategoryRail
           categories={categories}
@@ -1360,10 +1488,13 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
 
       {aiOpen && (
         <AiPhotoDialog
-          avatarId={shown.avatar}
+          // A 실사 character goes as the plain adult of its sex: the AI is told who it shows by the id.
+          avatarId={
+            real ? (real.gender === 'female' ? 'Female_Adult_01' : 'Male_Adult_01') : shown.avatar
+          }
           capture={aiCapture}
           focus={TAB_FOCUS[tab]}
-          look={shown.look}
+          look={real ? NO_LOOK : shown.look}
           npc={isNpc}
           onAnnounce={announce}
           onClose={() => {

@@ -68,6 +68,15 @@ export {
 } from './lib/csg-utils'
 export type { EdgeMode } from './lib/edge-style'
 export {
+  DEFAULT_SKIN,
+  type HumanSurface,
+  humanMaterial,
+  humanSurfaceOf,
+  SkinMaterial,
+  type SkinSettings,
+  skinReliefTexture,
+} from './lib/human-shading'
+export {
   applyIsolation,
   clearIsolation,
   collectIsolationSubtree,

@@ -1,6 +1,14 @@
 'use client'
 
-import { avatarGender, avatarThumbnailUrl } from '@pascal-app/editor'
+import {
+  avatarGender,
+  avatarThumbnailUrl,
+  CHARACTER_EDITIONS,
+  type CharacterEdition,
+  PHOTOREAL_LOOK_NOTE,
+  type PhotorealCharacter,
+  PhotorealThumbnail,
+} from '@pascal-app/editor'
 import { ChevronLeft, ChevronRight, Mars, PersonStanding, RotateCcw, Venus, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
@@ -99,6 +107,78 @@ function GenderSwitch({
   )
 }
 
+/**
+ * 기본 | 실사: which set the character comes from — the Rocketbox bodies,
+ * which every look tool fits, or the 실사 set (photoreal-catalog.ts).
+ */
+export function EditionToggle({
+  value,
+  onEdition,
+}: {
+  value: CharacterEdition
+  onEdition: (edition: CharacterEdition) => void
+}) {
+  const row = useRef<HTMLDivElement>(null)
+  return (
+    <div
+      aria-label="캐릭터 버전"
+      className="flex rounded-full bg-white/[0.06] p-1 ring-1 ring-white/10"
+      onKeyDown={(event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
+        event.preventDefault()
+        const next = value === 'basic' ? 'real' : 'basic'
+        onEdition(next)
+        row.current?.querySelector<HTMLElement>(`[data-edition="${next}"]`)?.focus()
+      }}
+      ref={row}
+      role="radiogroup"
+    >
+      {CHARACTER_EDITIONS.map(({ id, label }) => {
+        const selected = value === id
+        return (
+          <button
+            aria-checked={selected}
+            className={cn(
+              'h-8 flex-1 rounded-full font-semibold text-[13px] transition duration-200 ease-out motion-reduce:transition-none',
+              FOCUS_RING,
+              selected
+                ? 'bg-sky-400 text-neutral-950 shadow-[0_4px_14px_rgba(56,189,248,0.35)]'
+                : 'text-white/60 hover:text-white',
+            )}
+            data-edition={id}
+            key={id}
+            onClick={() => !selected && onEdition(id)}
+            role="radio"
+            tabIndex={selected ? 0 : -1}
+            type="button"
+          >
+            {id === 'real' ? '실사 버전' : `${label} 버전`}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Who a 실사 character is, and what the look tabs can't do for it. */
+function RealCard({ real }: { real: PhotorealCharacter }) {
+  return (
+    <div className="flex gap-3">
+      <PhotorealThumbnail
+        character={real}
+        className="h-24 w-[60px] shrink-0 rounded-xl bg-white/[0.06] object-contain text-white/40"
+      />
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="truncate font-semibold text-[14px]">{real.label}</span>
+        <span className="text-[11px] text-white/45">
+          {real.gender === 'female' ? '여성' : '남성'} · {real.credit}
+        </span>
+        <p className="text-[11px] text-white/55 leading-4">{PHOTOREAL_LOOK_NOTE}</p>
+      </div>
+    </div>
+  )
+}
+
 const Label = ({ children, htmlFor }: { children: React.ReactNode; htmlFor?: string }) =>
   htmlFor ? (
     <label className="text-[12px] text-white/50" htmlFor={htmlFor}>
@@ -115,22 +195,48 @@ type Props = {
   maxName: number
   avatar: string
   onAvatar: (avatar: string) => void
+  /** The 실사 character shown instead of the Rocketbox one, or null. */
+  real: PhotorealCharacter | null
+  onEdition: (edition: CharacterEdition) => void
   chips: string[]
   onReset: () => void
 }
 
-function Card({ npc, name, onName, maxName, avatar, onAvatar, chips, onReset }: Props) {
+function Card({
+  npc,
+  name,
+  onName,
+  maxName,
+  avatar,
+  onAvatar,
+  real,
+  onEdition,
+  chips,
+  onReset,
+}: Props) {
   const nameId = useId()
   return (
     <div className="flex flex-col gap-4 rounded-2xl bg-neutral-950/75 p-4 shadow-[0_24px_60px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-xl">
-      <div className="flex flex-col gap-1">
-        <Label>연령대</Label>
-        <AgeTrack avatar={avatar} onAvatar={onAvatar} />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label>성별</Label>
-        <GenderSwitch avatar={avatar} onAvatar={onAvatar} />
-      </div>
+      {!npc && (
+        <div className="flex flex-col gap-1.5">
+          <Label>버전</Label>
+          <EditionToggle onEdition={onEdition} value={real ? 'real' : 'basic'} />
+        </div>
+      )}
+      {real ? (
+        <RealCard real={real} />
+      ) : (
+        <>
+          <div className="flex flex-col gap-1">
+            <Label>연령대</Label>
+            <AgeTrack avatar={avatar} onAvatar={onAvatar} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>성별</Label>
+            <GenderSwitch avatar={avatar} onAvatar={onAvatar} />
+          </div>
+        </>
+      )}
       <div className="flex flex-col gap-1.5">
         <Label htmlFor={nameId}>이름</Label>
         <input
@@ -155,7 +261,7 @@ function Card({ npc, name, onName, maxName, avatar, onAvatar, chips, onReset }: 
               </span>
             ))
           ) : (
-            <span className="text-[11px] text-white/40">기본 모습</span>
+            <span className="text-[11px] text-white/40">{real ? '실사 그대로' : '기본 모습'}</span>
           )}
         </div>
       </div>
@@ -179,7 +285,7 @@ function Card({ npc, name, onName, maxName, avatar, onAvatar, chips, onReset }: 
  * into a chip that opens it.
  */
 export function BasicInfoPanel(props: Props & { compact: boolean }) {
-  const { compact, npc, name, avatar } = props
+  const { compact, npc, name, avatar, real } = props
   const shownName = name.trim() || (npc ? 'NPC' : '내 캐릭터')
   const title = npc ? `${shownName}, 어떤 모습인가요?` : `${shownName}, 어떤 모습을 하고 있나요?`
   const [open, setOpen] = useState(false)
@@ -206,11 +312,18 @@ export function BasicInfoPanel(props: Props & { compact: boolean }) {
           onClick={() => setOpen(!open)}
           type="button"
         >
-          <img
-            alt=""
-            className="size-8 rounded-full bg-white/10 object-cover object-top"
-            src={avatarThumbnailUrl(avatar)}
-          />
+          {real ? (
+            <PhotorealThumbnail
+              character={real}
+              className="size-8 rounded-full bg-white/10 object-cover object-top text-white/50"
+            />
+          ) : (
+            <img
+              alt=""
+              className="size-8 rounded-full bg-white/10 object-cover object-top"
+              src={avatarThumbnailUrl(avatar)}
+            />
+          )}
           <span className="max-w-40 truncate font-semibold text-[13px]">{shownName}</span>
         </button>
         {open && (
