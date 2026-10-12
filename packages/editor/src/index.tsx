@@ -156,9 +156,14 @@ export {
   usePhotorealEmoteClips,
 } from './components/editor/first-person/photoreal-body'
 export {
+  type AiPhotorealEntry,
+  aiAvatarIdOf,
+  aiCharacters,
+  aiPhotorealId,
   CHARACTER_EDITIONS,
   type CharacterEdition,
   findPhotoreal,
+  PHOTOREAL_AI_CREDIT,
   PHOTOREAL_CHARACTERS,
   PHOTOREAL_LOCAL_FOLDER,
   PHOTOREAL_LOOK_NOTE,
