@@ -1,8 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 import { Bone, Matrix4, Raycaster, Skeleton, Vector3 } from 'three'
-import type { BaseResult } from './hair-base'
-import { hairMesh, ribbonGeometry, rootsGeometry, showShells } from './hair-client'
-import type { RibbonArrays } from './hair-grow'
+import type { BaseInput, BaseResult } from './hair-base'
+import {
+  HairClient,
+  type HairPort,
+  hairMesh,
+  ribbonGeometry,
+  rootsGeometry,
+  showShells,
+} from './hair-client'
+import type { HairBuild, HairReply, HairRequest, RibbonArrays } from './hair-grow'
 import { CORE_COVERAGE, newHairValues } from './hair-material'
 
 /** One strip of `points` points, two vertices each, as a build lays it out. */
@@ -148,5 +155,138 @@ describe('hairMesh', () => {
   test('makes no mesh for a geometry with nothing to draw', () => {
     const empty = ribbonGeometry({ ...strip(4), index: new Uint32Array(0) })
     expect(hairMesh('strays', empty, skeleton, new Matrix4(), HEAD, values, true)).toBeNull()
+  })
+})
+
+/** A stand-in hair worker: what it was sent, and a way to answer. */
+function fakeWorker() {
+  const sent: HairRequest[] = []
+  let terminated = false
+  const port: HairPort = {
+    postMessage: (message) => sent.push(message),
+    onmessage: null,
+    onerror: null,
+    terminate: () => {
+      terminated = true
+    },
+  }
+  const answer = (reply: HairReply) => port.onmessage!({ data: reply } as MessageEvent<HairReply>)
+  const crash = () => port.onerror!(new Event('error'))
+  return { port, sent, answer, crash, terminated: () => terminated }
+}
+
+const input = (avatar: string) => ({ avatar }) as BaseInput
+const base = {} as BaseResult
+const build = { key: 'k' } as HairBuild
+
+const grow = (slot: string, avatar: string, version = 0) => ({
+  slot,
+  avatar,
+  cut: { style: 'bob' as const, length: 0, volume: 0, curl: 0, part: 0, fringe: 0.5 },
+  tier: 'studio' as const,
+  shape: { version, head: new Float32Array(3), body: null },
+  priority: 0,
+})
+
+function listener() {
+  const builds: string[] = []
+  const errors: string[] = []
+  return {
+    builds,
+    errors,
+    listener: {
+      build: (key: string) => builds.push(key),
+      error: (message: string) => errors.push(message),
+    },
+  }
+}
+
+describe('HairClient', () => {
+  test('starts its worker on first use and sends a head once, however often it is asked for', async () => {
+    const worker = fakeWorker()
+    let started = 0
+    const client = new HairClient(() => {
+      started++
+      return worker.port
+    })
+    expect(started).toBe(0)
+    const first = client.base('a', input('a'))
+    expect(client.base('a', input('a'))).toBe(first)
+    expect(started).toBe(1)
+    expect(worker.sent.map((m) => m.kind)).toEqual(['base'])
+    worker.answer({ kind: 'base', avatar: 'a', base })
+    expect(await first).toBe(base)
+  })
+
+  test("routes each slot's builds to it, and nothing once it let go", () => {
+    const worker = fakeWorker()
+    const client = new HairClient(() => worker.port)
+    const one = listener()
+    const two = listener()
+    client.grow(grow('s1', 'a'), one.listener)
+    client.grow(grow('s2', 'a'), two.listener)
+    worker.answer({ kind: 'grow', slot: 's2', key: 'k2', build })
+    worker.answer({ kind: 'grow', slot: 's1', key: 'k1', build })
+    expect(one.builds).toEqual(['k1'])
+    expect(two.builds).toEqual(['k2'])
+    client.cancel('s1')
+    expect(worker.sent.at(-1)).toEqual({ kind: 'cancel', slot: 's1' })
+    worker.answer({ kind: 'grow', slot: 's1', key: 'k3', build })
+    expect(one.builds).toEqual(['k1'])
+  })
+
+  test("sends a head the worker let go again, then each of its slots' latest ask", () => {
+    const worker = fakeWorker()
+    const client = new HairClient(() => worker.port)
+    void client.base('a', input('a'))
+    const { listener: l } = listener()
+    client.grow(grow('s1', 'a', 1), l)
+    client.grow(grow('s1', 'a', 2), l)
+    client.grow(grow('s2', 'b'), l)
+    worker.sent.length = 0
+    worker.answer({ kind: 'missing', avatar: 'a' })
+    expect(worker.sent.map((m) => m.kind)).toEqual(['base', 'grow'])
+    const again = worker.sent[1] as Extract<HairRequest, { kind: 'grow' }>
+    expect(again.slot).toBe('s1')
+    expect(again.shape.version).toBe(2)
+  })
+
+  test('tells a slot its grow failed, and a failed head is built again when asked for', async () => {
+    const worker = fakeWorker()
+    const client = new HairClient(() => worker.port)
+    const failing = client.base('a', input('a'))
+    const one = listener()
+    client.grow(grow('s1', 'a'), one.listener)
+    worker.answer({ kind: 'error', avatar: 'a', message: 'no skull' })
+    await expect(failing).rejects.toThrow('no skull')
+    worker.answer({ kind: 'error', slot: 's1', avatar: 'a', message: 'no skull' })
+    expect(one.errors).toEqual(['no skull'])
+    worker.sent.length = 0
+    void client.base('a', input('a'))
+    expect(worker.sent.map((m) => m.kind)).toEqual(['base'])
+  })
+
+  test('fails every head and slot when the worker stops, and every later ask at once', async () => {
+    const worker = fakeWorker()
+    const client = new HairClient(() => worker.port)
+    const pending = client.base('a', input('a'))
+    const one = listener()
+    client.grow(grow('s1', 'a'), one.listener)
+    worker.crash()
+    expect(worker.terminated()).toBe(true)
+    await expect(pending).rejects.toThrow()
+    expect(one.errors).toHaveLength(1)
+    await expect(client.base('b', input('b'))).rejects.toThrow()
+    const two = listener()
+    client.grow(grow('s2', 'b'), two.listener)
+    await Promise.resolve()
+    expect(two.errors).toHaveLength(1)
+  })
+
+  test('keeps characters on their own hair where no worker starts', async () => {
+    const client = new HairClient(() => {
+      throw new Error('no workers here')
+    })
+    await expect(client.base('a', input('a'))).rejects.toThrow('no workers here')
   })
 })

@@ -435,6 +435,10 @@ export function shapeKey(shape: ShapeInput) {
   return `${shape.head.length}.${h.toString(36)}`
 }
 
+/** A build's key (see HairBuild): the same for the same avatar, cut, tier and shape, whoever asks. */
+export const buildKey = (avatar: string, cut: GrowCut, tier: Tier, shape: ShapeInput) =>
+  `${avatar}|${cutKey(cut)}|${tier}|${shapeKey(shape)}`
+
 const stateOf = (head: HeadData) => head as HeadState
 
 export function headData(
@@ -2054,7 +2058,7 @@ export async function growHair(
   ends.sort((x, y) => x - y)
   const triangles = (inner.index.length + outer.index.length + (strays?.index.length ?? 0)) / 3
   return {
-    key: `${state.avatar}|${cutKey(groom.sliders)}|${tier}|${shapeKey(shape)}`,
+    key: buildKey(state.avatar, groom.sliders, tier, shape),
     tier,
     geometries: { inner, outer, ...(strays ? { strays } : {}), ...(soft ? { soft } : {}) },
     strips: { inner: innerIds.length, outer: outerIds.length, strays: strayIds.length },
