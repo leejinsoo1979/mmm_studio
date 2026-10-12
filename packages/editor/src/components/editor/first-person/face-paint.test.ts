@@ -438,7 +438,6 @@ describe('a body dressed in a look, placed by its landmarks', () => {
         face: null,
         paint: NO_PAINT,
         scalp: null,
-        scalpMode: 'wig',
         stubble: null,
         wig: null,
         shave: 0.35,

@@ -111,7 +111,7 @@ function useNpcLook(node: NpcNode) {
 function StaticBody({ node }: { node: NpcNode }) {
   const { look, strideScale } = useNpcLook(node)
   const { avatar, model, clips } = useAvatarBody(node.avatar, strideScale)
-  useAvatarLook(model, look, avatar.id, 'game')
+  useAvatarLook(model, look, avatar.id)
   useUnpickable(model)
 
   useLayoutEffect(() => {
@@ -137,7 +137,7 @@ const lookAt = new Vector3()
 function LiveBody({ node }: { node: NpcNode }) {
   const { look, heightScale, strideScale } = useNpcLook(node)
   const { avatar, model, clips, gaitSet } = useAvatarBody(node.avatar, strideScale)
-  useAvatarLook(model, look, avatar.id, 'game')
+  useAvatarLook(model, look, avatar.id)
   useUnpickable(model)
   const [emoted, setEmoted] = useState(false)
   const emoteClips = useEmoteClips(avatar, emoted)

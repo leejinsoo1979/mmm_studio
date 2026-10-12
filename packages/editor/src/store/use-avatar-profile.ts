@@ -26,7 +26,6 @@ import {
   readFaceShape,
 } from '../components/editor/first-person/face-shape'
 import { type AvatarFeet, readAvatarFeet, SHOD } from '../components/editor/first-person/footwear'
-import { type HairCut, readHairCut } from '../components/editor/first-person/hair-cut'
 import { type HairStyle, readHairStyle } from '../components/editor/first-person/hair-styles'
 
 /**
@@ -81,11 +80,8 @@ export const DEFAULT_SHAVE = 0.35
 /**
  * The player's changes to their character: hair and skin dyes (hex), a face
  * photo, the face's shape (the photo's proportions, the sliders, the
- * sculpted pins), the build, the hair grown on its scalp (`hairCut`, null
- * for its own), and what is painted on the face. `hairStyle` (a borrowed
- * hairstyle or the bald head) and `shave` (how much a shaved head's stubble
- * had grown back, 0–1) are kept as saved, though no longer worn, for the
- * studio to offer the closest cut in their place.
+ * sculpted pins), the build, the hairstyle and how much a shaved head's
+ * stubble has grown back (0–1), and what is painted on the face.
  */
 export type AvatarLook = {
   hair: string | null
@@ -93,7 +89,6 @@ export type AvatarLook = {
   face: AvatarFace | null
   shape: FaceShape
   body: BodyShape
-  hairCut: HairCut | null
   hairStyle: HairStyle
   shave: number
   paint: FacePaint
@@ -106,7 +101,6 @@ export const NO_LOOK: AvatarLook = {
   face: null,
   shape: DEFAULT_FACE_SHAPE,
   body: DEFAULT_BODY_SHAPE,
-  hairCut: null,
   hairStyle: null,
   shave: DEFAULT_SHAVE,
   paint: NO_PAINT,
@@ -123,7 +117,6 @@ export function readAvatarLook(value: unknown): AvatarLook {
     face: readAvatarFace(look.face),
     shape: readFaceShape(look.shape),
     body: readBodyShape(look.body),
-    hairCut: readHairCut(look.hairCut),
     hairStyle: readHairStyle(look.hairStyle),
     shave: unit(look.shave, DEFAULT_SHAVE),
     paint: readFacePaint(look.paint),
@@ -133,9 +126,8 @@ export function readAvatarLook(value: unknown): AvatarLook {
 
 /**
  * What of a look is painted on the character's textures (the shapes are the
- * geometry's, generated hair its own meshes): the dyes, the face photo, the
- * face paint, and the skin painted where the head's own hair was (with a
- * shaved head's stubble).
+ * geometry's, a borrowed hairstyle its own mesh): the dyes, the face photo,
+ * the face paint, and a shaved head and its stubble.
  */
 export type AvatarPaint = Pick<
   AvatarLook,
@@ -151,10 +143,9 @@ export const paintOf = (look: AvatarLook): AvatarPaint => ({
   paint: look.paint,
   feet: look.feet,
   shave: look.shave,
-  // Hair grown on the scalp lays the head's own hair flat, its skin painted
-  // where that hair was. A borrowed hairstyle is no longer worn: the
-  // character keeps its own hair, painted as it is.
-  bald: look.hairCut !== null,
+  // Any hairstyle but the character's own makes the head bald, its skin
+  // painted round where its own hair was taken out.
+  bald: look.hairStyle !== null,
 })
 
 /** Whether a look changes the character's textures. */
@@ -169,16 +160,11 @@ export const hasLook = (look: AvatarPaint | null | undefined): look is AvatarPai
         look.feet.wear !== 'shoes'),
   )
 
-/**
- * Whether a look changes the character at all. A borrowed hairstyle still
- * counts, though it is no longer worn: it is kept for the studio to offer
- * the closest cut in its place.
- */
+/** Whether a look changes the character at all. */
 export const changesCharacter = (look: AvatarLook) =>
   hasLook(paintOf(look)) ||
   hasFaceShape(look.shape) ||
   hasBodyShape(look.body) ||
-  look.hairCut !== null ||
   look.hairStyle !== null
 
 /** The longest name a player gives their character (in characters). */

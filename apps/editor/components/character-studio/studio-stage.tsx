@@ -5,8 +5,6 @@ import {
   bodyHeightScale,
   EmoteLayer,
   findAvatar,
-  hairSettled,
-  setHairKeyLight,
   useAvatarBody,
   useAvatarLook,
   useEmoteClips,
@@ -438,12 +436,6 @@ function StudioLights({ state }: { state: StageState }) {
   useEffect(() => {
     state.rig.aimLights = aim
   }, [state, aim])
-  // Generated hair shadows itself by the key's shadow, with its own bias in
-  // place of the key's; the game's sun is not the studio's key.
-  useEffect(() => {
-    setHairKeyLight(lights[0]!.light)
-    return () => setHairKeyLight(null)
-  }, [lights])
   useFrame(() => aim(state.view))
   return (
     <>
@@ -548,13 +540,6 @@ const ownMaterials = new WeakMap<Material, Material>()
 const glossed = new WeakMap<Texture, Texture>()
 
 const isOwn = (thing: { userData: Record<string, unknown> }) => thing.userData[STUDIO] === true
-
-/**
- * Node materials (generated hair's) are made for every renderer as they
- * are, one shared by every character: the studio leaves them be.
- */
-const isNodeMaterial = (material: Material) =>
-  (material as { isNodeMaterial?: boolean }).isNodeMaterial === true
 
 /** The studio's copy of a texture — the game's own is drei's, shared — sharpened at a slant. */
 function ownTexture(texture: Texture, anisotropy: number): Texture {
@@ -677,7 +662,7 @@ function takeOwnership(model: Object3D, anisotropy: number) {
     const mesh = object as Mesh
     if (!mesh.isMesh || Array.isArray(mesh.material)) return
     const material = mesh.material as Material
-    if (isOwn(material) || isNodeMaterial(material)) return
+    if (isOwn(material)) return
     let copy = ownMaterials.get(material)
     if (!copy) {
       copy = material.clone()
@@ -698,7 +683,7 @@ function keepOwnership(model: Object3D, anisotropy: number) {
     const mesh = object as Mesh
     if (!mesh.isMesh || Array.isArray(mesh.material)) return
     const material = mesh.material as Material
-    if (isOwn(material) || isNodeMaterial(material)) return
+    if (isOwn(material)) return
     const copy = ownMaterials.get(material)
     if (copy) mesh.material = copy
     else tune(material, mesh, anisotropy)
@@ -727,7 +712,7 @@ function StudioAvatar({
   const camera = useThree((three) => three.camera)
   // Before the look sees the body (its effects run after this render).
   useMemo(() => takeOwnership(model, anisotropy), [model, anisotropy])
-  useAvatarLook(model, look, avatar.id, 'studio')
+  useAvatarLook(model, look, avatar.id)
   useEffect(() => {
     const shown = state.model
     shown.current = model
@@ -901,11 +886,6 @@ type Gesture =
 /** The camera's lens when the canvas starts (the rig eases it from there). */
 const CAMERA = { fov: LENS.full.fov, near: 0.05, far: 50, position: [0, 1, 4] as const }
 
-/** How long (ms) a capture waits for generated hair to reach its final tier. */
-const HAIR_WAIT_MS = 4000
-
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
-
 /**
  * The studio's 3D stage, full-bleed under the studio's chrome: the
  * character on a lit turntable, framed by `focus` in the free room the
@@ -1002,14 +982,18 @@ export function StudioStage({
     (): StudioStageApi => ({
       setView,
       frame,
-      capture: async (request) => {
+      capture: (request) => {
         const model = state.model.current
-        if (!(model && state.rig.gl)) throw new Error('capture: the character has not loaded')
-        // Its hair at its final tier, not a drag's preview, unless that takes too long.
-        await Promise.race([hairSettled(model), sleep(HAIR_WAIT_MS)])
-        return request.kind === 'ai'
-          ? captureAiShot(state.rig, request.framing, model, stature, state.scale)
-          : captureSnapshot(state.rig, request.filter, state.insets)
+        if (!(model && state.rig.gl)) {
+          return Promise.reject(new Error('capture: the character has not loaded'))
+        }
+        try {
+          return request.kind === 'ai'
+            ? captureAiShot(state.rig, request.framing, model, stature, state.scale)
+            : captureSnapshot(state.rig, request.filter, state.insets)
+        } catch (error) {
+          return Promise.reject(error)
+        }
       },
     }),
     [setView, frame, state, stature],

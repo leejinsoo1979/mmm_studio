@@ -34,7 +34,6 @@ import { hasBodyShape } from './body-shape'
 import { hasFacePaint, NO_PAINT } from './face-paint'
 import { loadFaceTargets } from './face-targets'
 import { SHOD } from './footwear'
-import { type HairDetail, useGeneratedHair } from './generated-hair'
 import { wornHairStyle } from './hair-styles'
 import { headGeometry } from './head-geometry'
 import {
@@ -46,7 +45,6 @@ import {
   type LookResult,
   type Part,
   runLookJob,
-  type ScalpMode,
   sameLookJob,
 } from './look-job'
 import { packTriangles, type Rgb } from './look-pixels'
@@ -320,7 +318,6 @@ async function applyLook(
   scalp: ScalpPaint | null,
   stubble: Rgb | null,
   wig: Float32Array | null,
-  scalpMode: ScalpMode,
   avatarId: string,
   signal: AbortSignal,
 ): Promise<{ undo: () => void; retry: boolean } | null> {
@@ -359,7 +356,6 @@ async function applyLook(
     face: target && look.face,
     paint: look.paint,
     scalp: look.bald ? scalp : null,
-    scalpMode,
     stubble: look.bald ? stubble : null,
     wig: look.bald ? wig : null,
     shave: look.shave,
@@ -434,31 +430,17 @@ const RETRY_AFTER = 3000
  * Keeps a body dressed in a look, and its face shaped by it. A new look
  * replaces the old one only once it's ready (a face takes a moment), so the
  * body never shows undressed in between; no look, another body, or
- * unmounting undresses it at once. A look's generated hair is grown at
- * `hairDetail` (see generated-hair.ts); while it is worn the look paints
- * the head's skin alone, and a dye is the hair's own colour, not a texture.
+ * unmounting undresses it at once.
  */
 export function useAvatarLook(
   model: Object3D,
   look: AvatarLook | null | undefined,
   avatarId: string,
-  hairDetail: HairDetail = 'game',
 ) {
   const dressing = useRef<{ model: Object3D; undo: () => void } | null>(null)
-  const cut = look?.hairCut ?? null
-  const hairStyle = cut ? null : wornHairStyle(look?.hairStyle ?? null)
-  const dye = look?.hair ?? null
-  const generated = useGeneratedHair(
-    model,
-    avatarId,
-    cut,
-    { hair: dye, skin: look?.skin ?? null },
-    hairDetail,
-  ).on
-  const borrowed = useAvatarHair(model, hairStyle, dye)
-  const worn = generated ?? borrowed
-  // Generated hair takes its dye in its material: the textures are not dyed.
-  const hair = generated ? null : dye
+  const hairStyle = wornHairStyle(look?.hairStyle ?? null)
+  const hair = look?.hair ?? null
+  const worn = useAvatarHair(model, hairStyle, hair)
   const [feet, setFeet] = useState<ReturnType<typeof feetOn>>(null)
   useAvatarShape(model, look, avatarId, worn?.shaper ?? null, feet)
 
@@ -479,12 +461,10 @@ export function useAvatarLook(
   const face = look?.face ?? null
   const paint = look?.paint ?? NO_PAINT
   const footwear = look?.feet ?? SHOD
-  // A shaved head's stubble is never painted under generated hair.
-  const shave = generated ? DEFAULT_SHAVE : (look?.shave ?? DEFAULT_SHAVE)
+  const shave = look?.shave ?? DEFAULT_SHAVE
   const scalp = worn?.paint ?? null
   const stubble = worn?.stubble ?? null
   const wig = worn?.hairline ?? null
-  const scalpMode: ScalpMode = worn?.mode ?? 'wig'
   useEffect(() => {
     const look: AvatarPaint = {
       hair,
@@ -505,7 +485,7 @@ export function useAvatarLook(
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const dress = (attempt: number) => {
-      applyLook(model, look, scalp, stubble, wig, scalpMode, avatarId, controller.signal)
+      applyLook(model, look, scalp, stubble, wig, avatarId, controller.signal)
         .then((applied) => {
           if (!applied) return
           if (controller.signal.aborted) {
@@ -526,7 +506,7 @@ export function useAvatarLook(
       controller.abort()
       clearTimeout(timer)
     }
-  }, [model, hair, skin, face, paint, footwear, shave, scalp, stubble, wig, scalpMode, avatarId])
+  }, [model, hair, skin, face, paint, footwear, shave, scalp, stubble, wig, avatarId])
 
   useEffect(
     () => () => {

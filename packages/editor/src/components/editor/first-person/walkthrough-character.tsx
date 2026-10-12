@@ -122,7 +122,7 @@ export function WalkthroughCharacter({
     useWalkthroughView((state) => state.character),
     bodyStrideScale(look.body),
   )
-  useAvatarLook(model, look, avatar.id, 'game')
+  useAvatarLook(model, look, avatar.id)
   const emoteClips = useEmoteClips(avatar, true)
   const rootRef = useRef<Group>(null)
   const lastPositionRef = useRef<Vector3 | null>(null)

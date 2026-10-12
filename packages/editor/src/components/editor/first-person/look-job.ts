@@ -56,14 +56,6 @@ export type LookBody = {
   geometry: PackedGeometry
 }
 
-/**
- * What a bald head's skin is painted for: borrowed hair worn over it like a
- * wig (its stubble round the hairline, a shaved head's shade, the dye), or
- * hair generated on the head's own scalp, which paints the skin alone and
- * leaves the dye to the hair's material, so a dye starts no job.
- */
-export type ScalpMode = 'wig' | 'generated'
-
 /** A look to put on a body (see `AvatarPaint`), with the character's face landmarks. */
 export type LookJob = {
   body: LookBody
@@ -81,7 +73,6 @@ export type LookJob = {
   paint: FacePaint
   /** How a bald head's skin is painted round where its hair was taken out (see bald-head.ts); null for its own hair. */
   scalp: ScalpPaint | null
-  scalpMode: ScalpMode
   /**
    * The colour of the hair worn over a bald head, which the stubble round
    * its hairline is (see scalp-paint.ts): a borrowed style's, or its dye's.
@@ -129,7 +120,6 @@ const SAME_PART: {
   face: alike,
   paint: alike,
   scalp: is,
-  scalpMode: is,
   stubble: alike,
   wig: is,
   shave: is,
@@ -139,21 +129,11 @@ const SAME_PART: {
   target: is,
 }
 
-/** What a job under generated hair leaves out: the dye is the hair's material's, and no stubble is painted. */
-const NOT_GENERATED: ReadonlySet<keyof LookJob> = new Set(['hair', 'stubble', 'wig', 'shave'])
-
-/**
- * Whether two jobs make the same look: the same body (by its key) in the
- * same look. Under generated hair two looks that differ only in what such
- * a job leaves out (a dye) are the same.
- */
+/** Whether two jobs make the same look: the same body (by its key) in the same look. */
 export function sameLookJob(a: LookJob, b: LookJob): boolean {
   if (a.body.key !== b.body.key) return false
-  const generated = a.scalpMode === 'generated' && b.scalpMode === 'generated'
-  return (Object.keys(SAME_PART) as (keyof typeof SAME_PART)[]).every(
-    (part) =>
-      (generated && NOT_GENERATED.has(part)) ||
-      (SAME_PART[part] as (x: unknown, y: unknown) => boolean)(a[part], b[part]),
+  return (Object.keys(SAME_PART) as (keyof typeof SAME_PART)[]).every((part) =>
+    (SAME_PART[part] as (x: unknown, y: unknown) => boolean)(a[part], b[part]),
   )
 }
 
@@ -335,25 +315,6 @@ function keepConnectedHair(mask: Float32Array, head: Pixels, geometry: HeadGeome
   )
 }
 
-/**
- * A character's own colours on its textures: its skin's (the cheeks), its
- * hair's (its cards', or what is painted on its crown; null for none) and
- * its cards' alone. A crown of a colour hair never is (a blue cap,
- * camouflage, a hijab) is gear, not hair to dye or paint over; so is a
- * card's colour that isn't a hair's (the opacity texture's gear, a helmet's
- * visor or reflective strip, outweighing the hair): the crown under the
- * cards is the hair's.
- */
-export function ownColours(head: Pixels, opacity: Pixels | null, geometry: HeadGeometry) {
-  const skin = skinColor(head, geometry)
-  const crown = crownColor(head, geometry)
-  const painted =
-    hairHued(crown) && colorDistance(...crown, skin, luminance(...skin)) > BARE_CROWN ? crown : null
-  const cards = opacity && meanColor(opacity)
-  const hair: Rgb | null = cards && hairHued(cards) ? cards : painted
-  return { skin, hair, cards }
-}
-
 /** What a look needs to know of a body's textures (see `Analysis`). */
 export function analyseBody(
   head: Pixels,
@@ -361,8 +322,17 @@ export function analyseBody(
   opacity: Pixels | null,
   geometry: HeadGeometry,
 ): Analysis {
-  const { skin, hair: hairColour, cards } = ownColours(head, opacity, geometry)
+  const skin = skinColor(head, geometry)
   const skinLum = luminance(...skin)
+  // A crown of a colour hair never is (a blue cap, camouflage, a hijab) is
+  // gear, not hair to dye or paint over; so is a card's colour that isn't a
+  // hair's (the opacity texture's gear, a helmet's visor or reflective
+  // strip, outweighing the hair): the crown under the cards is the hair's.
+  const crown = crownColor(head, geometry)
+  const painted =
+    hairHued(crown) && colorDistance(...crown, skin, skinLum) > BARE_CROWN ? crown : null
+  const cards = opacity && meanColor(opacity)
+  const hairColour = cards && hairHued(cards) ? cards : painted
   const hairOnHead = hairColour
     ? hairMask(head, hairColour, skin)
     : new Float32Array(head.width * head.height)
@@ -506,18 +476,14 @@ function painterOf(analysis: Analysis, scalp: ScalpPaint): ScalpPainter {
  * cut to the scalp's tone (see `scalpTone`) with its stubble as grown
  * back as the look says, the face paint over it all, and the irises last (a face photo's, unless
  * the paint picks one). `photo` is the face's photo, read (null leaves the
- * face out). Under generated hair the scalp is painted skin alone, and
- * nothing is dyed: the hair's colour is its material's, and the beard, the
- * brows and the lashes keep their own.
+ * face out).
  */
 export function dressBody(
   analysis: Analysis,
   job: Omit<LookJob, 'body'> & { key: string },
   photo: Pixels | null,
 ): Partial<Record<Part, Pixels>> {
-  const generated = job.scalpMode === 'generated'
-  const { face, skin, paint, target, scalp } = job
-  const hair = generated ? null : job.hair
+  const { face, hair, skin, paint, target, scalp } = job
   const bald = scalp !== null
   const swap = face && photo && target
   const eyes = paint.eyes ?? face?.eyes ?? null
@@ -557,17 +523,13 @@ export function dressBody(
     }
     if (scalp) {
       const painter = painterOf(analysis, scalp)
-      const tone = scalpTone(analysis, painter, skin, carried)
-      if (generated) painter.paint(head, tone)
-      else {
-        painter.paint(
-          head,
-          tone,
-          job.wig ? (hair ? hexToRgb(hair) : job.stubble) : analysis.hairColor,
-          job.wig,
-          job.shave,
-        )
-      }
+      painter.paint(
+        head,
+        scalpTone(analysis, painter, skin, carried),
+        job.wig ? (hair ? hexToRgb(hair) : job.stubble) : analysis.hairColor,
+        job.wig,
+        job.shave,
+      )
     }
     if (target) {
       paintFace(head, analysis.geometry, target, paint, {

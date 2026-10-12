@@ -250,44 +250,19 @@ const STEP = 0.002
  */
 type Moves = Float32Array
 
-/**
- * A mesh's moves under a shaper, or null when it moves nothing there.
- * Given the moves worked out for another geometry of the mesh (`before`,
- * on `from`), a point that stands where it stood there keeps its move.
- */
-function movesOf(
-  mesh: Mesh,
-  original: BufferGeometry,
-  move: PointMove,
-  step: number,
-  before?: { from: BufferGeometry; moves: Moves | null },
-) {
+/** A mesh's moves under a shaper, or null when it moves nothing there. */
+function movesOf(mesh: Mesh, original: BufferGeometry, move: PointMove, step: number) {
   const position = original.getAttribute('position')
   if (!position) return null
   const skinned = mesh as SkinnedMesh
   const toBind = skinned.isSkinnedMesh ? skinned.bindMatrix : null
   const moves: Moves = new Float32Array(position.count * 12)
-  const was = before?.from.getAttribute('position')
-  const known = was?.count === position.count ? was : null
   const point = new Vector3()
   const shifted = new Vector3()
   const displacement = new Vector3()
   const around = new Vector3()
   let any = false
-  // As floats: one geometry's points may be quantized, the other's not.
-  const same = (i: number) =>
-    Math.fround(known!.getX(i)) === Math.fround(position.getX(i)) &&
-    Math.fround(known!.getY(i)) === Math.fround(position.getY(i)) &&
-    Math.fround(known!.getZ(i)) === Math.fround(position.getZ(i))
   for (let i = 0; i < position.count; i++) {
-    if (known && same(i)) {
-      const kept = before!.moves
-      if (kept && (kept[i * 12] !== 0 || kept[i * 12 + 1] !== 0 || kept[i * 12 + 2] !== 0)) {
-        moves.set(kept.subarray(i * 12, i * 12 + 12), i * 12)
-        any = true
-      }
-      continue
-    }
     point.fromBufferAttribute(position, i)
     if (toBind) point.applyMatrix4(toBind)
     move(point, i, displacement)
@@ -407,33 +382,6 @@ export function headOf(model: Object3D): Mesh | null {
 type KeptMoves = { original: BufferGeometry; byShaper: Map<Shaper, Moves | null> }
 
 /**
- * A mesh as applyShape left it: the shapers, what it was shaped from and
- * their moves there, and the geometry it shows for them (null: they move
- * none of its points). reshapeNow updates it, so the shape's undo frees
- * whichever geometry the mesh shows by then.
- */
-type Shaped = {
-  shapers: readonly Shaper[]
-  step: number
-  original: BufferGeometry
-  byShaper: Map<Shaper, Moves | null>
-  geometry: BufferGeometry | null
-}
-
-const shapedMeshes = new WeakMap<Mesh, Shaped>()
-
-/** Generated hair (see generated-hair.ts) follows the head's shape itself: applyShape leaves it be. */
-const unshaped = (mesh: Mesh) => mesh.userData.hair !== undefined
-
-let version = 0
-const shapeListeners = new WeakMap<Object3D, Set<(version: number) => void>>()
-
-function published(model: Object3D) {
-  version++
-  for (const listener of shapeListeners.get(model) ?? []) listener(version)
-}
-
-/**
  * The body reshaped last and its meshes' moves under each shaper: a slider
  * or a sculpting drag reshapes it many times a second, one shaper changing
  * while the rest stay as they were. Only that one body's are kept.
@@ -456,7 +404,7 @@ export function applyShape(model: Object3D, shapers: readonly Shaper[]): () => v
   const undo: (() => void)[] = []
   model.traverse((object) => {
     const mesh = object as Mesh
-    if (!mesh.isMesh || unshaped(mesh)) return
+    if (!mesh.isMesh) return
     const original = originalGeometry(mesh)
     const known = meshes.get(mesh)
     const before = known?.original === original ? known.byShaper : null
@@ -471,83 +419,25 @@ export function applyShape(model: Object3D, shapers: readonly Shaper[]): () => v
     }
     meshes.set(mesh, { original, byShaper })
     const parts = [...byShaper.values()].filter((moves) => moves !== null)
-    const geometry = parts.length > 0 ? reshaped(mesh, original, parts) : null
-    const shaped: Shaped = { shapers, step, original, byShaper, geometry }
-    shapedMeshes.set(mesh, shaped)
-    if (geometry) {
-      mesh.userData.shapeOriginal = original
-      mesh.geometry = geometry
-    }
+    if (parts.length === 0) return
+    const geometry = reshaped(mesh, original, parts)
+    if (!geometry) return
+    mesh.userData.shapeOriginal = original
+    mesh.geometry = geometry
     undo.push(() => {
-      if (shapedMeshes.get(mesh) === shaped) shapedMeshes.delete(mesh)
       // A later shape may have replaced this one since: leave that be. A
       // hairstyle may have changed what it was shaped from (avatar-hair.ts).
-      const shown = shaped.geometry
-      if (shown && mesh.geometry === shown) {
+      if (mesh.geometry === geometry) {
         mesh.geometry = originalGeometry(mesh)
         delete mesh.userData.shapeOriginal
       }
-      shown?.dispose()
+      geometry.dispose()
     })
   })
-  published(model)
   return () => {
     for (const step of undo) step()
-    published(model)
   }
 }
-
-/**
- * Reshapes a mesh at once by the shapers applyShape last put on it, after
- * what it is shaped from changed under it (generated hair lays the head's
- * own hair flat: see hair-base.ts), so it never shows unshaped in between.
- * Moves already worked out for points that stayed are kept. A mesh with no
- * shape on it shows what it is shaped from as it is.
- */
-export function reshapeNow(mesh: Mesh): void {
-  const shaped = shapedMeshes.get(mesh)
-  if (!shaped) return
-  const original = originalGeometry(mesh)
-  const byShaper = new Map<Shaper, Moves | null>()
-  for (const shaper of shaped.shapers) {
-    const move = shaper(mesh)
-    const before = { from: shaped.original, moves: shaped.byShaper.get(shaper) ?? null }
-    byShaper.set(shaper, move ? movesOf(mesh, original, move, shaped.step, before) : null)
-  }
-  const parts = [...byShaper.values()].filter((moves) => moves !== null)
-  const geometry = parts.length > 0 ? reshaped(mesh, original, parts) : null
-  const shown = shaped.geometry
-  if (geometry) {
-    mesh.userData.shapeOriginal = original
-    mesh.geometry = geometry
-  } else {
-    mesh.geometry = original
-    delete mesh.userData.shapeOriginal
-  }
-  // Freed before the next frame, while the renderer still draws the mesh with it.
-  shown?.dispose()
-  Object.assign(shaped, { original, byShaper, geometry })
-  if (kept?.meshes.has(mesh)) kept.meshes.set(mesh, { original, byShaper })
-}
-
-/**
- * Calls `listener` after each shape applyShape puts on `model` or takes off
- * it, with a version that rises with every one. Returns what stops it.
- */
-export function onShaped(model: Object3D, listener: (version: number) => void): () => void {
-  let listeners = shapeListeners.get(model)
-  if (!listeners) {
-    listeners = new Set()
-    shapeListeners.set(model, listeners)
-  }
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
-}
-
-/** The version of the shapes on bodies now (see onShaped). */
-export const shapeVersion = () => version
 
 /** The face's shaper last made for a body, and what it was made from. */
 type FaceShaping = {

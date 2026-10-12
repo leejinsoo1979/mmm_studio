@@ -5,33 +5,22 @@ import {
   avatarGender,
   avatarThumbnailUrl,
   BALD,
-  type HairCut,
-  type HairCutStyle,
   type HairStyle,
   type HairStyleEntry,
   loadHairStyles,
-  useHairFailed,
 } from '@pascal-app/editor'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { OFFERED_CUTS, OFFERED_SLIDERS, setSlider } from './hair-cuts'
 import {
   AmountSlider,
-  BipolarSlider,
   Chips,
   ColorPanel,
   FOCUS_RING,
   PanelNote,
   RoundTile,
 } from './studio-controls'
-import {
-  HAIR_CUT_LABELS,
-  HAIR_CUT_SLIDERS,
-  HAIR_CUT_TEXT,
-  HAIR_SWATCHES,
-  hairSections,
-} from './studio-data'
+import { HAIR_SWATCHES, hairSections } from './studio-data'
 
 type Filter = 'all' | AvatarGender
 
@@ -220,78 +209,6 @@ export function HairStyleBody({
         <p className="py-4 text-center text-[12px] text-white/40">
           이 조건의 헤어스타일이 아직 없어요
         </p>
-      )}
-    </div>
-  )
-}
-
-/** A generated style's tile: its name, drawn large (no picture of it yet). */
-function CutName({ label }: { label: string }) {
-  return (
-    <span className="absolute inset-0 grid place-items-center font-semibold text-[15px] text-white/80 tracking-tight">
-      {label}
-    </span>
-  )
-}
-
-/**
- * The generated hairstyles: the character's own hair, then each style
- * offered, grown on this character's own scalp; while one is worn, its
- * sliders (each previewing as it is dragged). The worn one shows its dye.
- */
-export function HairCutBody({
-  avatar,
-  hairCut,
-  hair,
-  onPick,
-  onPreview,
-  onCommit,
-}: {
-  avatar: string
-  hairCut: HairCut | null
-  hair: string | null
-  onPick: (style: HairCutStyle | null) => void
-  onPreview: (cut: HairCut) => void
-  onCommit: (cut: HairCut) => void
-}) {
-  const failed = useHairFailed(avatar)
-  const badge = (selected: boolean) => (selected && hair ? <DyeBadge hex={hair} /> : undefined)
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-3 gap-x-3 gap-y-4">
-        <RoundTile
-          badge={badge(hairCut === null)}
-          label={HAIR_CUT_TEXT.own}
-          onPick={() => onPick(null)}
-          selected={hairCut === null}
-        >
-          <HeadThumb id={avatar} />
-        </RoundTile>
-        {OFFERED_CUTS.map((style) => (
-          <RoundTile
-            badge={badge(hairCut?.style === style)}
-            key={style}
-            label={HAIR_CUT_LABELS[style]}
-            onPick={() => onPick(style)}
-            selected={hairCut?.style === style}
-          >
-            <CutName label={HAIR_CUT_LABELS[style]} />
-          </RoundTile>
-        ))}
-      </div>
-      {failed && <PanelNote tone="warn">{HAIR_CUT_TEXT.failed}</PanelNote>}
-      {hairCut && (
-        <div className="flex flex-col gap-4 rounded-2xl bg-white/[0.04] p-3 ring-1 ring-white/10">
-          {HAIR_CUT_SLIDERS.filter(({ id }) => OFFERED_SLIDERS.includes(id)).map((text) => (
-            <BipolarSlider
-              key={text.id}
-              onCommit={(value) => onCommit(setSlider(hairCut, text.id, value))}
-              onPreview={(value) => onPreview(setSlider(hairCut, text.id, value))}
-              text={text}
-              value={hairCut[text.id]}
-            />
-          ))}
-        </div>
       )}
     </div>
   )

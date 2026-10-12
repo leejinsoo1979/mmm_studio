@@ -3,7 +3,7 @@ import type { ScalpPaint } from './bald-head'
 import { NO_PAINT } from './face-paint'
 import { SHOD } from './footwear'
 import type { HeadGeometry } from './head-geometry'
-import { analyseBody, dressBody, type LookJob, ownColours, sameLookJob } from './look-job'
+import { analyseBody, dressBody, type LookJob, sameLookJob } from './look-job'
 import {
   type HeadTriangle,
   hexToRgb,
@@ -99,7 +99,6 @@ const look = (key: string, change: Partial<Omit<LookJob, 'body'>>) => ({
   face: null,
   paint: NO_PAINT,
   scalp: null,
-  scalpMode: 'wig' as const,
   stubble: null,
   wig: null,
   shave: 0.35,
@@ -134,15 +133,6 @@ describe('a body’s analysis', () => {
     // The jaw, as dark as the hair, is still no hair: it lies below the eyes.
     expect(at(analysis.hairMask, 0.62)).toBe(0)
     expect(at(analysis.hairMask, 0.87)).toBe(0)
-  })
-
-  test("a character's own colours: its cards', else its painted crown's; none on a bare crown", () => {
-    const painted = head(HAIR)
-    expect(ownColours(painted.pixels, null, painted.geometry).hair).toEqual(HAIR)
-    const cards = texture([[0, 1, [120, 80, 40]]])
-    expect(ownColours(painted.pixels, cards, painted.geometry).hair).toEqual([120, 80, 40])
-    const bare = head([205, 152, 124])
-    expect(ownColours(bare.pixels, null, bare.geometry).hair).toBeNull()
   })
 
   test('a bald head has no hair to dye', () => {
@@ -228,23 +218,6 @@ describe('a body dressed in a look', () => {
     const toned: Pixels = { data: new Uint8ClampedArray([...SHADED, 255]), width: 1, height: 1 }
     toneSkin(toned, hexToRgb('#8a5a3c'), analysis.skin, Float32Array.of(1))
     near(rows(dressed, 0.04, 0.2), [toned.data[0]!, toned.data[1]!, toned.data[2]!])
-  })
-
-  test('under generated hair the scalp is painted skin alone, and a dye paints nothing', () => {
-    const { pixels, geometry } = head(HAIR)
-    const cards = texture([[0.25, 0.5, HAIR]])
-    const analysis = analyseBody(pixels, body(), cards, geometry)
-    const generated = (hair: string | null) =>
-      dressBody(analysis, look('generated', { scalp, scalpMode: 'generated', hair }), null)
-    const plain = generated(null)
-    const dyed = generated('#c03020')
-    expect([...dyed.head!.data]).toEqual([...plain.head!.data])
-    expect(dyed.opacity).toBeUndefined()
-    // No stubble shades it: as light as the skin round it, lighter than the shaved head's.
-    const skin = rows(plain.head!, 0.04, 0.2)
-    near(skin, rows(pixels, 0.27, 0.48))
-    const shaved = rows(dressBody(analysis, look('shaved', { scalp }), null).head!, 0.04, 0.2)
-    expect(lightness(skin)).toBeGreaterThan(lightness(shaved))
   })
 
   test('an iris colour goes on without a face photo or landmarks', () => {
@@ -339,7 +312,6 @@ describe('the same look', () => {
       },
       paint: { ...NO_PAINT, lips: '#aa3344' },
       scalp,
-      scalpMode: 'wig',
       stubble: [40, 30, 25],
       wig,
       shave: 0.35,
@@ -364,17 +336,8 @@ describe('the same look', () => {
     expect(sameLookJob(job(), job({ face: { ...job().face!, light: 0.6 } }))).toBe(false)
     expect(sameLookJob(job(), job({ feet: { wear: 'bare', color: null } }))).toBe(false)
     expect(sameLookJob(job(), job({ scalp: null }))).toBe(false)
-    expect(sameLookJob(job(), job({ scalpMode: 'generated' }))).toBe(false)
     expect(sameLookJob(job(), job({ stubble: [41, 30, 25] }))).toBe(false)
     expect(sameLookJob(job(), job({ shave: 0.8 }))).toBe(false)
-  })
-
-  test('under generated hair is the same look whatever the dye, but not another skin', () => {
-    const generated = (patch: Partial<LookJob>) => job({ scalpMode: 'generated', ...patch })
-    expect(sameLookJob(generated({}), generated({ hair: '#000000', shave: 0.8 }))).toBe(true)
-    expect(sameLookJob(generated({}), generated({ stubble: null, wig: null }))).toBe(true)
-    expect(sameLookJob(generated({}), generated({ skin: '#8a5a3c' }))).toBe(false)
-    expect(sameLookJob(generated({}), generated({ scalp: {} as ScalpPaint }))).toBe(false)
   })
 
   test('tells what is worked out once apart by being the same, not by value', () => {
