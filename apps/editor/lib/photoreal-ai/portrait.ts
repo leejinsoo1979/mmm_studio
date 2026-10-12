@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { userTag } from '../ai-photo/handlers'
 import { type AiPhotoImageType, sniffImage } from '../ai-photo/image-header'
-import { moderateImages, moderateText } from '../ai-photo/moderation'
+import { moderateImages } from '../ai-photo/moderation'
 import { readAiPhotoResponse } from '../ai-photo/provider'
 import type { PhotorealAiConfig } from './config'
 import { mockPortraitPng } from './mock-portrait'
@@ -16,10 +16,9 @@ import {
 } from './shared'
 
 /**
- * One AI 인물 portrait from checked choices: the 자유 설명 through text
- * moderation (when configured), the text-to-image request, the size and
- * type the 3D service can take, and the finished image through image
- * moderation. Refund rules as AI 실사 사진: a portrait counts once the
+ * One AI 인물 portrait from checked choices: the text-to-image request, the
+ * size and type the 3D service can take, and the finished image through
+ * image moderation (when configured). Refund rules as AI 실사 사진: a portrait counts once the
  * generation request has gone out, unless the provider's answer shows it
  * did no billable work. The 목업 draws one instead (or reads a local file).
  */
@@ -115,15 +114,6 @@ export async function producePortrait(
     refund: false,
     detail,
   })
-
-  if (image.moderation && choices.notes) {
-    const verdict = await moderateText(image.moderation, choices.notes, {
-      fetch: deps.fetch,
-      signal,
-    })
-    if (verdict === 'flagged') return blocked('notes_flagged')
-    if (verdict === 'error') return failed('moderation')
-  }
 
   const { url, init } = aiPortraitRequest(image, {
     prompt: buildAiPortraitPrompt(choices),

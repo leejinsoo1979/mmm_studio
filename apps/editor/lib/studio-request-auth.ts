@@ -10,15 +10,21 @@ function adminAuth() {
   return getAuth(app)
 }
 
-export async function getVerifiedRequestStudioUserId(request: Request): Promise<string | null> {
+/** The uid of a verified Firebase ID token, never the development user header. */
+export async function getFirebaseVerifiedUserId(request: Request): Promise<string | null> {
   const authorization = request.headers.get('authorization')
   const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1]
-  if (token) {
-    try {
-      return (await adminAuth().verifyIdToken(token)).uid
-    } catch {
-      return null
-    }
+  if (!token) return null
+  try {
+    return (await adminAuth().verifyIdToken(token)).uid
+  } catch {
+    return null
+  }
+}
+
+export async function getVerifiedRequestStudioUserId(request: Request): Promise<string | null> {
+  if (/^Bearer\s+\S/i.test(request.headers.get('authorization') ?? '')) {
+    return getFirebaseVerifiedUserId(request)
   }
   return process.env.NODE_ENV === 'production' ? null : getRequestStudioUserId(request)
 }

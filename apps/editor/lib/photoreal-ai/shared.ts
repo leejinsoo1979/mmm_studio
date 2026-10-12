@@ -1,8 +1,9 @@
 /**
  * What the AI 인물 routes (`/api/photoreal-ai/*`) and their browser client
- * agree on: the appearance choices (fixed enums with Korean labels), the
- * free-text cap, the status, job and avatar shapes, the error codes and
- * their Korean copy, and the AI disclosure. Safe on both sides (no Node or
+ * agree on: the appearance choices (fixed enums with Korean labels; there
+ * is no free text, so no name or description reaches the image model), the
+ * status, job and avatar shapes, the error codes and their Korean copy, and
+ * the AI disclosure. Safe on both sides (no Node or
  * DOM-only APIs).
  *
  * The flow: `POST portrait` makes an AI photo of a fictional adult from the
@@ -72,6 +73,29 @@ export const AI_PERSON_OUTFIT_COLOURS = [
   'skyBlue',
 ] as const
 
+/** 세부 특징: up to `AI_PERSON_DETAILS_MAX`, each a fixed phrase in the prompt. */
+export const AI_PERSON_DETAILS = [
+  'thickBrows',
+  'fineBrows',
+  'doubleEyelids',
+  'monolids',
+  'freckles',
+  'cheekMole',
+  'dimples',
+  'highNoseBridge',
+  'fullLips',
+  'thinLips',
+  'angularJaw',
+  'highCheekbones',
+] as const
+export const AI_PERSON_DETAILS_MAX = 4
+/** Details that contradict each other: at most one of each pair. */
+export const AI_PERSON_DETAIL_CONFLICTS: readonly (readonly [AiPersonDetail, AiPersonDetail])[] = [
+  ['thickBrows', 'fineBrows'],
+  ['doubleEyelids', 'monolids'],
+  ['fullLips', 'thinLips'],
+]
+
 export type AiPersonSex = (typeof AI_PERSON_SEXES)[number]
 export type AiPersonAge = (typeof AI_PERSON_AGES)[number]
 export type AiPersonImpression = (typeof AI_PERSON_IMPRESSIONS)[number]
@@ -83,8 +107,9 @@ export type AiPersonHairColour = (typeof AI_PERSON_HAIR_COLOURS)[number]
 export type AiPersonFacialHair = (typeof AI_PERSON_FACIAL_HAIR)[number]
 export type AiPersonOutfit = (typeof AI_PERSON_OUTFITS)[number]
 export type AiPersonOutfitColour = (typeof AI_PERSON_OUTFIT_COLOURS)[number]
+export type AiPersonDetail = (typeof AI_PERSON_DETAILS)[number]
 
-/** The `POST /api/photoreal-ai/portrait` body's `choices`. Every field but `notes` is an enum. */
+/** The `POST /api/photoreal-ai/portrait` body's `choices`: every field is a fixed choice. */
 export type AiPersonChoices = {
   sex: AiPersonSex
   age: AiPersonAge
@@ -98,12 +123,17 @@ export type AiPersonChoices = {
   facialHair: AiPersonFacialHair
   outfit: AiPersonOutfit
   outfitColour: AiPersonOutfitColour
-  /** 자유 설명: optional, at most `AI_PERSON_NOTES_MAX` characters after normalising. */
-  notes: string
+  /** 세부 특징: distinct, at most `AI_PERSON_DETAILS_MAX`, no conflicting pair. */
+  details: AiPersonDetail[]
 }
 
-/** The longest 자유 설명, in characters (Hangul syllables count one each). */
-export const AI_PERSON_NOTES_MAX = 80
+/** Whether a list of details may be sent: distinct, within the cap, no conflicting pair. */
+export function detailsAllowed(details: readonly AiPersonDetail[]): boolean {
+  if (details.length > AI_PERSON_DETAILS_MAX || new Set(details).size !== details.length) {
+    return false
+  }
+  return AI_PERSON_DETAIL_CONFLICTS.every(([a, b]) => !(details.includes(a) && details.includes(b)))
+}
 
 export const AI_PERSON_DEFAULTS: AiPersonChoices = {
   sex: 'female',
@@ -117,7 +147,7 @@ export const AI_PERSON_DEFAULTS: AiPersonChoices = {
   facialHair: 'none',
   outfit: 'knit',
   outfitColour: 'beige',
-  notes: '',
+  details: [],
 }
 
 /** Korean labels, in the order the dialog shows them. */
@@ -202,9 +232,23 @@ export const AI_PERSON_LABELS = {
     burgundy: '버건디',
     skyBlue: '하늘색',
   },
+  details: {
+    thickBrows: '진한 눈썹',
+    fineBrows: '옅은 눈썹',
+    doubleEyelids: '쌍꺼풀',
+    monolids: '무쌍',
+    freckles: '주근깨',
+    cheekMole: '볼에 점',
+    dimples: '보조개',
+    highNoseBridge: '높은 콧대',
+    fullLips: '도톰한 입술',
+    thinLips: '얇은 입술',
+    angularJaw: '각진 턱',
+    highCheekbones: '도드라진 광대',
+  },
 } as const satisfies {
-  [K in Exclude<keyof AiPersonChoices, 'notes'>]: Record<AiPersonChoices[K], string>
-}
+  [K in Exclude<keyof AiPersonChoices, 'details'>]: Record<AiPersonChoices[K], string>
+} & { details: Record<AiPersonDetail, string> }
 
 /** The portrait the route hands out: at most this many bytes, and a short side of at least `AI_PORTRAIT_MIN_SIDE`. */
 export const AI_PORTRAIT_MAX_BYTES = 4_000_000
@@ -244,19 +288,8 @@ export type PhotorealAiStatus =
       part: 'portrait' | 'avatar'
     }
 
-/** Why a 자유 설명 is refused before anything is sent (see `checkNotes`). */
-export type AiPersonNotesError =
-  | 'notes_too_long'
-  | 'notes_invalid'
-  | 'notes_off_topic'
-  | 'name_not_allowed'
-  | 'minor_not_allowed'
-  | 'unsafe_text'
-  | 'face_covered'
-
 /** The `error` of a refused request to any `/api/photoreal-ai` route. */
 export type PhotorealAiRouteError =
-  | AiPersonNotesError
   | 'invalid_request'
   | 'sign_in_required'
   | 'too_large'
@@ -336,21 +369,11 @@ export const PHOTOREAL_AI_ERROR_TEXT: Record<
   PhotorealAiRouteError | 'network' | 'aborted',
   string
 > = {
-  notes_too_long: `자유 설명은 ${AI_PERSON_NOTES_MAX}자까지 쓸 수 있어요.`,
-  notes_invalid: '자유 설명에는 한글, 숫자와 기본 문장부호만 쓸 수 있어요.',
-  notes_off_topic: '자유 설명에는 생김새만 적어 주세요.',
-  name_not_allowed:
-    '실존 인물의 이름이나 특정인을 닮은 얼굴은 만들 수 없어요. 이름 대신 생김새만 적어 주세요.',
-  minor_not_allowed:
-    'AI 인물은 성인(20대 이상)만 만들 수 있어요. 어리거나 어려 보이게 하는 표현은 빼 주세요.',
-  unsafe_text: '선정적이거나 폭력적인 표현은 넣을 수 없어요.',
-  face_covered:
-    '3D 아바타를 만들려면 얼굴과 머리가 다 보여야 해요. 안경·모자·마스크 같은 표현은 빼 주세요.',
   invalid_request: '요청을 확인하지 못했어요. 다시 시도해 주세요.',
   sign_in_required: '로그인하면 AI 인물을 만들 수 있어요.',
   too_large: '보낸 내용이 너무 커요. 다시 시도해 주세요.',
   unsupported_type: '요청 형식이 맞지 않아요. 다시 시도해 주세요.',
-  blocked: '안전 기준에 맞지 않아 만들 수 없어요. 고른 항목이나 설명을 바꿔 주세요.',
+  blocked: '안전 기준에 맞지 않아 만들 수 없어요. 고른 항목을 바꿔 주세요.',
   rate_limited: '잠시 뒤에 다시 시도해 주세요.',
   busy: '이미 만들고 있어요. 끝나면 다시 시도해 주세요.',
   upstream: 'AI 서비스가 응답하지 않아요. 잠시 뒤 다시 시도해 주세요.',

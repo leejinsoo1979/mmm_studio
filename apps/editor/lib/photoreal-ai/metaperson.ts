@@ -4,6 +4,8 @@ import { isGlb, MAX_GLB_BYTES } from './glb'
 import type {
   AvatarLook,
   AvatarService,
+  CreateFailure,
+  CreateSent,
   ServiceFailure,
   ServiceFetch,
   ServicePoll,
@@ -30,9 +32,19 @@ import { isZip, readZip } from './zip'
  *   sdk_cloud/scripts/server_data/AvatarData.cs (statuses, L22) and ExportData.cs
  *   (files[].identity / file), sdk_core/scripts/computation_parameters/
  *   ExportParameters.cs (GetExportJsonObject L157-200) and AvatarAssetsParameters.cs
- *   (ToExportJson, the available-parameters shapes), samples_core/scripts/
- *   GettingStartedSample.cs L161-230 (remove_smile; GLB, embedded 1K JPEG
- *   textures, Color/Normal/GltfMetallicRoughness, the generated haircut).
+ *   (ToExportJson, the available-parameters shapes; ParseJsonWithAvailableExportParameters
+ *   L123-143 finds each category by name at any depth with
+ *   sdk_core/scripts/utils/JsonUtils.cs FindNodeByName L34-51),
+ *   sdk_cloud/scripts/CloudPipelineTraits.cs L43-55 (the pipeline `metaperson_2.1`
+ *   and its subtypes `male` / `female`), samples_core/scripts/GettingStartedSample.cs
+ *   L168-169 (remove_smile) and GetExportParameters L203-306 (GLB, embedded 1K JPEG
+ *   textures, Color/Normal/GltfMetallicRoughness, the generated haircut, `mobile_51`
+ *   blend shapes at L302), sdk_core/scripts/computation_parameters/
+ *   ComputationParameters.cs L23-44 and ComputationPropertiesGroup.cs ModelInfoGroup
+ *   L179-228 (`model_info` as a list of names, `age` among them),
+ *   sdk_core/scripts/utils/ModelInfo.cs L103-131 (`age` is `child` or `not_child`),
+ *   Connection.cs GetModelInfoAsync L576-578, and the avatar list (GetAvatarsPageAsync
+ *   L871-876, `?page=` L509-512, pages linked by the `Link` header L398-437).
  * - avatarsdk/samples-js @ 36f76d5158809059eac03e7e1b0cc9e28dbfb859, js/asdk.js
  *   (create_avatar L94-111, the status switch in _poll_impl L122-150, export
  *   files read as a ZIP L208-296).
@@ -85,6 +97,17 @@ const IN_PROGRESS: Record<string, ServiceStage> = {
 }
 const FAILED = new Set(['Failed', 'Timed Out'])
 const DONE = 'Completed'
+/** The categories the export takes, looked up by name at any depth (FindNodeByName). */
+const EXPORT_CATEGORIES = [
+  'outfits',
+  'outfits_top',
+  'outfits_bottom',
+  'outfits_shoes',
+  'haircuts',
+  'blendshapes',
+] as const
+/** How many pages of the account's newest builds are searched for a lost one. */
+const FIND_PAGES = 3
 
 /** A ZIP of a 1K-textured avatar is about 11 MB. */
 const MAX_DOWNLOAD_BYTES = 96 * 1024 * 1024
@@ -171,13 +194,39 @@ async function readJson(response: Response): Promise<unknown> {
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 
-/** `{ category: [names] | { list: [names], textures: [...] } }` as name lists per category. */
+const namesOf = (entry: unknown): string[] | null => {
+  const list = Array.isArray(entry) ? entry : (entry as { list?: unknown } | null)?.list
+  return Array.isArray(list)
+    ? list.filter((name): name is string => typeof name === 'string')
+    : null
+}
+
+/** The value under `name`: on this object first, else the first found depth-first below it. */
+function findNode(node: unknown, name: string, depth = 0): unknown {
+  if (!node || typeof node !== 'object' || depth > 8) return undefined
+  if (!Array.isArray(node) && name in node) return (node as Record<string, unknown>)[name]
+  for (const child of Object.values(node)) {
+    const found = findNode(child, name, depth + 1)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+/**
+ * `{ category: [names] | { list: [names], textures: [...] } }` as name lists
+ * per category: the ones the export takes wherever they are nested (as the
+ * vendor's client finds them), and any other top-level ones for the record.
+ */
 export function parseAvailableExportParameters(json: unknown): AvailableExportParameters {
   const out: AvailableExportParameters = {}
   if (!json || typeof json !== 'object' || Array.isArray(json)) return out
   for (const [category, entry] of Object.entries(json)) {
-    const list = Array.isArray(entry) ? entry : (entry as { list?: unknown } | null)?.list
-    if (Array.isArray(list)) out[category] = list.filter((name) => typeof name === 'string')
+    const names = namesOf(entry)
+    if (names) out[category] = names
+  }
+  for (const category of EXPORT_CATEGORIES) {
+    const names = namesOf(findNode(json, category))
+    if (names) out[category] = names
   }
   return out
 }
@@ -243,8 +292,14 @@ export function buildExportParameters(
   }
 }
 
-/** The computation parameters: a closed, neutral mouth, as the vendor's sample asks. */
-export const METAPERSON_PARAMETERS = { avatar_modifications: { remove_smile: true } }
+/**
+ * The computation parameters: a closed, neutral mouth, as the vendor's sample
+ * asks, and the service's own age estimate in `model_info`.
+ */
+export const METAPERSON_PARAMETERS = {
+  model_info: ['age'],
+  avatar_modifications: { remove_smile: true },
+}
 
 /** The GLB inside a downloaded export: the bytes themselves, or `…/model.glb` in its ZIP. */
 export function exportGlb(bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> | null {
@@ -264,6 +319,15 @@ export function exportGlb(bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffe
   } catch {
     return null
   }
+}
+
+/** The `rel="next"` page of a `Link` header, if any. */
+export function nextPage(link: string | null): string | null {
+  for (const part of (link ?? '').split(',')) {
+    const match = /<([^>]+)>\s*;.*rel="?next"?/.exec(part)
+    if (match) return match[1]!
+  }
+  return null
 }
 
 export function createMetaPersonService(options: MetaPersonOptions): MetaPersonService {
@@ -462,6 +526,17 @@ export function createMetaPersonService(options: MetaPersonOptions): MetaPersonS
     return { ok: true, available }
   }
 
+  /** Our handles for one of the service's avatar answers (a create's, or a list item). */
+  function avatarRef(json: unknown, owner: string): { ok: true; ref: ServiceRef } | ServiceFailure {
+    const avatar = (json ?? {}) as { code?: unknown; url?: unknown; exports?: unknown }
+    const code = text(avatar.code)
+    if (!code) return fail('upstream', 'avatar_unreadable')
+    const url = text(avatar.url) || `${base}/avatars/${encodeURIComponent(code)}/`
+    const exports = text(avatar.exports) || `${url.replace(/\/?$/, '/')}exports/`
+    if (!sameOrigin(url) || !sameOrigin(exports)) return fail('upstream', 'foreign_url')
+    return { ok: true, ref: { player: owner, avatar: code, url, exports } }
+  }
+
   async function modelInfo(ref: ServiceRef, signal: AbortSignal) {
     const url = `${base}/avatars/${encodeURIComponent(ref.avatar ?? '')}/model_info/`
     const result = await callJson({ method: 'GET', url, player: ref.player }, signal)
@@ -488,13 +563,19 @@ export function createMetaPersonService(options: MetaPersonOptions): MetaPersonS
     availableExportParameters,
     modelInfo,
 
-    async create({ photo, look, name }, signal) {
+    async create({ photo, look, name }, signal, beforeSend) {
+      const not = (failure: ServiceFailure, sent: CreateSent = 'no'): CreateFailure => ({
+        ...failure,
+        sent,
+      })
       const owner = await playerCode(signal)
-      if (typeof owner !== 'string') return owner
+      if (typeof owner !== 'string') return not(owner)
       const listed = await availableExportParameters(look.sex, signal)
-      if (!listed.ok) return listed
+      if (!listed.ok) return not(listed)
       const exportParameters = buildExportParameters(listed.available, look)
-      if (!exportParameters) return fail('unavailable', 'no_outfit')
+      if (!exportParameters) return not(fail('unavailable', 'no_outfit'))
+      if (signal.aborted) return not(fail('upstream', 'aborted'))
+      if (beforeSend && !(await beforeSend())) return not(fail('rate_limited', 'cap'))
       const form = new FormData()
       const file = new Blob([photo.bytes], { type: 'application/octet-stream' })
       form.append('photo', file, photo.type === 'image/png' ? 'photo.png' : 'photo.jpg')
@@ -507,14 +588,35 @@ export function createMetaPersonService(options: MetaPersonOptions): MetaPersonS
         { method: 'POST', url: `${base}/avatars/`, body: form, player: owner },
         signal,
       )
-      if (!result.ok) return result
-      const avatar = result.json as { code?: unknown; url?: unknown; exports?: unknown }
-      const code = text(avatar.code)
-      if (!code) return fail('upstream', 'avatar_unreadable')
-      const url = text(avatar.url) || `${base}/avatars/${encodeURIComponent(code)}/`
-      const exports = text(avatar.exports) || `${url.replace(/\/?$/, '/')}exports/`
-      if (!sameOrigin(url) || !sameOrigin(exports)) return fail('upstream', 'foreign_url')
-      return { ok: true, ref: { player: owner, avatar: code, url, exports } }
+      if (!result.ok) {
+        // A 4xx answer (or no token to send it with) refused it; anything else may have built it.
+        const refused = /^(http_4\d\d|token)/.test(result.detail) && result.detail !== 'http_408'
+        return not(result, refused ? 'refused' : 'unknown')
+      }
+      const ref = avatarRef(result.json, owner)
+      return ref.ok ? ref : not(ref, 'unknown')
+    },
+
+    async find(name, signal) {
+      const owner = await playerCode(signal)
+      if (typeof owner !== 'string') return owner
+      let url: string | null = `${base}/avatars/?page=1`
+      for (let page = 0; url && page < FIND_PAGES; page++) {
+        const result = await call({ method: 'GET', url, player: owner, retry: true }, signal)
+        if (!result.ok) return result
+        const linked = nextPage(result.response.headers.get('link'))
+        const json = await readJson(result.response)
+        const raw = Array.isArray(json) ? json : (json as { results?: unknown } | null)?.results
+        if (!Array.isArray(raw)) return fail('upstream', 'list_unreadable')
+        const found = raw.find((item) => text((item as { name?: unknown } | null)?.name) === name)
+        if (found) {
+          const ref = avatarRef(found, owner)
+          return ref.ok ? { ok: true, ref: ref.ref } : ref
+        }
+        const next = linked ?? text((json as { next?: unknown } | null)?.next)
+        url = next && sameOrigin(next) ? next : null
+      }
+      return { ok: true, ref: null }
     },
 
     async poll(ref, signal): Promise<ServicePoll> {
@@ -576,9 +678,12 @@ export function createMetaPersonService(options: MetaPersonOptions): MetaPersonS
       if (!file) return fail('upstream', 'no_avatar_file')
       if (!sameOrigin(file)) return fail('upstream', 'foreign_url')
 
-      // The service's own age estimate, where it gives one: a child is never kept.
+      // The service's own age estimate: a child is never kept; none, once required, is refused.
       const info = await modelInfo(ref, signal)
       if (info?.age === 'child') return fail('blocked', 'model_info_child')
+      if (config.requireAgeCheck && info?.age !== 'not_child') {
+        return fail('unavailable', 'model_info_no_age')
+      }
       return { ok: true, state: 'ready', ref: { ...ref, export: text(earliest.code), file } }
     },
 

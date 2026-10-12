@@ -4,10 +4,11 @@ import type {
   PhotorealAiErrorCode,
   PhotorealAiRefusal,
 } from '@/lib/photoreal-ai/client'
-import { checkNotes, normaliseNotes } from '@/lib/photoreal-ai/notes-check'
 import { PORTRAIT_ISSUE_TEXT, type PortraitIssue } from '@/lib/photoreal-ai/portrait-check'
 import {
   AI_PERSON_AGES,
+  AI_PERSON_DETAIL_CONFLICTS,
+  AI_PERSON_DETAILS_MAX,
   AI_PERSON_FACE_SHAPES,
   AI_PERSON_FACIAL_HAIR,
   AI_PERSON_HAIR_COLOURS,
@@ -19,6 +20,7 @@ import {
   AI_PERSON_SKIN_TONES,
   AI_PORTRAIT_TOKEN_TTL_MS,
   type AiPersonChoices,
+  type AiPersonDetail,
   type AiPersonHairColour,
   type AiPersonHairStyle,
   type AiPersonOutfitColour,
@@ -39,14 +41,34 @@ import type { CopyPart } from './ai-photo-label'
  * the progress while it is built.
  */
 
-/** The choices as the route takes them: the notes tidied, no facial hair on a woman. */
+/** The choices as the route takes them: no facial hair on a woman. */
 export function requestChoices(choices: AiPersonChoices): AiPersonChoices {
-  return {
-    ...choices,
-    facialHair: choices.sex === 'male' ? choices.facialHair : 'none',
-    notes: normaliseNotes(choices.notes),
-  }
+  return { ...choices, facialHair: choices.sex === 'male' ? choices.facialHair : 'none' }
 }
+
+/** The detail's opposite (진한 ↔ 옅은 눈썹, 쌍꺼풀 ↔ 무쌍, 도톰한 ↔ 얇은 입술), if it has one. */
+const oppositeOf = (detail: AiPersonDetail) =>
+  AI_PERSON_DETAIL_CONFLICTS.find((pair) => pair.includes(detail))?.find((one) => one !== detail)
+
+/**
+ * 세부 특징 after a tap: picked again, it is dropped; picking one replaces its
+ * opposite; past the cap, nothing changes (the other chips are off then).
+ */
+export function toggleDetail(
+  details: readonly AiPersonDetail[],
+  detail: AiPersonDetail,
+): AiPersonDetail[] {
+  if (details.includes(detail)) return details.filter((one) => one !== detail)
+  const opposite = oppositeOf(detail)
+  const kept = details.filter((one) => one !== opposite)
+  return kept.length >= AI_PERSON_DETAILS_MAX ? [...details] : [...kept, detail]
+}
+
+/** Whether a detail chip can be picked now (one picked can always be dropped). */
+export const detailOpen = (details: readonly AiPersonDetail[], detail: AiPersonDetail) =>
+  details.includes(detail) ||
+  details.length < AI_PERSON_DETAILS_MAX ||
+  details.includes(oppositeOf(detail) as AiPersonDetail)
 
 /** Any number of random draws in [0, 1). */
 type Random = () => number
@@ -54,7 +76,7 @@ type Random = () => number
 const pick = <T>(list: readonly T[], random: Random): T =>
   list[Math.min(list.length - 1, Math.floor(random() * list.length))]!
 
-/** 무작위: every list drawn again but 외모 계열 (the player's own call); the 자유 설명 kept as typed. */
+/** 무작위: every list drawn again but 외모 계열 (the player's own call); the 세부 특징 kept as picked. */
 export function randomChoices(current: AiPersonChoices, random: Random = Math.random) {
   const sex = pick(AI_PERSON_SEXES, random)
   return {
@@ -69,7 +91,7 @@ export function randomChoices(current: AiPersonChoices, random: Random = Math.ra
     facialHair: sex === 'male' ? pick(AI_PERSON_FACIAL_HAIR, random) : 'none',
     outfit: pick(AI_PERSON_OUTFITS, random),
     outfitColour: pick(AI_PERSON_OUTFIT_COLOURS, random),
-    notes: current.notes,
+    details: [...current.details],
   } satisfies AiPersonChoices
 }
 
@@ -137,7 +159,7 @@ export const OUTFIT_COLOUR_SWATCH: Record<AiPersonOutfitColour, string> = {
 }
 
 /** A field's choices as the dialog lists them. */
-export function optionsOf<K extends Exclude<keyof AiPersonChoices, 'notes'>>(
+export function optionsOf<K extends Exclude<keyof AiPersonChoices, 'details'>>(
   field: K,
   order: readonly AiPersonChoices[K][],
 ): { id: AiPersonChoices[K]; label: string }[] {
@@ -153,8 +175,13 @@ export type AiPersonUnavailableReason = Extract<
 const t = (text: string): CopyPart => ({ text })
 const c = (code: string): CopyPart => ({ code })
 
-/** Why AI 인물 is off, with what to set up where that's the reason. */
-export function unavailableCopy(reason: AiPersonUnavailableReason): CopyPart[] {
+/**
+ * Why AI 인물 is off. Only a development build names what to set up (the
+ * server's settings); everyone else is told plainly that it is not available.
+ */
+export function unavailableCopy(reason: AiPersonUnavailableReason, setup: boolean): CopyPart[] {
+  if (reason === 'network') return [t('AI 인물 서버에 연결하지 못했어요.')]
+  if (!setup) return [t(PHOTOREAL_AI_ERROR_TEXT.unavailable)]
   switch (reason) {
     case 'disabled':
       return [t('관리자가 AI 인물 만들기를 꺼 두었어요.')]
@@ -191,8 +218,6 @@ export function unavailableCopy(reason: AiPersonUnavailableReason): CopyPart[] {
         c('.env.example'),
         t('에 있어요.'),
       ]
-    case 'network':
-      return [t('AI 인물 서버에 연결하지 못했어요.')]
   }
 }
 
@@ -270,8 +295,6 @@ export type AiPersonView =
   | { kind: 'blocked'; message: string }
   | {
       kind: 'choose'
-      /** The 자유 설명 as typed can't be sent: why. */
-      notesError: string | null
       canGenerate: boolean
       /** The day's portraits are spent. */
       spent: string | null
@@ -300,7 +323,6 @@ export function aiPersonView(input: {
   status: PhotorealAiClientStatus | null
   job: AvatarJob | null
   step: AiPersonStep
-  notes: string
   portrait: Portrait | null
   now: number
 }): AiPersonView {
@@ -337,16 +359,8 @@ export function aiPersonView(input: {
         avatarsLeft,
       }
   }
-  const notes = checkNotes(input.notes)
-  const notesError = notes.ok ? null : PHOTOREAL_AI_ERROR_TEXT[notes.code]
   const spent = portraitsLeft === 0 ? PHOTOREAL_AI_DAILY_TEXT.portrait : null
-  return {
-    kind: 'choose',
-    notesError,
-    canGenerate: notesError === null && spent === null,
-    spent,
-    portraitsLeft,
-  }
+  return { kind: 'choose', canGenerate: spent === null, spent, portraitsLeft }
 }
 
 /** How far the portrait bar is after `seconds`: eases towards 90% (most answers take 15–60 s). */
@@ -377,13 +391,6 @@ export const leftText = (what: string, left: number | null, unit: string) =>
   left === null ? null : `${what} 오늘 ${left}${unit} 남음`
 
 const CHOICE_FAULTS: ReadonlySet<PhotorealAiErrorCode> = new Set<PhotorealAiErrorCode>([
-  'notes_too_long',
-  'notes_invalid',
-  'notes_off_topic',
-  'name_not_allowed',
-  'minor_not_allowed',
-  'unsafe_text',
-  'face_covered',
   'blocked',
   'invalid_request',
 ])

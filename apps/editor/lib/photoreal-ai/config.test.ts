@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readPhotorealAiConfig } from './config'
+import { readJobService, readPhotorealAiConfig } from './config'
 
 const IMAGE = {
   AI_PHOTO_PROVIDER: 'openai',
@@ -26,6 +26,7 @@ describe('readPhotorealAiConfig', () => {
       clientId: 'id',
       clientSecret: 'secret',
       playerUid: null,
+      requireAgeCheck: false,
     })
     expect(config.portraitLimits).toEqual({ userDaily: 8, globalDaily: 100 })
     expect(config.avatarLimits).toEqual({ userDaily: 2, globalDaily: 10 })
@@ -45,6 +46,7 @@ describe('readPhotorealAiConfig', () => {
         AI_AVATAR_STORE_DIR: '/data/avatars',
         AI_AVATAR_PLAYER_UID: 'player-1',
         AI_AVATAR_BASE_URL: 'https://api.avatarsdk.com/',
+        AI_AVATAR_REQUIRE_AGE_CHECK: 'true',
         AI_PHOTO_DAILY_LIMIT: '999',
       },
       CWD,
@@ -55,7 +57,11 @@ describe('readPhotorealAiConfig', () => {
         portraitLimits: { userDaily: 3, globalDaily: 30 },
         avatarLimits: { userDaily: 1, globalDaily: 5 },
         storeDir: '/data/avatars',
-        service: { playerUid: 'player-1', baseUrl: 'https://api.avatarsdk.com' },
+        service: {
+          playerUid: 'player-1',
+          baseUrl: 'https://api.avatarsdk.com',
+          requireAgeCheck: true,
+        },
       },
     })
   })
@@ -159,5 +165,30 @@ describe('readPhotorealAiConfig', () => {
     // The 목업's file settings mean nothing outside it.
     const real = readPhotorealAiConfig({ ...IMAGE, ...SERVICE, AI_AVATAR_MOCK_GLB: '/tmp/a.glb' })
     expect(real).toMatchObject({ ok: true, config: { mock: false, mockGlbPath: null } })
+  })
+})
+
+describe('readJobService', () => {
+  test('a started build is carried on whatever the feature switches say now', () => {
+    for (const env of [
+      { ...SERVICE, AI_AVATAR_ENABLED: 'false' },
+      { ...SERVICE },
+      { ...IMAGE, ...SERVICE, AI_PHOTO_ENABLED: 'false' },
+    ]) {
+      expect(readJobService(env, CWD, false)).toMatchObject({
+        mock: false,
+        service: { clientId: 'id', clientSecret: 'secret' },
+      })
+    }
+    expect(readJobService({ ...IMAGE }, CWD, false)).toBeNull()
+  })
+
+  test('a 목업 build on the 목업 service, never in production', () => {
+    expect(readJobService({ ...IMAGE, ...SERVICE }, CWD, true)).toMatchObject({
+      mock: true,
+      service: { clientId: 'mock-client' },
+      mockGlbPath: '/srv/app/public/characters/photoreal/makehuman-female-01.glb',
+    })
+    expect(readJobService({ NODE_ENV: 'production' }, CWD, true)).toBeNull()
   })
 })

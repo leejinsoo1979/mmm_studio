@@ -65,14 +65,17 @@ export type AiAvatarStartResult =
   | PhotorealAiRefusal
 
 /**
- * One look at a job. `retry`: nothing was learnt (no connection, the server
- * busy): ask again later. A refusal is final (the job is gone, or the user
- * signed out).
+ * Why a look at a job learnt nothing. None is final: the build goes on at
+ * the server whoever watches it, so the job is asked about again (with a
+ * longer wait) until it ends or runs past `AVATAR_JOB_MAX_MS`. A refused
+ * sign-in or an unknown job is often passing too: Firebase not yet restored
+ * after a reload, or a token check that failed once.
  */
+export type AvatarJobMiss = 'unreachable' | 'not_found' | 'sign_in_required'
+
 export type AvatarJobAnswer =
   | { ok: true; job: AvatarJobReport }
-  | { ok: false; retry: true }
-  | { ok: false; retry: false; code: 'not_found' | 'sign_in_required' }
+  | { ok: false; miss: AvatarJobMiss }
 
 export type PhotorealAiClientDeps = {
   fetch?: (input: string, init: RequestInit) => Promise<Response>
@@ -82,13 +85,6 @@ export type PhotorealAiClientDeps = {
 }
 
 const ROUTE_ERRORS: ReadonlySet<string> = new Set<PhotorealAiRouteError>([
-  'notes_too_long',
-  'notes_invalid',
-  'notes_off_topic',
-  'name_not_allowed',
-  'minor_not_allowed',
-  'unsafe_text',
-  'face_covered',
   'invalid_request',
   'sign_in_required',
   'too_large',
@@ -350,28 +346,31 @@ export function createPhotorealAiClient(deps: PhotorealAiClientDeps = {}) {
           headers: await headers(),
         })
       } catch {
-        return { ok: false, retry: true }
+        return { ok: false, miss: 'unreachable' }
       }
-      if (response.status === 404) return { ok: false, retry: false, code: 'not_found' }
-      if (response.status === 401) return { ok: false, retry: false, code: 'sign_in_required' }
-      if (!response.ok) return { ok: false, retry: true }
+      if (response.status === 404) return { ok: false, miss: 'not_found' }
+      if (response.status === 401) return { ok: false, miss: 'sign_in_required' }
+      if (!response.ok) return { ok: false, miss: 'unreachable' }
       const job = readJobReport(await response.json().catch(() => null))
       if (job?.state === 'done' || job?.state === 'failed') cached = null
-      return job ? { ok: true, job } : { ok: false, retry: true }
+      return job ? { ok: true, job } : { ok: false, miss: 'unreachable' }
     },
 
-    /** `GET /api/photoreal-ai/avatars`: the user's AI 인물 (none when signed out or off). */
-    async avatars(): Promise<PhotorealAiAvatar[]> {
+    /**
+     * `GET /api/photoreal-ai/avatars`: the user's AI 인물, or null when the listing
+     * could not be had (signed out, refused or unreachable): not an answer to keep.
+     */
+    async avatars(): Promise<PhotorealAiAvatar[] | null> {
       try {
         const response = await send(`${ROUTE}/avatars`, {
           cache: 'no-store',
           headers: await headers(),
         })
-        if (!response.ok) return []
+        if (!response.ok) return null
         const body = (await response.json()) as { avatars?: unknown }
-        return Array.isArray(body.avatars) ? (body.avatars as PhotorealAiAvatar[]) : []
+        return Array.isArray(body.avatars) ? (body.avatars as PhotorealAiAvatar[]) : null
       } catch {
-        return []
+        return null
       }
     },
 

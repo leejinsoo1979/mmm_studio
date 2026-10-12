@@ -17,17 +17,18 @@ import {
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { detectFaces } from '@/lib/face-detect'
 import { type PhotorealAiClientStatus, photorealAiClient } from '@/lib/photoreal-ai/client'
-import { normaliseNotes } from '@/lib/photoreal-ai/notes-check'
 import { portraitIssues } from '@/lib/photoreal-ai/portrait-check'
 import {
   AI_PERSON_AGES,
   AI_PERSON_DEFAULTS,
+  AI_PERSON_DETAILS,
+  AI_PERSON_DETAILS_MAX,
   AI_PERSON_FACE_SHAPES,
   AI_PERSON_FACIAL_HAIR,
   AI_PERSON_HAIR_COLOURS,
   AI_PERSON_HERITAGES,
   AI_PERSON_IMPRESSIONS,
-  AI_PERSON_NOTES_MAX,
+  AI_PERSON_LABELS,
   AI_PERSON_NOTICE,
   AI_PERSON_OUTFIT_COLOURS,
   AI_PERSON_OUTFITS,
@@ -37,11 +38,13 @@ import {
   PHOTOREAL_AI_ERROR_TEXT,
 } from '@/lib/photoreal-ai/shared'
 import { cn } from '@/lib/utils'
+import { avatarJobs, useAvatarJob } from './ai-person-jobs'
 import {
   type AiPersonStep,
   aiPersonView,
   backAfter,
   buildStageText,
+  detailOpen,
   elapsedText,
   HAIR_COLOUR_SWATCH,
   hairStylesFor,
@@ -56,11 +59,11 @@ import {
   refusalText,
   requestChoices,
   SKIN_TONE_SWATCH,
+  toggleDetail,
   unavailableCopy,
 } from './ai-person-view'
 import { AI_LABEL_TEXT, download, labelImage, stampedName } from './ai-photo-label'
 import { FOCUS_RING, Segmented } from './studio-controls'
-import { avatarJobs, useAvatarJob } from './use-ai-person'
 
 /** The portraits of this dialog the player can go back to. */
 const KEPT_PORTRAITS = 4
@@ -101,6 +104,47 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
         {label}
       </span>
       {children}
+    </div>
+  )
+}
+
+/** Several of a fixed list, each a pill that can be turned on and off. */
+function ToggleChips<T extends string>({
+  options,
+  picked,
+  open,
+  onToggle,
+}: {
+  options: readonly { id: T; label: string }[]
+  picked: readonly T[]
+  /** Whether a pill not picked yet can be. */
+  open: (id: T) => boolean
+  onToggle: (id: T) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map(({ id, label }) => {
+        const on = picked.includes(id)
+        return (
+          <button
+            aria-pressed={on}
+            className={cn(
+              'flex h-7 items-center gap-1 rounded-full px-3 font-medium text-[12px] transition duration-200 ease-out disabled:opacity-35 motion-reduce:transition-none',
+              FOCUS_RING,
+              on
+                ? 'bg-white text-neutral-900'
+                : 'bg-white/[0.08] text-white/75 ring-1 ring-white/10 hover:bg-white/15 hover:text-white disabled:hover:bg-white/[0.08]',
+            )}
+            disabled={!on && !open(id)}
+            key={id}
+            onClick={() => onToggle(id)}
+            type="button"
+          >
+            {on && <Check className="size-3" strokeWidth={3} />}
+            {label}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -196,7 +240,6 @@ export function AiPersonDialog({
   onAnnounce: (text: string) => void
 }) {
   const titleId = useId()
-  const notesId = useId()
   const client = photorealAiClient()
   const job = useAvatarJob()
   const [status, setStatus] = useState<PhotorealAiClientStatus | null>(null)
@@ -224,7 +267,6 @@ export function AiPersonDialog({
     status,
     job,
     step,
-    notes: choices.notes,
     portrait: shown,
     now: clock,
   })
@@ -412,7 +454,6 @@ export function AiPersonDialog({
 
   const seconds = Math.max(0, (clock - startedAt) / 1000)
   const waitLeft = Math.max(0, Math.ceil((retryAt - clock) / 1000))
-  const notesLength = [...normaliseNotes(choices.notes)].length
   const portraitLeft = status?.available ? status.portraitsLeft : null
   // The choices show no portrait: it would read as a preview of them.
   const portraitShown = shown !== null && view.kind !== 'choose'
@@ -561,14 +602,18 @@ export function AiPersonDialog({
               <p className="flex items-start gap-2 rounded-xl bg-amber-400/10 px-3 py-3 text-[12px] text-amber-100 leading-5">
                 <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-300" />
                 <span>
-                  {unavailableCopy(view.reason).map((part, index) =>
-                    'code' in part ? (
-                      <code className="rounded bg-white/10 px-1 font-mono text-[11px]" key={index}>
-                        {part.code}
-                      </code>
-                    ) : (
-                      <span key={index}>{part.text}</span>
-                    ),
+                  {unavailableCopy(view.reason, process.env.NODE_ENV !== 'production').map(
+                    (part, index) =>
+                      'code' in part ? (
+                        <code
+                          className="rounded bg-white/10 px-1 font-mono text-[11px]"
+                          key={index}
+                        >
+                          {part.code}
+                        </code>
+                      ) : (
+                        <span key={index}>{part.text}</span>
+                      ),
                   )}
                 </span>
               </p>
@@ -688,48 +733,21 @@ export function AiPersonDialog({
                   value={choices.outfitColour}
                 />
               </Field>
-              <div className="flex flex-col gap-1.5">
-                <label
-                  className="flex items-center justify-between font-semibold text-[12px] text-white/50 tracking-wide"
-                  htmlFor={notesId}
-                >
-                  <span>자유 설명 (선택)</span>
-                  <span
-                    className={cn(
-                      'font-normal tabular-nums',
-                      notesLength > AI_PERSON_NOTES_MAX ? 'text-rose-300' : 'text-white/40',
-                    )}
-                  >
-                    {notesLength}/{AI_PERSON_NOTES_MAX}
-                  </span>
-                </label>
-                <textarea
-                  aria-describedby={`${notesId}-hint`}
-                  aria-invalid={view.notesError !== null}
-                  className={cn(
-                    'min-h-[64px] resize-none rounded-xl bg-white/[0.06] px-3 py-2 text-[13px] text-white leading-5 ring-1 placeholder:text-white/30',
-                    FOCUS_RING,
-                    view.notesError ? 'ring-rose-400/60' : 'ring-white/10',
-                  )}
-                  id={notesId}
-                  maxLength={AI_PERSON_NOTES_MAX * 2}
-                  onChange={(event) => patch({ notes: event.target.value })}
-                  placeholder="예: 눈썹이 진하고 왼쪽 눈 밑에 작은 점"
-                  rows={2}
-                  value={choices.notes}
+              <Field label={`세부 특징 (선택, ${AI_PERSON_DETAILS_MAX}개까지)`}>
+                <ToggleChips
+                  onToggle={(detail) => patch({ details: toggleDetail(choices.details, detail) })}
+                  open={(detail) => detailOpen(choices.details, detail)}
+                  options={AI_PERSON_DETAILS.map((id) => ({
+                    id,
+                    label: AI_PERSON_LABELS.details[id],
+                  }))}
+                  picked={choices.details}
                 />
-                <p
-                  className={cn(
-                    'text-[11px] leading-4',
-                    view.notesError ? 'text-rose-200' : 'text-white/45',
-                  )}
-                  id={`${notesId}-hint`}
-                  role={view.notesError ? 'alert' : undefined}
-                >
-                  {view.notesError ??
-                    '생김새만 적어 주세요. 실존 인물 이름, 어려 보이는 표현, 안경·모자는 넣을 수 없어요. 표정·자세는 3D용으로 정면·무표정으로 정해져 있어요.'}
+                <p className="text-[11px] text-white/45 leading-4">
+                  생김새는 고른 항목으로만 정해요. 이름이나 다른 설명은 넣을 수 없어서 실존 인물을
+                  닮게 만들 수 없어요. 표정·자세는 3D용으로 정면·무표정으로 정해져 있어요.
                 </p>
-              </div>
+              </Field>
               {view.spent && (
                 <p className="rounded-xl bg-amber-400/10 px-3 py-2 text-[12px] text-amber-100">
                   {view.spent}
@@ -815,9 +833,16 @@ export function AiPersonDialog({
                   {elapsedText(clock - view.job.startedAt)}
                 </span>
               </p>
+              {view.job.signInNeeded && (
+                <p className="flex items-start gap-2 rounded-xl bg-amber-400/10 px-3 py-2 text-[12px] text-amber-100 leading-5">
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-300" />
+                  로그인이 풀린 것 같아요. 다시 로그인하면 이어서 확인해요. 만들기는 서버에서
+                  계속돼요.
+                </p>
+              )}
               <p className="rounded-xl bg-white/[0.05] px-3 py-2 text-[12px] text-white/60 leading-5">
-                보통 몇 분 걸려요. 이 창이나 스튜디오를 닫아도 계속 만들어요. 다 되면 실사 목록에
-                나타나고 바로 골라 둘게요.
+                보통 몇 분 걸려요. 이 창이나 스튜디오를 닫아도, 페이지를 새로고침해도 서버에서 계속
+                만들어요. 다 되면 실사 목록에 나타나고 바로 골라 둘게요.
               </p>
             </div>
           )}

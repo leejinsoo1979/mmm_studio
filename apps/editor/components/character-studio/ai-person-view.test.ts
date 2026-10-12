@@ -3,6 +3,8 @@ import type { AvatarJob } from '@/lib/photoreal-ai/avatar-job'
 import type { PhotorealAiClientStatus } from '@/lib/photoreal-ai/client'
 import {
   AI_PERSON_DEFAULTS,
+  AI_PERSON_DETAILS,
+  AI_PERSON_DETAILS_MAX,
   AI_PERSON_HAIR_STYLES,
   AI_PERSON_LABELS,
   AI_PORTRAIT_TOKEN_TTL_MS,
@@ -17,6 +19,7 @@ import {
   aiPersonView,
   backAfter,
   buildStageText,
+  detailOpen,
   elapsedText,
   HAIR_COLOUR_SWATCH,
   hairStylesFor,
@@ -30,6 +33,7 @@ import {
   refusalText,
   requestChoices,
   SKIN_TONE_SWATCH,
+  toggleDetail,
   unavailableCopy,
 } from './ai-person-view'
 
@@ -68,7 +72,6 @@ function view(
     status: PhotorealAiClientStatus | null
     job: AvatarJob | null
     step: AiPersonStep
-    notes: string
     portrait: Portrait | null
   }> = {},
 ) {
@@ -76,7 +79,6 @@ function view(
     status: READY,
     job: null,
     step: { kind: 'choose' },
-    notes: '',
     portrait: null,
     now: NOW,
     ...overrides,
@@ -84,25 +86,50 @@ function view(
 }
 
 describe('requestChoices', () => {
-  test('tidies the notes and drops facial hair from a woman', () => {
+  test('drops facial hair from a woman and keeps the details', () => {
     const choices: AiPersonChoices = {
       ...AI_PERSON_DEFAULTS,
       sex: 'female',
       facialHair: 'shortBeard',
-      notes: '  Ｖ넥   니트 \n',
+      details: ['freckles'],
     }
-    expect(requestChoices(choices)).toEqual({
-      ...choices,
-      facialHair: 'none',
-      notes: 'V넥 니트',
-    })
+    expect(requestChoices(choices)).toEqual({ ...choices, facialHair: 'none' })
     expect(requestChoices({ ...choices, sex: 'male' }).facialHair).toBe('shortBeard')
   })
 })
 
+describe('the details', () => {
+  test('a tap adds or drops one; its opposite gives way; never past the cap', () => {
+    expect(toggleDetail([], 'freckles')).toEqual(['freckles'])
+    expect(toggleDetail(['freckles'], 'freckles')).toEqual([])
+    expect(toggleDetail(['thickBrows', 'dimples'], 'fineBrows')).toEqual(['dimples', 'fineBrows'])
+    const full: AiPersonChoices['details'] = ['thickBrows', 'freckles', 'cheekMole', 'dimples']
+    expect(full).toHaveLength(AI_PERSON_DETAILS_MAX)
+    expect(toggleDetail(full, 'highNoseBridge')).toEqual(full)
+    expect(detailOpen(full, 'highNoseBridge')).toBe(false)
+    expect(detailOpen(full, 'freckles')).toBe(true)
+    // Swapping a picked one for its opposite stays open at the cap.
+    expect(detailOpen(full, 'fineBrows')).toBe(true)
+    expect(toggleDetail(full, 'fineBrows')).toEqual([
+      'freckles',
+      'cheekMole',
+      'dimples',
+      'fineBrows',
+    ])
+  })
+
+  test('every detail has a Korean label', () => {
+    expect(Object.keys(AI_PERSON_LABELS.details)).toEqual([...AI_PERSON_DETAILS])
+  })
+})
+
 describe('randomChoices', () => {
-  test('draws every list but 외모 계열, keeps the notes, and gives women no beard', () => {
-    const current = { ...AI_PERSON_DEFAULTS, heritage: 'european' as const, notes: '작은 점' }
+  test('draws every list but 외모 계열, keeps the details, and gives women no beard', () => {
+    const current: AiPersonChoices = {
+      ...AI_PERSON_DEFAULTS,
+      heritage: 'european',
+      details: ['cheekMole'],
+    }
     let seed = 0
     const random = () => {
       seed = (seed * 9301 + 49297) % 233280
@@ -111,10 +138,10 @@ describe('randomChoices', () => {
     for (let i = 0; i < 200; i++) {
       const drawn = randomChoices(current, random)
       expect(drawn.heritage).toBe('european')
-      expect(drawn.notes).toBe('작은 점')
+      expect(drawn.details).toEqual(['cheekMole'])
       if (drawn.sex === 'female') expect(drawn.facialHair).toBe('none')
       for (const [field, value] of Object.entries(drawn)) {
-        if (field === 'notes') continue
+        if (field === 'details') continue
         expect(AI_PERSON_LABELS[field as keyof typeof AI_PERSON_LABELS]).toHaveProperty(value)
       }
     }
@@ -143,20 +170,29 @@ describe('the lists', () => {
     ])
   })
 
-  test('each unavailable reason says what to do', () => {
-    for (const reason of [
+  test('each unavailable reason says what to set up, but only in development', () => {
+    const reasons = [
       'disabled',
       'not_configured',
       'no_api_key',
       'moderation_required',
       'service_not_configured',
       'network',
-    ] as const) {
-      const copy = unavailableCopy(reason)
-      expect(copy.length).toBeGreaterThan(0)
+    ] as const
+    for (const reason of reasons) {
+      expect(unavailableCopy(reason, true).length).toBeGreaterThan(0)
+      // Everyone else reads one plain line, with no server setting named.
+      const plain = unavailableCopy(reason, false)
+      expect(plain).toHaveLength(1)
+      expect(JSON.stringify(plain)).not.toMatch(/AI_|code|\.env/)
     }
-    expect(unavailableCopy('no_api_key')).toContainEqual({ code: 'AI_PHOTO_API_KEY' })
-    expect(unavailableCopy('service_not_configured')).toContainEqual({ code: 'AI_AVATAR_SERVICE' })
+    expect(unavailableCopy('no_api_key', false)).toEqual([
+      { text: PHOTOREAL_AI_ERROR_TEXT.unavailable },
+    ])
+    expect(unavailableCopy('no_api_key', true)).toContainEqual({ code: 'AI_PHOTO_API_KEY' })
+    expect(unavailableCopy('service_not_configured', true)).toContainEqual({
+      code: 'AI_AVATAR_SERVICE',
+    })
   })
 })
 
@@ -179,20 +215,12 @@ describe('aiPersonView', () => {
     })
   })
 
-  test('the choices: refused notes and a spent day stop the portrait', () => {
+  test('the choices: a spent day stops the portrait', () => {
     expect(view()).toEqual({
       kind: 'choose',
-      notesError: null,
       canGenerate: true,
       spent: null,
       portraitsLeft: 5,
-    })
-    expect(view({ notes: '김민준 닮게' })).toMatchObject({
-      notesError: PHOTOREAL_AI_ERROR_TEXT.name_not_allowed,
-      canGenerate: false,
-    })
-    expect(view({ notes: '17살처럼' })).toMatchObject({
-      notesError: PHOTOREAL_AI_ERROR_TEXT.minor_not_allowed,
     })
     expect(view({ status: { ...READY, portraitsLeft: 0 } })).toMatchObject({
       canGenerate: false,
@@ -327,7 +355,7 @@ describe('progress and refusals', () => {
 
 describe('after a refused portrait', () => {
   test('the choices when they are the cause, else back to the portraits there are', () => {
-    expect(backAfter('name_not_allowed', true)).toBe('choose')
+    expect(backAfter('invalid_request', true)).toBe('choose')
     expect(backAfter('blocked', true)).toBe('choose')
     expect(backAfter('upstream', true)).toBe('review')
     expect(backAfter('rate_limited', false)).toBe('choose')

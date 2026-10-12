@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Mesh, Object3D, SkinnedMesh } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { isHumanoidRig, prepareAvatarGlb, readGlb, writeGlb } from './glb'
+import { AI_GLB_NOTICE, isHumanoidRig, prepareAvatarGlb, readGlb, writeGlb } from './glb'
 import { TEST_HEAD_TARGETS, TEST_IMAGE, testAvatarGlb } from './test-glb'
 
 const SHIPPED = join(import.meta.dir, '../../public/characters/photoreal/makehuman-female-01.glb')
@@ -38,6 +38,12 @@ describe('prepareAvatarGlb', () => {
     ])
     expect(json.meshes?.[1]?.extras).toBeUndefined()
     expect(json.meshes?.[1]?.weights).toBeUndefined()
+    // The file itself says it shows an AI-made, fictional person.
+    expect(json.asset).toEqual({
+      version: '2.0',
+      copyright: AI_GLB_NOTICE,
+      extras: { aiGenerated: true },
+    })
 
     const scene = await load(result.bytes)
     const head = scene.getObjectByName('AvatarHead') as SkinnedMesh
@@ -80,14 +86,24 @@ describe('prepareAvatarGlb', () => {
     expect(prepareAvatarGlb(new Uint8Array(cut))).toMatchObject({ ok: false })
   })
 
-  test('keeps a compressed GLB as it came (the shipped meshopt character)', () => {
+  test('keeps a compressed GLB’s data as it came, only marking it (the shipped meshopt character)', async () => {
     const shipped = new Uint8Array(readFileSync(SHIPPED))
     const result = prepareAvatarGlb(shipped)
     if (!result.ok) throw new Error(result.problem)
     expect(result.trimmed).toBe(false)
-    expect(result.bytes).toBe(shipped)
     expect(result.before.extensions).toContain('EXT_meshopt_compression')
     expect(isHumanoidRig(result.before.joints)).toBe(true)
+    const before = readGlb(shipped)
+    const after = readGlb(result.bytes)
+    if (!before.ok || !after.ok) throw new Error('unreadable')
+    expect(after.bin).toEqual(before.bin)
+    const { asset: _marked, ...rest } = after.json
+    const { asset: _plain, ...original } = before.json
+    expect(rest).toEqual(original)
+    expect(after.json.asset).toMatchObject({
+      copyright: AI_GLB_NOTICE,
+      extras: { aiGenerated: true },
+    })
   })
 
   test('a GLB with no blend shapes to drop still repacks cleanly', async () => {
@@ -95,7 +111,8 @@ describe('prepareAvatarGlb', () => {
     const result = prepareAvatarGlb(plain)
     if (!result.ok) throw new Error(result.problem)
     expect(result.after.morphTargets).toEqual([])
-    expect(result.bytes.byteLength).toBe(plain.byteLength)
+    const [before, after] = [readGlb(plain), readGlb(result.bytes)]
+    expect(after.ok && after.bin?.byteLength).toBe(before.ok && before.bin?.byteLength)
     expect((await load(result.bytes)).getObjectByName('Head')).toBeDefined()
   })
 })

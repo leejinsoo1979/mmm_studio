@@ -51,16 +51,29 @@ describe('applyAnswer', () => {
     expect(applyAnswer(JOB, { ok: true, job: report({ jobId: 'f'.repeat(24) }) }, 2_000)).toBe(JOB)
   })
 
-  test('a final refusal fails it; a passing one waits, until the job has run too long', () => {
-    expect(applyAnswer(JOB, { ok: false, retry: false, code: 'not_found' }, 2_000)).toMatchObject({
+  test('no miss ends it before the job has run too long; then it ends for the last reason heard', () => {
+    for (const miss of ['not_found', 'unreachable'] as const) {
+      expect(applyAnswer(JOB, { ok: false, miss }, 2_000)).toBe(JOB)
+    }
+    const late = JOB.startedAt + AVATAR_JOB_MAX_MS + 1
+    expect(applyAnswer(JOB, { ok: false, miss: 'not_found' }, late)).toMatchObject({
       state: 'failed',
       stage: 'failed',
       error: 'not_found',
     })
-    expect(applyAnswer(JOB, { ok: false, retry: true }, 2_000)).toBe(JOB)
-    expect(
-      applyAnswer(JOB, { ok: false, retry: true }, JOB.startedAt + AVATAR_JOB_MAX_MS + 1),
-    ).toMatchObject({ state: 'failed', error: 'timeout' })
+    expect(applyAnswer(JOB, { ok: false, miss: 'unreachable' }, late)).toMatchObject({
+      state: 'failed',
+      error: 'timeout',
+    })
+  })
+
+  test('a refused sign-in is shown while it lasts, and the next answer carries on', () => {
+    const waiting = applyAnswer(JOB, { ok: false, miss: 'sign_in_required' }, 2_000)
+    expect(waiting).toMatchObject({ state: 'working', signInNeeded: true })
+    expect(applyAnswer(waiting, { ok: false, miss: 'sign_in_required' }, 3_000)).toBe(waiting)
+    const back = applyAnswer(waiting, working(40), 4_000)
+    expect(back).toMatchObject({ state: 'working', progress: 40 })
+    expect(back).not.toHaveProperty('signInNeeded')
   })
 
   test('a finished job stays as it ended', () => {
@@ -115,7 +128,7 @@ function harness(options: { kept?: string | null; start?: AiAvatarStartResult } 
     },
     poll: async (jobId) => {
       polled.push(jobId)
-      return answers.shift() ?? { ok: false, retry: true }
+      return answers.shift() ?? { ok: false, miss: 'unreachable' }
     },
     storage: {
       read: () => stored,
@@ -193,13 +206,36 @@ describe('the job tracker', () => {
     expect(h.pending).toHaveLength(0)
   })
 
-  test('failed polls back off; a job gone ends it', async () => {
+  test('failed polls back off and carry on: a 401 (Firebase not restored yet) then an answer', async () => {
     const h = harness()
     await h.tracker.begin(new Blob(['a']), 't')
     await h.tick()
     expect(h.pending[0]!.at - (10_000 + AVATAR_JOB_POLL_MS)).toBe(AVATAR_JOB_POLL_MS * 2)
-    h.answers.push({ ok: false, retry: false, code: 'not_found' })
+    h.answers.push(
+      { ok: false, miss: 'sign_in_required' },
+      { ok: false, miss: 'not_found' },
+      working(60),
+      done,
+    )
     await h.tick()
+    expect(h.tracker.get()).toMatchObject({ state: 'working', signInNeeded: true })
+    await h.tick()
+    expect(h.tracker.get()).toMatchObject({ state: 'working' })
+    expect(h.pending).toHaveLength(1)
+    await h.tick()
+    expect(h.tracker.get()).toMatchObject({ state: 'working', progress: 60 })
+    await h.tick()
+    expect(h.tracker.get()).toMatchObject({ state: 'done', avatar: AVATAR })
+    expect(h.finished).toHaveLength(1)
+  })
+
+  test('a job that stays unanswered is given up once it has run too long', async () => {
+    const h = harness()
+    await h.tracker.begin(new Blob(['a']), 't')
+    for (let i = 0; i < 200 && h.pending.length > 0; i++) {
+      h.answers.push({ ok: false, miss: 'not_found' })
+      await h.tick()
+    }
     expect(h.tracker.get()).toMatchObject({ state: 'failed', error: 'not_found' })
     expect(h.finished).toHaveLength(1)
   })
@@ -234,7 +270,7 @@ describe('the job tracker', () => {
   test('storage that refuses does not stop the job', async () => {
     const tracker = createAvatarJobTracker({
       start: async () => ({ ok: true, job: report(), avatarsLeft: null }),
-      poll: async () => ({ ok: false, retry: true }),
+      poll: async () => ({ ok: false, miss: 'unreachable' }),
       storage: {
         read: () => {
           throw new Error('denied')

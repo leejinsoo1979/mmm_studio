@@ -60,6 +60,7 @@ import type { AiPhotoFraming } from '@/lib/ai-photo/client'
 import { type AvatarJob, isFinished } from '@/lib/photoreal-ai/avatar-job'
 import { cn } from '@/lib/utils'
 import { AiPersonDialog } from './ai-person-dialog'
+import { avatarJobs, useAvatarJob } from './ai-person-jobs'
 import { AiPhotoDialog } from './ai-photo-dialog'
 import { download, stampedName } from './ai-photo-label'
 import { lookOn } from './avatar-counterpart'
@@ -119,7 +120,7 @@ import {
 import { StudioStage } from './studio-stage'
 import { StudioTabs } from './studio-tabs'
 import { StudioToolbar } from './studio-toolbar'
-import { avatarJobs, deleteAiPerson, useAiPeople, useAvatarJob } from './use-ai-person'
+import { deleteAiPerson, useAiPeople } from './use-ai-person'
 import { type StudioTarget, useCharacterStudio } from './use-character-studio'
 
 /** The body (a Rocketbox avatar, or a 실사 character in its place), its look, the emote keys. */
@@ -933,8 +934,9 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
     setCategory(REAL_CATEGORY.id)
     commit({ ...current, real: lastReal.current ?? PHOTOREAL_CHARACTERS[0]!.id })
   }
-  // An AI 인물 being built goes on while the studio is shut; once it is
-  // done it is picked here (one undo step), the next time the studio is open.
+  // An AI 인물 being built goes on at the server while the studio is shut (the
+  // layout follows a kept one on any page); once it is done it is picked here
+  // (one undo step), the next time the studio is open.
   useEffect(() => {
     if (!isNpc) avatarJobs().resume()
   }, [isNpc])

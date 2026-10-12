@@ -3,7 +3,8 @@ import type { AiPersonChoices } from './shared'
 /**
  * The 3D avatar service behind AI 인물, as the job runner sees it: start a
  * build from one frontal photo, ask where it is, download the finished GLB,
- * delete the service's copy. One implementation today (metaperson.ts); the
+ * delete the service's copy, and find a build by its name when the answer
+ * to starting it was lost. One implementation today (metaperson.ts); the
  * 목업 runs that same implementation against an in-process fake of its
  * protocol (metaperson-fake.ts).
  */
@@ -41,6 +42,16 @@ export type ServiceFailure = {
   retryAfter?: number
 }
 
+/**
+ * How far a refused create got. `no`: it never reached the service's create
+ * call. `refused`: the service answered it with a refusal (a 4xx), so nothing
+ * was built. `unknown`: it may have been built and billed (no answer, a
+ * timeout, a 5xx, an answer this adapter can't read).
+ */
+export type CreateSent = 'no' | 'refused' | 'unknown'
+
+export type CreateFailure = ServiceFailure & { sent: CreateSent }
+
 export type ServicePoll =
   | { ok: true; state: 'working'; stage: ServiceStage; progress: number; ref: ServiceRef }
   | { ok: true; state: 'ready'; ref: ServiceRef }
@@ -49,10 +60,20 @@ export type ServicePoll =
 export interface AvatarService {
   /** Shown on the avatar's card after "AI 생성 인물 · ". */
   readonly credit: string
+  /**
+   * Starts a build named `name` (unique: it finds the build again).
+   * `beforeSend` runs just before the billable request and may stop it.
+   */
   create(
     input: { photo: AvatarPhoto; look: AvatarLook; name: string },
     signal: AbortSignal,
-  ): Promise<{ ok: true; ref: ServiceRef } | ServiceFailure>
+    beforeSend?: () => Promise<boolean>,
+  ): Promise<{ ok: true; ref: ServiceRef } | CreateFailure>
+  /** The build named `name` among this account's recent ones; null when there is none. */
+  find(
+    name: string,
+    signal: AbortSignal,
+  ): Promise<{ ok: true; ref: ServiceRef | null } | ServiceFailure>
   poll(ref: ServiceRef, signal: AbortSignal): Promise<ServicePoll>
   download(
     ref: ServiceRef,

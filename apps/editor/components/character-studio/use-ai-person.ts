@@ -1,40 +1,44 @@
 'use client'
 
 import { aiCharacters, type PhotorealCharacter } from '@pascal-app/editor'
-import { useEffect, useState, useSyncExternalStore } from 'react'
-import {
-  type AvatarJob,
-  type AvatarJobTracker,
-  createAvatarJobTracker,
-} from '@/lib/photoreal-ai/avatar-job'
+import { useEffect, useState } from 'react'
+import { observeFirebaseUser } from '@/lib/firebase-client'
 import { photorealAiClient } from '@/lib/photoreal-ai/client'
+import { onAvatarJobFinished } from './ai-person-jobs'
 
 /**
- * The page's AI 인물 state, outliving the dialog and the studio: the one 3D
- * job being built (kept in browser storage, so a reload finds it again) and
- * the user's finished AI 인물 as 실사 characters.
+ * The user's finished AI 인물 as 실사 characters, listed once for every
+ * gallery on the page and listed again when one is added or deleted or the
+ * signed-in user changes. A listing that could not be had (signed out yet,
+ * refused, offline) shows none and is not kept: the next gallery asks again.
  */
-
-/** Browser storage key of the 3D job. */
-const JOB_KEY = 'mmm-ai-person-job'
 
 let listing: Promise<PhotorealCharacter[]> | null = null
 const listingReaders = new Set<() => void>()
 
 function loadAiPeople(): Promise<PhotorealCharacter[]> {
-  listing ??= photorealAiClient()
+  if (listing) return listing
+  const asked: Promise<PhotorealCharacter[]> = photorealAiClient()
     .avatars()
-    .then((avatars) => aiCharacters(avatars))
-  return listing
+    .then((avatars) => {
+      if (avatars === null && listing === asked) listing = null
+      return aiCharacters(avatars ?? [])
+    })
+  listing = asked
+  return asked
 }
 
-/** Lists the AI 인물 again (one was added or deleted), for every gallery showing them. */
+/** Lists the AI 인물 again (one was added or deleted, or the user changed), for every gallery showing them. */
 export function reloadAiPeople(): Promise<PhotorealCharacter[]> {
   listing = null
   const next = loadAiPeople()
   for (const read of listingReaders) read()
   return next
 }
+
+onAvatarJobFinished((job) => {
+  if (job.state === 'done') void reloadAiPeople()
+})
 
 /** The user's AI 인물 (none when signed out), null while the list first loads. */
 export function useAiPeople(): PhotorealCharacter[] | null {
@@ -45,14 +49,24 @@ export function useAiPeople(): PhotorealCharacter[] | null {
       const asked = loadAiPeople()
       asked.then((found) => {
         // An older list answering late is not shown over a newer one.
-        if (current && asked === listing) setPeople(found)
+        if (current && (asked === listing || listing === null)) setPeople(found)
       })
     }
     read()
     listingReaders.add(read)
+    // Signing in or out (or Firebase restoring the user after a reload) changes whose list it is.
+    let first = true
+    const stop = observeFirebaseUser(() => {
+      if (first) {
+        first = false
+        return
+      }
+      void reloadAiPeople()
+    })
     return () => {
       current = false
       listingReaders.delete(read)
+      stop()
     }
   }, [])
   return people
@@ -63,37 +77,4 @@ export async function deleteAiPerson(avatarId: string): Promise<boolean> {
   const deleted = await photorealAiClient().deleteAvatar(avatarId)
   if (deleted) void reloadAiPeople()
   return deleted
-}
-
-let tracker: AvatarJobTracker | null = null
-
-/** The page's one AI 인물 3D job, followed whether or not the studio is open. */
-export function avatarJobs(): AvatarJobTracker {
-  if (!tracker) {
-    const client = photorealAiClient()
-    tracker = createAvatarJobTracker({
-      start: (image, token) => client.startAvatar(image, token),
-      poll: (jobId) => client.avatarJob(jobId),
-      storage: {
-        read: () => window.localStorage.getItem(JOB_KEY),
-        write: (value) =>
-          value === null
-            ? window.localStorage.removeItem(JOB_KEY)
-            : window.localStorage.setItem(JOB_KEY, value),
-      },
-      // A finished avatar is in the user's list now.
-      onFinished: (job) => {
-        if (job.state === 'done') void reloadAiPeople()
-      },
-    })
-  }
-  return tracker
-}
-
-const serverJob = () => null
-
-/** The job as it stands (null when there is none). */
-export function useAvatarJob(): AvatarJob | null {
-  const jobs = avatarJobs()
-  return useSyncExternalStore(jobs.subscribe, jobs.get, serverJob)
 }

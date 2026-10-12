@@ -3,6 +3,7 @@ import { base64Of, jpeg } from '../ai-photo/test-images'
 import { createMetaPersonFake, type FakeCall } from './metaperson-fake'
 import { runAvatarServiceCheck, shapeOf } from './service-check'
 import { testAvatarGlb } from './test-glb'
+import { writeZip } from './zip'
 
 const ENV = {
   AI_AVATAR_CLIENT_ID: 'check-client-id',
@@ -19,6 +20,9 @@ function run(
     /** Rewrites a JSON answer of the fake, by path. */
     edit?: (path: string, json: Record<string, unknown>) => Record<string, unknown>
     image?: () => Response
+    /** Answers for a storage host the file download is sent on to. */
+    storage?: () => Response
+    env?: Record<string, string | undefined>
   } = {},
 ) {
   let t = 5_000_000
@@ -34,11 +38,16 @@ function run(
   })
   const lines: string[] = []
   const written = new Map<string, Uint8Array>()
+  const images: string[] = []
   const done = runAvatarServiceCheck({
-    env: ENV,
+    env: { ...ENV, ...options.env },
     args,
     fetch: async (url, init) => {
+      if (url.startsWith('https://storage.example.com/') && options.storage) {
+        return options.storage()
+      }
       if (!url.includes('avatarsdk.com')) {
+        images.push(url)
         return (
           options.image?.() ?? Response.json({ data: [{ b64_json: base64Of(jpeg(1024, 1024)) }] })
         )
@@ -49,7 +58,6 @@ function run(
       return Response.json(options.edit(new URL(url).pathname, json), { status: response.status })
     },
     log: (line) => lines.push(line),
-    readFile: async () => jpeg(1024, 1024),
     writeFile: async (path, bytes) => {
       written.set(path, bytes)
     },
@@ -58,7 +66,7 @@ function run(
       t += ms
     },
   })
-  return { done, lines, written, fake }
+  return { done, lines, written, fake, images }
 }
 
 describe('runAvatarServiceCheck', () => {
@@ -68,23 +76,22 @@ describe('runAvatarServiceCheck', () => {
     const output = lines.join('\n')
     expect(output).toContain('metaperson_2.1 / female: 이 계정으로 만들 수 있어요')
     expect(output).toContain('female / suit → fake_business_suit')
+    expect(output).toContain('아바타 목록(GET /avatars/)을 읽을 수 있어요')
     expect(output).toContain('--yes')
-    expect(fake.calls.some((call) => call.path === '/avatars/')).toBe(false)
+    expect(fake.calls.some((call) => call.method === 'POST' && call.path === '/avatars/')).toBe(
+      false,
+    )
     expect(output).not.toContain(ENV.AI_AVATAR_CLIENT_SECRET)
     expect(output).not.toContain(ENV.AI_AVATAR_CLIENT_ID)
   })
 
-  test('with --yes: one avatar built, checked, saved and deleted, with no secret printed', async () => {
-    const { done, lines, written, fake } = run([
-      'service',
-      '--yes',
-      '--portrait',
-      'portrait.jpg',
-      '--out',
-      'check.glb',
-    ])
+  test('with --yes: a portrait made here, one avatar built from it, checked, saved and deleted, with no secret printed', async () => {
+    const { done, lines, written, fake, images } = run(['service', '--yes', '--out', 'check.glb'])
     const code = await done
     const output = lines.join('\n')
+    // The photo sent is the one just made through the app's portrait step: no file is read.
+    expect(images).toEqual(['https://api.openai.com/v1/images/generations'])
+    expect(output).toContain('확인용 AI 인물 사진을 만들었어요')
     expect(output).toContain('ZIP 안에 avatar/model.glb')
     expect(output).toContain('eyeBlinkLeft / eyeBlinkRight 있음')
     expect(output).toContain('model_info.age = not_child')
@@ -103,7 +110,7 @@ describe('runAvatarServiceCheck', () => {
 
   test('reports where the service answers differently', async () => {
     let token = ''
-    const { done, lines } = run(['service', '--yes', '--portrait', 'p.jpg'], {
+    const { done, lines } = run(['service', '--yes'], {
       override: ({ method, path }) =>
         method === 'GET' && path.startsWith('/parameters/available/')
           ? Response.json({ detail: 'Not in your plan.' }, { status: 400 })
@@ -129,10 +136,37 @@ describe('runAvatarServiceCheck', () => {
     expect(output).not.toContain(token)
   })
 
-  test('portrait: refuses a real name locally, then one request through the app’s modules', async () => {
+  test('service --yes takes no photo file, and builds nothing without the portrait step', async () => {
+    const { done, lines, fake, images } = run(['service', '--yes', '--portrait', 'someone.jpg'], {
+      env: { AI_PHOTO_PROVIDER: undefined },
+    })
+    expect(await done).toBe(1)
+    expect(lines.join('\n')).toContain('확인용 인물 사진을 만들 수 없어요')
+    expect(images).toEqual([])
+    expect(fake.calls.some((call) => call.method === 'POST' && call.path === '/avatars/')).toBe(
+      false,
+    )
+  })
+
+  test('the downloaded file is examined even when it is served from storage elsewhere', async () => {
+    const { done, lines } = run(['service', '--yes'], {
+      override: ({ path }) =>
+        path.endsWith('/files/avatar/file/')
+          ? new Response(null, {
+              status: 302,
+              headers: { location: 'https://storage.example.com/model.zip?sig=1' },
+            })
+          : undefined,
+      storage: () => new Response(writeZip([{ name: 'avatar/model.glb', bytes: testAvatarGlb() }])),
+    })
+    await done
+    expect(lines.join('\n')).toContain('ZIP 안에 avatar/model.glb')
+  })
+
+  test('portrait: only the fixed choices, then one request through the app’s modules', async () => {
     const dry = run(['portrait'])
     expect(await dry.done).toBe(0)
-    expect(dry.lines.join('\n')).toContain('서버에 보내기 전에 거절 (name_not_allowed)')
+    expect(dry.lines.join('\n')).toContain('고른 항목만 보내요')
     const real = run(['portrait', '--yes', '--out', 'p.jpg'])
     expect(await real.done).toBe(0)
     expect(real.lines.join('\n')).toContain('3D 단계에 쓸 수 있어요')

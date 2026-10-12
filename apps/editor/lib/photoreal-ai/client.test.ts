@@ -129,12 +129,12 @@ describe('createPortrait', () => {
   })
 
   test('keeps the route’s codes, scope and wait; falls back on the HTTP status', async () => {
-    let reply = (): Response => Response.json({ error: 'name_not_allowed' }, { status: 422 })
+    let reply = (): Response => Response.json({ error: 'blocked' }, { status: 422 })
     const { fetch } = fakeFetch(() => reply())
     const client = createPhotorealAiClient({ fetch, headers })
     expect(await client.createPortrait(AI_PERSON_DEFAULTS)).toEqual({
       ok: false,
-      code: 'name_not_allowed',
+      code: 'blocked',
     })
     reply = () =>
       Response.json({ error: 'rate_limited', retryAfter: 41.2, scope: 'daily' }, { status: 429 })
@@ -234,25 +234,18 @@ describe('avatarJob', () => {
     expect(calls[0]!.url).toBe(`/api/photoreal-ai/avatar/${JOB}`)
   })
 
-  test('a job gone or a signed-out user is final; anything else is asked again', async () => {
+  test('a miss says why (job unknown, signed out, unreachable); none of them ends the job', async () => {
     let status = 404
     const { fetch } = fakeFetch(() => new Response('', { status }))
     const client = createPhotorealAiClient({ fetch, headers })
-    expect(await client.avatarJob(JOB)).toEqual({ ok: false, retry: false, code: 'not_found' })
+    expect(await client.avatarJob(JOB)).toEqual({ ok: false, miss: 'not_found' })
     status = 401
-    expect(await client.avatarJob(JOB)).toEqual({
-      ok: false,
-      retry: false,
-      code: 'sign_in_required',
-    })
+    expect(await client.avatarJob(JOB)).toEqual({ ok: false, miss: 'sign_in_required' })
     status = 502
-    expect(await client.avatarJob(JOB)).toEqual({ ok: false, retry: true })
+    expect(await client.avatarJob(JOB)).toEqual({ ok: false, miss: 'unreachable' })
     const offline = fakeFetch(() => Promise.reject(new TypeError('offline')))
     expect(await createPhotorealAiClient({ fetch: offline.fetch, headers }).avatarJob(JOB)).toEqual(
-      {
-        ok: false,
-        retry: true,
-      },
+      { ok: false, miss: 'unreachable' },
     )
   })
 
@@ -295,7 +288,7 @@ describe('avatarJob', () => {
 })
 
 describe('the AI 인물 list', () => {
-  test('lists with the token; none when refused or offline; deletes by id', async () => {
+  test('lists with the token; no listing (null) when refused or offline; deletes by id', async () => {
     let reply = (): Response => Response.json({ avatars: [{ id: AVATAR }] })
     const { calls, fetch } = fakeFetch(() => reply())
     const client = createPhotorealAiClient({ fetch, headers })
@@ -303,6 +296,10 @@ describe('the AI 인물 list', () => {
     expect(calls[0]!.url).toBe('/api/photoreal-ai/avatars')
     expect(header(calls[0]!, 'authorization')).toBe('Bearer id-token')
     reply = () => Response.json({ error: 'sign_in_required' }, { status: 401 })
+    expect(await client.avatars()).toBeNull()
+    reply = () => new Response('<html>', { status: 200 })
+    expect(await client.avatars()).toBeNull()
+    reply = () => Response.json({ avatars: [] })
     expect(await client.avatars()).toEqual([])
     reply = () => Response.json({ deleted: AVATAR })
     expect(await client.deleteAvatar(AVATAR)).toBe(true)

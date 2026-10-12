@@ -10,6 +10,7 @@
 // idempotent under HMR.
 import '../lib/bootstrap'
 import { type ReactNode, useEffect } from 'react'
+import { AVATAR_JOB_STORAGE_KEY } from '../lib/photoreal-ai/avatar-job'
 
 export function ClientBootstrap({ children }: { children: ReactNode }) {
   useEffect(() => {
@@ -20,6 +21,18 @@ export function ClientBootstrap({ children }: { children: ReactNode }) {
     // "script inside a React component" hydration warning. The package
     // is already a direct dep, so we don't need the CDN auto-global.
     import('react-scan').then(({ scan }) => scan({ enabled: true }))
+  }, [])
+  useEffect(() => {
+    // An AI 인물 3D build kept from before a reload is followed again from any
+    // page, not only once the studio opens (its code is loaded only then).
+    let kept: string | null = null
+    try {
+      kept = window.localStorage.getItem(AVATAR_JOB_STORAGE_KEY)
+    } catch {}
+    if (!kept) return
+    import('../components/character-studio/ai-person-jobs').then(({ avatarJobs }) =>
+      avatarJobs().resume(),
+    )
   }, [])
   return children
 }

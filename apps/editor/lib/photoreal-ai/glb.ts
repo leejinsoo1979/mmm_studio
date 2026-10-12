@@ -5,7 +5,9 @@
  * as `scripts/characters/build-photoreal-character.mjs` keeps them), with
  * the buffer repacked around what is left. A GLB whose data is compressed
  * by an extension (meshopt, Draco) or split over several buffers is checked
- * but kept as it is.
+ * and its data kept as it is. Either way the file says it shows an
+ * AI-generated, fictional person (`asset.copyright`, `asset.extras`), so the
+ * disclosure travels with it.
  */
 
 type Json = Record<string, unknown>
@@ -21,7 +23,7 @@ type Primitive = Json & {
 type Mesh = Json & { primitives: Primitive[]; weights?: number[]; extras?: Json }
 
 export type GltfJson = Json & {
-  asset?: { version?: unknown }
+  asset?: Json & { version?: unknown; extras?: unknown }
   buffers?: (Json & { uri?: unknown; byteLength: number })[]
   bufferViews?: BufferView[]
   accessors?: Accessor[]
@@ -55,6 +57,9 @@ export type GlbInfo = {
   extensions: string[]
   rootNodes: string[]
 }
+
+/** What every stored avatar says about itself in `asset.copyright`. */
+export const AI_GLB_NOTICE = 'AI 생성 인물 (가상 인물)'
 
 /** The blend shapes kept: the game blinks with them (photoreal-body.ts). */
 export const KEPT_MORPH_TARGETS: ReadonlySet<string> = new Set(['eyeBlinkLeft', 'eyeBlinkRight'])
@@ -367,7 +372,17 @@ export type AvatarGlbResult =
     }
   | { ok: false; problem: GlbProblem }
 
-/** The service's GLB checked (self-contained, humanoid) and trimmed to what the game uses. */
+/** The AI disclosure written into the file's asset block (the service's own extras kept). */
+function markAiGenerated(json: GltfJson): void {
+  const asset = json.asset ?? { version: '2.0' }
+  const extras =
+    asset.extras && typeof asset.extras === 'object' && !Array.isArray(asset.extras)
+      ? asset.extras
+      : {}
+  json.asset = { ...asset, copyright: AI_GLB_NOTICE, extras: { ...extras, aiGenerated: true } }
+}
+
+/** The service's GLB checked (self-contained, humanoid), trimmed to what the game uses, and marked as AI-made. */
 export function prepareAvatarGlb(
   bytes: Uint8Array<ArrayBuffer>,
   keep: ReadonlySet<string> = KEPT_MORPH_TARGETS,
@@ -381,10 +396,16 @@ export function prepareAvatarGlb(
     read.bin !== null &&
     read.json.buffers?.length === 1 &&
     (read.json.extensionsUsed ?? []).every((name) => REPACK_SAFE.some((safe) => safe.test(name)))
-  if (!repackable) return { ok: true, bytes, before, after: before, trimmed: false }
+  if (!repackable) {
+    // Compressed data is kept byte for byte; only the JSON gains the disclosure.
+    const json = structuredClone(read.json)
+    markAiGenerated(json)
+    return { ok: true, bytes: writeGlb(json, read.bin), before, after: before, trimmed: false }
+  }
   try {
     const json = structuredClone(read.json)
     trimMorphTargets(json, keep)
+    markAiGenerated(json)
     const out = writeGlb(json, repack(json, read.bin!))
     return {
       ok: true,

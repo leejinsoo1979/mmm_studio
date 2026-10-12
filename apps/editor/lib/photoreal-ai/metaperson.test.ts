@@ -6,6 +6,7 @@ import {
   createMetaPersonService,
   exportGlb,
   httpFailure,
+  nextPage,
   parseAvailableExportParameters,
 } from './metaperson'
 import { createMetaPersonFake, FAKE_OUTFITS, type FakeCall } from './metaperson-fake'
@@ -19,6 +20,7 @@ const CONFIG: AvatarServiceConfig = {
   clientId: 'client-id-123',
   clientSecret: 'client-secret-456',
   playerUid: null,
+  requireAgeCheck: true,
 }
 const LOOK: AvatarLook = {
   sex: 'female',
@@ -39,7 +41,9 @@ function setup(
     age?: 'child' | 'not_child'
     zip?: boolean
     tokenTtlS?: number
+    pageSize?: number
     players?: { load: () => Promise<string | null>; save: (code: string) => Promise<void> }
+    config?: Partial<AvatarServiceConfig>
   } = {},
 ) {
   let t = 1_000_000
@@ -55,7 +59,7 @@ function setup(
   })
   const seen: Seen[] = []
   const service = createMetaPersonService({
-    config: CONFIG,
+    config: { ...CONFIG, ...options.config },
     fetch: async (url, init) => {
       seen.push({ url, init })
       return fake.fetch(url, init)
@@ -103,7 +107,9 @@ describe('the MetaPerson adapter against the protocol fake', () => {
     const form = seen[3]!.init.body as FormData
     expect(form.get('pipeline')).toBe('metaperson_2.1')
     expect(form.get('pipeline_subtype')).toBe('female')
+    expect(form.get('name')).toBe('ai-person')
     expect(JSON.parse(String(form.get('parameters')))).toEqual({
+      model_info: ['age'],
       avatar_modifications: { remove_smile: true },
     })
     const exported = JSON.parse(String(form.get('export_parameters')))
@@ -179,7 +185,12 @@ describe('the MetaPerson adapter against the protocol fake', () => {
       sleep: async () => {},
     })
     const created = await service.create({ photo: PHOTO, look: LOOK, name: 'a' }, signal())
-    expect(created).toEqual({ ok: false, code: 'unavailable', detail: 'token_http_401' })
+    expect(created).toEqual({
+      ok: false,
+      code: 'unavailable',
+      detail: 'token_http_401',
+      sent: 'no',
+    })
   })
 
   test('an expired token is replaced once, then the call is retried', async () => {
@@ -202,7 +213,7 @@ describe('the MetaPerson adapter against the protocol fake', () => {
     expect(fake.calls.filter((call) => call.path === '/o/token/')).toHaveLength(2)
   })
 
-  test('maps refusals: plan, rate limit with Retry-After, server errors, network', async () => {
+  test('maps refusals, and says whether the create may have built (and billed) anything', async () => {
     const answer = (response: () => Response) =>
       setup({
         override: ({ method, path }) =>
@@ -215,22 +226,74 @@ describe('the MetaPerson adapter against the protocol fake', () => {
       ok: false,
       code: 'unavailable',
       detail: 'http_402',
+      sent: 'refused',
     })
     expect(
       await create(
         answer(() => new Response('{}', { status: 429, headers: { 'retry-after': '12' } })),
       ),
-    ).toEqual({ ok: false, code: 'rate_limited', detail: 'http_429', retryAfter: 12 })
+    ).toEqual({
+      ok: false,
+      code: 'rate_limited',
+      detail: 'http_429',
+      retryAfter: 12,
+      sent: 'refused',
+    })
     const busy = answer(() => new Response('{}', { status: 503 }))
-    expect(await create(busy)).toMatchObject({ ok: false, code: 'upstream', detail: 'http_503' })
+    expect(await create(busy)).toMatchObject({
+      ok: false,
+      code: 'upstream',
+      detail: 'http_503',
+      sent: 'unknown',
+    })
     // A create is never repeated: it could build (and bill) twice.
     expect(busy.fake.calls.filter((call) => call.path === '/avatars/')).toHaveLength(1)
     const bad = answer(() => Response.json({ photo: ['Unsupported image.'] }, { status: 400 }))
-    expect(await create(bad)).toMatchObject({ ok: false, code: 'rejected' })
+    expect(await create(bad)).toMatchObject({ ok: false, code: 'rejected', sent: 'refused' })
     const offline = answer(() => {
       throw new TypeError('offline')
     })
-    expect(await create(offline)).toMatchObject({ ok: false, code: 'upstream', detail: 'network' })
+    expect(await create(offline)).toMatchObject({
+      ok: false,
+      code: 'upstream',
+      detail: 'network',
+      sent: 'unknown',
+    })
+    const unreadable = answer(() => new Response('<html>', { status: 201 }))
+    expect(await create(unreadable)).toMatchObject({ ok: false, sent: 'unknown' })
+  })
+
+  test('a create stopped just before sending sends nothing', async () => {
+    const { service, fake } = setup()
+    let asked = 0
+    const created = await service.create(
+      { photo: PHOTO, look: LOOK, name: 'a' },
+      signal(),
+      async () => {
+        asked += 1
+        return false
+      },
+    )
+    expect(created).toEqual({ ok: false, code: 'rate_limited', detail: 'cap', sent: 'no' })
+    expect(asked).toBe(1)
+    expect(fake.calls.some((call) => call.path === '/avatars/')).toBe(false)
+  })
+
+  test('finds a build by its name across the list’s pages, or says there is none', async () => {
+    const { service, fake, advance } = setup({ pageSize: 1 })
+    for (const name of ['first', 'second', 'third']) {
+      const created = await service.create({ photo: PHOTO, look: LOOK, name }, signal())
+      if (!created.ok) throw new Error(created.detail)
+      advance(1000)
+    }
+    const found = await service.find('first', signal())
+    const first = [...fake.avatars.values()].find((avatar) => avatar.name === 'first')!
+    expect(found.ok && found.ref?.avatar).toBe(first.code)
+    // Newest first, one a page: the oldest is on the third page.
+    expect(
+      fake.calls.filter((call) => call.path === '/avatars/' && call.method === 'GET'),
+    ).toHaveLength(3)
+    expect(await service.find('nobody', signal())).toEqual({ ok: true, ref: null })
   })
 
   test('status asks are retried on 5xx, up to three attempts', async () => {
@@ -281,6 +344,24 @@ describe('the MetaPerson adapter against the protocol fake', () => {
       code: 'blocked',
       detail: 'model_info_child',
     })
+
+    // No age in model_info: refused once the age check is required, else let through.
+    const noAge = (requireAgeCheck: boolean) =>
+      setup({
+        config: { requireAgeCheck },
+        override: ({ path }) =>
+          path.endsWith('/model_info/') ? Response.json({ pipeline: 'metaperson_2.1' }) : undefined,
+      })
+    for (const required of [true, false]) {
+      const one = noAge(required)
+      const made = await one.service.create({ photo: PHOTO, look: LOOK, name: 'a' }, signal())
+      if (!made.ok) throw new Error(made.detail)
+      one.advance(20_000)
+      const poll = await one.service.poll(made.ref, signal())
+      if (required) {
+        expect(poll).toEqual({ ok: false, code: 'unavailable', detail: 'model_info_no_age' })
+      } else expect(poll).toMatchObject({ ok: true, state: 'ready' })
+    }
 
     expect(await child.service.remove(two.ref, signal())).toBe(true)
     expect(await child.service.poll(two.ref, signal())).toMatchObject({ ok: false, code: 'gone' })
@@ -376,6 +457,24 @@ describe('export parameters', () => {
     })
   })
 
+  test('finds the categories it needs at any depth, as the vendor’s client does', () => {
+    const nested = parseAvailableExportParameters({
+      plan_basic: {
+        assets: { outfits: { list: ['casual_tshirt_01'] }, haircuts: ['HaircutGenerated'] },
+      },
+      plan_extra: { blendshapes: { list: ['mobile_51'] } },
+    })
+    expect(nested).toMatchObject({
+      outfits: ['casual_tshirt_01'],
+      haircuts: ['HaircutGenerated'],
+      blendshapes: ['mobile_51'],
+    })
+    expect(buildExportParameters(nested, LOOK)).toMatchObject({
+      outfits: { list: ['casual_tshirt_01'] },
+      blendshapes: { list: ['mobile_51'] },
+    })
+  })
+
   test('picks the outfit by its words, the generated haircut, no glasses', () => {
     const suit = buildExportParameters(available, { ...LOOK, outfit: 'suit' })!
     expect(suit.outfits).toEqual({
@@ -431,6 +530,18 @@ describe('exportGlb', () => {
     expect(exportGlb(writeZip([{ name: 'avatar/model.fbx', bytes: GLB }]))).toBeNull()
     expect(exportGlb(writeZip([{ name: 'model.glb', bytes: new Uint8Array([1, 2]) }]))).toBeNull()
     expect(exportGlb(new Uint8Array([1, 2, 3, 4, 5]))).toBeNull()
+  })
+})
+
+describe('nextPage', () => {
+  test('the next page of a Link header', () => {
+    expect(
+      nextPage(
+        '<https://api.avatarsdk.com/avatars/?page=1>; rel="first", <https://api.avatarsdk.com/avatars/?page=3>; rel="next"',
+      ),
+    ).toBe('https://api.avatarsdk.com/avatars/?page=3')
+    expect(nextPage('<https://x/?page=1>; rel="prev"')).toBeNull()
+    expect(nextPage(null)).toBeNull()
   })
 })
 

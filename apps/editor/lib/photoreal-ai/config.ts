@@ -20,6 +20,10 @@ import type { PhotorealAiUnavailableReason } from './shared'
  * `AI_AVATAR_MOCK=true` runs the whole flow with no external call (a drawn
  * portrait, and the avatar service's protocol answered in-process): ignored
  * when `NODE_ENV` is `production`.
+ *
+ * A build already started is carried to its end, and the service's copy
+ * deleted, with `readJobService` alone: switching the feature off, or the
+ * portrait part breaking, must not leave a paid build or a photo behind.
  */
 
 /** The 3D avatar service: Avatar SDK's MetaPerson cloud API (one frontal photo in, rigged GLB out). */
@@ -31,6 +35,11 @@ export type AvatarServiceConfig = {
   clientSecret: string
   /** A player registered once (see the check script); null registers one and keeps it in the store. */
   playerUid: string | null
+  /**
+   * `AI_AVATAR_REQUIRE_AGE_CHECK=true`: a build whose `model_info` carries no
+   * age is refused (turn on once the check script shows the service returns it).
+   */
+  requireAgeCheck: boolean
 }
 
 export type PhotorealAiLimits = { userDaily: number; globalDaily: number }
@@ -71,6 +80,7 @@ const MOCK_SERVICE: AvatarServiceConfig = {
   clientId: 'mock-client',
   clientSecret: 'mock-secret',
   playerUid: null,
+  requireAgeCheck: true,
 }
 
 const value = (env: Env, key: string) => env[key]?.trim() || undefined
@@ -116,7 +126,36 @@ function readService(env: Env): AvatarServiceConfig | null {
     clientId,
     clientSecret,
     playerUid: value(env, 'AI_AVATAR_PLAYER_UID') ?? null,
+    requireAgeCheck: value(env, 'AI_AVATAR_REQUIRE_AGE_CHECK') === 'true',
   }
+}
+
+/** The development 목업 is on (never in production). */
+export function photorealAiMockOn(env: Env = process.env): boolean {
+  return value(env, 'AI_AVATAR_MOCK') === 'true' && env.NODE_ENV !== 'production'
+}
+
+/** The 목업's GLB: `AI_AVATAR_MOCK_GLB`, else the shipped CC0 실사 character. */
+const mockGlbOf = (env: Env, cwd: string) => value(env, 'AI_AVATAR_MOCK_GLB') ?? join(cwd, MOCK_GLB)
+
+export type JobServiceConfig = {
+  mock: boolean
+  service: AvatarServiceConfig
+  mockGlbPath: string | null
+}
+
+/**
+ * The service a started build (made in the 목업 or not) is carried on with,
+ * whatever `AI_AVATAR_ENABLED` and the portrait settings say now; null when
+ * it can't be reached any more (the keys removed, or a 목업 build in production).
+ */
+export function readJobService(env: Env, cwd: string, mock: boolean): JobServiceConfig | null {
+  if (mock) {
+    if (env.NODE_ENV === 'production') return null
+    return { mock: true, service: MOCK_SERVICE, mockGlbPath: mockGlbOf(env, cwd) }
+  }
+  const service = readService(env)
+  return service ? { mock: false, service, mockGlbPath: null } : null
 }
 
 /** The store folder (absolute): `AI_AVATAR_STORE_DIR`, or apps/editor/data/photoreal-ai. */
@@ -136,7 +175,7 @@ export function readPhotorealAiConfig(
   if (value(env, 'AI_AVATAR_ENABLED') === 'false') {
     return { ok: false, reason: 'disabled', part: 'portrait' }
   }
-  const mock = value(env, 'AI_AVATAR_MOCK') === 'true' && env.NODE_ENV !== 'production'
+  const mock = photorealAiMockOn(env)
   const portraitExtraParams = portraitParams(value(env, 'AI_AVATAR_PORTRAIT_EXTRA_PARAMS'))
   if (!portraitExtraParams) return { ok: false, reason: 'not_configured', part: 'portrait' }
 
@@ -175,7 +214,7 @@ export function readPhotorealAiConfig(
       },
       storeDir: photorealAiStoreDir(env, cwd),
       mockPortraitPath: mock ? (value(env, 'AI_AVATAR_MOCK_PORTRAIT') ?? null) : null,
-      mockGlbPath: mock ? (value(env, 'AI_AVATAR_MOCK_GLB') ?? join(cwd, MOCK_GLB)) : null,
+      mockGlbPath: mock ? mockGlbOf(env, cwd) : null,
     },
   }
 }

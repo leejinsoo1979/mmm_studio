@@ -4,7 +4,6 @@ import { sniffImage } from '../ai-photo/image-header'
 import { readAiPhotoResponse } from '../ai-photo/provider'
 import { base64Of, jpeg, png, webp } from '../ai-photo/test-images'
 import { mockPortraitPng } from './mock-portrait'
-import { checkNotes } from './notes-check'
 import { portraitImage } from './portrait'
 import { aiPortraitRequest } from './portrait-provider'
 import { portraitSha, signPortrait, verifyPortrait } from './portrait-token'
@@ -12,6 +11,7 @@ import { AI_PORTRAIT_SAFETY_RULES, buildAiPortraitPrompt } from './prompt'
 import {
   AI_PERSON_AGES,
   AI_PERSON_DEFAULTS,
+  AI_PERSON_DETAILS,
   AI_PERSON_HAIR_STYLES,
   AI_PERSON_LABELS,
   AI_PERSON_SEXES,
@@ -33,7 +33,7 @@ describe('buildAiPortraitPrompt', () => {
           const rules = prompt.slice(prompt.indexOf(AI_PORTRAIT_SAFETY_RULES[0]))
           expect(rules).toContain('clearly an adult aged')
           for (const rule of AI_PORTRAIT_SAFETY_RULES) expect(rules).toContain(rule)
-          expect(prompt).not.toContain('<notes>')
+          expect(prompt).not.toContain('- Features:')
           expect(prompt).not.toContain('undefined')
         }
       }
@@ -46,12 +46,20 @@ describe('buildAiPortraitPrompt', () => {
     )
   })
 
-  test('checked notes go in their fence, before the safety rules', () => {
-    const notes = checkNotes('왼쪽 눈 밑에 작은 점')
-    if (!notes.ok) throw new Error('refused')
-    const prompt = buildAiPortraitPrompt({ ...AI_PERSON_DEFAULTS, notes: notes.notes })
-    expect(prompt).toContain('<notes>왼쪽 눈 밑에 작은 점</notes>')
-    expect(prompt.indexOf('<notes>')).toBeLessThan(prompt.indexOf(AI_PORTRAIT_SAFETY_RULES[0]))
+  test('each detail is a fixed English phrase, listed before the safety rules', () => {
+    const phrases = new Set<string>()
+    for (const detail of AI_PERSON_DETAILS) {
+      const prompt = buildAiPortraitPrompt({ ...AI_PERSON_DEFAULTS, details: [detail] })
+      const line = prompt.split('\n').find((text) => text.startsWith('- Features: '))!
+      expect(line).toMatch(/^- Features: [a-z ,-]+\.$/)
+      phrases.add(line)
+      expect(prompt.indexOf(line)).toBeLessThan(prompt.indexOf(AI_PORTRAIT_SAFETY_RULES[0]))
+    }
+    expect(phrases.size).toBe(AI_PERSON_DETAILS.length)
+    const two = buildAiPortraitPrompt({ ...AI_PERSON_DEFAULTS, details: ['freckles', 'dimples'] })
+    expect(two).toContain(
+      '- Features: a light scattering of freckles across the nose and cheeks, cheek dimples.',
+    )
   })
 
   test('facial hair only for men; a shaved head has no colour', () => {

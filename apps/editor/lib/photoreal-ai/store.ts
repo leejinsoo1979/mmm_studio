@@ -7,14 +7,16 @@ import type { AiPersonAge, AiPersonSex } from './shared'
  * Where AI 인물 keeps its avatars, on the server's disk (by default
  * apps/editor/data/photoreal-ai, which git ignores): one folder per user,
  * named by a hash of the uid, holding each finished avatar (model.glb, the
- * portrait it came from, meta.json) and the records of running 3D jobs.
- * Files are written to a temporary name and renamed, so a reader never sees
- * half a file. A hosted deployment with no lasting disk needs another
- * implementation of this interface (cloud storage).
+ * portrait it came from, meta.json) and the records of 3D jobs; and the
+ * ledger of builds sent to the service (day counts and used portraits, which
+ * must outlive a restart). Files are written to a temporary name and
+ * renamed, so a reader never sees half a file. A hosted deployment with no
+ * lasting disk needs another implementation of this interface (cloud storage).
  *
  *   <root>/users/<user key>/avatars/<avatar>/{model.glb, portrait.jpg|png, meta.json}
  *   <root>/users/<user key>/jobs/<job>.json
  *   <root>/service/player-<account hash>.json
+ *   <root>/service/ledger.json
  */
 
 export type AvatarMeta = {
@@ -35,15 +37,24 @@ export type PortraitType = 'image/jpeg' | 'image/png'
 
 export type StoredFile = { bytes: Uint8Array<ArrayBuffer>; type: string }
 
+/** A job record and when it was last written (ms). */
+export type StoredJob = { id: string; job: unknown; writtenAt: number }
+
+/** An avatar folder: finished once its meta.json is written; else a build's portrait. */
+export type AvatarFolder = { id: string; finished: boolean; writtenAt: number }
+
 export type AvatarStore = {
   userKey(uid: string): string
   newAvatarId(userKey: string): string
   /** The avatar id's owner key, when it is a well-formed id. */
   ownerOf(id: string): string | null
+  /** Every user key with a folder. */
+  listUsers(): Promise<string[]>
   saveJob(userKey: string, jobId: string, job: unknown): Promise<void>
   loadJob(userKey: string, jobId: string): Promise<unknown | null>
-  /** Removes job records last written before `before` (ms). */
-  sweepJobs(userKey: string, before: number): Promise<void>
+  listJobs(userKey: string): Promise<StoredJob[]>
+  deleteJob(userKey: string, jobId: string): Promise<void>
+  listFolders(userKey: string): Promise<AvatarFolder[]>
   savePortrait(id: string, bytes: Uint8Array, type: PortraitType): Promise<void>
   saveAvatar(id: string, glb: Uint8Array, meta: AvatarMeta): Promise<void>
   listAvatars(userKey: string): Promise<AvatarMeta[]>
@@ -55,9 +66,13 @@ export type AvatarStore = {
     load: () => Promise<string | null>
     save: (code: string) => Promise<void>
   }
+  /** The ledger's one record (see ledger.ts). */
+  loadLedger(): Promise<unknown | null>
+  saveLedger(value: unknown): Promise<void>
 }
 
 const AVATAR_ID = /^([0-9a-f]{16})-([0-9a-f]{24})$/
+const USER_KEY = /^[0-9a-f]{16}$/
 export const JOB_ID = /^[0-9a-f]{24}$/
 const PORTRAIT_FILES: Record<string, PortraitType> = {
   'portrait.jpg': 'image/jpeg',
@@ -67,8 +82,22 @@ const PORTRAIT_FILES: Record<string, PortraitType> = {
 async function writeAtomic(path: string, data: Uint8Array | string): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   const temporary = `${path}.${randomBytes(4).toString('hex')}.tmp`
-  await writeFile(temporary, data)
-  await rename(temporary, path)
+  try {
+    await writeFile(temporary, data)
+    await rename(temporary, path)
+  } catch (error) {
+    // A full disk must not keep the half-written copy.
+    await rm(temporary, { force: true }).catch(() => {})
+    throw error
+  }
+}
+
+const parseJson = (bytes: Uint8Array): unknown => {
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown
+  } catch {
+    return null
+  }
 }
 
 async function readOptional(path: string): Promise<Uint8Array<ArrayBuffer> | null> {
@@ -101,9 +130,10 @@ export function createFileAvatarStore(root: string): AvatarStore {
     return parts ? join(users, parts.user, 'avatars', parts.avatar) : null
   }
   const jobPath = (userKey: string, jobId: string) =>
-    /^[0-9a-f]{16}$/.test(userKey) && JOB_ID.test(jobId)
+    USER_KEY.test(userKey) && JOB_ID.test(jobId)
       ? join(users, userKey, 'jobs', `${jobId}.json`)
       : null
+  const ledgerPath = join(root, 'service', 'ledger.json')
 
   return {
     userKey: (uid) =>
@@ -117,26 +147,51 @@ export function createFileAvatarStore(root: string): AvatarStore {
       await writeAtomic(path, JSON.stringify(job))
     },
 
+    async listUsers() {
+      const names = await readdir(users).catch(() => [] as string[])
+      return names.filter((name) => USER_KEY.test(name))
+    },
+
     async loadJob(userKey, jobId) {
       const path = jobPath(userKey, jobId)
       const bytes = path ? await readOptional(path) : null
-      if (!bytes) return null
-      try {
-        return JSON.parse(new TextDecoder().decode(bytes)) as unknown
-      } catch {
-        return null
-      }
+      return bytes ? parseJson(bytes) : null
     },
 
-    async sweepJobs(userKey, before) {
-      if (!/^[0-9a-f]{16}$/.test(userKey)) return
+    async listJobs(userKey) {
+      if (!USER_KEY.test(userKey)) return []
       const folder = join(users, userKey, 'jobs')
       const names = await readdir(folder).catch(() => [] as string[])
+      const jobs: StoredJob[] = []
       for (const name of names) {
+        const id = name.replace(/\.json$/, '')
+        if (!JOB_ID.test(id) || name !== `${id}.json`) continue
         const path = join(folder, name)
-        const info = await stat(path).catch(() => null)
-        if (info && info.mtimeMs < before) await rm(path, { force: true })
+        const [bytes, info] = await Promise.all([readOptional(path), stat(path).catch(() => null)])
+        if (bytes && info) jobs.push({ id, job: parseJson(bytes), writtenAt: info.mtimeMs })
       }
+      return jobs
+    },
+
+    async deleteJob(userKey, jobId) {
+      const path = jobPath(userKey, jobId)
+      if (path) await rm(path, { force: true })
+    },
+
+    async listFolders(userKey) {
+      if (!USER_KEY.test(userKey)) return []
+      const folder = join(users, userKey, 'avatars')
+      const names = await readdir(folder).catch(() => [] as string[])
+      const folders: AvatarFolder[] = []
+      for (const name of names) {
+        const id = `${userKey}-${name}`
+        if (!AVATAR_ID.test(id)) continue
+        const info = await stat(join(folder, name)).catch(() => null)
+        if (!info?.isDirectory()) continue
+        const finished = (await stat(join(folder, name, 'meta.json')).catch(() => null)) !== null
+        folders.push({ id, finished, writtenAt: info.mtimeMs })
+      }
+      return folders
     },
 
     async savePortrait(id, bytes, type) {
@@ -154,17 +209,14 @@ export function createFileAvatarStore(root: string): AvatarStore {
     },
 
     async listAvatars(userKey) {
-      if (!/^[0-9a-f]{16}$/.test(userKey)) return []
+      if (!USER_KEY.test(userKey)) return []
       const folder = join(users, userKey, 'avatars')
       const names = await readdir(folder).catch(() => [] as string[])
       const metas: AvatarMeta[] = []
       for (const name of names) {
         const bytes = await readOptional(join(folder, name, 'meta.json'))
-        if (!bytes) continue
-        try {
-          const meta = JSON.parse(new TextDecoder().decode(bytes)) as unknown
-          if (isMeta(meta) && meta.id === `${userKey}-${name}`) metas.push(meta)
-        } catch {}
+        const meta = bytes ? parseJson(bytes) : null
+        if (isMeta(meta) && meta.id === `${userKey}-${name}`) metas.push(meta)
       }
       return metas.sort((a, b) => a.createdAt - b.createdAt)
     },
@@ -177,8 +229,9 @@ export function createFileAvatarStore(root: string): AvatarStore {
     },
 
     async readPortrait(id) {
+      // Only a finished avatar's: a build's portrait is not served.
       const folder = avatarDir(id)
-      if (!folder) return null
+      if (!folder || !(await readOptional(join(folder, 'meta.json')))) return null
       for (const [file, type] of Object.entries(PORTRAIT_FILES)) {
         const bytes = await readOptional(join(folder, file))
         if (bytes) return { bytes, type }
@@ -200,18 +253,22 @@ export function createFileAvatarStore(root: string): AvatarStore {
       return {
         async load() {
           const bytes = await readOptional(path)
-          if (!bytes) return null
-          try {
-            const code = (JSON.parse(new TextDecoder().decode(bytes)) as { code?: unknown }).code
-            return typeof code === 'string' && code ? code : null
-          } catch {
-            return null
-          }
+          const code = bytes ? (parseJson(bytes) as { code?: unknown } | null)?.code : null
+          return typeof code === 'string' && code ? code : null
         },
         async save(code) {
           await writeAtomic(path, JSON.stringify({ code }))
         },
       }
+    },
+
+    async loadLedger() {
+      const bytes = await readOptional(ledgerPath)
+      return bytes ? parseJson(bytes) : null
+    },
+
+    async saveLedger(value) {
+      await writeAtomic(ledgerPath, JSON.stringify(value))
     },
   }
 }

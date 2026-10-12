@@ -7,12 +7,15 @@ import type {
 import { AVATAR_JOB_POLL_MS, type AvatarJobError } from './shared'
 
 /**
- * The 3D avatar being built. A job takes minutes and only moves on while it
- * is asked about, so it is followed here and not in the dialog: the dialog
- * and the studio can close and open again (the page even be reloaded: the
- * job is kept in browser storage) and still find it, and its end is heard
- * once. One job at a time.
+ * The 3D avatar being built. A job takes minutes and goes on at the server
+ * whether or not anyone watches; it is followed here, not in the dialog, so
+ * the dialog and the studio can close and open again (the page even be
+ * reloaded: the job is kept in browser storage, and picked up again from
+ * any page) and still find it, and its end is heard once. One job at a time.
  */
+
+/** Browser storage key of the one job. */
+export const AVATAR_JOB_STORAGE_KEY = 'mmm-ai-person-job'
 
 /** Why a job ended without an avatar: the service's reason, or the route's (job gone, signed out). */
 export type AvatarJobEnd = AvatarJobError | 'not_found' | 'sign_in_required'
@@ -23,6 +26,8 @@ export type AvatarJob = Omit<AvatarJobReport, 'error'> & {
   startedAt: number
   /** Its end (done or failed) has been taken up by the studio. */
   seen: boolean
+  /** The last ask was refused for want of a sign-in: say so while asking on. */
+  signInNeeded?: boolean
 }
 
 /** Past this, a job still unfinished is given up on (the server's own deadline is shorter). */
@@ -44,16 +49,23 @@ const failed = (job: AvatarJob, error: AvatarJobEnd): AvatarJob => ({
   error,
 })
 
-/** The job after an answer about it (`now` gives up on one that has run too long). */
+/**
+ * The job after an answer about it. A miss is asked again (the build goes on
+ * at the server); only past `AVATAR_JOB_MAX_MS` is it given up, for the last
+ * reason heard.
+ */
 export function applyAnswer(job: AvatarJob, answer: AvatarJobAnswer, now: number): AvatarJob {
   if (isFinished(job)) return job
   if (answer.ok) {
     if (answer.job.jobId !== job.jobId) return job
-    return { ...job, ...answer.job }
+    const { signInNeeded: _cleared, ...rest } = job
+    return { ...rest, ...answer.job }
   }
-  if (!answer.retry) return failed(job, answer.code)
-  if (now - job.startedAt > AVATAR_JOB_MAX_MS) return failed(job, 'timeout')
-  return job
+  if (now - job.startedAt > AVATAR_JOB_MAX_MS) {
+    return failed(job, answer.miss === 'unreachable' ? 'timeout' : answer.miss)
+  }
+  const signInNeeded = answer.miss === 'sign_in_required'
+  return Boolean(job.signInNeeded) === signInNeeded ? job : { ...job, signInNeeded }
 }
 
 const STATES = ['working', 'done', 'failed'] as const
@@ -140,7 +152,7 @@ export function createAvatarJobTracker(deps: AvatarJobTrackerDeps) {
         const answer = await deps.poll(jobId)
         // Cleared or replaced meanwhile.
         if (job?.jobId !== jobId) return
-        failures = answer.ok || !answer.retry ? 0 : failures + 1
+        failures = answer.ok ? 0 : failures + 1
         set(applyAnswer(job, answer, now()))
         follow()
       },

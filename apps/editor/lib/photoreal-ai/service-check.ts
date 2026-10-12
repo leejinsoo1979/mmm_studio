@@ -1,14 +1,14 @@
-import { readAiPhotoConfig } from '../ai-photo/config'
+import { type AiPhotoConfig, readAiPhotoConfig } from '../ai-photo/config'
 import { sniffImage } from '../ai-photo/image-header'
+import { moderateImages } from '../ai-photo/moderation'
 import { readAiPhotoResponse } from '../ai-photo/provider'
-import { type AvatarServiceConfig, METAPERSON_BASE_URL, readPhotorealAiConfig } from './config'
+import { readJobService, readPhotorealAiConfig } from './config'
 import { inspectGlb, isHumanoidRig, KEPT_MORPH_TARGETS, prepareAvatarGlb, readGlb } from './glb'
 import {
   buildExportParameters,
   createMetaPersonService,
   type MetaPersonService,
 } from './metaperson'
-import { checkNotes } from './notes-check'
 import { portraitImage } from './portrait'
 import { aiPortraitRequest } from './portrait-provider'
 import { buildAiPortraitPrompt } from './prompt'
@@ -22,7 +22,9 @@ import { isZip, readZip } from './zip'
  * the same adapter the app uses, records every exchange (status, timing,
  * the shape of each JSON answer, never its secrets), and lists where the
  * real answers differ from what the adapter was built from. Nothing billable
- * happens without `--yes`.
+ * happens without `--yes`. The 3D check uploads only a portrait it has just
+ * made itself through the app's own portrait step (a fictional adult): it
+ * takes no photo file, so no real person's photo can be sent with it.
  */
 
 type Env = Record<string, string | undefined>
@@ -32,7 +34,6 @@ export type CheckOptions = {
   fetch: ServiceFetch
   args: readonly string[]
   log: (line: string) => void
-  readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>
   writeFile: (path: string, bytes: Uint8Array) => Promise<void>
   now?: () => number
   sleep?: (ms: number) => Promise<void>
@@ -153,6 +154,8 @@ export async function runAvatarServiceCheck(options: CheckOptions): Promise<numb
   const exchanges: Exchange[] = []
   /** Every build status the service answered with, in order of first sight. */
   const statuses = new Set<string>()
+  /** While downloading: the raw bytes of each successful answer that is not JSON. */
+  let capturing = false
   const recording: ServiceFetch = async (url, init) => {
     const started = now()
     let response: Response
@@ -188,7 +191,7 @@ export async function runAvatarServiceCheck(options: CheckOptions): Promise<numb
         }
       }
       exchange.shape = json === undefined ? '(JSON 아님)' : shapeOf(json)
-    } else if (response.ok && /\/file\/?$/.test(new URL(url).pathname)) {
+    } else if (capturing && response.status === 200) {
       exchange.bytes = new Uint8Array(await response.clone().arrayBuffer())
     }
     exchanges.push(exchange)
@@ -219,27 +222,21 @@ export async function runAvatarServiceCheck(options: CheckOptions): Promise<numb
     const value = env[key]?.trim()
     if (value && key !== 'AI_AVATAR_BASE_URL') secrets.add(value)
   }
-  const config = readPhotorealAiConfig({ ...env, AI_AVATAR_MOCK: undefined })
-  let service: AvatarServiceConfig
-  if (config.ok) service = config.config.service
-  else if (config.part === 'avatar' || !env.AI_AVATAR_CLIENT_ID?.trim()) {
+  const real = { ...env, AI_AVATAR_MOCK: undefined }
+  const reached = readJobService(real, '', false)
+  if (!reached) {
     log(
-      `  설정이 모자라요 (${config.ok ? '' : config.reason}). .env.local의 AI_AVATAR_CLIENT_ID / AI_AVATAR_CLIENT_SECRET을 확인해 주세요.`,
+      '  설정이 모자라요. .env.local의 AI_AVATAR_CLIENT_ID / AI_AVATAR_CLIENT_SECRET (와 AI_AVATAR_BASE_URL)을 확인해 주세요.',
     )
     return 2
-  } else {
-    // The portrait part is off: the service can still be checked on its own.
-    service = {
-      kind: 'metaperson',
-      baseUrl: (env.AI_AVATAR_BASE_URL?.trim() || METAPERSON_BASE_URL).replace(/\/+$/, ''),
-      clientId: env.AI_AVATAR_CLIENT_ID!.trim(),
-      clientSecret: env.AI_AVATAR_CLIENT_SECRET?.trim() ?? '',
-      playerUid: env.AI_AVATAR_PLAYER_UID?.trim() || null,
-    }
+  }
+  const config = readPhotorealAiConfig(real)
+  if (!config.ok && config.part === 'portrait') {
     log(`  (AI 사진 설정은 꺼져 있어요: ${config.reason}. 3D 서비스만 확인해요.)`)
   }
   const adapter: MetaPersonService = createMetaPersonService({
-    config: service,
+    // The age answer is reported below rather than refused here.
+    config: { ...reached.service, requireAgeCheck: false },
     fetch: recording,
     now,
     sleep: (ms) => sleep(ms),
@@ -269,8 +266,13 @@ export async function runAvatarServiceCheck(options: CheckOptions): Promise<numb
   if (exchanges.some((exchange) => exchange.basic && exchange.status === 200)) {
     diff('토큰: 폼 방식이 거절되고 HTTP Basic 방식으로 받았어요 (어댑터가 자동으로 맞춰요)')
   }
-  if (!service.playerUid)
+  if (!reached.service.playerUid)
     expectKeys('플레이어 등록', lastShape(/^\/players\/?$/), EXPECTED_KEYS.player)
+  // The avatar list finds a build whose start went unanswered (by its name).
+  const listed = await adapter.find('mmm-check-no-such-build', signal())
+  if (listed.ok && listed.ref === null) ok('아바타 목록(GET /avatars/)을 읽을 수 있어요')
+  else if (listed.ok) diff('아바타 목록에 없어야 할 이름이 있어요')
+  else diff(`아바타 목록을 읽지 못했어요 (${listed.detail}): 답이 끊긴 만들기를 찾을 수 없어요`)
 
   log('\n2) 고를 수 있는 옷·헤어 (비용 없음)')
   for (const sex of AI_PERSON_SEXES) {
@@ -311,8 +313,8 @@ export async function runAvatarServiceCheck(options: CheckOptions): Promise<numb
     return finish()
   }
 
-  log('\n3) 아바타 1개 만들기 (요금제 사용량 1개 차감)')
-  const photo = await loadPhoto()
+  log('\n3) AI 인물 사진 1장과 아바타 1개 만들기 (사진 1장 비용 + 요금제 사용량 1개 차감)')
+  const photo = await makePortrait()
   if (!photo) return finish()
   const started = now()
   const created = await adapter.create(
@@ -356,11 +358,18 @@ export async function runAvatarServiceCheck(options: CheckOptions): Promise<numb
   const info = await adapter.modelInfo(ref, signal())
   if (info) {
     log(`    model_info: ${shapeOf(info)}`)
-    if (typeof info.age === 'string') ok(`model_info.age = ${info.age}`)
-    else diff('model_info에 age가 없어요 (나이 안전장치는 프롬프트와 사진 단계만으로 동작)')
-  } else diff('model_info를 받지 못했어요 (나이 안전장치는 프롬프트와 사진 단계만으로 동작)')
+    if (info.age === 'not_child' || info.age === 'child') {
+      ok(`model_info.age = ${info.age} (AI_AVATAR_REQUIRE_AGE_CHECK=true 로 켜도 돼요)`)
+    } else {
+      diff(
+        'model_info에 age(child / not_child)가 없어요: 서비스의 나이 확인이 동작하지 않아요. AI_AVATAR_REQUIRE_AGE_CHECK는 켜지 말고 Avatar SDK에 문의해 주세요',
+      )
+    }
+  } else diff('model_info를 받지 못했어요: 서비스의 나이 확인이 동작하지 않아요')
 
+  capturing = true
   const download = await adapter.download(ref, AbortSignal.timeout(180_000))
+  capturing = false
   const raw = exchanges.filter((exchange) => exchange.bytes).at(-1)?.bytes
   if (raw && isZip(raw)) {
     const names = readZip(raw, { maxEntryBytes: 1 })?.map((entry) => entry.name) ?? []
@@ -368,6 +377,7 @@ export async function runAvatarServiceCheck(options: CheckOptions): Promise<numb
     if (names.includes('avatar/model.glb')) ok('ZIP 안에 avatar/model.glb')
     else diff(`ZIP 안에 avatar/model.glb 없음 (${names.join(', ')})`)
   } else if (raw) diff('내려받은 파일이 ZIP이 아니라 GLB 그대로예요 (어댑터가 둘 다 받아요)')
+  else diff('내려받은 파일의 원래 바이트를 기록하지 못했어요 (다운로드 응답 위 기록 참고)')
   if (!download.ok) {
     diff(`GLB 받기 실패: ${download.code} (${download.detail})`)
     await cleanup(ref)
@@ -382,22 +392,21 @@ export async function runAvatarServiceCheck(options: CheckOptions): Promise<numb
   if (!flag(args, '--keep')) await cleanup(ref)
   return finish()
 
-  async function loadPhoto(): Promise<(AvatarPhoto & { sex: 'female' | 'male' }) | null> {
-    const path = option(args, '--portrait')
+  /** A fictional adult's portrait made here and now through the app's portrait step. */
+  async function makePortrait(): Promise<(AvatarPhoto & { sex: 'female' | 'male' }) | null> {
     const sex = option(args, '--sex') === 'male' ? 'male' : 'female'
-    if (!path) {
-      log(
-        '    --portrait <파일> 로 이 앱의 "AI 인물" 단계가 만든 가상 성인 사진을 넣어 주세요 (실제 사람 사진 금지).',
-      )
-      log('    (또는 먼저 portrait 명령으로 사진을 만들어 --out 으로 저장한 뒤 그 파일을 쓰세요.)')
+    const photo = readAiPhotoConfig({ ...env, AI_PHOTO_FACE_ENABLED: undefined })
+    if (!photo.ok) {
+      diff(`AI 사진 설정이 꺼져 있어 확인용 인물 사진을 만들 수 없어요 (${photo.reason})`)
       return null
     }
-    const checked = portraitImage(await options.readFile(path))
-    if (!checked.ok) {
-      log(`    사진을 쓸 수 없어요: ${checked.detail} (JPEG/PNG, 짧은 변 768px 이상, 4MB 이하)`)
+    const made = await generatePortrait(photo.config, sex, recording)
+    if (!made.ok) {
+      diff(`확인용 인물 사진을 만들지 못했어요: ${made.detail}`)
       return null
     }
-    return { ...checked.image, sex }
+    ok('확인용 AI 인물 사진을 만들었어요 (가상의 성인)')
+    return { ...made.image, sex }
   }
 
   async function cleanup(target: ServiceRef) {
@@ -450,6 +459,38 @@ export async function runAvatarServiceCheck(options: CheckOptions): Promise<numb
   }
 }
 
+/** One portrait from the default choices, checked and moderated as the app does. */
+async function generatePortrait(
+  config: AiPhotoConfig,
+  sex: 'female' | 'male',
+  fetch: ServiceFetch,
+  extraParams: Record<string, string | number | boolean> = {},
+): Promise<{ ok: true; image: AvatarPhoto } | { ok: false; detail: string }> {
+  const { url, init } = aiPortraitRequest(config, {
+    prompt: buildAiPortraitPrompt({ ...AI_PERSON_DEFAULTS, sex }),
+    extraParams,
+    user: null,
+  })
+  let response: Response
+  try {
+    response = await fetch(url, { ...init, signal: AbortSignal.timeout(180_000) })
+  } catch {
+    return { ok: false, detail: '연결 실패' }
+  }
+  const result = await readAiPhotoResponse(config.provider, response)
+  if (!result.ok) return { ok: false, detail: `${result.code} (${result.detail ?? ''})` }
+  const fits = portraitImage(result.bytes)
+  if (!fits.ok) return { ok: false, detail: `3D 단계에 쓸 수 없는 사진 (${fits.detail})` }
+  if (config.moderation) {
+    const verdict = await moderateImages(config.moderation, [fits.image], {
+      fetch,
+      signal: AbortSignal.timeout(60_000),
+    })
+    if (verdict !== 'clear') return { ok: false, detail: `이미지 검사 ${verdict}` }
+  }
+  return { ok: true, image: fits.image }
+}
+
 /** The portrait step: one text-to-image request through the app's own modules. */
 async function portraitCheck(
   options: CheckOptions & {
@@ -460,10 +501,7 @@ async function portraitCheck(
 ): Promise<number> {
   const { env, args, log } = options
   log('== AI 인물 사진 확인 ==')
-  const refused = checkNotes('김민준 닮게')
-  log(
-    `  자유 설명 "김민준 닮게": ${refused.ok ? '통과 (예상과 다름!)' : `서버에 보내기 전에 거절 (${refused.code})`}`,
-  )
+  log('  고른 항목만 보내요 (자유 입력 없음): 실존 인물의 이름이나 설명은 보낼 수 없어요.')
   const photo = readAiPhotoConfig({ ...env, AI_PHOTO_FACE_ENABLED: undefined })
   if (!photo.ok) {
     log(`  AI 사진 설정이 꺼져 있어요: ${photo.reason}`)

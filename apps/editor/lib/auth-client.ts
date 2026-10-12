@@ -144,7 +144,11 @@ export function clearStudioUser(): void {
 }
 
 export async function getStudioAuthHeaders(): Promise<Record<string, string>> {
-  const firebaseUser = getFirebaseAuth()?.currentUser
+  const auth = getFirebaseAuth()
+  // Right after a page load Firebase is still restoring the signed-in user:
+  // asking now would go out as the local user (refused, or someone else).
+  await auth?.authStateReady().catch(() => {})
+  const firebaseUser = auth?.currentUser
   if (firebaseUser) {
     return {
       authorization: `Bearer ${await firebaseUser.getIdToken()}`,

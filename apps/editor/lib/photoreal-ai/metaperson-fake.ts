@@ -11,7 +11,9 @@ import { writeZip } from './zip'
  * unchanged. It checks what the real service needs (credentials, the bearer
  * token, the player, a JPEG/PNG photo, the pipeline, export parameters that
  * ask for a clothed GLB with embedded textures) and answers in the shapes
- * the vendor's clients read (see metaperson.ts). Builds move through
+ * the vendor's clients read (see metaperson.ts): `model_info` carries the age
+ * only when the computation parameters asked for it, and the account's
+ * builds are listed newest first, a page at a time. Builds move through
  * Uploading → Queued → Computing → Completed with the clock. Codes, names and
  * timings are made up; nothing here is a recording.
  */
@@ -28,8 +30,10 @@ export type MetaPersonFakeOptions = {
   exportMs?: number
   /** `failed`: the build ends Failed (no face found, say). */
   outcome?: 'completed' | 'failed'
-  /** What `model_info` says about age. */
+  /** What `model_info` says about age (when it was asked for). */
   age?: 'child' | 'not_child'
+  /** Builds per page of `GET /avatars/`. */
+  pageSize?: number
   zip?: boolean
   tokenTtlS?: number
   /** Answers one call differently (a test's failure); undefined lets the fake answer. */
@@ -41,8 +45,10 @@ export type FakeCall = { method: string; path: string; init: RequestInit }
 type FakeAvatar = {
   code: string
   player: string
+  name: string
   subtype: string
   createdAt: number
+  parameters: Record<string, unknown>
   exportParameters: Record<string, unknown>
 }
 
@@ -87,7 +93,7 @@ export function createMetaPersonFake(options: MetaPersonFakeOptions) {
       status,
       status_verbose: failed ? { code: 7, message: 'Face not found' } : null,
       progress: done ? 100 : status === 'Computing' ? Math.round((age / buildMs) * 100) : 0,
-      name: 'ai-person',
+      name: avatar.name,
       description: '',
       created_on: new Date(avatar.createdAt).toISOString(),
       pipeline: METAPERSON_PIPELINE,
@@ -226,8 +232,9 @@ export function createMetaPersonFake(options: MetaPersonFakeOptions) {
       if (form.get('pipeline') !== METAPERSON_PIPELINE || !['male', 'female'].includes(subtype)) {
         return json({ pipeline: ['Invalid pipeline.'] }, 400)
       }
+      let parameters: Record<string, unknown>
       try {
-        JSON.parse(String(form.get('parameters') ?? ''))
+        parameters = JSON.parse(String(form.get('parameters') ?? ''))
       } catch {
         return json({ parameters: ['Invalid JSON.'] }, 400)
       }
@@ -237,12 +244,30 @@ export function createMetaPersonFake(options: MetaPersonFakeOptions) {
       const avatar: FakeAvatar = {
         code: code(),
         player,
+        name: String(form.get('name') ?? ''),
         subtype,
         createdAt: now(),
+        parameters,
         exportParameters: JSON.parse(exportRaw),
       }
       avatars.set(avatar.code, avatar)
       return json(avatarJson(avatar), 201)
+    }
+
+    if (method === 'GET' && path === '/avatars/') {
+      const size = options.pageSize ?? 20
+      const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1)
+      const own = [...avatars.values()]
+        .filter((avatar) => avatar.player === player)
+        .sort((a, b) => b.createdAt - a.createdAt)
+      const items = own.slice((page - 1) * size, page * size).map(avatarJson)
+      const more = page * size < own.length
+      return new Response(JSON.stringify(items), {
+        headers: {
+          'content-type': 'application/json',
+          ...(more ? { link: `<${base}/avatars/?page=${page + 1}>; rel="next"` } : {}),
+        },
+      })
     }
 
     const match = path.match(/^\/avatars\/([^/]+)\/(.*)$/)
@@ -258,11 +283,12 @@ export function createMetaPersonFake(options: MetaPersonFakeOptions) {
       return json(now() - avatar.createdAt >= buildMs ? [exportJson(avatar)] : [])
     }
     if (method === 'GET' && rest === 'model_info/') {
+      const asked = avatar.parameters.model_info
+      const age = Array.isArray(asked) && asked.includes('age')
       return json({
         pipeline: METAPERSON_PIPELINE,
         pipeline_subtype: avatar.subtype,
-        age: options.age ?? 'not_child',
-        age_confidence: 0.97,
+        ...(age ? { age: options.age ?? 'not_child', age_confidence: 0.97 } : {}),
       })
     }
     if (method === 'GET' && rest === `exports/e-${avatar.code}/files/avatar/file/`) {
