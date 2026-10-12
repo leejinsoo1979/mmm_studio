@@ -60,10 +60,12 @@ import {
   CustomBlending,
   DataTexture,
   DoubleSide,
+  FloatType,
   LinearFilter,
   LinearMipmapLinearFilter,
   Matrix4,
   MeshStandardNodeMaterial,
+  NearestFilter,
   NoColorSpace,
   type NodeBuilder,
   NormalBlending,
@@ -91,6 +93,7 @@ import {
 import type { HairBuild } from './hair-grow'
 import { HAIRLINE_STEPS, WOBBLE_OCTAVES } from './hair-scalp'
 import { hairLookValues, rootsStyleValues, wobbleCorners } from './hair-shading'
+import { MOST_STRANDS, OFFSET_COLUMNS } from './hair-wear'
 
 /**
  * Generated hair's materials: the strands', the studio's soft pass over
@@ -131,6 +134,11 @@ export type HairValues = {
   /** x, fadeFrom, fadeTo, crown (see hair-shading's RootsStyleValues). */
   part: Vector4
   undercut: Vector4
+  /**
+   * How far each strand has moved with the head since it was grown (see
+   * newStrandOffsets), or null for none. Its owner frees it.
+   */
+  offsets: DataTexture | null
 }
 
 export function newHairValues(): HairValues {
@@ -147,6 +155,7 @@ export function newHairValues(): HairValues {
     hairline: new Array(HAIRLINE_STEPS).fill(0.7),
     part: new Vector4(),
     undercut: new Vector4(),
+    offsets: null,
   }
   writeLook(values, { base: '#4f3426', tip: null, shine: 0.5, skin: '#c8987a' })
   writeRoots(values, {
@@ -309,15 +318,57 @@ function cameraInBind({ object, camera }: N, self: N) {
 const bindCamera = uniform(new Vector3()).onObjectUpdate(cameraInBind as N)
 
 /**
+ * A texture for a character's strand offsets (see hair-wear.ts's
+ * strandOffsets): one RGBA float texel per strand, OFFSET_COLUMNS across,
+ * read texel by texel. Its owner writes `image.data`, flags it, and frees it.
+ */
+export function newStrandOffsets(): DataTexture {
+  const texture = new DataTexture(
+    new Float32Array(MOST_STRANDS * 4),
+    OFFSET_COLUMNS,
+    OFFSET_COLUMNS,
+    RGBAFormat,
+    FloatType,
+  )
+  texture.minFilter = NearestFilter
+  texture.magFilter = NearestFilter
+  texture.generateMipmaps = false
+  texture.name = 'hair-offsets'
+  texture.needsUpdate = true
+  return texture
+}
+
+/** A character's strands that have not moved with its head since they were grown. */
+const NO_OFFSETS = newStrandOffsets()
+
+/**
+ * How far a strand point moved with the head since it was grown (a face
+ * slider being dragged), read per drawn object from its character's
+ * offsets by the strand's id, as much as the point follows the head.
+ */
+function strandMove(data: N, shape: N): N {
+  const id = int(data.w)
+  const offsetsOf = ({ object }: { object: Mesh }) =>
+    (object.userData.hair as HairValues | undefined)?.offsets ?? NO_OFFSETS
+  const offsets: N = textureLoad(
+    NO_OFFSETS,
+    ivec2(id.mod(OFFSET_COLUMNS), id.div(OFFSET_COLUMNS)),
+  ).onObjectUpdate(offsetsOf as N)
+  return offsets.xyz.mul(shape.w)
+}
+
+/**
  * Turns the strip from its centreline to its width: inner strips flat on
  * the head, the others toward the camera (in the shadow pass, the light).
  * In r184 positionLocal, normalLocal and tangentLocal are still bind-space
  * here (skinning runs on what this returns), hence the camera in bind space.
+ * The strip first moves with the head (see strandMove).
  */
-function expandStrip(shape: N, layer: N) {
+function expandStrip(data: N, shape: N, layer: N) {
   return Fn(() => {
     const along: N = tangentLocal.normalize()
-    const toCamera = bindCamera.sub(positionLocal).normalize()
+    const at = positionLocal.add(strandMove(data, shape))
+    const toCamera = bindCamera.sub(at).normalize()
     // Arithmetic, not select(): a branch would set up normalLocal on its own side only,
     // leaving camera-facing strips with a zero normal.
     const facing = mix(toCamera, normalLocal, step(layer, 0.5))
@@ -325,7 +376,7 @@ function expandStrip(shape: N, layer: N) {
     const axis = vec3(upright, upright.oneMinus(), 0)
     const side = cross(along, facing)
     const safe = select(length(side).lessThan(1e-4), cross(along, axis), side).normalize()
-    return positionLocal.add(safe.mul(shape.x.mul(value('width', 'float'))))
+    return at.add(safe.mul(shape.x.mul(value('width', 'float'))))
   })()
 }
 
@@ -624,7 +675,7 @@ export class HairNodeMaterial extends MeshStandardNodeMaterial {
         ? coverage.greaterThan(MIN_COVERAGE).and(coverage.lessThan(CORE_COVERAGE))
         : coverage.greaterThanEqual(max(core, hardEdges.mul(0.5)))
     this.maskShadowNode = s.shadowCoverage.greaterThanEqual(0.4)
-    this.positionNode = expandStrip(shape, s.layer)
+    this.positionNode = expandStrip(data, shape, s.layer)
     this.normalNode = normalViewGeometry
     this.receivedShadowPositionNode = shadowPosition
     this.receivedShadowNode = Fn(([shadow]: [N], builder: NodeBuilder) =>
