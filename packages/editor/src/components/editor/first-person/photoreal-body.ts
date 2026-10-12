@@ -87,11 +87,19 @@ export function usePhotorealEmoteClips(
   useEffect(() => {
     if (!(wanted && rig && source) || clips?.rig === rig) return
     let current = true
-    loadEmoteClips(character.gender)
-      .then((loaded) => {
-        if (current) setClips({ rig, clips: loaded.map((clip) => retargetClip(clip, source, rig)) })
-      })
-      .catch(() => {})
+    // A clip at a time, a task each: all 25 at once would hold the page up
+    // for most of a second.
+    const carry = async () => {
+      const loaded = await loadEmoteClips(character.gender)
+      const carried: AnimationClip[] = []
+      for (const clip of loaded) {
+        await new Promise((resolve) => setTimeout(resolve))
+        if (!current) return
+        carried.push(retargetClip(clip, source, rig))
+      }
+      setClips({ rig, clips: carried })
+    }
+    carry().catch(() => {})
     return () => {
       current = false
     }
