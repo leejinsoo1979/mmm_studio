@@ -3,7 +3,7 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 import { BufferGeometry, Float32BufferAttribute, Mesh, Scene, Texture } from 'three'
 import type { WebGPURenderer } from 'three/webgpu'
-import { SheenSafePhysicalNodeMaterial } from './sheen-safe-material'
+import { SkinPhysicalNodeMaterial } from './skin-material'
 import { prepareWebGPURenderer, rendererForCanvas, watchGpuDevice } from './webgpu-renderer'
 
 function triangle(count = 3) {
@@ -141,11 +141,11 @@ describe('prepareWebGPURenderer', () => {
     }
   })
 
-  test('draws physical materials sheen-safe', () => {
+  test('draws physical materials sheen-safe, and as skin where marked', () => {
     const { renderer, asRenderer } = fakeRenderer(fakeDevice().device)
     const release = prepareWebGPURenderer(asRenderer, 'canvas')
     expect(renderer.library.materialNodes.get('MeshPhysicalMaterial')).toBe(
-      SheenSafePhysicalNodeMaterial,
+      SkinPhysicalNodeMaterial,
     )
     release()
   })

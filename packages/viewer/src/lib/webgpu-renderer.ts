@@ -7,7 +7,7 @@ import {
   type InUseDisposeGuard,
 } from './drawable-geometry'
 import { createGpuErrorReporter } from './gpu-error-log'
-import { installSheenSafeMaterial } from './sheen-safe-material'
+import { installPhysicalMaterial } from './skin-material'
 
 const warnedEmptyDraw = process.env.NODE_ENV === 'production' ? null : new WeakSet<object>()
 
@@ -247,13 +247,14 @@ export function trackTextureListeners(renderer: WebGPURenderer): () => void {
 /**
  * Gives a WebGPURenderer made outside the viewer (after `await
  * renderer.init()`) the viewer's safety nets: the draw guards, the
- * sheen-safe physical material and the device watch. `scope` names it in
- * the log. Returns what undoes them; call it before `renderer.dispose()`,
- * so the geometries, materials and textures it drew, which may live on in
- * another renderer, no longer hold on to it, its meshes or its scenes.
+ * physical material (sheen-safe, and skin where marked) and the device
+ * watch. `scope` names it in the log. Returns what undoes them; call it
+ * before `renderer.dispose()`, so the geometries, materials and textures
+ * it drew, which may live on in another renderer, no longer hold on to it,
+ * its meshes or its scenes.
  */
 export function prepareWebGPURenderer(renderer: WebGPURenderer, scope: string): () => void {
-  installSheenSafeMaterial(renderer)
+  installPhysicalMaterial(renderer)
   const guard = installDrawGuards(renderer, scope)
   const stop = watchGpuDevice(renderer, scope)
   const disposeRenderObjects = trackRenderObjects(renderer)

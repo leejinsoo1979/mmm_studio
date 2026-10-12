@@ -13,6 +13,7 @@ import {
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { avatarGender, avatarUrl, findAvatar } from './avatar-catalog'
 import { foldCardTwins } from './avatar-hair'
+import { prepareSkin } from './avatar-skin'
 import { bleedTexture } from './hair-bleed'
 import { MOTION_SETS, scaledGaits } from './locomotion'
 
@@ -126,6 +127,7 @@ export function prepareModel(source: Object3D): Object3D {
       if (map) bleedTexture(map)
       if (!Array.isArray(mesh.material)) foldCardTwins(mesh.geometry)
     }
+    prepareSkin(mesh)
   })
   return model
 }

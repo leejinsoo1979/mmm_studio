@@ -22,7 +22,7 @@ import { applyIsolation, clearIsolation } from '../../lib/isolation'
 import { ensureKtx2Support } from '../../lib/ktx2-loader'
 import type { ColorPreset, RenderShading } from '../../lib/materials'
 import { getSceneTheme } from '../../lib/scene-themes'
-import { installSheenSafeMaterial } from '../../lib/sheen-safe-material'
+import { installPhysicalMaterial } from '../../lib/skin-material'
 import { toneMappingFor } from '../../lib/tone-mapping'
 import { installDrawGuards, rendererForCanvas, watchGpuDevice } from '../../lib/webgpu-renderer'
 import useViewer, { type RenderContext } from '../../store/use-viewer'
@@ -416,7 +416,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
               ).toneMappingExposure
               await renderer.init()
               installDrawGuards(renderer)
-              installSheenSafeMaterial(renderer)
+              installPhysicalMaterial(renderer)
               return renderer
             } catch (err) {
               console.error('[viewer] WebGPURenderer init failed', err)

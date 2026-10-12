@@ -2,15 +2,19 @@
 // depend on @types/bun so the import type is unresolved at compile time.
 import { describe, expect, test } from 'bun:test'
 import { MeshPhysicalNodeMaterial, PhysicalLightingModel, type WebGPURenderer } from 'three/webgpu'
-import { installSheenSafeMaterial, SheenSafePhysicalNodeMaterial } from './sheen-safe-material'
+import { SheenSafePhysicalNodeMaterial } from './sheen-safe-material'
+import { installPhysicalMaterial } from './skin-material'
 
-describe('installSheenSafeMaterial', () => {
-  test('draws MeshPhysicalMaterial as the sheen-safe node material', () => {
+describe('SheenSafePhysicalNodeMaterial', () => {
+  test('draws MeshPhysicalMaterial as a sheen-safe node material', () => {
     const materialNodes = new Map<string, unknown>([
       ['MeshPhysicalMaterial', MeshPhysicalNodeMaterial],
     ])
-    installSheenSafeMaterial({ library: { materialNodes } } as unknown as WebGPURenderer)
-    expect(materialNodes.get('MeshPhysicalMaterial')).toBe(SheenSafePhysicalNodeMaterial)
+    installPhysicalMaterial({ library: { materialNodes } } as unknown as WebGPURenderer)
+    const drawnAs = materialNodes.get(
+      'MeshPhysicalMaterial',
+    ) as typeof SheenSafePhysicalNodeMaterial
+    expect(new drawnAs()).toBeInstanceOf(SheenSafePhysicalNodeMaterial)
   })
 
   test('the material is still physical, lit by a physical lighting model with its features', () => {

@@ -112,6 +112,7 @@ export {
   SCENE_THEMES,
   type SceneTheme,
 } from './lib/scene-themes'
+export { markSkin, SKIN_EYE_ATTRIBUTE, setSkinShading } from './lib/skin-material'
 export { WEATHERS, type Weather } from './lib/weather'
 // For a canvas outside <Viewer> that renders with three's WebGPURenderer: the
 // viewer's safety nets and its one-renderer-per-canvas R3F factory.

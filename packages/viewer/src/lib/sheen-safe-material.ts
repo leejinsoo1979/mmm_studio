@@ -1,5 +1,5 @@
 import { Fn, float, max, normalView, positionViewDirection, sheen, sheenRoughness } from 'three/tsl'
-import { MeshPhysicalNodeMaterial, PhysicalLightingModel, type WebGPURenderer } from 'three/webgpu'
+import { MeshPhysicalNodeMaterial, PhysicalLightingModel } from 'three/webgpu'
 
 /**
  * three r184's WebGPU sheen (BRDF_Sheen.js) divides by `dotNL + dotNV −
@@ -44,8 +44,8 @@ const IBLSheenBRDF = Fn(([normal, viewDir, roughness]: any[]) => {
   return a.mul(dotNV).add(b).exp().saturate()
 })
 
-type DirectInput = Parameters<PhysicalLightingModel['direct']>[0]
-type Builder = Parameters<PhysicalLightingModel['direct']>[1]
+export type DirectInput = Parameters<PhysicalLightingModel['direct']>[0]
+export type Builder = Parameters<PhysicalLightingModel['direct']>[1]
 
 /**
  * The physical lighting model with the direct sheen term above. Its
@@ -54,7 +54,14 @@ type Builder = Parameters<PhysicalLightingModel['direct']>[1]
  * linear in it. With clearcoat, whose term reads the light's colour too,
  * three's own runs.
  */
-class SheenSafeLightingModel extends PhysicalLightingModel {
+export class SheenSafeLightingModel extends PhysicalLightingModel {
+  /** The share of a light the sheen leaves to the layers under it (three's energy compensation). */
+  protected sheenEnergy(lightDirection: any) {
+    const albedoV = IBLSheenBRDF(normalView, positionViewDirection, sheenRoughness)
+    const albedoL = IBLSheenBRDF(normalView, lightDirection, sheenRoughness)
+    return sheen.r.max(sheen.g).max(sheen.b).mul(albedoV.max(albedoL)).oneMinus()
+  }
+
   override direct(input: DirectInput, builder: Builder) {
     const model = this as unknown as {
       sheen: boolean
@@ -68,9 +75,7 @@ class SheenSafeLightingModel extends PhysicalLightingModel {
     }
     const irradiance = normalView.dot(lightDirection).clamp().mul(lightColor)
     model.sheenSpecularDirect.addAssign(irradiance.mul(BRDF_Sheen(lightDirection)))
-    const albedoV = IBLSheenBRDF(normalView, positionViewDirection, sheenRoughness)
-    const albedoL = IBLSheenBRDF(normalView, lightDirection, sheenRoughness)
-    const energy = sheen.r.max(sheen.g).max(sheen.b).mul(albedoV.max(albedoL)).oneMinus()
+    const energy = this.sheenEnergy(lightDirection)
     model.sheen = false
     try {
       super.direct({ ...input, lightColor: lightColor.mul(energy) } as DirectInput, builder)
@@ -80,8 +85,11 @@ class SheenSafeLightingModel extends PhysicalLightingModel {
   }
 }
 
+/** The physical lighting model's features a material uses, in the order its constructor takes them. */
+export type PhysicalFeatures = [boolean, boolean, boolean, boolean, boolean, boolean]
+
 export class SheenSafePhysicalNodeMaterial extends MeshPhysicalNodeMaterial {
-  override setupLightingModel() {
+  protected physicalFeatures(): PhysicalFeatures {
     const material = this as unknown as {
       useClearcoat: boolean
       useSheen: boolean
@@ -90,23 +98,17 @@ export class SheenSafePhysicalNodeMaterial extends MeshPhysicalNodeMaterial {
       useTransmission: boolean
       useDispersion: boolean
     }
-    return new SheenSafeLightingModel(
+    return [
       material.useClearcoat,
       material.useSheen,
       material.useIridescence,
       material.useAnisotropy,
       material.useTransmission,
       material.useDispersion,
-    )
+    ]
   }
-}
 
-/**
- * Has the renderer draw every MeshPhysicalMaterial (glTF's, with sheen) as
- * SheenSafePhysicalNodeMaterial. Node materials are drawn as they are.
- */
-export function installSheenSafeMaterial(renderer: WebGPURenderer) {
-  const library = (renderer as unknown as { library: { materialNodes: Map<string, unknown> } })
-    .library
-  library.materialNodes.set('MeshPhysicalMaterial', SheenSafePhysicalNodeMaterial)
+  override setupLightingModel() {
+    return new SheenSafeLightingModel(...this.physicalFeatures())
+  }
 }
