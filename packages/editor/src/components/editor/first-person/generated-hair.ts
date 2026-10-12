@@ -12,6 +12,7 @@ import {
   type Mesh,
   type MeshStandardMaterial,
   type Object3D,
+  type PerspectiveCamera,
   type SkinnedMesh,
   type Texture,
   Vector3,
@@ -255,6 +256,9 @@ export function useHairFailed(avatar: string): boolean {
 /** How many times a character's grow may fail before it keeps its own hair. */
 const TRIES = 2
 
+/** How long (ms) a character stays on the studio's stage before its head's base is worked out ahead. */
+const PREFETCH_MS = 2500
+
 const PARTS: readonly Exclude<HairPart, 'roots'>[] = ['inner', 'outer', 'strays', 'soft']
 
 /** A build's meshes on a character, and what its strands were grown against. */
@@ -307,6 +311,8 @@ function sortSoft(mesh: SkinnedMesh) {
   const centre = geometry.boundingSphere!.center
   let sortedFor: [number, number, number] | null = null
   mesh.onBeforeRender = (_renderer, _scene, view) => {
+    // A pass looking from elsewhere (the studio's contact shadow, from below) would sort it for itself.
+    if (!(view as PerspectiveCamera).isPerspectiveCamera) return
     const to = cameraInBind(mesh, view).sub(centre).normalize()
     const now: [number, number, number] = [to.x, to.y, to.z]
     if (!turnedSince(sortedFor, now)) return
@@ -346,6 +352,7 @@ class HairSlot {
   private failures = 0
   private broken = false
   private timer: ReturnType<typeof setTimeout> | undefined
+  private prefetch: ReturnType<typeof setTimeout> | undefined
   private waiters: (() => void)[] = []
   private readonly stopShaped: () => void
   private disposed = false
@@ -362,6 +369,13 @@ class HairSlot {
     this.plan = new GrowPlan(detail, 0)
     this.values.offsets = this.offsets
     this.stopShaped = onShaped(model, () => this.shaped())
+    // In the studio a style is likely to be picked: the head's base is worked out ahead, once
+    // the character has stayed on the stage a moment, so the first pick waits on its grow alone.
+    if (detail === 'studio') {
+      this.prefetch = setTimeout(() => {
+        if (!this.disposed) this.ready().catch(() => {})
+      }, PREFETCH_MS)
+    }
   }
 
   private readonly listener = {
@@ -395,6 +409,7 @@ class HairSlot {
   dispose() {
     this.disposed = true
     clearTimeout(this.timer)
+    clearTimeout(this.prefetch)
     this.stopShaped()
     hairClient().cancel(this.id)
     this.takeOff()
