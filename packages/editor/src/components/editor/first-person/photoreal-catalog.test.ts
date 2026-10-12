@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  aiAvatarIdOf,
+  aiCharacters,
+  aiPhotorealId,
   findPhotoreal,
   guessGender,
   localCharacters,
   localPhotorealId,
+  PHOTOREAL_AI_CREDIT,
   PHOTOREAL_CHARACTERS,
   PHOTOREAL_LOCAL_URL,
   readPhotorealId,
@@ -67,5 +71,47 @@ describe('the 실사 set', () => {
     expect(guessGender('여자캐릭터.glb')).toBe('female')
     expect(guessGender('f_01.glb')).toBe('female')
     expect(guessGender('hero.glb')).toBe('male')
+  })
+
+  test('names an AI 인물 by its gender and avatar id, served by the app', () => {
+    const avatarId = `${'a'.repeat(16)}-${'0'.repeat(24)}`
+    const id = aiPhotorealId('female', avatarId)
+    expect(id).toBe(`ai:female:${avatarId}`)
+    expect(findPhotoreal(id)).toEqual({
+      id,
+      label: 'AI 인물',
+      gender: 'female',
+      url: `/api/photoreal-ai/avatars/${avatarId}/model.glb`,
+      thumbnail: `/api/photoreal-ai/avatars/${avatarId}/portrait`,
+      credit: PHOTOREAL_AI_CREDIT,
+      local: false,
+      ai: true,
+    })
+    expect(readPhotorealId(id)).toBe(id)
+    expect(aiAvatarIdOf(id)).toBe(avatarId)
+    expect(aiAvatarIdOf(localPhotorealId('male', 'a.glb'))).toBeNull()
+    for (const bad of [
+      `ai:other:${avatarId}`,
+      'ai:male:../model.glb',
+      `ai:male:${avatarId}/x`,
+      'ai:male:ABCDEF',
+    ]) {
+      expect(findPhotoreal(bad)).toBeNull()
+    }
+  })
+
+  test('lists the AI 인물 under their given names, always credited as AI-made', () => {
+    const one = `${'1'.repeat(16)}-${'2'.repeat(24)}`
+    const two = `${'3'.repeat(16)}-${'4'.repeat(24)}`
+    const listed = aiCharacters([
+      { id: one, name: 'AI 인물 1', gender: 'male', credit: 'AI 생성 인물 · 목업' },
+      { id: two, name: '  ', gender: 'female', credit: '누군가의 사진' },
+      { id: 'nope', name: 'x', gender: 'female' },
+      { id: one, name: 'y' },
+    ])
+    expect(listed.map(({ label, credit, ai }) => [label, credit, ai])).toEqual([
+      ['AI 인물 1', 'AI 생성 인물 · 목업', true],
+      ['AI 인물', PHOTOREAL_AI_CREDIT, true],
+    ])
   })
 })

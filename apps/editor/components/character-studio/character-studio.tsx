@@ -5,6 +5,8 @@ import {
   ALL_AVATARS,
   type AvatarLook,
   type AvatarTab,
+  aiAvatarIdOf,
+  aiPhotorealId,
   applyFaceDrag,
   avatarLabel,
   avatarTab,
@@ -31,6 +33,7 @@ import {
   NO_LOOK,
   PHOTOREAL_CHARACTERS,
   PHOTOREAL_LOOK_NOTE,
+  type PhotorealCharacter,
   PhotorealThumbnail,
   useAvatarProfile,
   useFaceTarget,
@@ -39,10 +42,24 @@ import {
   wornHairStyle,
 } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
-import { Check, Eye, EyeOff, Keyboard, Plus, X } from 'lucide-react'
+import {
+  Check,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Keyboard,
+  LoaderCircle,
+  Plus,
+  Sparkles,
+  Trash2,
+  TriangleAlert,
+  X,
+} from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AiPhotoFraming } from '@/lib/ai-photo/client'
+import { type AvatarJob, isFinished } from '@/lib/photoreal-ai/avatar-job'
 import { cn } from '@/lib/utils'
+import { AiPersonDialog } from './ai-person-dialog'
 import { AiPhotoDialog } from './ai-photo-dialog'
 import { download, stampedName } from './ai-photo-label'
 import { lookOn } from './avatar-counterpart'
@@ -102,6 +119,7 @@ import {
 import { StudioStage } from './studio-stage'
 import { StudioTabs } from './studio-tabs'
 import { StudioToolbar } from './studio-toolbar'
+import { avatarJobs, deleteAiPerson, useAiPeople, useAvatarJob } from './use-ai-person'
 import { type StudioTarget, useCharacterStudio } from './use-character-studio'
 
 /** The body (a Rocketbox avatar, or a 실사 character in its place), its look, the emote keys. */
@@ -258,20 +276,85 @@ function AvatarGallery({
   )
 }
 
+/** AI 인물 만들기, first in the 실사 set: what it does, or how its 3D build stands. */
+function AiPersonCard({ job, onOpen }: { job: AvatarJob | null; onOpen: () => void }) {
+  const building = job !== null && !isFinished(job)
+  const failed = job?.state === 'failed'
+  return (
+    <button
+      className={cn(
+        'group flex w-full items-center gap-3 rounded-2xl border border-sky-300/35 border-dashed bg-sky-400/[0.07] px-3 py-3 text-left transition duration-200 ease-out hover:border-sky-300/70 hover:bg-sky-400/[0.12] motion-reduce:transition-none',
+        FOCUS_RING,
+      )}
+      data-ai-person-card
+      onClick={onOpen}
+      type="button"
+    >
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-sky-400/15 text-sky-300">
+        {building ? (
+          <LoaderCircle className="size-5 animate-spin motion-reduce:animate-none" />
+        ) : failed ? (
+          <TriangleAlert className="size-5 text-amber-300" />
+        ) : (
+          <Sparkles className="size-5" />
+        )}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="font-semibold text-[13px] text-white">AI로 새 인물 만들기</span>
+        <span className="text-[11px] text-white/55 leading-4">
+          {building
+            ? `3D 아바타를 만드는 중이에요 · ${Math.round(job.progress)}%`
+            : failed
+              ? '3D 아바타를 만들지 못했어요 · 눌러서 보기'
+              : '생김새를 고르면 AI가 가상의 성인 인물을 만들어 움직이는 아바타로 바꿔요'}
+        </span>
+      </span>
+      <ChevronRight className="size-4 shrink-0 text-white/40 group-hover:text-white/70" />
+    </button>
+  )
+}
+
 /**
- * The 실사 set as tall cards: those shipped, then the owner's own from the
- * local folder (with how to add them when there are none), and what a 실사
+ * The 실사 set as tall cards: AI 인물 만들기 first, then those shipped, the
+ * user's AI 인물 (marked, and deletable), the owner's own from the local
+ * folder (with how to add them when there are none), and what a 실사
  * character can't take from the look tabs.
  */
-function RealGallery({ real, onPick }: { real: string | null; onPick: (id: string) => void }) {
-  const local = useLocalPhotoreal()
-  const characters = [...PHOTOREAL_CHARACTERS, ...(local ?? [])]
+function RealGallery({
+  real,
+  people,
+  local,
+  job,
+  onPick,
+  onCreate,
+  onDelete,
+}: {
+  real: string | null
+  people: PhotorealCharacter[] | null
+  local: PhotorealCharacter[] | null
+  job: AvatarJob | null
+  onPick: (id: string) => void
+  onCreate: () => void
+  onDelete: (character: PhotorealCharacter) => Promise<boolean>
+}) {
+  const characters = [...PHOTOREAL_CHARACTERS, ...(people ?? []), ...(local ?? [])]
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const remove = async (character: PhotorealCharacter) => {
+    setBusy(true)
+    try {
+      if (await onDelete(character)) setDeleting(null)
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <div className="flex flex-col gap-4">
+      <AiPersonCard job={job} onOpen={onCreate} />
       <div className="grid grid-cols-3 gap-x-2.5 gap-y-3">
         {characters.map((entry) => {
           const selected = entry.id === real
-          return (
+          const card = (
             <button
               aria-pressed={selected}
               className={cn(
@@ -293,8 +376,17 @@ function RealGallery({ real, onPick }: { real: string | null; onPick: (id: strin
               >
                 <PhotorealThumbnail
                   character={entry}
-                  className="aspect-[128/208] h-auto w-full object-contain text-white/40"
+                  className={cn(
+                    'aspect-[128/208] h-auto w-full text-white/40',
+                    // The AI portrait is square: the face fills the card.
+                    entry.ai ? 'object-cover' : 'object-contain',
+                  )}
                 />
+                {entry.ai && (
+                  <span className="absolute top-1.5 left-1.5 rounded-full bg-sky-400/90 px-1.5 py-0.5 font-bold text-[9px] text-neutral-950">
+                    AI
+                  </span>
+                )}
               </span>
               <span
                 className={cn(
@@ -308,6 +400,55 @@ function RealGallery({ real, onPick }: { real: string | null; onPick: (id: strin
                 {entry.credit}
               </span>
             </button>
+          )
+          if (!entry.ai) return card
+          return (
+            <div className="group/ai relative" key={entry.id}>
+              {card}
+              {deleting === entry.id ? (
+                <div
+                  className="absolute inset-x-0 top-0 flex aspect-[128/208] flex-col items-center justify-center gap-1.5 rounded-2xl bg-neutral-950/85 p-2 text-center backdrop-blur-sm"
+                  role="alertdialog"
+                >
+                  <span className="text-[11px] text-white/85 leading-4">
+                    이 AI 인물을 지울까요?
+                  </span>
+                  <button
+                    className={cn(
+                      'h-7 w-full rounded-full bg-rose-500 font-semibold text-[11px] text-white hover:bg-rose-400 disabled:opacity-50',
+                      FOCUS_RING,
+                    )}
+                    disabled={busy}
+                    onClick={() => void remove(entry)}
+                    type="button"
+                  >
+                    지우기
+                  </button>
+                  <button
+                    className={cn(
+                      'h-7 w-full rounded-full bg-white/10 text-[11px] text-white/85 hover:bg-white/15',
+                      FOCUS_RING,
+                    )}
+                    onClick={() => setDeleting(null)}
+                    type="button"
+                  >
+                    취소
+                  </button>
+                </div>
+              ) : (
+                <button
+                  aria-label={`${entry.label} 지우기`}
+                  className={cn(
+                    'absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-black/55 text-white/80 opacity-0 transition hover:bg-rose-500 hover:text-white focus-visible:opacity-100 group-hover/ai:opacity-100 motion-reduce:transition-none',
+                    FOCUS_RING,
+                  )}
+                  onClick={() => setDeleting(entry.id)}
+                  type="button"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              )}
+            </div>
           )
         })}
       </div>
@@ -635,6 +776,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const [randomizing, setRandomizing] = useState(false)
   const [snapshotting, setSnapshotting] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
+  const [personOpen, setPersonOpen] = useState(false)
   const [coach, setCoach] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
@@ -642,8 +784,14 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const rootRef = useRef<HTMLDivElement>(null)
 
   const shown = preview ?? draft
-  // A 실사 character takes no look: only 프리셋 and 동작 apply to it.
-  const real = findPhotoreal(shown.real)
+  // A 실사 character takes no look: only 프리셋 and 동작 apply to it. An AI
+  // 인물 or one from the local folder goes by the name its listing gives it.
+  const local = useLocalPhotoreal()
+  const people = useAiPeople()
+  const real =
+    [...(people ?? []), ...(local ?? [])].find(({ id }) => id === shown.real) ??
+    findPhotoreal(shown.real)
+  const job = useAvatarJob()
   const tabs = studioTabs(isNpc, real !== null)
   const stageLook = useThrottled(shown.look, 90)
   const faceTarget = useFaceTarget(shown.avatar)
@@ -758,6 +906,19 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
     const current = draftRef.current
     if (id !== current.real) commit({ ...current, real: id })
   }
+  // An AI 인물 deleted while on stage gives way to the first shipped one (one undo step).
+  const deletePerson = async (character: PhotorealCharacter) => {
+    const avatarId = aiAvatarIdOf(character.id)
+    if (!avatarId || !(await deleteAiPerson(avatarId))) {
+      showToast('AI 인물을 지우지 못했어요. 잠시 뒤 다시 시도해 주세요.')
+      return false
+    }
+    if (lastReal.current === character.id) lastReal.current = null
+    const current = draftRef.current
+    if (current.real === character.id) commit({ ...current, real: PHOTOREAL_CHARACTERS[0]!.id })
+    showToast('AI 인물을 지웠어요')
+    return true
+  }
   /** 기본 | 실사: the Rocketbox body, or the 실사 character last shown (the first, at first). */
   const pickEdition = (edition: CharacterEdition) => {
     const current = draftRef.current
@@ -772,6 +933,30 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
     setCategory(REAL_CATEGORY.id)
     commit({ ...current, real: lastReal.current ?? PHOTOREAL_CHARACTERS[0]!.id })
   }
+  // An AI 인물 being built goes on while the studio is shut; once it is
+  // done it is picked here (one undo step), the next time the studio is open.
+  useEffect(() => {
+    if (!isNpc) avatarJobs().resume()
+  }, [isNpc])
+  useEffect(() => {
+    if (isNpc || !job || !isFinished(job) || job.seen) return
+    avatarJobs().markSeen()
+    const made =
+      job.state === 'done' && job.avatar
+        ? findPhotoreal(aiPhotorealId(job.avatar.gender, job.avatar.id))
+        : null
+    if (!made) {
+      showToast('3D 아바타를 만들지 못했어요. AI로 새 인물 만들기에서 이유를 볼 수 있어요.')
+      return
+    }
+    lastReal.current = made.id
+    setTab('preset')
+    setCategory(REAL_CATEGORY.id)
+    if (viewport.width >= WIDE) setPanelOpen(true)
+    commit({ ...draftRef.current, real: made.id })
+    showToast('AI 인물이 완성됐어요. 실사 목록에서 골라 두었어요.')
+  }, [job, isNpc, commit, showToast, viewport.width])
+
   // The hairstyle library may still be loading (or fail to): the random
   // look is made once it answers, on the draft as it is by then, and the
   // button waits with it so a second click doesn't queue another.
@@ -930,7 +1115,8 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const keyContext = {
     listening,
     confirming,
-    aiOpen,
+    // Either AI dialog answers its own keys.
+    aiOpen: aiOpen || personOpen,
     coach,
     panelOpen,
     tab,
@@ -1103,7 +1289,15 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
             <div className="flex flex-col gap-4">
               {!isNpc && <EditionToggle onEdition={pickEdition} value={real ? 'real' : 'basic'} />}
               {real ? (
-                <RealGallery onPick={pickReal} real={real.id} />
+                <RealGallery
+                  job={job}
+                  local={local}
+                  onCreate={() => setPersonOpen(true)}
+                  onDelete={deletePerson}
+                  onPick={pickReal}
+                  people={people}
+                  real={real.id}
+                />
               ) : (
                 <AvatarGallery
                   avatar={shown.avatar}
@@ -1489,6 +1683,16 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
             </div>
           </div>
         </div>
+      )}
+
+      {personOpen && (
+        <AiPersonDialog
+          onAnnounce={announce}
+          onClose={() => {
+            setPersonOpen(false)
+            rootRef.current?.querySelector<HTMLElement>('[data-ai-person-card]')?.focus()
+          }}
+        />
       )}
 
       {aiOpen && (

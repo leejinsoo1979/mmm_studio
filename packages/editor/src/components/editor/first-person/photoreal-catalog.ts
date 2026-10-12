@@ -10,11 +10,13 @@ import type { AvatarGender } from './avatar-catalog'
  * be shipped are listed here; the rest — a MetaHuman, Character Creator or
  * selfie-avatar export, whose terms keep them off a public site — the owner
  * puts in a local folder the repository ignores, and the app lists what it
- * finds there.
+ * finds there. AI 인물 — fictional people the AI made from a portrait — are
+ * kept and served by the app (apps/editor/app/api/photoreal-ai), each named
+ * by its id alone.
  */
 
 export type PhotorealCharacter = {
-  /** `local:<gender>:<file>` for one from the local folder. */
+  /** `local:<gender>:<file>` for one from the local folder, `ai:<gender>:<avatar id>` for an AI 인물. */
   id: string
   /** Korean label: "실사 여 1", or a local file's name. */
   label: string
@@ -25,6 +27,8 @@ export type PhotorealCharacter = {
   /** Who made it and its licence, shown with it. */
   credit: string
   local: boolean
+  /** A fictional person the AI made, listed as AI 생성 인물 wherever it is picked. */
+  ai?: boolean
 }
 
 const BASE = '/characters/photoreal'
@@ -34,6 +38,10 @@ export const PHOTOREAL_LOCAL_URL = '/characters/photoreal-local'
 export const PHOTOREAL_LOCAL_FOLDER = 'apps/editor/public/characters/photoreal-local'
 /** The app's listing of that folder (apps/editor/app/api/photoreal-local). */
 const LOCAL_LISTING = '/api/photoreal-local'
+/** Where the app serves each AI 인물's model and portrait (apps/editor/app/api/photoreal-ai). */
+const AI_AVATARS = '/api/photoreal-ai/avatars'
+/** The credit an AI 인물 carries in place of a maker and licence. */
+export const PHOTOREAL_AI_CREDIT = 'AI 생성 인물'
 
 export const PHOTOREAL_CHARACTERS: readonly PhotorealCharacter[] = [
   {
@@ -50,8 +58,13 @@ export const PHOTOREAL_CHARACTERS: readonly PhotorealCharacter[] = [
 const shipped = new Map(PHOTOREAL_CHARACTERS.map((character) => [character.id, character]))
 
 const LOCAL_ID = /^local:(male|female):([^/\\:]+\.glb)$/i
+/** The app's avatar ids: the owner's key, then a random part. */
+const AI_ID = /^ai:(male|female):([0-9a-f]{16}-[0-9a-f]{24})$/
 
 export const localPhotorealId = (gender: AvatarGender, file: string) => `local:${gender}:${file}`
+export const aiPhotorealId = (gender: AvatarGender, avatarId: string) => `ai:${gender}:${avatarId}`
+/** The app's avatar id inside an AI 인물's id, or null for any other id. */
+export const aiAvatarIdOf = (id: string) => AI_ID.exec(id)?.[2] ?? null
 
 /** A local file's name without its extension, for its label. */
 const stem = (file: string) => file.replace(/\.glb$/i, '')
@@ -66,6 +79,20 @@ export function findPhotoreal(id: string | null | undefined): PhotorealCharacter
   if (!id) return null
   const known = shipped.get(id)
   if (known) return known
+  const made = AI_ID.exec(id)
+  if (made) {
+    const base = `${AI_AVATARS}/${made[2]!}`
+    return {
+      id,
+      label: 'AI 인물',
+      gender: made[1] as AvatarGender,
+      url: `${base}/model.glb`,
+      thumbnail: `${base}/portrait`,
+      credit: PHOTOREAL_AI_CREDIT,
+      local: false,
+      ai: true,
+    }
+  }
   const local = LOCAL_ID.exec(id)
   if (!local) return null
   const file = local[2]!
@@ -97,6 +124,26 @@ export function localCharacters(entries: readonly LocalPhotorealEntry[]): Photor
       entry.gender === 'male' || entry.gender === 'female' ? entry.gender : guessGender(entry.file)
     const character = findPhotoreal(localPhotorealId(gender, entry.file))!
     characters.push({ ...character, label: entry.name?.trim() || character.label })
+  }
+  return characters
+}
+
+/** One AI 인물 as the app lists it (`GET /api/photoreal-ai/avatars`). */
+export type AiPhotorealEntry = { id: string; name?: string; gender?: AvatarGender; credit?: string }
+
+/** The AI 인물 as characters, in the listing's order; entries that don't name one are skipped. */
+export function aiCharacters(entries: readonly AiPhotorealEntry[]): PhotorealCharacter[] {
+  const characters: PhotorealCharacter[] = []
+  for (const entry of entries) {
+    if (entry.gender !== 'male' && entry.gender !== 'female') continue
+    const character = findPhotoreal(aiPhotorealId(entry.gender, entry.id))
+    if (!character) continue
+    const credit = entry.credit?.trim()
+    characters.push({
+      ...character,
+      label: entry.name?.trim().slice(0, 40) || character.label,
+      credit: credit?.startsWith(PHOTOREAL_AI_CREDIT) ? credit.slice(0, 60) : character.credit,
+    })
   }
   return characters
 }

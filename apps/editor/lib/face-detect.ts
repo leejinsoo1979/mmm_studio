@@ -87,6 +87,13 @@ const imageSize = (image: FaceImage) =>
 
 /** The largest face in the image (a group photo's nearest), or null when there is none. */
 export async function detectFace(image: FaceImage): Promise<DetectedFace | null> {
+  return (await detectFaces(image)).largest
+}
+
+/** The largest face in the image and how many faces it has (up to four are looked for). */
+export async function detectFaces(
+  image: FaceImage,
+): Promise<{ largest: DetectedFace | null; count: number }> {
   const found = (await loadFaceLandmarker()).detect(image)
   const { width, height } = imageSize(image)
   let largest: DetectedFace | null = null
@@ -100,7 +107,7 @@ export async function detectFace(image: FaceImage): Promise<DetectedFace | null>
     const matrix = found.facialTransformationMatrixes[i]
     largest = { points, ...(matrix ? poseFromMatrix(matrix.data) : { yaw: 0, pitch: 0, roll: 0 }) }
   }
-  return largest
+  return { largest, count: found.faceLandmarks.length }
 }
 
 type Vector = [number, number, number]
