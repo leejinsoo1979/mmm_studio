@@ -49,8 +49,6 @@ export type StudioLighting = {
   shadowBias: number
   normalBias: number
   softShadow: boolean
-  /** The platform's disc: under the softbox room, a lighter grey keeps its tone. */
-  disc: string
 }
 
 export const STUDIO_LIGHTING: Record<StudioMode, StudioLighting> = {
@@ -64,7 +62,6 @@ export const STUDIO_LIGHTING: Record<StudioMode, StudioLighting> = {
     shadowBias: -0.0003,
     normalBias: 0.012,
     softShadow: false,
-    disc: '#16191e',
   },
   portrait: {
     key: 3,
@@ -76,7 +73,6 @@ export const STUDIO_LIGHTING: Record<StudioMode, StudioLighting> = {
     shadowBias: -0.0001,
     normalBias: 0.005,
     softShadow: true,
-    disc: '#3a4048',
   },
 }
 

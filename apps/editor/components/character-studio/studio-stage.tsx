@@ -907,7 +907,7 @@ const RING = untonedColor('#3c5a73')
 const HALO_OPACITY = 0.015
 
 /** A dark disc the character stands on, ringed in steel blue. */
-function Platform({ state, mode }: { state: StageState; mode: StudioMode }) {
+function Platform({ state }: { state: StageState }) {
   const ref = useRef<Group>(null)
   useEffect(() => {
     const { rig } = state
@@ -920,7 +920,7 @@ function Platform({ state, mode }: { state: StageState; mode: StudioMode }) {
     <group ref={ref} rotation-x={-Math.PI / 2}>
       <mesh receiveShadow>
         <circleGeometry args={[PLATFORM_RADIUS, 96]} />
-        <meshStandardMaterial color={STUDIO_LIGHTING[mode].disc} roughness={0.55} />
+        <meshStandardMaterial color="#16191e" roughness={0.55} />
       </mesh>
       <mesh position-z={0.001}>
         <ringGeometry args={[PLATFORM_RADIUS, 0.975, 128]} />
@@ -1392,7 +1392,7 @@ export function StudioStage({
         <Backdrop state={state} />
         <StudioEnvironment mode={mode} />
         <StudioLights mode={mode} state={state} />
-        <Platform mode={mode} state={state} />
+        <Platform state={state} />
         <FloorShadow shown={!HEAD_FOCUS.has(focus)} state={state} />
         <Suspense fallback={null}>
           <StudioAvatar avatarId={avatarId} look={look} onCueEnd={onCueEnd} state={state} />
