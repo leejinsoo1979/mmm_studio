@@ -3,9 +3,17 @@
 import { characterStatus } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
-import { type AnimationAction, AnimationMixer, type Group, type Object3D, Vector3 } from 'three'
+import {
+  type AnimationAction,
+  type AnimationClip,
+  AnimationMixer,
+  type Group,
+  type Object3D,
+  Vector3,
+} from 'three'
 import useAvatarProfile, { useAvatarEmote } from '../../../store/use-avatar-profile'
 import useWalkthroughView from '../../../store/use-walkthrough-view'
+import { ErrorBoundary } from '../../ui/primitives/error-boundary'
 import { bodyStrideScale } from './avatar-body'
 import { useAvatarLook } from './avatar-look'
 import { useAvatarBody } from './avatar-rig'
@@ -15,11 +23,16 @@ import {
   airborneJumpTime,
   GAITS,
   type Gait,
+  type GaitClip,
   type JumpKind,
   locomotionWeights,
+  type MotionSet,
   runningJumpWeight,
   type Span,
 } from './locomotion'
+import { usePhotorealBody, usePhotorealEmoteClips } from './photoreal-body'
+import { findPhotoreal, type PhotorealCharacter } from './photoreal-catalog'
+import { Blinker } from './photoreal-model'
 
 /** A frame-to-frame jump faster than this (m/s) is a respawn or ride, not a step. */
 const TELEPORT_SPEED = 12
@@ -100,23 +113,25 @@ const approach = (value: number, target: number, rate: number, delta: number) =>
 
 const spanTime = (span: Span, progress: number) => span.from + (span.to - span.from) * progress
 
+type WalkerProps = { feetOffset: number; visible: boolean }
+
 /**
- * The walkthrough's third-person body: any Rocketbox avatar, whose idle, walk,
- * brisk walk, run and sprint motion-capture loops blend by the speed the
- * controller actually moves at — all sharing one gait phase driven by the
- * ground covered, so the feet stay planted at every speed. Motion-capture
- * jumps (on the spot, or out of a run) follow the controller's flight
- * (rising, top, falling, landing) and a crouch plays in place. The player's
- * look (face photo, hair, skin) dresses it, and an emote plays over it until
- * it ends or the player moves off.
+ * The walkthrough's third-person body: the player's Rocketbox avatar in
+ * their look, or the 실사 character they picked — whose file, should it not
+ * load (a local one since removed), leaves the Rocketbox body in its place.
  */
-export function WalkthroughCharacter({
-  feetOffset,
-  visible,
-}: {
-  feetOffset: number
-  visible: boolean
-}) {
+export function WalkthroughCharacter(props: WalkerProps) {
+  const real = findPhotoreal(useAvatarProfile((state) => state.real))
+  const rocketbox = <RocketboxWalker {...props} />
+  if (!real) return rocketbox
+  return (
+    <ErrorBoundary fallback={rocketbox} key={real.id}>
+      <PhotorealWalker character={real} {...props} />
+    </ErrorBoundary>
+  )
+}
+
+function RocketboxWalker(props: WalkerProps) {
   const look = useAvatarProfile((state) => state.look)
   const { avatar, motion, model, clips, gaitSet } = useAvatarBody(
     useWalkthroughView((state) => state.character),
@@ -124,6 +139,62 @@ export function WalkthroughCharacter({
   )
   useAvatarLook(model, look, avatar.id)
   const emoteClips = useEmoteClips(avatar, true)
+  return (
+    <Walker
+      clips={clips}
+      emoteClips={emoteClips}
+      gaitSet={gaitSet}
+      model={model}
+      motion={motion}
+      {...props}
+    />
+  )
+}
+
+/** A 실사 body: the shared clips carried onto its rig, blinking; one whose rig can't take them stands in its file's pose. */
+function PhotorealWalker({ character, ...props }: WalkerProps & { character: PhotorealCharacter }) {
+  const body = usePhotorealBody(character)
+  const emoteClips = usePhotorealEmoteClips(body, true)
+  const blinker = useMemo(() => new Blinker(body.model), [body.model])
+  return (
+    <Walker
+      clips={body.clips}
+      emoteClips={emoteClips}
+      gaitSet={body.gaitSet}
+      model={body.model}
+      motion={body.motion}
+      onFrame={(delta) => blinker.update(delta)}
+      {...props}
+    />
+  )
+}
+
+/**
+ * A body walking: its idle, walk, brisk walk, run and sprint motion-capture
+ * loops blend by the speed the controller actually moves at — all sharing
+ * one gait phase driven by the ground covered, so the feet stay planted at
+ * every speed. Motion-capture jumps (on the spot, or out of a run) follow
+ * the controller's flight (rising, top, falling, landing) and a crouch
+ * plays in place. An emote plays over it until it ends or the player moves
+ * off.
+ */
+function Walker({
+  model,
+  clips,
+  motion,
+  gaitSet,
+  emoteClips,
+  onFrame,
+  feetOffset,
+  visible,
+}: WalkerProps & {
+  model: Object3D
+  clips: AnimationClip[]
+  motion: MotionSet
+  gaitSet: { gaits: Record<Gait, GaitClip> }
+  emoteClips: AnimationClip[] | null
+  onFrame?: (delta: number) => void
+}) {
   const rootRef = useRef<Group>(null)
   const lastPositionRef = useRef<Vector3 | null>(null)
   const leanRef = useRef({ vx: 0, vz: 0, curve: 0, speed: 0, acceleration: 0, roll: 0, pitch: 0 })
@@ -372,6 +443,7 @@ export function WalkthroughCharacter({
     actions.idle.setEffectiveWeight(gaitWeight * gait.idle)
     for (const name of GAITS) actions[name].setEffectiveWeight(gaitWeight * gait[name])
     actions.mixer.update(delta)
+    onFrame?.(delta)
     bodyOverlay?.(model, delta)
   })
 

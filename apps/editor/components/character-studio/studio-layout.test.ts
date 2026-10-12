@@ -20,6 +20,7 @@ import {
   freeRect,
   lookChips,
   MAKEUP_SETTINGS,
+  REAL_CATEGORY,
   regionOfCategory,
   STILL_TABS,
   stageInsets,
@@ -54,6 +55,25 @@ describe('the tabs', () => {
       '동작',
     ])
     expect(studioTabs(true).map(({ id }) => id)).not.toContain('motion')
+  })
+
+  test('a 실사 character keeps 프리셋 and 동작 alone: the look tabs fit Rocketbox bodies', () => {
+    expect(studioTabs(false, true).map(({ label }) => label)).toEqual(['프리셋', '동작'])
+    expect(studioTabs(true, true).map(({ id }) => id)).toEqual(['preset'])
+  })
+
+  test('프리셋 lists the 실사 set as one category, marked while a 실사 character is picked', () => {
+    expect(categoriesOf('preset', false, true)).toEqual([REAL_CATEGORY])
+    expect(categoriesOf('preset', false).map(({ id }) => id)).toEqual(
+      AVATAR_TABS.map(({ id }) => id),
+    )
+    expect(firstCategory('preset', false, 'Male_Adult_02', true)).toBe('real')
+    expect(firstCategory('preset', false, 'Male_Adult_02')).toBe('men')
+    const real = context({}, { real: 'makehuman-female-01' })
+    expect(categoryChanged('preset', 'real', real)).toBe(true)
+    expect(categoryChanged('preset', 'men', real)).toBe(false)
+    expect(categoryChanged('preset', 'real', context({}))).toBe(false)
+    expect(categoryChanged('preset', 'men', context({}))).toBe(true)
   })
 
   test('the avatar holds still in 얼굴, 헤어 and 메이크업 unless LIVE is on', () => {

@@ -38,9 +38,14 @@ export const STUDIO_TABS: readonly { id: StudioTab; label: string; focus: Camera
   { id: 'motion', label: '동작', focus: 'full' },
 ]
 
-/** An NPC has no game keys, so no 동작. */
-export const studioTabs = (npc: boolean) =>
-  npc ? STUDIO_TABS.filter((tab) => tab.id !== 'motion') : STUDIO_TABS
+/** Tabs whose tools fit the Rocketbox bodies alone: a 실사 character has none of them. */
+const ROCKETBOX_TABS: ReadonlySet<StudioTab> = new Set(['face', 'body', 'hair', 'makeup', 'skin'])
+
+/** An NPC has no game keys, so no 동작; a 실사 character keeps 프리셋 and 동작. */
+export const studioTabs = (npc: boolean, real = false) =>
+  STUDIO_TABS.filter(
+    (tab) => !(npc && tab.id === 'motion') && !(real && ROCKETBOX_TABS.has(tab.id)),
+  )
 
 export const TAB_FOCUS = Object.fromEntries(
   STUDIO_TABS.map((tab) => [tab.id, tab.focus]),
@@ -167,17 +172,21 @@ const CATEGORIES: Record<Exclude<StudioTab, 'face'>, readonly Category[]> = {
   ],
 }
 
-/** A tab's rail. An NPC's face has no photo (scenes are public). */
-export function categoriesOf(tab: StudioTab, npc: boolean): readonly Category[] {
+/** 프리셋's rail for the 실사 set: the set has no groups. */
+export const REAL_CATEGORY: Category = { id: 'real', label: '실사', subTabs: [] }
+
+/** A tab's rail. An NPC's face has no photo (scenes are public); the 실사 set is one list. */
+export function categoriesOf(tab: StudioTab, npc: boolean, real = false): readonly Category[] {
+  if (tab === 'preset' && real) return [REAL_CATEGORY]
   if (tab === 'face')
     return npc ? FACE_CATEGORIES.filter(({ id }) => id !== 'photo') : FACE_CATEGORIES
   return CATEGORIES[tab]
 }
 
 /** The category a tab opens on: its first, except 프리셋, which opens where the character is. */
-export function firstCategory(tab: StudioTab, npc: boolean, avatar: string): string {
-  if (tab === 'preset') return avatarTab(findAvatar(avatar))
-  return categoriesOf(tab, npc)[0]!.id
+export function firstCategory(tab: StudioTab, npc: boolean, avatar: string, real = false): string {
+  if (tab === 'preset') return real ? REAL_CATEGORY.id : avatarTab(findAvatar(avatar))
+  return categoriesOf(tab, npc, real)[0]!.id
 }
 
 /** The face region a 얼굴 category sculpts (사진 none). */
@@ -187,6 +196,8 @@ export const regionOfCategory = (category: string): FaceRegion | null =>
 export type ChangeContext = {
   look: AvatarLook
   avatar: string
+  /** The 실사 character picked, if any (photoreal-catalog.ts). */
+  real?: string | null
   keys: Record<string, EmoteId>
   /** The character's face points; undefined while loading, null for a covered face. */
   target: readonly number[] | null | undefined
@@ -227,7 +238,8 @@ export function categoryChanged(tab: StudioTab, category: string, context: Chang
   const { look, target } = context
   switch (tab) {
     case 'preset':
-      return avatarTab(findAvatar(context.avatar)) === (category as AvatarTab)
+      if (category === REAL_CATEGORY.id) return Boolean(context.real)
+      return !context.real && avatarTab(findAvatar(context.avatar)) === (category as AvatarTab)
     case 'face': {
       if (category === 'photo') return look.face !== null
       const region = category as FaceRegion
