@@ -642,6 +642,8 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const rootRef = useRef<HTMLDivElement>(null)
 
   const shown = preview ?? draft
+  // A local 실사 character's name comes with the folder's listing.
+  useLocalPhotoreal()
   // A 실사 character takes no look: only 프리셋 and 동작 apply to it.
   const real = findPhotoreal(shown.real)
   const tabs = studioTabs(isNpc, real !== null)
