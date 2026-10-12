@@ -27,6 +27,7 @@ import {
 } from '../components/editor/first-person/face-shape'
 import { type AvatarFeet, readAvatarFeet, SHOD } from '../components/editor/first-person/footwear'
 import { type HairStyle, readHairStyle } from '../components/editor/first-person/hair-styles'
+import { readPhotorealId } from '../components/editor/first-person/photoreal-catalog'
 
 /**
  * The player's face, swapped onto their character's: the face cropped from
@@ -182,21 +183,30 @@ type AvatarProfileState = {
   keys: Record<string, EmoteId>
   /** What the player calls their character ('' for none). */
   name: string
+  /**
+   * The 실사 character the player plays (photoreal-catalog.ts), or null for
+   * their Rocketbox body (useWalkthroughView's) dressed in `look`. The look
+   * is kept meanwhile: it fits the Rocketbox body alone.
+   */
+  real: string | null
   setLook: (look: AvatarLook) => void
   setKeys: (keys: Record<string, EmoteId>) => void
   setName: (name: string) => void
+  setReal: (real: string | null) => void
 }
 
-/** The player's own character setup, kept in this browser (the body itself is useWalkthroughView's). */
+/** The player's own character setup, kept in this browser (the Rocketbox body itself is useWalkthroughView's). */
 const useAvatarProfile = create<AvatarProfileState>()(
   persist(
     (set) => ({
       look: NO_LOOK,
       keys: DEFAULT_EMOTE_KEYS,
       name: '',
+      real: null,
       setLook: (look) => set({ look }),
       setKeys: (keys) => set({ keys }),
       setName: (name) => set({ name: readCharacterName(name) }),
+      setReal: (real) => set({ real: readPhotorealId(real) }),
     }),
     {
       name: 'mmm-avatar-profile',
@@ -212,6 +222,7 @@ const useAvatarProfile = create<AvatarProfileState>()(
           look: readAvatarLook(saved.look),
           keys,
           name: readCharacterName(saved.name),
+          real: readPhotorealId(saved.real),
         }
       },
     },

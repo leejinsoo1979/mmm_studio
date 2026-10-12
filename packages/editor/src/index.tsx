@@ -53,7 +53,13 @@ export {
   DEFAULT_BODY_SHAPE,
   hasBodyShape,
 } from './components/editor/first-person/body-shape'
-export { CharacterGallery } from './components/editor/first-person/character-picker'
+export {
+  CharacterGallery,
+  EditionSwitch,
+  LocalPhotorealHint,
+  PhotorealThumbnail,
+  usePickedCharacter,
+} from './components/editor/first-person/character-picker'
 export { EmoteLayer, useEmoteClips } from './components/editor/first-person/emote-player'
 export {
   canBindKey,
@@ -144,6 +150,22 @@ export {
   MOTION_SETS,
   WALK_SPEED,
 } from './components/editor/first-person/locomotion'
+export {
+  type PhotorealBody,
+  usePhotorealBody,
+  usePhotorealEmoteClips,
+} from './components/editor/first-person/photoreal-body'
+export {
+  CHARACTER_EDITIONS,
+  type CharacterEdition,
+  findPhotoreal,
+  PHOTOREAL_CHARACTERS,
+  PHOTOREAL_LOCAL_FOLDER,
+  PHOTOREAL_LOOK_NOTE,
+  type PhotorealCharacter,
+  useLocalPhotoreal,
+} from './components/editor/first-person/photoreal-catalog'
+export { Blinker } from './components/editor/first-person/photoreal-model'
 export {
   type LocalPresence,
   lerpAngle,

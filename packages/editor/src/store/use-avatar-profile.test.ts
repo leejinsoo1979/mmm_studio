@@ -3,6 +3,7 @@ import { BODY_SLIDERS } from '../components/editor/first-person/body-shape'
 import { MAX_PIN } from '../components/editor/first-person/face-pins'
 import { FACE_PARTS, FACE_POINT_INDICES } from '../components/editor/first-person/face-points'
 import { FACE_SLIDERS } from '../components/editor/first-person/face-shape'
+import { PHOTOREAL_CHARACTERS } from '../components/editor/first-person/photoreal-catalog'
 import useAvatarProfile, {
   type AvatarLook,
   changesCharacter,
@@ -83,6 +84,22 @@ describe('the character’s name', () => {
     expect(useAvatarProfile.getState().name).toBe('x'.repeat(MAX_CHARACTER_NAME))
     setName('')
     expect(useAvatarProfile.getState().name).toBe('')
+  })
+})
+
+describe('the 실사 character', () => {
+  const shipped = PHOTOREAL_CHARACTERS[0]!.id
+
+  test('is set by the studio, only as one the 실사 set has; null is the Rocketbox body', () => {
+    const { setReal } = useAvatarProfile.getState()
+    setReal(shipped)
+    expect(useAvatarProfile.getState().real).toBe(shipped)
+    setReal('local:female:../escape.glb')
+    expect(useAvatarProfile.getState().real).toBeNull()
+    setReal('local:male:kim.glb')
+    expect(useAvatarProfile.getState().real).toBe('local:male:kim.glb')
+    setReal(null)
+    expect(useAvatarProfile.getState().real).toBeNull()
   })
 })
 
