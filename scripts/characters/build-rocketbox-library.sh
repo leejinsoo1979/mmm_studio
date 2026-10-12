@@ -34,10 +34,8 @@ for avatar in "$@"; do
   "$python" "$here/build-rocketbox-character.py" -- avatar \
     "$src/Export/$name.fbx" "$src/Textures" "$work/$name.glb" "$work/$name.json" >"$work/$name.log" 2>&1 ||
     { tail -20 "$work/$name.log"; exit 1; }
-  # The face keeps 2K color; normals and roughness can be coarser.
-  $gltf resize "$work/$name.glb" "$work/$name.a.glb" --width 1024 --height 1024 --pattern "*_normal*" >/dev/null
-  $gltf resize "$work/$name.a.glb" "$work/$name.b.glb" --width 512 --height 512 --pattern "*roughness*" >/dev/null
-  $gltf webp "$work/$name.b.glb" "$work/$name.c.glb" --quality 85 >/dev/null
+  # Each texture comes at its size (TEX_SIZE, ROUGH_SIZE in build-rocketbox-character.py).
+  $gltf webp "$work/$name.glb" "$work/$name.c.glb" --quality 85 >/dev/null
   $gltf meshopt "$work/$name.c.glb" "$out/$name.glb" >/dev/null
   "$python" - "$src/$name.png" "$out/thumbs/$name.webp" <<'PY'
 import sys
@@ -51,13 +49,22 @@ cx, h = (x0 + x1) // 2, y1 - y0
 w = int(h * 0.62)
 bg.crop((cx - w // 2, y0 - 8, cx + w // 2, y1 + 8)).resize((128, 208), Image.LANCZOS).save(dst, quality=82)
 PY
-  "$python" - "$avatar" "$work/$name.json" "$out/$name.glb" >>"$here/rocketbox-avatars.jsonl" <<'PY'
+  "$python" - "$avatar" "$work/$name.json" "$out/$name.glb" "$here/rocketbox-avatars.jsonl" <<'PY'
 import json, os, sys
-avatar, meta_path, glb = sys.argv[1:]
+avatar, meta_path, glb, lines_path = sys.argv[1:]
 meta = json.load(open(meta_path))
 group, name = avatar.split('/')
-print(json.dumps({'id': name, 'group': group, 'hip': meta['hip'], 'height': meta['height'],
-                  'triangles': meta['triangles'], 'bytes': os.path.getsize(glb)}))
+line = json.dumps({'id': name, 'group': group, 'hip': meta['hip'], 'height': meta['height'],
+                   'triangles': meta['triangles'], 'bytes': os.path.getsize(glb)}) + '\n'
+# A rebuilt avatar's line takes the place of its old one.
+lines = open(lines_path).readlines() if os.path.exists(lines_path) else []
+rows = [json.loads(old) if old.strip() else None for old in lines]
+at = next((i for i, row in enumerate(rows) if row and (row['id'], row['group']) == (name, group)), None)
+if at is None:
+    lines.append(line)
+else:
+    lines[at] = line
+open(lines_path, 'w').writelines(lines)
 PY
   rm -f "$work/$name".*
 done

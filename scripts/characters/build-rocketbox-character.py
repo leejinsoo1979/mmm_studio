@@ -26,7 +26,7 @@ Bruce Hahne's BVH conversion (data/<subject>/<trial>.bvh of
 https://github.com/una-dinosauria/cmu-mocap), retargeted onto the Rocketbox
 skeleton: see JUMPS for the trials.
 
-Needs Blender's Python module and Pillow (`pip install bpy==5.0.1 pillow`, Python 3.11):
+Needs Blender's Python module (with its numpy) and Pillow (`pip install bpy==5.0.1 pillow`, Python 3.11):
   python build-rocketbox-character.py -- <mode> <args...>
 build-rocketbox-library.sh runs it over the whole library and compresses the
 results (WebP textures, meshopt geometry).
@@ -38,8 +38,9 @@ import os
 import sys
 
 import bpy
+import numpy as np
 from mathutils import Matrix, Vector
-from PIL import Image
+from PIL import Image, ImageFilter
 
 mode, *args = sys.argv[sys.argv.index('--') + 1:]
 if mode == 'anims':
@@ -93,8 +94,10 @@ EMOTES = {
     'drink': 'drink_drinking',
 }
 EMOTES = {emote: f'{gender}_{stem}' for emote, stem in EMOTES.items()}
-# The face is seen up close in third person: it keeps the source's full 2K.
+# The face is seen up close in third person: its colour and normals keep the
+# source's full 2K. Roughness (and the skin mask with it) changes slowly.
 TEX_SIZE = {'head': 2048, 'body': 1024, 'opacity': 1024}
+ROUGH_SIZE = {'head': 1024, 'body': 512}
 
 
 def fcurves(act):
@@ -396,32 +399,131 @@ def texture_file(material, images, kind):
     return os.path.splitext(found[0])[0] if found else None
 
 
-def load_image(name, size, keep_alpha=False):
+def load_image(name, size, keep_alpha=False, lossless=False):
+    """A source texture at `size`², for the export: through a JPEG, or
+    through a PNG for cut-outs and where `lossless` (the face's normals,
+    whose X and Y JPEG's chroma subsampling bends visibly up close), so
+    the library's WebP pass is the only lossy one they see."""
     src = os.path.join(tex_dir, name + '.tga')
     img = Image.open(src)
     img = img.convert('RGBA' if keep_alpha else 'RGB').resize((size, size), Image.LANCZOS)
-    ext = '.png' if keep_alpha else '.jpg'
-    dst = os.path.join(work, name + ext)
-    if keep_alpha:
+    png = keep_alpha or lossless
+    dst = os.path.join(work, name + ('.png' if png else '.jpg'))
+    if png:
         img.save(dst, optimize=True)
     else:
         img.save(dst, quality=90, optimize=True)
     return bpy.data.images.load(dst)
 
 
-def roughness_image(name, size):
+def lab(rgb):
+    """CIE Lab (D65) of sRGB colours, an array of 0–255 RGB triples."""
+    c = np.asarray(rgb, dtype=np.float32) / 255
+    c = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    m = np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]])
+    xyz = c @ m.T / np.array([0.9505, 1.0, 1.089])
+    f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16 / 116)
+    return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], -1)
+
+
+def box_mean(values, radius):
+    """Each value's mean over the (2·radius + 1)² box round it, the edges held."""
+    k = 2 * radius + 1
+    summed = np.pad(np.pad(values.astype(np.float64), radius, mode='edge').cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    return (summed[k:, k:] - summed[:-k, k:] - summed[k:, :-k] + summed[:-k, :-k]) / (k * k)
+
+
+# The cheeks, where the skin's colour is read: midway between each eye and the
+# corner of the mouth below it, this far (m) round on the front of the face.
+CHEEK_BONES = ('Bip01 Head', 'Bip01 LEye', 'Bip01 REye', 'Bip01 LMouthCorner', 'Bip01 RMouthCorner')
+CHEEK_REACH = 0.012
+# What any skin's colour is like (Lab): warm, never grey or black. A balaclava's isn't.
+SKIN_HUE = (15, 95)
+SKIN_CHROMA = 8
+SKIN_LIGHTNESS = 10
+# The skin mask is worked out at this size; a texel counts as skin as near the
+# cheeks' colour as NEAR (Lab, lightness counting half: Rocketbox paints its
+# shading in), not at all from FAR, and only where it is smooth (painted hair
+# and cloth weave vary from texel to texel).
+MASK_SIZE = 1024
+NEAR, FAR = 10, 22
+SMOOTH, ROUGH = 3, 7
+SKIN_PARTS = ('head', 'body')
+
+
+def skin_colour(color_name, head_slot):
+    """The skin's colour (Lab) on the head's colour map, read off its cheeks
+    by the face's bones; None where the head lacks them or isn't bare there."""
+    bones = arm.data.bones
+    if not all(name in bones for name in CHEEK_BONES):
+        return None
+    at = {name: arm.matrix_world @ bones[name].head_local for name in CHEEK_BONES}
+    front = (at['Bip01 LEye'] + at['Bip01 REye']) / 2 - at['Bip01 Head']
+    front.normalize()
+    cheeks = [(at[f'Bip01 {side}Eye'] + at[f'Bip01 {side}MouthCorner']) / 2 for side in 'LR']
+    image = np.asarray(Image.open(os.path.join(tex_dir, color_name + '.tga')).convert('RGB'))
+    height, width = image.shape[:2]
+    data = mesh.data
+    uvs = data.uv_layers.active.data
+    turn = mesh.matrix_world.to_3x3()
+    samples = []
+    for poly in data.polygons:
+        if poly.material_index != head_slot or (turn @ poly.normal).normalized().dot(front) < 0.5:
+            continue
+        for loop in poly.loop_indices:
+            point = mesh.matrix_world @ data.vertices[data.loops[loop].vertex_index].co
+            for cheek in cheeks:
+                off = point - cheek
+                if (off - front * off.dot(front)).length < CHEEK_REACH and off.dot(front) > -CHEEK_REACH:
+                    u, v = uvs[loop].uv
+                    x = min(width - 1, max(0, int(u % 1 * width)))
+                    y = min(height - 1, max(0, int((1 - v % 1) * height)))
+                    samples.append(image[y, x])
+    if len(samples) < 6:
+        return None
+    colour = np.median(lab(np.array(samples)), axis=0)
+    hue = math.degrees(math.atan2(colour[2], colour[1]))
+    bare = (
+        SKIN_HUE[0] <= hue <= SKIN_HUE[1]
+        and math.hypot(colour[1], colour[2]) >= SKIN_CHROMA
+        and colour[0] >= SKIN_LIGHTNESS
+    )
+    print('SKIN', [round(float(c), 1) for c in colour], 'from', len(samples), 'bare' if bare else 'not skin')
+    return colour if bare else None
+
+
+def skin_mask(color_name, skin, size):
+    """How much each texel of a colour map is bare skin (an L image, size²)."""
+    image = Image.open(os.path.join(tex_dir, color_name + '.tga')).convert('RGB')
+    colours = lab(np.asarray(image.resize((MASK_SIZE, MASK_SIZE), Image.LANCZOS)))
+    off = colours - skin
+    distance = np.sqrt((off[..., 0] * 0.5) ** 2 + off[..., 1] ** 2 + off[..., 2] ** 2)
+    t = np.clip((FAR - distance) / (FAR - NEAR), 0, 1)
+    near = t * t * (3 - 2 * t)
+    lightness = colours[..., 0]
+    spread = np.sqrt(np.maximum(box_mean(lightness**2, 2) - box_mean(lightness, 2) ** 2, 0))
+    smooth = np.clip((ROUGH - spread) / (ROUGH - SMOOTH), 0, 1)
+    mask = Image.fromarray((np.clip(box_mean(near * smooth, 1), 0, 1) * 255).astype(np.uint8))
+    # Freckles and pores filled in, specks dropped.
+    mask = mask.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(5)).filter(ImageFilter.MaxFilter(3))
+    return mask.filter(ImageFilter.GaussianBlur(1.5)).resize((size, size), Image.LANCZOS)
+
+
+def roughness_image(name, size, skin=None):
     """glTF metallic-roughness texture from a Rocketbox specular map.
 
     The specular map is dark on dry skin and cloth, brighter on lips and
     brightest on the wet eyes; roughness follows it inversely (G channel),
-    metal is none (B).
+    metal is none (B). R, which glTF leaves unused, carries `skin` (an L
+    image): how much each texel is bare skin, for skin shading to go by.
+    Data: saved lossless (see load_image).
     """
     spec = Image.open(os.path.join(tex_dir, name + '.tga')).convert('L').resize((size, size), Image.LANCZOS)
     rough = spec.point(lambda v: round(255 * (0.84 - 0.66 * min(1.0, v / 150))))
     black = Image.new('L', (size, size), 0)
-    img = Image.merge('RGB', (Image.new('L', (size, size), 255), rough, black))
-    dst = os.path.join(work, name + '_roughness.jpg')
-    img.save(dst, quality=90, optimize=True)
+    img = Image.merge('RGB', (skin or black, rough, black))
+    dst = os.path.join(work, name + '_roughness.png')
+    img.save(dst, optimize=True)
     image = bpy.data.images.load(dst)
     image.colorspace_settings.name = 'Non-Color'
     return image
@@ -429,7 +531,8 @@ def roughness_image(name, size):
 
 def dress():
     """PBR materials from each Rocketbox material's color, normal and specular maps."""
-    for slot in mesh.material_slots:
+    slots = []
+    for index, slot in enumerate(mesh.material_slots):
         mat = slot.material
         if mat is None:
             continue
@@ -440,9 +543,12 @@ def dress():
             if n.type == 'TEX_IMAGE' and n.image
         ]
         part = mat.name.split('_', 1)[1].lower() if '_' in mat.name else ''  # body / head / opacity / …
-        color = texture_file(mat.name, linked, 'color')
-        normal = texture_file(mat.name, linked, 'normal')
-        specular = texture_file(mat.name, linked, 'specular')
+        maps = {kind: texture_file(mat.name, linked, kind) for kind in ('color', 'normal', 'specular')}
+        slots.append((index, mat, part, maps))
+    head = next(((index, maps) for index, _, part, maps in slots if part == 'head' and maps['color']), None)
+    skin = skin_colour(head[1]['color'], head[0]) if head else None
+    for _, mat, part, maps in slots:
+        color, normal, specular = maps['color'], maps['normal'], maps['specular']
         mat.use_nodes = True
         nt = mat.node_tree
         nt.nodes.clear()
@@ -465,14 +571,16 @@ def dress():
                 continue
         if normal:
             nrm_tex = nt.nodes.new('ShaderNodeTexImage')
-            nrm_tex.image = load_image(normal, size)
+            nrm_tex.image = load_image(normal, size, lossless=part == 'head')
             nrm_tex.image.colorspace_settings.name = 'Non-Color'
             nrm = nt.nodes.new('ShaderNodeNormalMap')
             nt.links.new(nrm_tex.outputs['Color'], nrm.inputs['Color'])
             nt.links.new(nrm.outputs['Normal'], bsdf.inputs['Normal'])
         if specular:
+            rough_size = ROUGH_SIZE.get(part, ROUGH_SIZE['body'])
+            bare = skin_mask(color, skin, rough_size) if skin is not None and color and part in SKIN_PARTS else None
             rough_tex = nt.nodes.new('ShaderNodeTexImage')
-            rough_tex.image = roughness_image(specular, size)
+            rough_tex.image = roughness_image(specular, rough_size, bare)
             split = nt.nodes.new('ShaderNodeSeparateColor')
             nt.links.new(rough_tex.outputs['Color'], split.inputs['Color'])
             nt.links.new(split.outputs['Green'], bsdf.inputs['Roughness'])
