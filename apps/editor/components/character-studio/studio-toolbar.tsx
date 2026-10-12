@@ -9,6 +9,7 @@ import {
   LoaderCircle,
   type LucideIcon,
   Redo2,
+  ScanFace,
   Undo2,
   WandSparkles,
 } from 'lucide-react'
@@ -76,6 +77,35 @@ function ToolButton({
 }
 
 const Separator = () => <span aria-hidden className="mx-1 h-5 w-px bg-white/15" />
+
+/** 실사 on or off: the studio's light and every character's skin as true to life as they go. */
+function PhotorealToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <button
+      aria-label="실사"
+      aria-pressed={on}
+      className={cn(
+        'group relative flex h-10 items-center gap-1.5 rounded-full px-3 font-medium text-[13px] transition duration-200 ease-out motion-reduce:transition-none',
+        on
+          ? 'bg-sky-400/20 text-sky-50 ring-1 ring-sky-300/60 hover:bg-sky-400/30'
+          : 'text-white/80 hover:bg-white/10 hover:text-white',
+        FOCUS_RING,
+      )}
+      onClick={() => onChange(!on)}
+      type="button"
+    >
+      <ScanFace className="size-5" />
+      실사
+      <Tooltip
+        text={
+          on
+            ? '실사 끄기: 원래 조명과 피부로'
+            : '실사 버전: 조명·그림자·피부를 사진처럼 (게임 캐릭터 피부에도 적용)'
+        }
+      />
+    </button>
+  )
+}
 
 /** ←/→ and Home/End over a row of radio pills, moving the choice and the focus together. */
 function stepFilter(current: StudioFilterId, key: string): StudioFilterId | null {
@@ -233,6 +263,8 @@ export function StudioToolbar({
   onRedo,
   filter,
   onFilter,
+  photoreal,
+  onPhotoreal,
   short,
 }: {
   randomizing: boolean
@@ -247,6 +279,8 @@ export function StudioToolbar({
   onRedo: () => void
   filter: StudioFilterId
   onFilter: (filter: StudioFilterId) => void
+  photoreal: boolean
+  onPhotoreal: (on: boolean) => void
   /** Under 720 px tall: the filters fold into one pill. */
   short: boolean
 }) {
@@ -268,6 +302,8 @@ export function StudioToolbar({
           onClick={onSnapshot}
         />
         <ToolButton icon={WandSparkles} label="AI 실사 사진" onClick={onAi} />
+        <Separator />
+        <PhotorealToggle on={photoreal} onChange={onPhotoreal} />
         <Separator />
         <ToolButton icon={Focus} label="프레임 맞춤" onClick={onFrame} shortcut="F" />
         <Separator />

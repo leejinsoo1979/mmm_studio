@@ -72,6 +72,17 @@ import {
 } from './studio-capture'
 import { ContactShadow } from './studio-contact-shadow'
 import { grainDataUrl, overlayBackground, overlayBlend, STUDIO_FILTER } from './studio-filters'
+import {
+  disposeRoom,
+  FILL_FROM,
+  KEY_FROM,
+  KICK_FROM,
+  RIM_FROM,
+  STUDIO_LIGHTING,
+  type StudioMode,
+  softboxRoom,
+  softShadowFilter,
+} from './studio-lighting'
 import { StudioPose } from './studio-pose'
 import { useStudioRenderer } from './studio-renderer'
 import { untonedColor } from './studio-tone'
@@ -373,16 +384,23 @@ function CameraRig({ state, stature }: { state: StageState; stature: number }) {
   return null
 }
 
-/** Where each light shines from (towards the aim), seen from the camera: right, up, towards it. */
-const KEY_FROM = new Vector3(0.62, 0.62, 0.58).normalize()
-const FILL_FROM = new Vector3(-0.8, 0.12, 0.6).normalize()
-const RIM_FROM = new Vector3(-0.8, 0.28, -0.53).normalize()
-const KICK_FROM = new Vector3(0.82, 0.18, -0.55).normalize()
 /** How far from the aim the lights stand: the key's shadow camera reaches this far either way along it. */
 const LIGHT_DISTANCE = 4
 /** How soft (m) the key's shadow's edge is, and the shadow map's size. */
 const PENUMBRA = 0.006
 const SHADOW_MAP = 1024
+
+/** The key light for a mode: its shadow's filter is built into it, so each mode has its own. */
+function keyLight(mode: StudioMode) {
+  const { key: intensity, shadowBias, normalBias, softShadow } = STUDIO_LIGHTING[mode]
+  const key = new DirectionalLight('#fff0df', intensity)
+  key.castShadow = true
+  key.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP)
+  key.shadow.bias = shadowBias
+  key.shadow.normalBias = normalBias
+  if (softShadow) (key.shadow as unknown as { filterNode: unknown }).filterNode = softShadowFilter
+  return key
+}
 
 /**
  * A portrait's three-point rig, following the camera's aim: a warm key
@@ -390,37 +408,45 @@ const SHADOW_MAP = 1024
  * the left, and a rim light with a kicker behind, which outline the hair
  * against the dark backdrop. The key's shadow camera closes in on what the
  * view holds, so a close-up's shadows are as fine as the whole body's. The
- * capture aims it at its own shot the same way.
+ * capture aims it at its own shot the same way. `mode` sets how bright
+ * each is and how the key's shadow falls (studio-lighting.ts).
  */
-function StudioLights({ state }: { state: StageState }) {
-  const lights = useMemo(() => {
-    const key = new DirectionalLight('#fff0df', 2.6)
-    key.castShadow = true
-    key.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP)
-    key.shadow.bias = -0.0003
-    key.shadow.normalBias = 0.012
-    const fill = new DirectionalLight('#dbe6ff', 0.55)
-    const rim = new DirectionalLight('#eef4ff', 3)
-    const kick = new DirectionalLight('#fff3e6', 1.4)
-    return [
-      { light: key, from: KEY_FROM },
-      { light: fill, from: FILL_FROM },
-      { light: rim, from: RIM_FROM },
-      { light: kick, from: KICK_FROM },
-    ]
-  }, [])
+function StudioLights({ state, mode }: { state: StageState; mode: StudioMode }) {
+  const rig = useMemo(
+    () => ({
+      keys: { classic: keyLight('classic'), real: keyLight('real') },
+      fill: new DirectionalLight('#dbe6ff'),
+      rim: new DirectionalLight('#eef4ff'),
+      kick: new DirectionalLight('#fff3e6'),
+    }),
+    [],
+  )
+  const lighting = STUDIO_LIGHTING[mode]
+  rig.fill.intensity = lighting.fill
+  rig.rim.intensity = lighting.rim
+  rig.kick.intensity = lighting.kick
+  const aimed = useMemo(
+    () => [
+      { light: rig.keys.classic, from: KEY_FROM },
+      { light: rig.keys.real, from: KEY_FROM },
+      { light: rig.fill, from: FILL_FROM },
+      { light: rig.rim, from: RIM_FROM },
+      { light: rig.kick, from: KICK_FROM },
+    ],
+    [rig],
+  )
   const aim = useCallback(
     (view: HeadFraming) => {
-      for (const { light, from } of lights) {
+      for (const { light, from } of aimed) {
         light.target.position.set(view.x, view.y, 0)
         light.position.copy(light.target.position).addScaledVector(from, LIGHT_DISTANCE)
         light.updateMatrixWorld()
         light.target.updateMatrixWorld()
       }
-      const { shadow } = lights[0]!.light
       const reach = Math.max(view.half * 1.5, 0.3)
-      const camera = shadow.camera
-      if (Math.abs(camera.right - reach) > 1e-4) {
+      for (const { shadow } of Object.values(rig.keys)) {
+        const camera = shadow.camera
+        if (Math.abs(camera.right - reach) <= 1e-4) continue
         camera.left = -reach
         camera.right = reach
         camera.top = reach
@@ -431,7 +457,7 @@ function StudioLights({ state }: { state: StageState }) {
         shadow.radius = Math.min(8, Math.max(1.5, (PENUMBRA * SHADOW_MAP) / (2 * reach)))
       }
     },
-    [lights],
+    [aimed, rig],
   )
   useEffect(() => {
     state.rig.aimLights = aim
@@ -439,7 +465,7 @@ function StudioLights({ state }: { state: StageState }) {
   useFrame(() => aim(state.view))
   return (
     <>
-      {lights.map(({ light }) => (
+      {[rig.keys[mode], rig.fill, rig.rim, rig.kick].map((light) => (
         <group key={light.uuid}>
           <primitive object={light} />
           <primitive object={light.target} />
@@ -449,26 +475,35 @@ function StudioLights({ state }: { state: StageState }) {
   )
 }
 
-/** How bright the studio's surroundings light and show in the character (the lights above do the modelling). */
-const ENVIRONMENT_INTENSITY = 0.35
-
-/** Soft image-based light from a studio room, made here (no picture to download). */
-function StudioEnvironment() {
+/**
+ * Soft image-based light, made here (no picture to download): three's
+ * studio room, or for 실사 a dark room with softboxes where the lights
+ * stand, whose reflections are the eyes' catchlights.
+ */
+function StudioEnvironment({ mode }: { mode: StudioMode }) {
   const gl = useThree((state) => state.gl) as unknown as WebGPURenderer
   const scene = useThree((state) => state.scene)
   useEffect(() => {
+    const { environment, environmentIntensity } = STUDIO_LIGHTING[mode]
     const generator = new PMREMGenerator(gl)
-    const room = new RoomEnvironment()
-    const target = generator.fromScene(room, 0.04)
-    room.dispose()
+    let target: ReturnType<PMREMGenerator['fromScene']>
+    if (environment === 'room') {
+      const room = new RoomEnvironment()
+      target = generator.fromScene(room, 0.04)
+      room.dispose()
+    } else {
+      const room = softboxRoom()
+      target = generator.fromScene(room, 0.02)
+      disposeRoom(room)
+    }
     generator.dispose()
     scene.environment = target.texture
-    scene.environmentIntensity = ENVIRONMENT_INTENSITY
+    scene.environmentIntensity = environmentIntensity
     return () => {
       scene.environment = null
       target.dispose()
     }
-  }, [gl, scene])
+  }, [gl, scene, mode])
   return null
 }
 
@@ -768,7 +803,7 @@ const RING = untonedColor('#3c5a73')
 const HALO_OPACITY = 0.015
 
 /** A dark disc the character stands on, ringed in steel blue. */
-function Platform({ state }: { state: StageState }) {
+function Platform({ state, mode }: { state: StageState; mode: StudioMode }) {
   const ref = useRef<Group>(null)
   useEffect(() => {
     const { rig } = state
@@ -781,7 +816,7 @@ function Platform({ state }: { state: StageState }) {
     <group ref={ref} rotation-x={-Math.PI / 2}>
       <mesh receiveShadow>
         <circleGeometry args={[PLATFORM_RADIUS, 96]} />
-        <meshStandardMaterial color="#16191e" roughness={0.55} />
+        <meshStandardMaterial color={STUDIO_LIGHTING[mode].disc} roughness={0.55} />
       </mesh>
       <mesh position-z={0.001}>
         <ringGeometry args={[PLATFORM_RADIUS, 0.975, 128]} />
@@ -904,11 +939,13 @@ export function StudioStage({
   cue,
   onCueEnd,
   filter,
+  photoreal,
   sculpt,
   onSculpt,
   onHandleHover,
   onViewChange,
 }: StudioStageProps) {
+  const mode: StudioMode = photoreal ? 'real' : 'classic'
   const stature = findAvatar(avatarId).hip * HEIGHT_PER_HIP
   const [board] = useState(createHandleBoard)
   // Made once; the props are copied in below on every render.
@@ -1249,9 +1286,9 @@ export function StudioStage({
         style={css === 'none' ? undefined : { filter: css }}
       >
         <Backdrop state={state} />
-        <StudioEnvironment />
-        <StudioLights state={state} />
-        <Platform state={state} />
+        <StudioEnvironment mode={mode} />
+        <StudioLights mode={mode} state={state} />
+        <Platform mode={mode} state={state} />
         <FloorShadow shown={!HEAD_FOCUS.has(focus)} state={state} />
         <Suspense fallback={null}>
           <StudioAvatar avatarId={avatarId} look={look} onCueEnd={onCueEnd} state={state} />

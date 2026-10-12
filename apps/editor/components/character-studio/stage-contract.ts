@@ -72,6 +72,8 @@ export type StudioStageProps = {
   cue: EmoteCue | null
   onCueEnd: () => void
   filter: StudioFilterId
+  /** 실사: the studio lit as true to life as it goes (studio-lighting.ts); otherwise as it always was. */
+  photoreal: boolean
   /** Null: no handles (another tab, handles hidden, UI hidden, no landmarks). */
   sculpt: SculptSettings | null
   onSculpt: (event: SculptEvent) => void

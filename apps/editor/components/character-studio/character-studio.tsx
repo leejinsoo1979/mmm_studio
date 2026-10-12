@@ -46,6 +46,7 @@ import { FaceEditor } from './face-editor'
 import { FaceRegionBody, FaceRegionFooter, regionHasChanges, resetRegion } from './face-shape-panel'
 import { HairColorBody, HairStyleBody } from './hair-panel'
 import { MakeupBody, MakeupFooter } from './makeup-panel'
+import { choosePhotoreal, storedPhotoreal, useStoredPhotoreal } from './photoreal'
 import { randomLook } from './random-look'
 import {
   COACH_WIDTH,
@@ -496,6 +497,7 @@ const FOCUSABLE =
  * name (no face photo, no keys), kept on its node as one undoable change.
  */
 export function CharacterStudio() {
+  useStoredPhotoreal()
   const open = useCharacterStudio((state) => state.open)
   const target = useCharacterStudio((state) => state.target)
   if (!open) return null
@@ -539,6 +541,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const [handleHover, setHandleHover] = useState<FaceHandleId | null>(null)
   const [live, setLive] = useState(false)
   const [filter, setFilter] = useState<StudioFilterId>(storedFilter)
+  const [photoreal, setPhotoreal] = useState(storedPhotoreal)
   const [sculptOptions, setSculptOptions] = useState<SculptOptions>(storedSculpt)
   const [showHandles, setShowHandles] = useState(true)
   const [uiHidden, setUiHidden] = useState(false)
@@ -746,6 +749,10 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const pickFilter = (next: StudioFilterId) => {
     setFilter(next)
     stored.set(FILTER_KEY, next)
+  }
+  const pickPhotoreal = (next: boolean) => {
+    setPhotoreal(next)
+    choosePhotoreal(next)
   }
 
   // The coach mark shows the first time the handles do (once the camera has
@@ -1167,10 +1174,12 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
           onAi={() => setAiOpen(true)}
           onFilter={pickFilter}
           onFrame={() => stageRef.current?.frame()}
+          onPhotoreal={pickPhotoreal}
           onRandom={() => void randomize()}
           onRedo={redo}
           onSnapshot={() => void snapshot()}
           onUndo={undo}
+          photoreal={photoreal}
           randomizing={randomizing}
           short={short}
           snapshotting={snapshotting}
@@ -1188,6 +1197,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
         onHandleHover={setHandleHover}
         onSculpt={onSculpt}
         onViewChange={setView}
+        photoreal={photoreal}
         pose={stagePose(tab, live)}
         ref={stageRef}
         sculpt={sculpt}
