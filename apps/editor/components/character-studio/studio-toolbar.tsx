@@ -78,11 +78,11 @@ function ToolButton({
 
 const Separator = () => <span aria-hidden className="mx-1 h-5 w-px bg-white/15" />
 
-/** 실사 on or off: the studio's light and every character's skin as true to life as they go. */
-function PhotorealToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+/** 인물 조명 on or off: the studio lit as a portrait studio is, and every character's skin drawn as skin. */
+function PortraitToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
   return (
     <button
-      aria-label="실사"
+      aria-label="인물 조명"
       aria-pressed={on}
       className={cn(
         'group relative flex h-10 items-center gap-1.5 rounded-full px-3 font-medium text-[13px] transition duration-200 ease-out motion-reduce:transition-none',
@@ -95,12 +95,12 @@ function PhotorealToggle({ on, onChange }: { on: boolean; onChange: (on: boolean
       type="button"
     >
       <ScanFace className="size-5" />
-      실사
+      인물 조명
       <Tooltip
         text={
           on
-            ? '실사 끄기: 원래 조명과 피부로'
-            : '실사 버전: 조명·그림자·피부를 사진처럼 (게임 캐릭터 피부에도 적용)'
+            ? '인물 조명 끄기: 원래 조명과 피부로'
+            : '인물 조명: 소프트박스 조명·얼굴 그림자·피부 결 (게임 속 캐릭터 피부에도 적용)'
         }
       />
     </button>
@@ -263,8 +263,8 @@ export function StudioToolbar({
   onRedo,
   filter,
   onFilter,
-  photoreal,
-  onPhotoreal,
+  portrait,
+  onPortrait,
   short,
 }: {
   randomizing: boolean
@@ -279,8 +279,8 @@ export function StudioToolbar({
   onRedo: () => void
   filter: StudioFilterId
   onFilter: (filter: StudioFilterId) => void
-  photoreal: boolean
-  onPhotoreal: (on: boolean) => void
+  portrait: boolean
+  onPortrait: (on: boolean) => void
   /** Under 720 px tall: the filters fold into one pill. */
   short: boolean
 }) {
@@ -303,7 +303,7 @@ export function StudioToolbar({
         />
         <ToolButton icon={WandSparkles} label="AI 실사 사진" onClick={onAi} />
         <Separator />
-        <PhotorealToggle on={photoreal} onChange={onPhotoreal} />
+        <PortraitToggle on={portrait} onChange={onPortrait} />
         <Separator />
         <ToolButton icon={Focus} label="프레임 맞춤" onClick={onFrame} shortcut="F" />
         <Separator />

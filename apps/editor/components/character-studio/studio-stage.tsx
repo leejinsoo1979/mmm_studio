@@ -414,7 +414,7 @@ function keyLight(mode: StudioMode) {
 function StudioLights({ state, mode }: { state: StageState; mode: StudioMode }) {
   const rig = useMemo(
     () => ({
-      keys: { classic: keyLight('classic'), real: keyLight('real') },
+      keys: { classic: keyLight('classic'), portrait: keyLight('portrait') },
       fill: new DirectionalLight('#dbe6ff'),
       rim: new DirectionalLight('#eef4ff'),
       kick: new DirectionalLight('#fff3e6'),
@@ -428,7 +428,7 @@ function StudioLights({ state, mode }: { state: StageState; mode: StudioMode }) 
   const aimed = useMemo(
     () => [
       { light: rig.keys.classic, from: KEY_FROM },
-      { light: rig.keys.real, from: KEY_FROM },
+      { light: rig.keys.portrait, from: KEY_FROM },
       { light: rig.fill, from: FILL_FROM },
       { light: rig.rim, from: RIM_FROM },
       { light: rig.kick, from: KICK_FROM },
@@ -492,7 +492,7 @@ function StudioEnvironment({ mode }: { mode: StudioMode }) {
       target = generator.fromScene(room, 0.04)
       room.dispose()
     } else {
-      const room = softboxRoom()
+      const room = softboxRoom(environment)
       target = generator.fromScene(room, 0.02)
       disposeRoom(room)
     }
@@ -939,13 +939,13 @@ export function StudioStage({
   cue,
   onCueEnd,
   filter,
-  photoreal,
+  portrait,
   sculpt,
   onSculpt,
   onHandleHover,
   onViewChange,
 }: StudioStageProps) {
-  const mode: StudioMode = photoreal ? 'real' : 'classic'
+  const mode: StudioMode = portrait ? 'portrait' : 'classic'
   const stature = findAvatar(avatarId).hip * HEIGHT_PER_HIP
   const [board] = useState(createHandleBoard)
   // Made once; the props are copied in below on every render.

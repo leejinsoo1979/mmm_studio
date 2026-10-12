@@ -22,7 +22,7 @@ import { applyIsolation, clearIsolation } from '../../lib/isolation'
 import { ensureKtx2Support } from '../../lib/ktx2-loader'
 import type { ColorPreset, RenderShading } from '../../lib/materials'
 import { getSceneTheme } from '../../lib/scene-themes'
-import { installPhysicalMaterial } from '../../lib/skin-material'
+import { installPhysicalMaterial, setSkinShading } from '../../lib/skin-material'
 import { toneMappingFor } from '../../lib/tone-mapping'
 import { installDrawGuards, rendererForCanvas, watchGpuDevice } from '../../lib/webgpu-renderer'
 import useViewer, { type RenderContext } from '../../store/use-viewer'
@@ -141,6 +141,19 @@ function ToneMappingExposure() {
     gl.toneMappingExposure = getSceneTheme(sceneTheme).toneMappingExposure
     invalidate()
   }, [gl, invalidate, sceneTheme, shading])
+
+  return null
+}
+
+/** Every renderer's skin shading (skin-material.ts), as the preference has it. */
+function SkinDetail() {
+  const skinDetail = useViewer((state) => state.skinDetail)
+  const invalidate = useThree((state) => state.invalidate)
+
+  useEffect(() => {
+    setSkinShading(skinDetail)
+    invalidate()
+  }, [invalidate, skinDetail])
 
   return null
 }
@@ -437,6 +450,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       <ViewerCamera />
       <GPUDeviceWatcher />
       <ToneMappingExposure />
+      <SkinDetail />
       <SceneReadyTracker onSceneReadyChange={onSceneReadyChange} sceneReadyKey={sceneReadyKey} />
 
       <ErrorBoundary fallback={null} scope="viewer-scene">

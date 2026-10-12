@@ -3,7 +3,8 @@ import {
   DataTexture,
   LinearFilter,
   LinearMipmapLinearFilter,
-  type Material,
+  MeshPhysicalMaterial,
+  type MeshPhysicalMaterialParameters,
   RepeatWrapping,
   type Texture,
 } from 'three'
@@ -14,6 +15,7 @@ import {
   diffuseColor,
   float,
   materialReference,
+  materialRoughness,
   mix,
   nodeObject,
   normalMap,
@@ -21,10 +23,9 @@ import {
   property,
   roughness,
   specularF90,
+  subBuild,
   texture,
-  uniform,
   uv,
-  vec2,
   vec3,
   vec4,
 } from 'three/tsl'
@@ -38,55 +39,104 @@ import {
 } from './sheen-safe-material'
 
 /**
- * Skin shading for physical materials marked as skin (`markSkin`): light
- * that wraps a little round the terminator, further in red than in blue,
- * as light scattered under the skin does, over a shape seen through a
- * softer copy of the normal map; a broader second highlight over the
- * main one, as skin's oily top layer gives; and fine pores and creases
- * from a tiling detail normal. How much a texel is skin is the red channel
- * of the material's roughness map (glTF leaves it unused); a geometry may
- * also carry `skinEye` (x: 1 on an eyeball; y: how much its white is shaded
- * towards the lids and corners), whose eyes turn wet and sit in their
- * sockets. `skinShading` sets how much of it every renderer draws: at 0,
- * a marked material draws as any other.
+ * Skin shading for skin materials (SkinMaterial): light that wraps a little
+ * round the terminator, further in red than in blue, as light scattered
+ * under the skin does, over a shape seen through a softer copy of the
+ * normal map; a broader second highlight over the main one, as skin's oily
+ * top layer gives; and fine pores and creases from a tiling detail normal.
+ * How much a texel is skin is the red channel of the material's roughness
+ * map (glTF leaves it unused); a geometry may also carry `skinEye` (x: 1 on
+ * an eyeball; y: how much its white is shaded towards the lids and
+ * corners), whose eyes turn wet and sit in their sockets.
+ *
+ * Every renderer draws it while it is on (setSkinShading). Off, a skin
+ * material is built as the plain physical one: it costs nothing then, and
+ * turning it on or off rebuilds the skin materials' shaders once.
  */
-
-/** How much of the skin shading is drawn, 0–1, by every renderer: none until it is turned on. */
-export const skinShading = uniform(0)
-
-export function setSkinShading(amount: number) {
-  skinShading.value = Math.min(1, Math.max(0, amount))
-}
 
 /** The vertex attribute that marks a skin geometry's eyes (see above). */
 export const SKIN_EYE_ATTRIBUTE = 'skinEye'
 
-const SKIN = 'skin'
+export type SkinSettings = {
+  /** How many times the detail normal tiles across the material's UVs. */
+  detailRepeat: number
+  /** How much of it is skin where it has no roughness map to say: 0 when unset. */
+  mask?: number
+}
 
-type SkinSettings = { detailRepeat: number }
+let skinOn = false
+
+/** The skin materials there are (weakly): turning skin shading on or off rebuilds them. */
+const live = new Set<WeakRef<SkinMaterial>>()
+const gone = new FinalizationRegistry<WeakRef<SkinMaterial>>((ref) => live.delete(ref))
+
+/** Whether every renderer draws skin materials as skin. */
+export const skinShadingOn = () => skinOn
+
+export function setSkinShading(on: boolean) {
+  if (on === skinOn) return
+  skinOn = on
+  for (const ref of live) {
+    const material = ref.deref()
+    if (material?.skin) material.needsUpdate = true
+  }
+}
 
 /**
- * Marks a material (its copies too: they carry its userData) as skin, its
- * detail normal tiled `detailRepeat` times across its UVs.
+ * A physical material that is skin (`skin`, null: not after all). Its
+ * copies are too, which a plain material's userData couldn't promise the
+ * renderer: it tells shaders apart by what this keys, not by userData.
  */
-export function markSkin(material: Material, detailRepeat: number) {
-  material.userData[SKIN] = { detailRepeat } satisfies SkinSettings
+export class SkinMaterial extends MeshPhysicalMaterial {
+  readonly isSkinMaterial = true
+  skin: SkinSettings | null
+
+  constructor(skin: SkinSettings | null = null, parameters?: MeshPhysicalMaterialParameters) {
+    super(parameters)
+    this.skin = skin
+    const ref = new WeakRef(this)
+    live.add(ref)
+    gone.register(this, ref)
+  }
+
+  override copy(source: MeshPhysicalMaterial) {
+    super.copy(source)
+    const skin = (source as Partial<SkinMaterial>).isSkinMaterial
+      ? (source as SkinMaterial).skin
+      : this.skin
+    this.skin = skin ? { ...skin } : null
+    return this
+  }
+
+  override customProgramCacheKey() {
+    const key = super.customProgramCacheKey()
+    const skin = this.skin
+    return skin && skinOn ? `${key}|skin:${skin.detailRepeat}:${skin.mask ?? 0}` : key
+  }
 }
 
-export function skinSettings(material: {
-  userData?: Record<string, unknown>
-}): SkinSettings | null {
-  const settings = material.userData?.[SKIN] as SkinSettings | undefined
-  return settings && typeof settings.detailRepeat === 'number' ? settings : null
-}
+export const isSkinMaterial = (material: unknown): material is SkinMaterial =>
+  (material as Partial<SkinMaterial> | null)?.isSkinMaterial === true
 
 /** How far the light wraps round, per channel (red furthest). */
 const WRAP = [0.22, 0.1, 0.07] as const
+/** How much the wrapped light rolls off into the shadow as its square does. */
+const ROLL_OFF = 0.4
+/**
+ * Each channel's wrapped diffuse is `mix(t, t², ROLL_OFF)` of t = (n·l + w) /
+ * (1 + w): over a whole sphere it catches (1 + w)(1 − ROLL_OFF / 3) of what
+ * Lambert's n·l does. Divided by that, a channel keeps its energy, so a lit
+ * ball keeps its colour and only its terminator turns red.
+ */
+const wrapEnergy = (w: number) => (1 + w) * (1 - ROLL_OFF / 3)
+export const SKIN_DIFFUSE = {
+  wrap: WRAP,
+  rollOff: ROLL_OFF,
+  energy: [wrapEnergy(WRAP[0]), wrapEnergy(WRAP[1]), wrapEnergy(WRAP[2])],
+} as const
 /** How far towards the softer normal each channel's diffuse light turns, and how soft (mip bias) that is. */
 const SOFTEN = [0.7, 0.35, 0.15] as const
 const SOFTEN_BIAS = 3
-/** How much the wrapped light rolls off into the shadow as its square does. */
-const ROLL_OFF = 0.4
 /** The main highlight's roughness, and skin's reflectance (F0 0.04 × this) under it. */
 const LOBE_ROUGHNESS = 0.85
 const REFLECTANCE = 0.7
@@ -95,8 +145,15 @@ const SECOND_LOBE_ROUGHNESS = 1.4
 const SECOND_LOBE = 0.1
 /** How strongly the detail normal tilts the surface. */
 const DETAIL = 0.13
-/** An eye's roughness: a wet cornea, catching the lights' reflections sharply. */
+/**
+ * An eye's roughness: a wet cornea, mirroring its surroundings (the
+ * studio's softboxes) sharply and brightly (EYE_REFLECTANCE × F0 0.04).
+ * The lights themselves glint in it softly (EYE_GLINT, at F0 0.04), so
+ * that only the brightest shows, and as a sheen, not a pinpoint each.
+ */
 const EYE_ROUGHNESS = 0.04
+const EYE_REFLECTANCE = 2.5
+const EYE_GLINT = 0.35
 
 const DETAIL_SIZE = 512
 const PORES = 3300
@@ -211,10 +268,10 @@ const specularColorBlended = nodeObject(property('color', 'SpecularColorBlended'
 
 /** What a skin material's build shares between its parts. */
 type SkinNodes = {
-  /** How much a texel is lit as skin: the shading drawn, times the mask, off the eyes. */
+  /** How much a texel is lit as skin: the mask, off the eyes. */
   amount: any
-  /** The eye attribute (zero without it). */
-  eye: any
+  /** The eye attribute; null without it. */
+  eye: any | null
   /** The normal map, sampled as loaded, its scale and type; null without one. */
   normal: { texel: any; scale: any; type: number } | null
   /** The view normal through the softer normal map. */
@@ -246,7 +303,7 @@ class SkinLightingModel extends SheenSafeLightingModel {
       } as unknown as DirectInput,
       builder,
     )
-    const { amount, soft } = this.skin
+    const { amount, eye, soft } = this.skin
     const light = (this as unknown as { sheen: boolean }).sheen
       ? lightColor.mul(this.sheenEnergy(lightDirection))
       : lightColor
@@ -254,29 +311,39 @@ class SkinLightingModel extends SheenSafeLightingModel {
     const facing = vec3(towards(SOFTEN[0]), towards(SOFTEN[1]), towards(SOFTEN[2]))
     const wrap = vec3(...WRAP)
     const wrapped = facing.add(wrap).div(wrap.add(1)).clamp()
-    const lit = mix(wrapped, wrapped.mul(wrapped), ROLL_OFF)
+    const lit = mix(wrapped, wrapped.mul(wrapped), ROLL_OFF).div(vec3(...SKIN_DIFFUSE.energy))
     const skinDiffuse = lit
       .mul(light)
       .mul((BRDF_Lambert as any)({ diffuseColor: diffuseContribution }))
     reflectedLight.directDiffuse.addAssign(mix(diffuse, skinDiffuse, amount))
     const irradiance: any = normalView.dot(lightDirection).clamp().mul(light)
-    const broad = BRDF_GGX({
-      lightDirection,
-      f0: specularColorBlended,
-      f90: specularF90,
-      roughness: roughness.mul(SECOND_LOBE_ROUGHNESS).min(1),
-    } as any)
+    const highlight = (lobeRoughness: any, f0: any = specularColorBlended) =>
+      irradiance.mul(
+        BRDF_GGX({ lightDirection, f0, f90: specularF90, roughness: lobeRoughness } as any),
+      )
+    const skinSpecular = mix(
+      specular,
+      highlight(roughness.mul(SECOND_LOBE_ROUGHNESS).min(1)),
+      amount.mul(SECOND_LOBE),
+    )
     reflectedLight.directSpecular.addAssign(
-      mix(specular, irradiance.mul(broad), amount.mul(SECOND_LOBE)),
+      eye
+        ? mix(
+            skinSpecular,
+            highlight(float(EYE_GLINT), specularColorBlended.div(EYE_REFLECTANCE)),
+            eye.x,
+          )
+        : skinSpecular,
     )
   }
 }
 
 /**
  * The material the renderer draws every MeshPhysicalMaterial with:
- * sheen-safe, and lit as skin where marked. Everything it reads of the
- * material — its maps above all, which the copies a look makes swap — it
- * reads by reference, as three's own nodes do.
+ * sheen-safe, and lit as skin where it is a SkinMaterial while skin
+ * shading is on. Everything it reads of the material — its maps above
+ * all, which the copies a look makes swap — it reads by reference, as
+ * three's own nodes do.
  */
 export class SkinPhysicalNodeMaterial extends SheenSafePhysicalNodeMaterial {
   private skinBuild: SkinNodes | null = null
@@ -287,21 +354,17 @@ export class SkinPhysicalNodeMaterial extends SheenSafePhysicalNodeMaterial {
   }
 
   private skinNodes(builder: any): SkinNodes | null {
-    const material = builder.material as Material & {
-      normalMap?: Texture | null
-      normalMapType?: number
-      roughnessMap?: Texture | null
-    }
-    const settings = skinSettings(material)
-    if (!settings) return null
+    const material = builder.material as SkinMaterial
+    const settings = isSkinMaterial(material) ? material.skin : null
+    if (!(settings && skinOn)) return null
     const geometry = builder.geometry as BufferGeometry
     const eye: any = geometry.hasAttribute(SKIN_EYE_ATTRIBUTE)
       ? attribute(SKIN_EYE_ATTRIBUTE, 'vec2')
-      : vec2(0)
+      : null
     const mask = material.roughnessMap
       ? (materialReference('roughnessMap', 'texture') as any).r
-      : float(0)
-    const amount = skinShading.mul(mask).mul(eye.x.oneMinus())
+      : float(settings.mask ?? 0)
+    const amount = eye ? mask.mul(eye.x.oneMinus()) : mask
     const { detailRepeat } = settings
     if (!material.normalMap) return { amount, eye, normal: null, soft: normalView, detailRepeat }
     const normalTexture = materialReference('normalMap', 'texture') as any
@@ -309,11 +372,16 @@ export class SkinPhysicalNodeMaterial extends SheenSafePhysicalNodeMaterial {
     normalTexture.updateReference(builder)
     normalTexture.updateValue()
     const scale = materialReference('normalScale', 'vec2')
+    const type = material.normalMapType ?? 0
+    const softer = normalMap(normalTexture.node.bias(SOFTEN_BIAS), scale) as any
+    softer.normalMapType = type
     return {
       amount,
       eye,
-      normal: { texel: normalTexture, scale, type: material.normalMapType ?? 0 },
-      soft: normalMap(normalTexture.node.bias(SOFTEN_BIAS), scale),
+      normal: { texel: normalTexture, scale, type },
+      // Built as the material's own normal is, on the surface's frame: in
+      // the lighting, the frame round the view normal is the mapped one.
+      soft: subBuild(softer, 'NORMAL', 'vec3'),
       detailRepeat,
     }
   }
@@ -324,33 +392,34 @@ export class SkinPhysicalNodeMaterial extends SheenSafePhysicalNodeMaterial {
     const surface = skin.normal.texel.xyz.mul(2).sub(1)
     const detail = texture(skinDetail(), uv().mul(skin.detailRepeat)).xyz.mul(2).sub(1)
     const detailed = vec3(surface.xy.add(detail.xy.mul(skin.amount.mul(DETAIL))), surface.z)
-    // Exactly the map's own normal while no skin shading is drawn.
-    const tangent = mix(surface, detailed.normalize(), skinShading)
-    const node = normalMap(tangent.mul(0.5).add(0.5), skin.normal.scale) as any
+    const node = normalMap(detailed.normalize().mul(0.5).add(0.5), skin.normal.scale) as any
     node.normalMapType = skin.normal.type
     return node
   }
 
   override setupDiffuseColor(builder: any) {
     super.setupDiffuseColor(builder)
-    const skin = this.skinBuild
-    if (!skin) return
-    const shade = skin.eye.y.mul(skinShading).oneMinus()
-    diffuseColor.assign(vec4(diffuseColor.rgb.mul(shade), diffuseColor.a))
+    const eye = this.skinBuild?.eye
+    if (!eye) return
+    diffuseColor.assign(vec4(diffuseColor.rgb.mul(eye.y.oneMinus()), diffuseColor.a))
   }
 
   override setupVariants(builder: any) {
-    super.setupVariants(builder)
     const skin = this.skinBuild
+    // Before three's floor and its geometric anti-aliasing, so a small,
+    // far eye's highlight doesn't sparkle.
+    if (skin) {
+      const lobe = (materialRoughness as any).mul(mix(1, LOBE_ROUGHNESS, skin.amount))
+      this.roughnessNode = skin.eye ? mix(lobe, EYE_ROUGHNESS, skin.eye.x) : lobe
+    }
+    super.setupVariants(builder)
     if (!skin) return
-    roughness.assign(
-      mix(
-        roughness.mul(mix(1, LOBE_ROUGHNESS, skin.amount)),
-        EYE_ROUGHNESS,
-        skin.eye.x.mul(skinShading),
+    const reflectance = mix(1, REFLECTANCE, skin.amount)
+    specularColorBlended.assign(
+      specularColorBlended.mul(
+        skin.eye ? mix(reflectance, EYE_REFLECTANCE, skin.eye.x) : reflectance,
       ),
     )
-    specularColorBlended.assign(specularColorBlended.mul(mix(1, REFLECTANCE, skin.amount)))
   }
 
   override setupLightingModel() {

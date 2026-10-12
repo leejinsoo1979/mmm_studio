@@ -20,12 +20,12 @@ import {
 } from 'three/tsl'
 
 /**
- * The studio's lighting, as it was ('classic') and in 실사 ('real'): a
- * dark room whose softboxes stand where the lights shine from, so a face
- * keeps its shape and each eye catches one light; the key light a little
- * stronger and the fill brighter against it; and the key's shadow cast
- * close to the surface (the face shading itself under the nose, brows and
- * hair) with a soft, smooth edge.
+ * The studio's lighting, as it was ('classic') and for 인물 조명
+ * ('portrait'): a room whose softboxes stand where the lights shine from,
+ * so each eye catches the light that models the face, and whose walls
+ * still fill the shadow side as the classic room does; and the key's
+ * shadow cast close to the surface (the face shading itself under the
+ * nose, brows and hair) with a soft, smooth edge.
  */
 
 /** Where each light shines from (towards the aim), seen from the camera: right, up, towards it. */
@@ -34,7 +34,7 @@ export const FILL_FROM = new Vector3(-0.8, 0.12, 0.6).normalize()
 export const RIM_FROM = new Vector3(-0.8, 0.28, -0.53).normalize()
 export const KICK_FROM = new Vector3(0.82, 0.18, -0.55).normalize()
 
-export type StudioMode = 'classic' | 'real'
+export type StudioMode = 'classic' | 'portrait'
 
 export type StudioLighting = {
   /** The lights' intensities. */
@@ -42,14 +42,14 @@ export type StudioLighting = {
   fill: number
   rim: number
   kick: number
-  /** The room lighting and showing in the character: three's studio room, or the softboxes'. */
-  environment: 'room' | 'softboxes'
+  /** The room lighting and showing in the character: three's studio room, or the softboxes' (softboxRoom). */
+  environment: 'room' | SoftboxRoom
   environmentIntensity: number
   /** The key's shadow: its depth bias, how far (m) along the normal it is looked up, and whether its edge is the soft 32-tap one. */
   shadowBias: number
   normalBias: number
   softShadow: boolean
-  /** The platform's disc: under the darker softbox room, a lighter grey keeps it from going black. */
+  /** The platform's disc: under the softbox room, a lighter grey keeps its tone. */
   disc: string
 }
 
@@ -66,15 +66,15 @@ export const STUDIO_LIGHTING: Record<StudioMode, StudioLighting> = {
     softShadow: false,
     disc: '#16191e',
   },
-  real: {
+  portrait: {
     key: 3,
-    fill: 0.7,
+    fill: 0.9,
     rim: 2.6,
     kick: 1.2,
-    environment: 'softboxes',
-    environmentIntensity: 0.6,
+    environment: { walls: 0.3, floor: 0.3 },
+    environmentIntensity: 0.8,
     shadowBias: -0.0001,
-    normalBias: 0.003,
+    normalBias: 0.005,
     softShadow: true,
     disc: '#3a4048',
   },
@@ -95,21 +95,20 @@ export const SOFTBOXES: readonly Softbox[] = [
   { from: new Vector3(0, 1, 0.15).normalize(), width: 3, height: 3, glow: 1.2, tint: '#ffffff' },
 ]
 
-/** How bright the room's walls and floor are (linear), well under the softboxes. */
-const WALLS = 0.02
-const FLOOR = 0.035
+/** How bright the softbox room's walls and floor are (linear), well under the softboxes. */
+export type SoftboxRoom = { walls: number; floor: number }
 
 /**
- * The dark room with the softboxes, to make the studio's environment
- * from (PMREM). Its geometries and materials are the caller's to dispose
+ * The room with the softboxes, to make the studio's environment from
+ * (PMREM). Its geometries and materials are the caller's to dispose
  * (disposeRoom) once it is made.
  */
-export function softboxRoom(): Scene {
+export function softboxRoom({ walls, floor: floorTone }: SoftboxRoom): Scene {
   const room = new Scene()
   room.add(
     new Mesh(
       new SphereGeometry(8, 32, 16),
-      new MeshBasicMaterial({ color: new Color().setScalar(WALLS), side: BackSide }),
+      new MeshBasicMaterial({ color: new Color().setScalar(walls), side: BackSide }),
     ),
   )
   for (const { from, width, height, glow, tint } of SOFTBOXES) {
@@ -123,7 +122,7 @@ export function softboxRoom(): Scene {
   }
   const floor = new Mesh(
     new PlaneGeometry(16, 16),
-    new MeshBasicMaterial({ color: new Color().setScalar(FLOOR) }),
+    new MeshBasicMaterial({ color: new Color().setScalar(floorTone) }),
   )
   floor.rotation.x = -Math.PI / 2
   floor.position.y = -1.2

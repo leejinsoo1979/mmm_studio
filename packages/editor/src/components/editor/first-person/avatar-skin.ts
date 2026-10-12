@@ -1,11 +1,11 @@
-import { markSkin, SKIN_EYE_ATTRIBUTE } from '@pascal-app/viewer'
+import { isSkinMaterial, SKIN_EYE_ATTRIBUTE, SkinMaterial } from '@pascal-app/viewer'
 import {
   BufferAttribute,
   type BufferGeometry,
   type Material,
   type Matrix4,
   type Mesh,
-  MeshPhysicalMaterial,
+  type MeshPhysicalMaterial,
   MeshStandardMaterial,
   type SkinnedMesh,
   Vector3,
@@ -13,11 +13,11 @@ import {
 
 /**
  * A Rocketbox body's skin, for the renderers' skin shading (the viewer's
- * skin-material.ts): its head and body materials marked as skin, as
- * physical materials (glTF loads the body's as standard), and its eyes'
- * vertices marked on the head, their whites shaded towards the lids and
- * corners. The build puts how much each texel is skin in the red channel
- * of the roughness map (build-rocketbox-character.py).
+ * skin-material.ts): its head and body materials made skin materials
+ * (glTF loads the body's as standard), and its eyes' vertices marked on
+ * the head, their whites shaded towards the lids and corners. The build
+ * puts how much each texel is skin in the red channel of the roughness map
+ * (build-rocketbox-character.py).
  */
 
 /** How many times the skin's pore detail tiles across a part's texture: the body's spans far more of the body. */
@@ -28,45 +28,54 @@ const EYE_BONE = /Eye$/
  * How an eye's white darkens away from its front (the iris): towards the
  * corners and rims, from RIM_FROM° to RIM_TO° off the front, by up to RIM;
  * under the upper lid, from LID_FROM° to LID_TO° above its middle, by up
- * to LID more; never below LIGHTEST of its own colour.
+ * to LID more; by DARKEST at most, so the white stays white, as the lid's
+ * own shadow does the rest.
  */
-const RIM = 0.35
+const RIM = 0.2
 const RIM_FROM = 14
 const RIM_TO = 42
-const LID = 0.3
+const LID = 0.15
 const LID_FROM = 2
 const LID_TO = 24
-const LIGHTEST = 0.3
+const DARKEST = 0.3
 
 type Part = keyof typeof DETAIL_REPEAT
 
 const partOf = (material: Material): Part | null =>
   (/_(head|body)$/.exec(material.name)?.[1] as Part | undefined) ?? null
 
-const skinMaterials = new WeakMap<Material, MeshPhysicalMaterial>()
+const skinMaterials = new WeakMap<Material, SkinMaterial>()
 
 /**
- * The physical skin material for one of a body's materials as loaded:
- * the same one for every character drawn from it. Rocketbox has no metal:
- * the metalness the map's blue would give is its compression's noise.
+ * The skin material for one of a body's materials as loaded: the same one
+ * for every character drawn from it. Rocketbox has no metal: the
+ * metalness the map's blue would give is its compression's noise.
  */
-export function skinMaterialOf(material: MeshStandardMaterial, part: Part): MeshPhysicalMaterial {
+export function skinMaterialOf(material: MeshStandardMaterial, part: Part): SkinMaterial {
   let skin = skinMaterials.get(material)
   if (!skin) {
+    skin = new SkinMaterial({ detailRepeat: DETAIL_REPEAT[part] })
     if ((material as MeshPhysicalMaterial).isMeshPhysicalMaterial) {
-      skin = material as MeshPhysicalMaterial
+      skin.copy(material as MeshPhysicalMaterial)
     } else {
-      skin = new MeshPhysicalMaterial()
       // The standard material's own properties; the physical ones stay as plain as standard's.
       MeshStandardMaterial.prototype.copy.call(skin, material)
       skin.defines = { STANDARD: '', PHYSICAL: '' }
     }
     skin.metalnessMap = null
     skin.metalness = 0
-    markSkin(skin, DETAIL_REPEAT[part])
     skinMaterials.set(material, skin)
   }
   return skin
+}
+
+/**
+ * Makes a copy of a body's skin material the feet's: bare feet are skin all
+ * over (they have no roughness map to say so texel by texel), socks none.
+ */
+export function feetSkin(material: Material, bare: boolean) {
+  if (!isSkinMaterial(material)) return
+  material.skin = bare && material.skin ? { ...material.skin, mask: 1 } : null
 }
 
 const smoothstep = (from: number, to: number, x: number) => {
@@ -120,7 +129,7 @@ export function eyeShading(
     const shade =
       RIM * smoothstep(RIM_FROM, RIM_TO, fromFront) + LID * smoothstep(LID_FROM, LID_TO, above)
     out[i * 2] = 1
-    out[i * 2 + 1] = Math.min(1 - LIGHTEST, shade)
+    out[i * 2 + 1] = Math.min(DARKEST, shade)
   }
   return out
 }
@@ -135,7 +144,7 @@ export function prepareSkin(mesh: Mesh) {
   const part = partOf(mesh.material)
   const standard = mesh.material as MeshStandardMaterial
   if (!(part && standard.isMeshStandardMaterial)) return
-  mesh.material = skinMaterialOf(standard, part)
+  if (!isSkinMaterial(standard)) mesh.material = skinMaterialOf(standard, part)
   const skinned = mesh as SkinnedMesh
   if (part !== 'head' || !skinned.isSkinnedMesh) return
   const { geometry } = mesh

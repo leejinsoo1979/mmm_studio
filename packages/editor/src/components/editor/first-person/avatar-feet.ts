@@ -15,6 +15,7 @@ import {
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { avatarUrl } from './avatar-catalog'
+import { feetSkin } from './avatar-skin'
 import { type AtlasRect, type BodyBind, donorFeet } from './bare-feet'
 import type { FeetDonor, FeetMesh, FeetSeam, FittedFeet } from './feet-job'
 import type { Footwear } from './footwear'
@@ -318,6 +319,7 @@ function feetMaterial(body: SkinnedMesh, normalMap: Texture | null, wear: Footwe
   // The body's vertex colours are its own; the feet have none, and a
   // missing colour attribute reads as black.
   material.vertexColors = false
+  feetSkin(material, wear === 'bare')
   return material
 }
 

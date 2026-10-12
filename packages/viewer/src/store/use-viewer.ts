@@ -80,6 +80,10 @@ type ViewerState = {
   shadows: boolean
   setShadows: (shadows: boolean) => void
 
+  /** Characters' skin drawn as skin (skin-material.ts), wherever they are drawn; off, their shaders stay the plain ones. */
+  skinDetail: boolean
+  setSkinDetail: (on: boolean) => void
+
   unit: ViewerUnit
   setUnit: (unit: ViewerUnit) => void
 
@@ -172,6 +176,7 @@ type PersistedViewerState = Partial<
     | 'colorPreset'
     | 'edges'
     | 'shadows'
+    | 'skinDetail'
     | 'unit'
     | 'levelMode'
     | 'wallMode'
@@ -243,6 +248,7 @@ function normalizePersistedViewerState(value: unknown): PersistedViewerState {
     colorPreset: pickString<ColorPreset>(state.colorPreset, COLOR_PRESETS, 'clay'),
     edges: pickString<EdgeMode>(state.edges, EDGE_MODES, 'soft'),
     shadows: typeof state.shadows === 'boolean' ? state.shadows : true,
+    skinDetail: typeof state.skinDetail === 'boolean' ? state.skinDetail : false,
     unit: normalizeViewerUnit(state.unit),
     levelMode: pickString<ViewerState['levelMode']>(state.levelMode, LEVEL_MODES, 'stacked'),
     wallMode: pickString<ViewerState['wallMode']>(state.wallMode, WALL_MODES, 'cutaway'),
@@ -305,6 +311,9 @@ const useViewer = create<ViewerState>()(
 
       shadows: true,
       setShadows: (shadows) => set({ shadows }),
+
+      skinDetail: false,
+      setSkinDetail: (on) => set({ skinDetail: on }),
 
       unit: 'millimeter',
       setUnit: (unit) => set({ unit: unit === 'metric' ? 'millimeter' : unit }),
@@ -461,6 +470,7 @@ const useViewer = create<ViewerState>()(
         colorPreset: state.colorPreset,
         edges: state.edges,
         shadows: state.shadows,
+        skinDetail: state.skinDetail,
         unit: state.unit,
         levelMode: state.levelMode,
         wallMode: state.wallMode,
