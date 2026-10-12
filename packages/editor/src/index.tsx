@@ -132,6 +132,7 @@ export {
   loadHairStyles,
   wornHairStyle,
 } from './components/editor/first-person/hair-styles'
+export { type HeadDetail, loadHeadDetail } from './components/editor/first-person/head-detail'
 export { type HeadFrame, headFrame } from './components/editor/first-person/head-geometry'
 // Gait blending and presence smoothing, for bodies driven outside the player
 // controller (NPCs in `@pascal-app/nodes`).

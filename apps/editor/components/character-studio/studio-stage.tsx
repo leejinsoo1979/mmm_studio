@@ -5,6 +5,8 @@ import {
   bodyHeightScale,
   EmoteLayer,
   findAvatar,
+  type HeadDetail,
+  loadHeadDetail,
   useAvatarBody,
   useAvatarLook,
   useEmoteClips,
@@ -597,7 +599,24 @@ function ownTexture(texture: Texture, anisotropy: number): Texture {
 function glossyEyes(texture: Texture, mesh: SkinnedMesh): Texture {
   const done = glossed.get(texture)
   if (done) return done
-  const image = texture.image as (CanvasImageSource & { width: number; height: number }) | null
+  const image = glossImage(
+    texture.image as CanvasImageSource & { width: number; height: number },
+    mesh,
+  )
+  if (!image) return texture
+  const own = texture.clone()
+  own.source = new Source(image)
+  own.userData[STUDIO] = true
+  own.needsUpdate = true
+  glossed.set(texture, own)
+  return own
+}
+
+/** A head's roughness image with its eyes made glossy (see glossyEyes); null where that can't be worked out. */
+function glossImage(
+  image: (CanvasImageSource & { width: number; height: number }) | null,
+  mesh: SkinnedMesh,
+): ImageBitmap | null {
   const { geometry } = mesh
   const uv = geometry.getAttribute('uv')
   const joints = geometry.getAttribute('skinIndex')
@@ -610,7 +629,7 @@ function glossyEyes(texture: Texture, mesh: SkinnedMesh): Texture {
     !(image?.width && uv && joints && weights && eyes.size) ||
     typeof OffscreenCanvas === 'undefined'
   )
-    return texture
+    return null
   const held = (i: number) => {
     let weight = 0
     for (let k = 0; k < joints.itemSize; k++)
@@ -621,7 +640,7 @@ function glossyEyes(texture: Texture, mesh: SkinnedMesh): Texture {
   const mask = new OffscreenCanvas(width, height).getContext('2d')
   const canvas = new OffscreenCanvas(width, height)
   const context = canvas.getContext('2d', { willReadFrequently: true })
-  if (!(mask && context)) return texture
+  if (!(mask && context)) return null
   mask.fillStyle = '#fff'
   mask.beginPath()
   const index = geometry.index
@@ -639,7 +658,7 @@ function glossyEyes(texture: Texture, mesh: SkinnedMesh): Texture {
     })
     mask.closePath()
   }
-  if (!found) return texture
+  if (!found) return null
   mask.fill()
   context.drawImage(image, 0, 0)
   const pixels = context.getImageData(0, 0, width, height)
@@ -651,12 +670,7 @@ function glossyEyes(texture: Texture, mesh: SkinnedMesh): Texture {
     if (share > 0) pixels.data[p + 1] = pixels.data[p + 1]! * (1 - share) + gloss * share
   }
   context.putImageData(pixels, 0, 0)
-  const own = texture.clone()
-  own.source = new Source(canvas.transferToImageBitmap())
-  own.userData[STUDIO] = true
-  own.needsUpdate = true
-  glossed.set(texture, own)
-  return own
+  return canvas.transferToImageBitmap()
 }
 
 /** Tunes a material the studio owns for the close-up: sharp textures, soft-edged hair, glossy eyes. */
@@ -726,6 +740,94 @@ function keepOwnership(model: Object3D, anisotropy: number) {
 }
 
 /**
+ * The head's relief and roughness at the file's full size, for the
+ * close-up (a crowd draws them smaller: head-detail.ts): twins of the
+ * studio's own textures, and the materials (weakly) they were put on.
+ */
+type HeadTwins = {
+  twins: Map<Texture, Texture>
+  worn: Set<WeakRef<Material>>
+  seen: WeakSet<Material>
+}
+
+/**
+ * Loads the full-size head maps while this character is on the stage;
+ * after it, puts the studio's own back on every material that wore the
+ * twins and lets their GPU copies go.
+ */
+function useHeadDetail(avatarId: string, model: Object3D): HeadTwins | null {
+  const [shown, setShown] = useState<HeadTwins | null>(null)
+  useEffect(() => {
+    let live = true
+    let made: HeadTwins | null = null
+    loadHeadDetail(avatarId).then(
+      (detail) => {
+        if (!live) return
+        made = { twins: headTwins(model, detail), worn: new Set(), seen: new WeakSet() }
+        setShown(made)
+      },
+      // The crowd's maps stay.
+      () => {},
+    )
+    return () => {
+      live = false
+      setShown(null)
+      if (!made) return
+      const back = new Map([...made.twins].map(([own, twin]) => [twin, own]))
+      for (const ref of made.worn) {
+        const material = ref.deref()
+        if (material) swapMaps(material, back)
+      }
+      for (const twin of made.twins.values()) twin.dispose()
+    }
+  }, [avatarId, model])
+  return shown
+}
+
+/** Full-size twins of the head's own maps (the roughness glossed as glossyEyes does it). */
+function headTwins(model: Object3D, detail: HeadDetail): Map<Texture, Texture> {
+  const twins = new Map<Texture, Texture>()
+  model.traverse((object) => {
+    const mesh = object as SkinnedMesh
+    const material = mesh.material as MeshStandardMaterial
+    if (!(mesh.isSkinnedMesh && /_head$/.test(material?.name ?? ''))) return
+    const twin = (own: Texture | null, image: ImageBitmap | null) => {
+      if (!(own && image) || twins.has(own)) return
+      const made = own.clone()
+      made.source = new Source(image)
+      made.needsUpdate = true
+      twins.set(own, made)
+    }
+    twin(material.normalMap, detail.normalMap)
+    const roughness = detail.roughnessMap
+    twin(material.roughnessMap, roughness && (glossImage(roughness, mesh) ?? roughness))
+  })
+  return twins
+}
+
+function swapMaps(material: Material, twins: Map<Texture, Texture>) {
+  const slots = material as unknown as Record<string, Texture | null | undefined>
+  for (const slot of ['normalMap', 'roughnessMap'] as const) {
+    const texture = slots[slot]
+    const twin = texture && twins.get(texture)
+    if (twin) slots[slot] = twin
+  }
+}
+
+/** Puts the full-size twins on whatever the model shows (the look's copies come and go). */
+function showDetail(model: Object3D, { twins, worn, seen }: HeadTwins) {
+  model.traverse((object) => {
+    const mesh = object as Mesh
+    if (!mesh.isMesh || Array.isArray(mesh.material)) return
+    const material = mesh.material as Material
+    swapMaps(material, twins)
+    if (seen.has(material)) return
+    seen.add(material)
+    worn.add(new WeakRef(material))
+  })
+}
+
+/**
  * The character: idling, playing the emote being previewed, or holding
  * still facing the camera (studio-pose.ts); its model is put in the
  * state for the camera and the handles to go by, and it turns with the
@@ -747,6 +849,7 @@ function StudioAvatar({
   const camera = useThree((three) => three.camera)
   // Before the look sees the body (its effects run after this render).
   useMemo(() => takeOwnership(model, anisotropy), [model, anisotropy])
+  const detail = useHeadDetail(avatar.id, model)
   useAvatarLook(model, look, avatar.id)
   useEffect(() => {
     const shown = state.model
@@ -771,6 +874,7 @@ function StudioAvatar({
 
   useFrame((_, delta) => {
     keepOwnership(model, anisotropy)
+    if (detail) showDetail(model, detail)
     const group = groupRef.current
     if (group) {
       group.rotation.y += (state.yaw - group.rotation.y) * (1 - Math.exp(-TURN_RESPONSE * delta))

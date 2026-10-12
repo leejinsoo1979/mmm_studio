@@ -15,6 +15,7 @@ import { avatarGender, avatarUrl, findAvatar } from './avatar-catalog'
 import { foldCardTwins } from './avatar-hair'
 import { prepareSkin } from './avatar-skin'
 import { bleedTexture } from './hair-bleed'
+import { fitHeadForCrowd } from './head-detail'
 import { MOTION_SETS, scaledGaits } from './locomotion'
 
 /** The hips carry the clips' only translation: their dips and bounce. */
@@ -108,6 +109,7 @@ export function prepareModel(source: Object3D): Object3D {
     mesh.frustumCulled = false
     const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as Material[]
     for (const material of materials) {
+      fitHeadForCrowd(material as MeshStandardMaterial)
       // Hair and lashes are alpha cards: cut them out instead of sorting them.
       // Not softened by alpha to coverage here: it writes the cut's soft
       // alpha, and the game's post-processing takes the scene's alpha for
