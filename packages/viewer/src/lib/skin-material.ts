@@ -81,12 +81,12 @@ export function skinSettings(material: {
 }
 
 /** How far the light wraps round, per channel (red furthest). */
-const WRAP = [0.3, 0.12, 0.07] as const
+const WRAP = [0.22, 0.1, 0.07] as const
 /** How far towards the softer normal each channel's diffuse light turns, and how soft (mip bias) that is. */
 const SOFTEN = [0.7, 0.35, 0.15] as const
 const SOFTEN_BIAS = 3
 /** How much the wrapped light rolls off into the shadow as its square does. */
-const ROLL_OFF = 0.6
+const ROLL_OFF = 0.4
 /** The main highlight's roughness, and skin's reflectance (F0 0.04 × this) under it. */
 const LOBE_ROUGHNESS = 0.85
 const REFLECTANCE = 0.7
