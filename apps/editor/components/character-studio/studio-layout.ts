@@ -4,7 +4,6 @@ import {
   type AvatarTab,
   avatarTab,
   BALD,
-  BORROWED_HAIRSTYLES,
   type BodySliderId,
   DEFAULT_EMOTE_KEYS,
   type EmoteId,
@@ -142,7 +141,7 @@ const CATEGORIES: Record<Exclude<StudioTab, 'face'>, readonly Category[]> = {
   preset: AVATAR_TABS.map(({ id, label }) => ({ id, label, subTabs: [] })),
   body: BODY_CATEGORIES.map(({ id, label }) => ({ id, label, subTabs: [] })),
   hair: [
-    ...(BORROWED_HAIRSTYLES ? [{ id: 'style', label: '스타일', subTabs: [] }] : []),
+    { id: 'style', label: '스타일', subTabs: [] },
     { id: 'color', label: '색상', subTabs: [] },
   ],
   makeup: [

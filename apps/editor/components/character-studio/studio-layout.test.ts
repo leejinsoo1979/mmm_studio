@@ -140,10 +140,10 @@ describe('the rails', () => {
     expect(settings).not.toContain('browColor')
   })
 
-  test('the hair rail offers its colour only, no hairstyle or bald head to pick', () => {
+  test('the hair rail offers the generated styles and the colour, for an NPC too', () => {
     for (const npc of [false, true]) {
-      expect(categoriesOf('hair', npc).map(({ label }) => label)).toEqual(['색상'])
-      expect(firstCategory('hair', npc, 'Female_Adult_03')).toBe('color')
+      expect(categoriesOf('hair', npc).map(({ label }) => label)).toEqual(['스타일', '색상'])
+      expect(firstCategory('hair', npc, 'Female_Adult_03')).toBe('style')
     }
   })
 })

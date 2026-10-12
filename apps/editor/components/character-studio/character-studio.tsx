@@ -44,7 +44,8 @@ import { BodyBody, BodyFooter } from './body-panel'
 import { CategoryRail } from './category-rail'
 import { FaceEditor } from './face-editor'
 import { FaceRegionBody, FaceRegionFooter, regionHasChanges, resetRegion } from './face-shape-panel'
-import { HairColorBody, HairStyleBody } from './hair-panel'
+import { pickCut } from './hair-cuts'
+import { HairColorBody, HairCutBody, HairStyleBody } from './hair-panel'
 import { MakeupBody, MakeupFooter } from './makeup-panel'
 import { randomLook } from './random-look'
 import {
@@ -1055,15 +1056,26 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
         return {
           body:
             current.id === 'style' ? (
-              <HairStyleBody
-                avatar={shown.avatar}
-                hair={look.hair}
-                hairStyle={look.hairStyle}
-                onPick={(hairStyle) => lookPatch({ hairStyle }, true)}
-                onShaveCommit={(shave) => lookPatch({ shave }, true)}
-                onShavePreview={(shave) => lookPatch({ shave }, false)}
-                shave={look.shave}
-              />
+              BORROWED_HAIRSTYLES ? (
+                <HairStyleBody
+                  avatar={shown.avatar}
+                  hair={look.hair}
+                  hairStyle={look.hairStyle}
+                  onPick={(hairStyle) => lookPatch({ hairStyle }, true)}
+                  onShaveCommit={(shave) => lookPatch({ shave }, true)}
+                  onShavePreview={(shave) => lookPatch({ shave }, false)}
+                  shave={look.shave}
+                />
+              ) : (
+                <HairCutBody
+                  avatar={shown.avatar}
+                  hair={look.hair}
+                  hairCut={look.hairCut}
+                  onCommit={(hairCut) => lookPatch({ hairCut }, true)}
+                  onPick={(style) => lookPatch(pickCut(draftRef.current.look, style), true)}
+                  onPreview={(hairCut) => lookPatch({ hairCut }, false)}
+                />
+              )
             ) : (
               <HairColorBody
                 hair={look.hair}
