@@ -153,7 +153,7 @@ function RemotePlayer({
     player.avatar,
     player.look ? bodyStrideScale(player.look.body) : 1,
   )
-  useAvatarLook(model, player.look, avatar.id)
+  useAvatarLook(model, player.look, avatar.id, 'game')
   const [emoted, setEmoted] = useState(false)
   const emoteClips = useEmoteClips(avatar, emoted)
   const rootRef = useRef<Group>(null)
