@@ -344,6 +344,25 @@ function standOver(
 const stand = [0, 0, 0, 0, 0]
 
 /**
+ * Where a point stands over a surface, averaged over its nearest few: its
+ * height along the surface's normal (negative inside) into out[0], that
+ * normal into out[1..3], and how far it is off the nearest point into
+ * out[4]. Returns false where no point of the surface is within `within`.
+ */
+export function standOn(
+  surface: Surface,
+  x: number,
+  y: number,
+  z: number,
+  out: number[],
+  within = Number.POSITIVE_INFINITY,
+) {
+  if (standOver(surface, null, x, y, z, out, within) < 0) return false
+  out[4] = Math.sqrt(distances[0]!)
+  return out[4]! <= within
+}
+
+/**
  * How far each point stands over the skull (bind units, negative under
  * it), the skull's hair share where it stands, and how far it is off the
  * skull's nearest point.

@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import { ALL_AVATARS, avatarGender, BALD, NO_LOOK } from '@pascal-app/editor'
+import {
+  ALL_AVATARS,
+  avatarGender,
+  BALD,
+  DEFAULT_CUT_PARAMS,
+  type HairCut,
+  NO_LOOK,
+  readAvatarLook,
+} from '@pascal-app/editor'
 import { counterpartAvatar, isChild, lookOn } from './avatar-counterpart'
 
 describe('the avatar in the other sex or age', () => {
@@ -58,5 +66,32 @@ describe('a look moved onto another avatar', () => {
     expect(lookOn(borrowed, 'Male_Adult_07')).toBe(borrowed)
     const bald = { ...NO_LOOK, hairStyle: BALD }
     expect(lookOn(bald, 'Male_Adult_07')).toBe(bald)
+  })
+})
+
+describe('a hair cut in the studio', () => {
+  const cut: HairCut = {
+    style: 'ponytail',
+    ...DEFAULT_CUT_PARAMS.ponytail,
+    tip: '#d8b07a',
+    shine: 0.7,
+  }
+
+  test('moves onto any avatar as it is: it grows on each one’s own scalp', () => {
+    const look = { ...NO_LOOK, hairCut: cut }
+    expect(lookOn(look, 'Male_Adult_07')).toBe(look)
+    const both = { ...NO_LOOK, hairCut: cut, hairStyle: 'Female_Adult_07' }
+    expect(lookOn(both, 'Female_Adult_07')).toEqual({ ...both, hairStyle: null })
+  })
+
+  test('picked over a borrowed hairstyle, is saved and read back as the draft had it', () => {
+    const opened = lookOn(
+      readAvatarLook({ ...NO_LOOK, hairStyle: BALD, shave: 0.8 }),
+      'Male_Adult_07',
+    )
+    const draft = { ...opened, hairCut: cut, hairStyle: null }
+    const saved = JSON.parse(JSON.stringify(draft))
+    expect(readAvatarLook(saved)).toEqual(draft)
+    expect(readAvatarLook({ ...saved, face: null })).toEqual(draft)
   })
 })

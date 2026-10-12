@@ -1,5 +1,18 @@
 import { describe, expect, test } from 'bun:test'
 import { type AnyNode, LevelNode, nodeRegistry, registerNode, useScene } from '@pascal-app/core'
+import {
+  type AvatarLook,
+  BODY_SLIDERS,
+  FACE_PARTS,
+  FACE_POINT_INDICES,
+  FACE_SLIDERS,
+  type FacePin,
+  type HairCut,
+  MAX_PIN,
+  NO_LOOK,
+  NO_PAINT,
+  readAvatarLook,
+} from '@pascal-app/editor'
 import { npcDefinition } from './definition'
 import { NPC_DIALOGUE_TEMPLATES, NPC_PRESETS, npcDialogueTemplate } from './presets'
 import { DialogueGraph, isChildAvatar, NpcNode } from './schema'
@@ -65,6 +78,54 @@ describe('NpcNode', () => {
     const photo = { face: { photo: 'data:image/png;base64,AAAA' } }
     expect(NpcNode.safeParse({ look: photo }).success).toBe(false)
     expect(NpcNode.safeParse({ look: { blob: 'x'.repeat(20_000) } }).success).toBe(false)
+  })
+
+  test('keeps the look the studio saves, its hair cut and old hairstyle read back the same', () => {
+    const cut: HairCut = {
+      style: 'twoBlock',
+      length: -0.37,
+      volume: -0.37,
+      curl: 0.37,
+      part: -0.37,
+      fringe: 0.37,
+      tip: '#a0522d',
+      shine: 0.37,
+    }
+    const irises = new Set(
+      [...FACE_PARTS.rightIris, ...FACE_PARTS.leftIris].map((i) => FACE_POINT_INDICES[i]!),
+    )
+    const far = -MAX_PIN / Math.sqrt(3) + 1e-4
+    // The most an NPC's look holds: every slider and pin set, every paint, the longest cut.
+    const look: AvatarLook = readAvatarLook({
+      ...NO_LOOK,
+      hair: '#a0522d',
+      skin: '#c68d63',
+      shape: {
+        fit: 0.37,
+        sliders: Object.fromEntries(FACE_SLIDERS.map(({ id }) => [id, -0.37])),
+        pins: Object.fromEntries(
+          FACE_POINT_INDICES.filter((landmark) => !irises.has(landmark)).map((landmark) => [
+            landmark,
+            [far, far, far] as FacePin,
+          ]),
+        ),
+      },
+      body: {
+        height: -0.37,
+        sliders: Object.fromEntries(BODY_SLIDERS.map(({ id }) => [id, -0.37])),
+      },
+      hairCut: cut,
+      hairStyle: 'Female_Adult_04',
+      shave: 0.37,
+      paint: { ...NO_PAINT, lips: '#b3202e', lipAmount: 0.37, beard: 'stubble', beardAmount: 0.37 },
+      feet: { wear: 'socks', color: '#223344' },
+    })
+    expect(look.hairCut).toEqual(cut)
+    // Saved on the node, the scene written out and loaded again.
+    const saved = NpcNode.parse({ look: { ...look, face: null } })
+    const loaded = NpcNode.parse(JSON.parse(JSON.stringify(saved)))
+    expect(readAvatarLook(loaded.look)).toEqual(look)
+    expect(JSON.stringify(loaded.look).length).toBeLessThan(12 * 1024)
   })
 
   test('voice settings stay in range', () => {

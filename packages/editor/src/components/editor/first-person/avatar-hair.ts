@@ -2055,7 +2055,12 @@ const HEADWEAR = 0.02
  * (`neck`), a visor or a mask fixed to it. Glasses alone stay. Returns
  * whether it had headwear.
  */
-function hideHeadwear(model: Object3D, top: number, neck: number, undo: (() => void)[]): boolean {
+export function hideHeadwear(
+  model: Object3D,
+  top: number,
+  neck: number,
+  undo: (() => void)[],
+): boolean {
   const worn: { mesh: SkinnedMesh; high: number; middle: number }[] = []
   model.traverse((object) => {
     const mesh = object as SkinnedMesh
@@ -2142,7 +2147,7 @@ function besides(beside: SkinnedMesh, geometry: BufferGeometry, material: Materi
  * reshaped with the rest, showing the hidden mesh's material as the look
  * dresses it.
  */
-function hideOwnHair(model: Object3D, keepGear: boolean, undo: (() => void)[]) {
+export function hideOwnHair(model: Object3D, keepGear: boolean, undo: (() => void)[]) {
   for (const mesh of ownMeshes(model, 'opacity')) {
     const kinds = kindsOf(mesh)
     if (!(kinds.includes(HAIR) || (!keepGear && kinds.includes(GEAR)))) continue
@@ -2573,6 +2578,12 @@ export type HairOn = {
   /** The colour of the borrowed hair worn and where it shows (see `WornHair`), or null. */
   stubble: Rgb | null
   hairline: Float32Array | null
+  /**
+   * 'generated' for hair grown on the character's own scalp (see
+   * generated-hair.ts): the look paints the head's skin alone, and a dye
+   * goes to the hair's material, not the textures.
+   */
+  mode?: 'generated'
 }
 
 /**

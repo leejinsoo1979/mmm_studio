@@ -5,9 +5,12 @@ import {
   type AvatarLook,
   BALD,
   BODY_SLIDERS,
+  DEFAULT_CUT_PARAMS,
   DEFAULT_EMOTE_KEYS,
+  DEFAULT_SHINE,
   FACE_HANDLE,
   FACE_SLIDER_GROUPS,
+  type HairCut,
   NO_LOOK,
 } from '@pascal-app/editor'
 import {
@@ -33,6 +36,8 @@ const TARGET: readonly number[] = JSON.parse(
     'utf8',
   ),
 ).avatars.Male_Adult_02
+
+const BOB: HairCut = { style: 'bob', ...DEFAULT_CUT_PARAMS.bob, tip: null, shine: DEFAULT_SHINE }
 
 const context = (look: Partial<AvatarLook>, extra: Partial<ChangeContext> = {}): ChangeContext => ({
   look: { ...NO_LOOK, ...look },
@@ -135,10 +140,10 @@ describe('the rails', () => {
     expect(settings).not.toContain('browColor')
   })
 
-  test('the hair rail offers its colour only, no hairstyle or bald head to pick', () => {
+  test('the hair rail offers the generated styles and the colour, for an NPC too', () => {
     for (const npc of [false, true]) {
-      expect(categoriesOf('hair', npc).map(({ label }) => label)).toEqual(['색상'])
-      expect(firstCategory('hair', npc, 'Female_Adult_03')).toBe('color')
+      expect(categoriesOf('hair', npc).map(({ label }) => label)).toEqual(['스타일', '색상'])
+      expect(firstCategory('hair', npc, 'Female_Adult_03')).toBe('style')
     }
   })
 })
@@ -211,6 +216,13 @@ describe('changed categories', () => {
     expect(categoryChanged('hair', 'color', context({ hair: '#8c2436' }))).toBe(true)
   })
 
+  test('a hair cut marks 스타일, and its tip colour 색상', () => {
+    expect(categoryChanged('hair', 'style', context({ hairCut: BOB }))).toBe(true)
+    expect(categoryChanged('hair', 'color', context({ hairCut: BOB }))).toBe(false)
+    const tipped = context({ hairCut: { ...BOB, tip: '#d8b07a' } })
+    expect(categoryChanged('hair', 'color', tipped)).toBe(true)
+  })
+
   test('changed keys mark 단축키', () => {
     expect(categoryChanged('motion', 'keys', context({}, { keys: { KeyQ: 'wave' } }))).toBe(true)
     expect(categoryChanged('motion', 'emotes', context({}, { keys: { KeyQ: 'wave' } }))).toBe(false)
@@ -231,6 +243,15 @@ describe('꾸민 곳', () => {
   test('a saved hairstyle or bald head shows nothing: the character wears its own hair', () => {
     expect(lookChips({ ...NO_LOOK, hairStyle: BALD, shave: 0.9 })).toEqual([])
     expect(lookChips({ ...NO_LOOK, hairStyle: 'Female_Adult_03' })).toEqual([])
+  })
+
+  test('a hair cut shows as 헤어스타일, over a saved hairstyle too, and its tip colour as 염색', () => {
+    expect(lookChips({ ...NO_LOOK, hairCut: BOB })).toEqual(['헤어스타일'])
+    expect(lookChips({ ...NO_LOOK, hairCut: BOB, hairStyle: BALD })).toEqual(['헤어스타일'])
+    expect(lookChips({ ...NO_LOOK, hairCut: { ...BOB, tip: '#d8b07a' } })).toEqual([
+      '헤어스타일',
+      '염색',
+    ])
   })
 })
 

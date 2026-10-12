@@ -6,6 +6,8 @@ import type {
   EmoteId,
   FaceSliderGroup,
   FaceSliderId,
+  HairCutSlider,
+  HairCutStyle,
   HairStyleEntry,
 } from '@pascal-app/editor'
 import {
@@ -344,5 +346,43 @@ export function hairSections(
     })
     .filter((section) => section.styles.length > 0)
 }
+
+/** The generated hairstyles' names on their tiles. */
+export const HAIR_CUT_LABELS: Record<HairCutStyle, string> = {
+  short: '숏컷',
+  dandy: '댄디컷',
+  twoBlock: '투블럭',
+  bob: '단발',
+  long: '장발',
+  layered: '레이어드',
+  ponytail: '포니테일',
+  bun: '번',
+  curly: '곱슬',
+}
+
+/** The sliders under the style tiles, in order (가르마's ends as seen from the front). */
+export const HAIR_CUT_SLIDERS: readonly ({ id: HairCutSlider } & SliderText)[] = [
+  { id: 'length', label: '길이', low: '짧게', high: '길게' },
+  { id: 'volume', label: '볼륨', low: '차분하게', high: '풍성하게' },
+  { id: 'curl', label: '컬', low: '생머리', high: '곱슬' },
+  { id: 'part', label: '가르마', low: '왼쪽', high: '오른쪽' },
+  { id: 'fringe', label: '앞머리', low: '없음', high: '길게' },
+]
+
+export const HAIR_SHINE_TEXT: SliderText = { label: '윤기', low: '은은하게', high: '반짝이게' }
+
+/** The 헤어 panel's other words for generated hair: tiles, colours, and its notes. */
+export const HAIR_CUT_TEXT = {
+  own: '원래 머리',
+  ownColour: '원래 머리색',
+  tip: '끝 색 (투톤)',
+  closest: '내 머리와 비슷',
+  reset: '이 스타일 기본값',
+  covered:
+    '이 캐릭터는 머리 장식이 머리와 붙어 있어서 헤어스타일을 바꿀 수 없어요. 머리색은 바꿀 수 있어요.',
+  failed: '새 헤어를 만들지 못했어요. 원래 머리로 보여요.',
+  legacy: '예전 방식의 헤어스타일은 더 이상 쓰지 않아요.',
+  migrate: '비슷한 새 스타일로 바꾸기',
+} as const
 
 export const GENDER_LABELS: Record<AvatarGender, string> = { male: '남성', female: '여성' }
