@@ -15,7 +15,8 @@ built once per gender and shared, and each avatar ships only its body:
       One avatar's skinned mesh and materials, no clips. Its hip height goes
       to meta.json (clips from another body are scaled to it).
 
-Sources (MIT, https://github.com/microsoft/Microsoft-Rocketbox):
+Sources (MIT, https://github.com/microsoft/Microsoft-Rocketbox, the library
+built from commit 0943055db6ec570bcef9f2c8b41c9e5467c808f9, its master):
   Assets/Avatars/<group>/<Name>/Export/<Name>.fbx and its Textures/*.tga
   Assets/Animations/all_animations_max_motextr_*/<m|f>_{idle_neutral_01,walk_neutral_01,
     walk_fast_01,run_neutral_01,run_fast_01,crouch_in,crouch_idle,crouch_out}.max.fbx
@@ -26,7 +27,8 @@ Bruce Hahne's BVH conversion (data/<subject>/<trial>.bvh of
 https://github.com/una-dinosauria/cmu-mocap), retargeted onto the Rocketbox
 skeleton: see JUMPS for the trials.
 
-Needs Blender's Python module (with its numpy) and Pillow (`pip install bpy==5.0.1 pillow`, Python 3.11):
+Needs Blender's Python module (with its numpy, 1.26.4) and Pillow, as the library was
+built (`pip install bpy==5.0.1 pillow==12.3.0`, Python 3.11):
   python build-rocketbox-character.py -- <mode> <args...>
 build-rocketbox-library.sh runs it over the whole library and compresses the
 results (WebP textures, meshopt geometry).
@@ -35,6 +37,7 @@ results (WebP textures, meshopt geometry).
 import json
 import math
 import os
+import re
 import sys
 
 import bpy
@@ -402,8 +405,9 @@ def texture_file(material, images, kind):
 def load_image(name, size, keep_alpha=False, lossless=False):
     """A source texture at `size`², for the export: through a JPEG, or
     through a PNG for cut-outs and where `lossless` (the face's normals,
-    whose X and Y JPEG's chroma subsampling bends visibly up close), so
-    the library's WebP pass is the only lossy one they see."""
+    which JPEG's chroma subsampling bends visibly up close). That spares
+    them one lossy pass, not all: the library's WebP pass (quality 85)
+    subsamples their chroma too."""
     src = os.path.join(tex_dir, name + '.tga')
     img = Image.open(src)
     img = img.convert('RGBA' if keep_alpha else 'RGB').resize((size, size), Image.LANCZOS)
@@ -449,6 +453,7 @@ MASK_SIZE = 1024
 NEAR, FAR = 10, 22
 SMOOTH, ROUGH = 3, 7
 SKIN_PARTS = ('head', 'body')
+SKIN_PART = re.compile(r'_(head|body)$', re.IGNORECASE)
 
 
 def skin_colour(color_name, head_slot):
@@ -542,7 +547,10 @@ def dress():
             for n in (nt.nodes if nt else [])
             if n.type == 'TEX_IMAGE' and n.image
         ]
-        part = mat.name.split('_', 1)[1].lower() if '_' in mat.name else ''  # body / head / opacity / …
+        # body / head / opacity / …; a head or body as the editor tells them (avatar-skin.ts), so
+        # Chef_Female_01's `f110_A_head` is a head.
+        own = SKIN_PART.search(mat.name)
+        part = own.group(1).lower() if own else mat.name.split('_', 1)[1].lower() if '_' in mat.name else ''
         maps = {kind: texture_file(mat.name, linked, kind) for kind in ('color', 'normal', 'specular')}
         slots.append((index, mat, part, maps))
     head = next(((index, maps) for index, _, part, maps in slots if part == 'head' and maps['color']), None)
