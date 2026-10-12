@@ -11,6 +11,9 @@ const nextConfig: NextConfig = {
   },
   // The dev-mode "N" badge covers the editor's bottom-left project card.
   devIndicators: false,
+  // Next only trusts `localhost` as a dev origin; a page opened on
+  // 127.0.0.1 has its HMR socket refused and reloads itself every ~40 s.
+  allowedDevOrigins: ['127.0.0.1'],
   typescript: {
     ignoreBuildErrors: false,
   },
