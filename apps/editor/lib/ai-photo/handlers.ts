@@ -93,12 +93,12 @@ function refuse(
 }
 
 /** The provider's per-user abuse tag: a hash, so the uid itself never leaves us. */
-function userTag(uid: string | null): string | null {
+export function userTag(uid: string | null): string | null {
   if (!uid) return null
   return createHash('sha256').update(`mmm-ai-photo:${uid}`).digest('hex').slice(0, 32)
 }
 
-function imageStream(bytes: Uint8Array<ArrayBuffer>): ReadableStream<Uint8Array> {
+export function imageStream(bytes: Uint8Array<ArrayBuffer>): ReadableStream<Uint8Array> {
   let offset = 0
   return new ReadableStream({
     pull(controller) {

@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { moderateImages, moderationRequest, readModerationVerdict } from './moderation'
+import {
+  moderateImages,
+  moderateText,
+  moderationRequest,
+  moderationTextRequest,
+  readModerationVerdict,
+} from './moderation'
 import { base64Of, jpeg, png } from './test-images'
 
 const config = { baseUrl: 'https://mod.example.com/v1', apiKey: 'key', model: 'test-moderation' }
@@ -74,5 +80,23 @@ describe('moderateImages', () => {
     expect(await moderateImages(config, [image], { fetch: refused, signal })).toBe('error')
     const garbled = async () => new Response('not json')
     expect(await moderateImages(config, [image], { fetch: garbled, signal })).toBe('error')
+  })
+})
+
+describe('moderateText', () => {
+  const signal = new AbortController().signal
+
+  test('sends the text as one text input and reads the same verdicts', async () => {
+    const { url, init } = moderationTextRequest(config, '눈썹이 진한')
+    expect(url).toBe('https://mod.example.com/v1/moderations')
+    expect(JSON.parse(init.body as string)).toEqual({
+      model: 'test-moderation',
+      input: [{ type: 'text', text: '눈썹이 진한' }],
+    })
+    const fetch = async () =>
+      Response.json({ results: [{ flagged: true, categories: { violence: true } }] })
+    expect(await moderateText(config, '아무 말', { fetch, signal })).toBe('flagged')
+    const down = async () => new Response('nope', { status: 503 })
+    expect(await moderateText(config, '아무 말', { fetch: down, signal })).toBe('error')
   })
 })

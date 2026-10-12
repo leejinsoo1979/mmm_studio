@@ -52,7 +52,7 @@ const EXTENSION: Record<AiPhotoImageType, string> = {
   'image/png': 'png',
 }
 
-const GEMINI_SAFETY = [
+export const GEMINI_SAFETY = [
   'HARM_CATEGORY_SEXUALLY_EXPLICIT',
   'HARM_CATEGORY_HARASSMENT',
   'HARM_CATEGORY_HATE_SPEECH',

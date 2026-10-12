@@ -35,6 +35,24 @@ export function moderationRequest(
   }
 }
 
+/** A user's own words (AI 인물's 자유 설명) through the same `/moderations`, as text. */
+export function moderationTextRequest(
+  config: AiPhotoModerationConfig,
+  text: string,
+): { url: string; init: RequestInit } {
+  return {
+    url: `${config.baseUrl}/moderations`,
+    init: {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
+      },
+      body: JSON.stringify({ model: config.model, input: [{ type: 'text', text }] }),
+    },
+  }
+}
+
 /** Flagged when any result is flagged or names sexual content involving minors. */
 export function readModerationVerdict(json: unknown): ModerationVerdict {
   const results = (json as { results?: unknown } | null)?.results
@@ -46,13 +64,10 @@ export function readModerationVerdict(json: unknown): ModerationVerdict {
   return 'clear'
 }
 
-/** One image checked; any network or HTTP failure reads as 'error'. */
-export async function moderateImage(
-  config: AiPhotoModerationConfig,
-  image: AiPhotoImage,
+async function moderate(
+  { url, init }: { url: string; init: RequestInit },
   options: ModerationOptions,
 ): Promise<ModerationVerdict> {
-  const { url, init } = moderationRequest(config, image)
   try {
     const response = await options.fetch(url, {
       ...init,
@@ -67,6 +82,24 @@ export async function moderateImage(
   } catch {
     return 'error'
   }
+}
+
+/** One image checked; any network or HTTP failure reads as 'error'. */
+export function moderateImage(
+  config: AiPhotoModerationConfig,
+  image: AiPhotoImage,
+  options: ModerationOptions,
+): Promise<ModerationVerdict> {
+  return moderate(moderationRequest(config, image), options)
+}
+
+/** One text checked; any network or HTTP failure reads as 'error'. */
+export function moderateText(
+  config: AiPhotoModerationConfig,
+  text: string,
+  options: ModerationOptions,
+): Promise<ModerationVerdict> {
+  return moderate(moderationTextRequest(config, text), options)
 }
 
 /** Every image checked in parallel: flagged if any is, else error if any failed. */
