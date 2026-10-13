@@ -26,10 +26,16 @@ export function loadBaseForTests(gender: AvatarGender): Promise<BaseBody> {
       basemesh: buffer(`mpfb-base-${gender}.basemesh.bin`),
       meta: JSON.parse(read(`mpfb-base-${gender}.json`).toString()),
       landmarks: JSON.parse(read(`mpfb-base-${gender}.landmarks.json`).toString()),
-      targets: readFaceTargets(
-        JSON.parse(read('mpfb-face-targets.json').toString()),
-        buffer('mpfb-face-targets.bin'),
-      ),
+      targets: [
+        ...readFaceTargets(
+          JSON.parse(read('mpfb-face-targets.json').toString()),
+          buffer('mpfb-face-targets.bin'),
+        ),
+        ...readFaceTargets(
+          JSON.parse(read(`mpfb-head-shapes-${gender}.json`).toString()),
+          buffer(`mpfb-head-shapes-${gender}.bin`),
+        ),
+      ],
     })
     loaded.set(gender, found)
   }

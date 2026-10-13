@@ -76,3 +76,22 @@ README).
   skin. Only vertex indices and weights of the CC0 base mesh; no face data
   of any person.
 - Licence: CC0 1.0, as the base bodies.
+
+## mpfb-head-shapes-male.bin/.json, mpfb-head-shapes-female.bin/.json
+
+- What: the principal shapes of MakeHuman heads, for fitting a head to
+  photos (사진으로 실사 아바타): 300 adult bodies per base, their macro
+  sliders (age, weight, muscle, height, proportions, African / Asian /
+  Caucasian mix) drawn at random, each head put on the base body's head by a
+  similarity, and the main directions of how they differ kept (12 for the
+  man, 11 for the woman; 99.5 % of the differences), each scaled to one
+  standard deviation. They move the skull, the ears and the face together,
+  as people's heads differ. Same compact layout as `mpfb-face-targets.*`.
+- Source: MPFB2, https://github.com/makehumancommunity/mpfb2 (v2.0.18,
+  commit `d0a32e57`): its base mesh and macro targets, through Blender as a
+  Python module. Made by `scripts/photo-avatar/make-head-shapes.py --count
+  300 --seed 1` and `scripts/photo-avatar/head-shapes.py --most 12 --keep
+  0.995`. sha256: male `.bin` `897a1878bbd49b75069c4525f4dad16ab25b13184000473e5c6b1b85274cb22b`,
+  female `.bin` `32bd85cfb2e2f8262f154980ce104ff1607484950e78c09b9829763e2ac4b23a`.
+- Licence: CC0 1.0, as MPFB2's assets (its LICENSE.md, section C). No face
+  data of any person.

@@ -12,6 +12,8 @@ export const baseFileUrls = (gender: AvatarGender, root = PHOTO_BASE_URL) => ({
   landmarks: `${root}/mpfb-base-${gender}.landmarks.json`,
   targetIndex: `${root}/mpfb-face-targets.json`,
   targetData: `${root}/mpfb-face-targets.bin`,
+  shapeIndex: `${root}/mpfb-head-shapes-${gender}.json`,
+  shapeData: `${root}/mpfb-head-shapes-${gender}.bin`,
 })
 
 const loaded = new Map<string, Promise<BaseBody>>()
@@ -32,15 +34,24 @@ export function loadBaseBody(
       return response
     }
     found = (async () => {
-      const [glb, meta, basemesh, landmarks, index, data] = await Promise.all([
-        get(urls.glb).then((r) => r.arrayBuffer()),
-        get(urls.meta).then((r) => r.json() as Promise<BaseMeta>),
-        get(urls.basemesh).then((r) => r.arrayBuffer()),
-        get(urls.landmarks).then((r) => r.json() as Promise<LandmarkMap>),
-        get(urls.targetIndex).then((r) => r.json() as Promise<FaceTargetIndex>),
-        get(urls.targetData).then((r) => r.arrayBuffer()),
-      ])
-      return readBaseBody({ glb, meta, basemesh, landmarks, targets: readFaceTargets(index, data) })
+      const [glb, meta, basemesh, landmarks, index, data, shapeIndex, shapeData] =
+        await Promise.all([
+          get(urls.glb).then((r) => r.arrayBuffer()),
+          get(urls.meta).then((r) => r.json() as Promise<BaseMeta>),
+          get(urls.basemesh).then((r) => r.arrayBuffer()),
+          get(urls.landmarks).then((r) => r.json() as Promise<LandmarkMap>),
+          get(urls.targetIndex).then((r) => r.json() as Promise<FaceTargetIndex>),
+          get(urls.targetData).then((r) => r.arrayBuffer()),
+          get(urls.shapeIndex).then((r) => r.json() as Promise<FaceTargetIndex>),
+          get(urls.shapeData).then((r) => r.arrayBuffer()),
+        ])
+      return readBaseBody({
+        glb,
+        meta,
+        basemesh,
+        landmarks,
+        targets: [...readFaceTargets(index, data), ...readFaceTargets(shapeIndex, shapeData)],
+      })
     })()
     found.catch(() => loaded.delete(key))
     loaded.set(key, found)

@@ -44,10 +44,11 @@ import {
  * it — so that it is the person's shape seen from any side, not a mask that
  * matches only from the front.
  *
- * One shared face shape (MPFB's face targets, then smooth fields of bumps
- * along the skin's normals: one over the face, a finer one down the
- * profile) and a camera per photo are solved together, by damped
- * Gauss–Newton, from:
+ * One shared head shape (the principal shapes of people's heads, which move
+ * the skull, the ears and the face together as heads differ; MPFB's face
+ * targets; then smooth fields of bumps along the skin's normals: one over
+ * the face, a finer one down the profile) and a camera per photo are solved
+ * together, by damped Gauss–Newton, from:
  * - MediaPipe's landmarks as fixed points on the skin, in every photo that
  *   has them, each counting less the further the face is turned (MediaPipe
  *   draws a turned face's points towards its average face); the points it
@@ -193,6 +194,12 @@ const SIDE_VIEW = (25 * Math.PI) / 180
 const DEPTH_PRIOR_FRONT = 60
 const DEPTH_PRIOR_SIDE = 3
 /**
+ * How strongly a principal head shape's weight is held to 0 (in standard deviations of people's
+ * heads, as one measurement), and how far it may go.
+ */
+const SHAPE_PRIOR = 1
+const SHAPE_RANGE = 3
+/**
  * How far the nose's tip stands ahead of its base in depth, as a share of the pupils' distance:
  * adults' noses project 14–21 mm, about a quarter of it, the base heads' 10–11 mm. A front photo
  * can't see it, so with no view from the side the nose is held to people's.
@@ -253,7 +260,10 @@ function depthGram(model: HeadModel): Float64Array {
     for (let a = start; a < end; a++) {
       const za = model.basisDelta[a * 3 + 2]! * 1000
       const ia = model.basisTarget[a]!
+      // The principal shapes bring their own depth with their front: people's, not the base head's.
+      if (model.targetShape[ia]) continue
       for (let b = start; b < end; b++) {
+        if (model.targetShape[model.basisTarget[b]!]) continue
         const at = ia * nT + model.basisTarget[b]!
         gram[at] = gram[at]! + za * model.basisDelta[b * 3 + 2]! * 1000
       }
@@ -755,6 +765,9 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
   const nT = model.targetNames.length
   const nV = model.vertices.length
   const multi = views.length > 1
+  /** Each target's weight's range: a face target's 0 to 1, a principal shape's ± SHAPE_RANGE. */
+  const lowest = Float64Array.from(model.targetShape, (shape) => (shape ? -SHAPE_RANGE : 0))
+  const highest = Float64Array.from(model.targetShape, (shape) => (shape ? SHAPE_RANGE : 1))
   const prepared: Prepared[] = views.map((view) => ({
     view,
     sdf: view.mask ? signedDistanceField(view.mask, view.width, view.height, 127) : null,
@@ -823,8 +836,8 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
     const upper = new Float64Array(n).fill(Number.POSITIVE_INFINITY)
     if (layout.shape >= 0) {
       for (let j = 0; j < nT; j++) {
-        lower[layout.shape + j] = -coefficients[j]!
-        upper[layout.shape + j] = 1 - coefficients[j]!
+        lower[layout.shape + j] = lowest[j]! - coefficients[j]!
+        upper[layout.shape + j] = highest[j]! - coefficients[j]!
       }
     }
     const rhs = g.map((value) => -value)
@@ -839,7 +852,10 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
     }
     if (layout.shape >= 0) {
       for (let j = 0; j < nT; j++) {
-        coefficients[j] = Math.min(1, Math.max(0, coefficients[j]! + delta[layout.shape + j]!))
+        coefficients[j] = Math.min(
+          highest[j]!,
+          Math.max(lowest[j]!, coefficients[j]! + delta[layout.shape + j]!),
+        )
       }
     }
     if (layout.field >= 0) {
@@ -878,7 +894,9 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
   const priors = (normal: Normal, layout: Layout) => {
     const at = (base: number, offset: number) => (base < 0 ? -1 : base + offset)
     for (let j = 0; j < nT; j++) {
-      const w = ((model.targetScale[j]! * 1000) / shapeSigma) ** 2
+      const w = model.targetShape[j]
+        ? SHAPE_PRIOR
+        : ((model.targetScale[j]! * 1000) / shapeSigma) ** 2
       normal.prior(at(layout.shape, j), coefficients[j]!, 0, w)
     }
     for (const [a, b] of model.mirrored) {

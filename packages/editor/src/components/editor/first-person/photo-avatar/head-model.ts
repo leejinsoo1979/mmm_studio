@@ -3,10 +3,11 @@ import type { Vec3 } from './linalg'
 /**
  * The head a photo is fitted to, as plain data (it crosses to a worker):
  * the base body's head and neck from MakeHuman's base mesh, the face
- * targets that reshape it (MPFB's, CC0), where MediaPipe's 478 landmarks
- * sit on it, and a smooth field of bumps along its normals for what the
- * targets can't say. Positions are glTF metres (+y up, the face towards +z,
- * the subject's left +x).
+ * targets that reshape it (MPFB's, CC0), the principal shapes of people's
+ * whole heads (skull, ears and face together), where MediaPipe's 478
+ * landmarks sit on it, and a smooth field of bumps along its normals for
+ * what the targets can't say. Positions are glTF metres (+y up, the face
+ * towards +z, the subject's left +x).
  */
 
 /** One face target as shipped: base mesh vertex indices and their deltas (metres). */
@@ -65,6 +66,11 @@ export type HeadModel = {
   /** The targets the fit may use, by name, and each one's RMS movement (m). */
   targetNames: string[]
   targetScale: Float32Array
+  /**
+   * Which targets are principal head shapes (group `shape`, mpfb-head-shapes-*.json): weighed
+   * either way, one standard deviation of people's heads at ±1, where a face target runs 0 to 1.
+   */
+  targetShape: Uint8Array
   /** Per region vertex, the targets moving it: CSR offsets into `basisTarget` / `basisDelta` (xyz). */
   basisStart: Uint32Array
   basisTarget: Uint16Array
@@ -190,6 +196,7 @@ export function buildHeadModel({
     }
   }
   const names = used.map((target) => target.name)
+  const targetShape = Uint8Array.from(used, (target) => (target.group === 'shape' ? 1 : 0))
   const mirrored: [number, number][] = []
   names.forEach((name, j) => {
     if (!name.startsWith('l-')) return
@@ -230,6 +237,7 @@ export function buildHeadModel({
     normals,
     targetNames: names,
     targetScale,
+    targetShape,
     basisStart,
     basisTarget,
     basisDelta,

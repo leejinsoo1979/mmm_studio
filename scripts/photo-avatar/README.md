@@ -173,3 +173,18 @@ Regenerate the fixtures with `--fixtures` whenever the app changes what it reads
 - **LPS has no real size.** Its scale is a guess, so its scale check is not scored (`·`).
 - **Some checks need a person's eye** and are marked `·`: whether the forehead not reading as skin
   is a fringe, and a hair class where the head's label is unset.
+
+## Head shapes
+
+The fit's principal head shapes (`apps/editor/public/characters/photoreal/mpfb-head-shapes-*`) are
+made from MakeHuman bodies whose macro sliders are drawn at random, with the same Blender-as-a-module
+setup as the MPFB heads:
+
+```bash
+BLENDER_USER_RESOURCES=$(mktemp -d) python scripts/photo-avatar/make-head-shapes.py \
+  --mpfb mpfb2/src/mpfb --repo . --out <folder> --count 300 --seed 1
+python scripts/photo-avatar/head-shapes.py --heads <folder> --repo .
+```
+
+The second step is plain numpy and rewrites the shipped files; with the same heads it gives the same
+bytes.
