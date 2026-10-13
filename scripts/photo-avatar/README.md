@@ -30,6 +30,9 @@ bun scripts/photo-avatar/bench.ts --set tuning --configs five,three,single,pertu
 
 # Held-out heads, named (verifiers only: see "Held-out pool")
 bun scripts/photo-avatar/bench.ts --heldout rocketbox:Business_Male_03,mpfb:101
+
+# The hair library's styles on both base bodies at rest (no photos): class, colour, holes
+bun scripts/photo-avatar/bench.ts --hair-styles
 ```
 
 | flag | meaning |
@@ -41,6 +44,8 @@ bun scripts/photo-avatar/bench.ts --heldout rocketbox:Business_Male_03,mpfb:101
 | `--out <dir>` | where reports go (default `<cache>/out/tuning` or `<cache>/out/heldout`) |
 | `--cache <dir>` | the bench's cache (or `BENCH_CACHE`). It holds the MPFB and scan heads, the bundled page, the Chrome profile and the clips. Default is `$TMPDIR/photo-avatar-bench`. |
 | `--fixtures` | write `__bench__/fixtures/<head>.json` for redistributable tuning heads |
+| `--hair-styles` | instead of heads: every style of the hair library (`apps/editor/public/characters/photoreal/hair`) and a bald head, on both base bodies at rest, through the hair probes below; `styles.md` and `styles.json` in `--out` |
+| `--styles a,b` | with `--hair-styles`: only these, by `<style>-<body>` (`short02-male`, `bald-female`) |
 
 Environment:
 - `BENCH_DISPLAY`, `BENCH_CDP` and `BENCH_HTTP` set the Xvfb display, the Chrome DevTools port and
@@ -109,6 +114,24 @@ them. Only a verifier runs `--heldout`, and it never writes fixtures. The pool:
   and `mpfb-truth.ts`. These seeds draw random macros and face targets.
 - **Scans:** `scan:<name>`. Put `<cache>/scans/<file>` with `<name>.json` beside it, giving
   `{file, map?, gender, scale, absoluteScale, hair?, source, licence}`. Scans stay in the cache.
+
+### Hair (G7)
+
+- **Class.** From the avatar's hair meshes (`Hair`) at rest: bald (none), buzz (every hair vertex
+  within 6 mm of the skin's surface), short (ending above the earlobes, 6 cm under the eyes),
+  medium (above the chin, 13 cm under), long; long hair gathered within 5 cm of the midline at the
+  back is long-tied.
+- **Colour.** The median of the avatar's `hair_color` picture (alpha over half) against the
+  truth's hair texture (or the hair painted on its scalp).
+- **Holes.** From 8 directions (front, both sides, back, both back quarters, top, under the
+  nape) in idle, walk and wave: the share of the scalp's visible pixels (crown 9 cm over the eyes,
+  the back of the head above 2 cm under them) showing skin or the background through the hair, its
+  cards cut by their alpha. Each view is saved (`hair/<pose>-<view>.jpg`) with its hole map
+  (`hair/holes-<pose>-<view>.png`: scalp grey, holes red where skin shows, orange where it shows
+  in one of the pixel's four samples only, yellow where the background does). Each view's
+  `singleSample` share counts the orange ones. SwiftShader shows a surface seen edge on through
+  a shell a few millimetres out in one sample now and then: two concentric spheres 2 mm apart
+  give 13 such pixels of 17,559 (4 mm: 4, 8 mm: 3), all along the inner sphere's outline.
 
 ## Fixture tests
 

@@ -474,7 +474,7 @@ async function loadTruth(spec: HeadSpec) {
     triangles: triangles.length / 3,
     pivot: pivot.toArray(),
     hairAlbedo: truth.hair.albedo,
-    hairClass: hairClass(truth.model, hair.filter((m) => m.visible), pivot, scale),
+    hairClass: hairClass(truth.model, hair.filter((m) => m.visible), pivot, { positions, triangles }, scale),
     bones: bones.size,
   }
 }
@@ -595,7 +595,8 @@ async function liftLandmarks(url: string, shot: ShotSpec) {
 
 type Built = {
   glb: Uint8Array
-  report: AvatarJobReport
+  /** The worker's report (null for a file made outside the page: see adopt). */
+  report: AvatarJobReport | null
   base: BaseBody
   positions: Float64Array
   url: string
@@ -702,6 +703,7 @@ async function build({
     })),
     lightFit: result.report.lightFit,
     photoShare: result.report.photoShare,
+    hair: result.report.hair,
     jobSeconds: result.report.seconds,
   }
 }
@@ -940,7 +942,7 @@ async function likeness(name: string, shots: ShotSpec[], urls: string[]) {
   const results = []
   for (let k = 0; k < shots.length; k++) {
     const shot = shots[k]!
-    const camera = b.report.cameras[k]!
+    const camera = b.report!.cameras[k]!
     setSize(camera.width, camera.height)
     // The photo's light, kept where it was against its camera.
     const { pivot, position, turn, camera: trueCamera } = posed(shot)
@@ -1172,7 +1174,7 @@ async function textureSkin(name: string) {
     balance,
     neckSeam: seam.length ? { mean: seam.reduce((s, x) => s + x, 0) / seam.length, p95: seam[Math.floor(seam.length * 0.95)]!, count: seam.length } : null,
     foreheadNotSkin: all ? far / all : Number.NaN,
-    photoShare: b.report.photoShare,
+    photoShare: b.report?.photoShare ?? Number.NaN,
   }
 }
 
@@ -1191,17 +1193,70 @@ function medianOfTexels(image: ImageData, uvs: [number, number][]): Rgb | null {
 // ---------------------------------------------------------------------------------------------
 // Hair (G7), eyes and expression (G8)
 
+/** A point's distance (m) to a triangle (Ericson, Real-Time Collision Detection 5.1.5). */
+function triangleDistance(p: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) {
+  const triangle = new THREE.Triangle(a, b, c)
+  const closest = new THREE.Vector3()
+  triangle.closestPointToPoint(p, closest)
+  return closest.distanceTo(p)
+}
+
+/** How far points are from a skin's surface (its triangles), within a reach, on a 1 cm grid. */
+function skinDistances(skin: { positions: Float32Array; triangles: Uint32Array }) {
+  const cell = 0.01
+  const grid = new Map<string, number[]>()
+  const { positions, triangles } = skin
+  const at = (i: number) => new THREE.Vector3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2])
+  for (let t = 0; t < triangles.length; t += 3) {
+    const box = new THREE.Box3().setFromPoints([at(triangles[t]!), at(triangles[t + 1]!), at(triangles[t + 2]!)])
+    for (let x = Math.floor(box.min.x / cell); x <= Math.floor(box.max.x / cell); x++)
+      for (let y = Math.floor(box.min.y / cell); y <= Math.floor(box.max.y / cell); y++)
+        for (let z = Math.floor(box.min.z / cell); z <= Math.floor(box.max.z / cell); z++) {
+          const key = `${x},${y},${z}`
+          const list = grid.get(key)
+          if (list) list.push(t)
+          else grid.set(key, [t])
+        }
+  }
+  return (p: THREE.Vector3, within: number) => {
+    const reach = Math.ceil(within / cell)
+    const [gx, gy, gz] = [Math.floor(p.x / cell), Math.floor(p.y / cell), Math.floor(p.z / cell)]
+    let best = Number.POSITIVE_INFINITY
+    const seen = new Set<number>()
+    for (let dx = -reach; dx <= reach; dx++)
+      for (let dy = -reach; dy <= reach; dy++)
+        for (let dz = -reach; dz <= reach; dz++)
+          for (const t of grid.get(`${gx + dx},${gy + dy},${gz + dz}`) ?? []) {
+            if (seen.has(t)) continue
+            seen.add(t)
+            best = Math.min(best, triangleDistance(p, at(triangles[t]!), at(triangles[t + 1]!), at(triangles[t + 2]!)))
+          }
+    return best
+  }
+}
+
+/** A buzz cut's hair stays this near the skull (m). */
+const BUZZ_REACH = 0.006
+
 /**
  * A hair class from hair meshes (of a model at rest): none, buzz (within
- * 6 mm of the skull), short (ending above the earlobes), medium (above the
- * chin), long; and whether long hair hangs loose or is tied (gathered within
- * 5 cm of the midline at the back).
+ * 6 mm of the skull: every hair vertex that near the surface of `skin`, the
+ * head's skin in the same frame), short (ending above the earlobes), medium
+ * (above the chin), long; and whether long hair hangs loose or is tied
+ * (gathered within 5 cm of the midline at the back).
  */
-function hairClass(root: THREE.Object3D, meshes: THREE.Mesh[], pivot: THREE.Vector3, scale = 1) {
-  if (!meshes.length) return { length: 'bald', lowest: null as number | null, spread: null as number | null }
+function hairClass(
+  root: THREE.Object3D,
+  meshes: THREE.Mesh[],
+  pivot: THREE.Vector3,
+  skin: { positions: Float32Array; triangles: Uint32Array },
+  scale = 1,
+) {
+  if (!meshes.length) return { length: 'bald', lowest: null as number | null, spread: null as number | null, offSkull: null as number | null }
   root.updateMatrixWorld(true)
+  const nearSkin = skinDistances(skin)
   let lowest = Number.POSITIVE_INFINITY
-  let farthest = 0
+  let offSkull = 0
   let wide = 0
   let count = 0
   const v = new THREE.Vector3()
@@ -1214,21 +1269,45 @@ function hairClass(root: THREE.Object3D, meshes: THREE.Mesh[], pivot: THREE.Vect
       // Lashes and brows sit in front of the eyes: not hair.
       if (v.z > pivot.z - 0.03 && v.y < pivot.y + 0.04) continue
       lowest = Math.min(lowest, v.y - pivot.y)
-      farthest = Math.max(farthest, v.distanceTo(pivot))
+      if (offSkull <= BUZZ_REACH) offSkull = Math.max(offSkull, nearSkin(v, BUZZ_REACH))
       if (v.y - pivot.y < -0.1) {
         count++
         if (Math.abs(v.x - pivot.x) > 0.05) wide++
       }
     }
   }
-  if (!Number.isFinite(lowest)) return { length: 'bald', lowest: null, spread: null }
+  if (!Number.isFinite(lowest)) return { length: 'bald', lowest: null, spread: null, offSkull: null }
   // Below the eyes: earlobes ~6 cm, chin ~12 cm.
-  const length = farthest < 0.115 ? 'buzz' : lowest > -0.06 ? 'short' : lowest > -0.13 ? 'medium' : 'long'
+  const length = offSkull <= BUZZ_REACH ? 'buzz' : lowest > -0.06 ? 'short' : lowest > -0.13 ? 'medium' : 'long'
   return {
     length: length === 'long' && count > 0 && wide / count < 0.2 ? 'long-tied' : length,
     lowest,
     spread: count ? wide / count : null,
+    offSkull: Number.isFinite(offSkull) ? offSkull : null,
   }
+}
+
+/** A loaded avatar's head and body skin at rest (metres, its frame): positions and triangles. */
+function avatarSkin(root: THREE.Object3D) {
+  root.updateMatrixWorld(true)
+  const positions: number[] = []
+  const triangles: number[] = []
+  const v = new THREE.Vector3()
+  root.traverse((o) => {
+    const mesh = o as THREE.SkinnedMesh
+    if (!mesh.isMesh || !/^(Head|Body)_Skin$/.test((mesh.material as THREE.Material).name)) return
+    const offset = positions.length / 3
+    const count = mesh.geometry.attributes.position!.count
+    for (let i = 0; i < count; i++) {
+      if (mesh.isSkinnedMesh) mesh.getVertexPosition(i, v)
+      else v.fromBufferAttribute(mesh.geometry.attributes.position as THREE.BufferAttribute, i)
+      v.applyMatrix4(mesh.matrixWorld)
+      positions.push(v.x, v.y, v.z)
+    }
+    const index = mesh.geometry.index
+    for (let i = 0; i < (index ? index.count : count); i++) triangles.push(offset + (index ? index.getX(i) : i))
+  })
+  return { positions: Float32Array.from(positions), triangles: Uint32Array.from(triangles) }
 }
 
 async function avatarHair(name: string) {
@@ -1242,7 +1321,7 @@ async function avatarHair(name: string) {
   const eyes = b.base.head.frame.eyes
   const image = await glbImage(b.glb, 'hair_color')
   return {
-    class: hairClass(gltf.scene, hair, new THREE.Vector3(...eyes)),
+    class: hairClass(gltf.scene, hair, new THREE.Vector3(...eyes), avatarSkin(gltf.scene)),
     albedo: image ? medianRgb(image.data, (i) => image.data[i * 4 + 3]! > 128) : null,
   }
 }
@@ -1308,7 +1387,7 @@ async function hairHoles(name: string) {
   const holder = new THREE.Group()
   holder.add(model)
   scene.add(holder)
-  truth!.holder.visible = false
+  if (truth) truth.holder.visible = false
   const mixer = new THREE.AnimationMixer(model)
   const flat = (color: string, side: THREE.Side = THREE.DoubleSide) =>
     new THREE.MeshBasicNodeMaterial({ color, side })
@@ -1344,8 +1423,9 @@ async function hairHoles(name: string) {
     ['top', 0, 80],
     ['nape', 180, -35],
   ]
-  const results: { pose: string; view: string; holes: number; scalpPixels: number }[] = []
-  const sheet: string[] = []
+  const results: { pose: string; view: string; holes: number; singleSample: number; scalpPixels: number }[] =
+    []
+  const sheet: { pose: string; view: string; url: string; holes: string }[] = []
   setSize(400, 400)
   const savedBackground = scene.background
   const savedEnvironment = scene.environment
@@ -1399,7 +1479,13 @@ async function hairHoles(name: string) {
       scene.environment = savedEnvironment
       let scalpPixels = 0
       let holes = 0
+      let lone = 0
+      // Where the holes are: the scalp grey, its holes red where skin shows, orange where it
+      // shows in one of the pixel's four samples only, yellow where the background does (a
+      // pixel the hair only partly covers), the rest black.
+      const map = new ImageData(ids.width, ids.height)
       for (let i = 0; i < ids.data.length / 4; i++) {
+        map.data[i * 4 + 3] = 255
         if (scalpImage.data[i * 4]! < 128) continue
         scalpPixels++
         const r = ids.data[i * 4]!
@@ -1407,17 +1493,33 @@ async function hairHoles(name: string) {
         const bl = ids.data[i * 4 + 2]!
         const isHair = r > 128 && g < 100 && bl < 100
         const isOther = bl > 128 && r < 100 && g < 100
-        if (!(isHair || isOther)) holes++
+        const hole = !(isHair || isOther)
+        // Three samples hair, one skin: resolved linear, so a quarter of green reads 137.
+        const single = hole && r > 200 && g > 115 && g < 160 && bl < 60
+        if (hole) holes++
+        if (single) lone++
+        map.data.set(
+          hole ? (single ? [255, 128, 0] : g > 100 ? [255, 0, 0] : [255, 200, 0]) : [90, 90, 90],
+          i * 4,
+        )
       }
-      results.push({ pose, view, holes: scalpPixels ? holes / scalpPixels : Number.NaN, scalpPixels })
-      if (pose === 'idle') {
-        await draw(camera)
-        sheet.push(canvas.toDataURL('image/jpeg', 0.8))
-      }
+      results.push({
+        pose,
+        view,
+        holes: scalpPixels ? holes / scalpPixels : Number.NaN,
+        singleSample: scalpPixels ? lone / scalpPixels : Number.NaN,
+        scalpPixels,
+      })
+      const mapCanvas = document.createElement('canvas')
+      mapCanvas.width = map.width
+      mapCanvas.height = map.height
+      mapCanvas.getContext('2d')!.putImageData(map, 0, 0)
+      await draw(camera)
+      sheet.push({ pose, view, url: canvas.toDataURL('image/jpeg', 0.8), holes: mapCanvas.toDataURL('image/png') })
     }
   }
   scene.remove(holder)
-  truth!.holder.visible = true
+  if (truth) truth.holder.visible = true
   return { results, sheet }
 }
 
@@ -1590,6 +1692,23 @@ async function truthSkinViews() {
   return urls
 }
 
+/** An avatar file made outside the page (a hair style on a base body at rest) taken as a build, for the hair probes. */
+async function adopt(name: string, url: string, gender: Gender) {
+  const glb = new Uint8Array(await (await fetch(url)).arrayBuffer())
+  const base = await loadBaseBody(gender)
+  forget(name)
+  builds.set(name, {
+    glb,
+    report: null,
+    base,
+    positions: await fittedRegion(glb, base),
+    url: URL.createObjectURL(new Blob([glb as Uint8Array<ArrayBuffer>], { type: 'model/gltf-binary' })),
+    views: [],
+    slots: [],
+    gender,
+  })
+}
+
 function forget(name: string) {
   const b = builds.get(name)
   if (b) URL.revokeObjectURL(b.url)
@@ -1618,6 +1737,7 @@ const glbBase64 = (name: string) => toBase64(builds.get(name)!.glb)
   clipFrames,
   webcamCapture,
   fixtureViews,
+  adopt,
   forget,
   glbBase64,
   truthSkinViews,
