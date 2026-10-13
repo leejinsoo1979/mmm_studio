@@ -55,6 +55,16 @@ export function writeGlb(json: GltfJson, bin: Uint8Array): Uint8Array {
   return out
 }
 
+/** A GLB with some of its materials changed (each by its name); everything else kept byte for byte. */
+export function editMaterials(
+  bytes: Uint8Array,
+  edits: Record<string, (material: GltfJson) => void>,
+): Uint8Array {
+  const glb = parseGlb(bytes)
+  for (const material of glb.json.materials ?? []) edits[material.name]?.(material)
+  return writeGlb(glb.json, glb.bin)
+}
+
 /** Every buffer view's bytes, meshopt-compressed ones decoded. */
 export async function bufferViewBytes(glb: Glb): Promise<Uint8Array[]> {
   const views = glb.json.bufferViews ?? []

@@ -1,33 +1,12 @@
-import {
-  type AvatarImages,
-  type BaseBody,
-  baseMeshMoves,
-  buildAvatarGlb,
-  movedPositions,
-} from './base-body'
+import { type AvatarImages, type BaseBody, baseMeshMoves, buildAvatarGlb } from './base-body'
 import type { Camera } from './camera'
-import { landmarkUvs, texelKinds } from './features'
-import { composite, fillVertexColors, pushPull, rasterizeVertexColors, toneGains } from './fill'
+import { toneGains } from './fill'
 import { type FitOptions, type FitResult, type FitView, fitHead } from './fit'
-import { vertexNormals } from './head-model'
+import { editMaterials } from './glb'
 import type { FaceBlendshapes, SegmentMasks } from './segment'
 import { fillTriangles } from './silhouette'
-import {
-  blendViews,
-  delight,
-  depthBuffer,
-  linearRgb,
-  linearToSrgb,
-  matchExposure,
-  median,
-  type PhotoImage,
-  type ProjectedView,
-  projectView,
-  rasterizeUv,
-  srgbToLinear,
-  TEXEL_SKIN,
-  type UvMesh,
-} from './texture'
+import { SKIN_MATERIAL_EDITS, skinTextures } from './skin-texture'
+import { linearToSrgb, median, srgbToLinear } from './texture'
 
 /**
  * A photo avatar made, start to finish, from photos already read (each
@@ -87,9 +66,6 @@ export type AvatarJobResult = {
   fit: FitResult
 }
 
-/** Texels per side the photos are laid at (the face island then holds ≈ 730 photo pixels across). */
-const WORKING = 1024
-
 const hexLinear = (hex: string): [number, number, number] => {
   const n = Number.parseInt(hex.replace('#', ''), 16)
   return [srgbToLinear((n >> 16) & 255), srgbToLinear((n >> 8) & 255), srgbToLinear(n & 255)]
@@ -130,119 +106,25 @@ export async function runAvatarJob({
   progress(0.45, 'texture')
 
   const moves = baseMeshMoves(base, fit.positions)
-  const { headSkin } = base
-  const headPositions = movedPositions(base, headSkin.primitive, moves)
-  const headMesh: UvMesh = {
-    positions: headPositions,
-    normals: vertexNormals(headPositions, headSkin.mesh.triangles, headPositions.length / 3),
-    uvs: headSkin.mesh.uvs,
-    triangles: headSkin.mesh.triangles,
-  }
-  // What hides the head from a photo: the head and the neck and shoulders below it.
-  const occluder = occluderMesh(base, moves)
-  const texels = rasterizeUv(headMesh, WORKING)
-  const kind = texelKinds(texels, landmarkUvs(base.head, headSkin.weld, headSkin.mesh.uvs))
-  const projected: ProjectedView[] = []
-  const lightFit: number[] = []
-  views.forEach((view, k) => {
-    const camera = fit.cameras[k]!
-    const photo: PhotoImage = {
-      width: view.width,
-      height: view.height,
-      rgb: linearRgb(view.rgba, view.width, view.height),
-      mask: view.mask,
-      skin: view.skin,
-    }
-    const seen = projectView(texels, kind, photo, camera, depthBuffer(occluder, camera))
-    lightFit.push(delight(seen, texels, kind, camera).fit)
-    projected.push(seen)
-    progress(0.45 + (0.25 * (k + 1)) / views.length, 'texture')
-  })
-  // The front photo sets the exposure the others are matched to.
-  const front = views.findIndex((view) => view.slot === 'front')
-  const reference = projected[front >= 0 ? front : 0]!
-  for (const view of projected) if (view !== reference) matchExposure(view, reference, kind)
-  const blended = blendViews(projected, WORKING * WORKING)
-
-  // The photos' skin in the tone the texture should hold (the front photo's skin, read on the page).
-  const target = hexLinear(colors.skin)
-  const photoSkin = skinMedian(
-    blended.color,
-    (i) => kind[i] === TEXEL_SKIN && blended.weight[i]! > 0.6,
-  )
-  const photoGains = toneGains(photoSkin, target)
-  for (let i = 0; i < blended.weight.length; i++) {
-    for (let k = 0; k < 3; k++)
-      blended.color[i * 3 + k] = blended.color[i * 3 + k]! * photoGains[k]!
-  }
-  let seenTexels = 0
-  let skinTexels = 0
-  for (let i = 0; i < blended.weight.length; i++) {
-    if (texels.triangle[i]! < 0) continue
-    skinTexels++
-    if (blended.weight[i]! > 0.5) seenTexels++
-  }
-
-  // The skin carried on where no photo saw it.
-  const vertexCount = headPositions.length / 3
-  const vertexColor = new Float32Array(vertexCount * 3)
-  const vertexWeight = new Float32Array(vertexCount)
-  for (let v = 0; v < vertexCount; v++) {
-    const x = Math.min(WORKING - 1, Math.max(0, Math.floor(headMesh.uvs[v * 2]! * WORKING)))
-    const y = Math.min(WORKING - 1, Math.max(0, Math.floor(headMesh.uvs[v * 2 + 1]! * WORKING)))
-    // The best-seen texel around the vertex.
-    let best = -1
-    for (let dy = -2; dy <= 2; dy++) {
-      for (let dx = -2; dx <= 2; dx++) {
-        const px = x + dx
-        const py = y + dy
-        if (px < 0 || py < 0 || px >= WORKING || py >= WORKING) continue
-        const i = py * WORKING + px
-        if (best < 0 || blended.weight[i]! > blended.weight[best]!) best = i
-      }
-    }
-    if (best < 0) continue
-    vertexWeight[v] = kind[best] === TEXEL_SKIN ? blended.weight[best]! : 0
-    for (let k = 0; k < 3; k++) vertexColor[v * 3 + k] = blended.color[best * 3 + k]!
-  }
-  const fillColors = fillVertexColors(headMesh, headSkin.weld, vertexColor, vertexWeight, target)
-  const fill = rasterizeVertexColors(headMesh, fillColors, WORKING)
-  const covered = new Uint8Array(WORKING * WORKING)
-  for (let i = 0; i < covered.length; i++) covered[i] = texels.triangle[i]! >= 0 ? 1 : 0
-  pushPull(fill, covered, WORKING, 3)
-  const seen = new Uint8Array(WORKING * WORKING)
-  for (let i = 0; i < seen.length; i++) seen[i] = blended.weight[i]! > 0 ? 1 : 0
-  pushPull(blended.color, seen, WORKING, 3)
-  const coverage = Float32Array.from(blended.weight)
-  pushPull(coverage, covered, WORKING, 1)
-  progress(0.8, 'texture')
-
-  const images: AvatarImages = new Map()
   const head = await decodeImage(base, 'head_color', codec)
-  const headUv = base.meta.headUV
-  const baseSkin = textureSkinMedian(head, headMesh)
-  const keep = ['mouth', 'sockets']
-    .map((name) => headUv.boxes[name])
-    .filter((box): box is [number, number, number, number] => Boolean(box))
-    // The boxes are v up (Blender's); the texture's rows run down.
-    .map(([u0, v0, u1, v1]) => [u0, 1 - v1, u1, 1 - v0] as [number, number, number, number])
-  const headPixels = composite({
-    base: head.data,
-    size: head.width,
-    gains: toneGains(baseSkin, target),
-    photo: blended.color,
-    coverage,
-    fill,
-    working: WORKING,
-    keep,
-  })
-  images.set('head_color', await codec.encode(headPixels, head.width, head.height, 0.92))
-
   const body = await decodeImage(base, 'body_color', codec)
-  const bodySkin = bodySkinMedian(base, body)
+  const roughness = await decodeImage(base, 'head_roughness', codec)
+  const skin = skinTextures({
+    base,
+    views,
+    cameras: fit.cameras,
+    moves,
+    head,
+    body,
+    roughness,
+    progress: (fraction) => progress(0.45 + 0.4 * fraction, 'texture'),
+  })
+  const images: AvatarImages = new Map()
+  images.set('head_color', await codec.encode(skin.head, head.width, head.height, 0.92))
+  images.set('body_color', await codec.encode(skin.body, body.width, body.height, 0.9))
   images.set(
-    'body_color',
-    await codec.encode(tone(body.data, toneGains(bodySkin, target)), body.width, body.height, 0.9),
+    'head_roughness',
+    await codec.encode(skin.roughness, roughness.width, roughness.height, 0.9),
   )
   if (colors.eyes) {
     const eyes = await decodeImage(base, 'eye_color', codec)
@@ -271,7 +153,10 @@ export async function runAvatarJob({
   }
   const textured = performance.now()
   progress(0.92, 'pack')
-  const glb = buildAvatarGlb(base, moves, images, { dropBrows: true })
+  const glb = editMaterials(
+    buildAvatarGlb(base, moves, images, { dropBrows: true }),
+    SKIN_MATERIAL_EDITS,
+  )
   progress(1, 'pack')
   const done = performance.now()
   return {
@@ -279,8 +164,8 @@ export async function runAvatarJob({
     fit,
     report: {
       views: fit.views,
-      lightFit,
-      photoShare: skinTexels ? seenTexels / skinTexels : 0,
+      lightFit: skin.lightFit,
+      photoShare: skin.photoShare,
       cameras: fit.cameras,
       seconds: {
         fit: (fitted - started) / 1000,
@@ -291,26 +176,6 @@ export async function runAvatarJob({
   }
 }
 
-/** The head's skin and the body's (neck, shoulders) as they stand after `moves`: what hides the face from a camera. */
-function occluderMesh(base: BaseBody, moves: Float64Array): UvMesh {
-  const positions: number[] = []
-  const triangles: number[] = []
-  base.primitives.forEach((p, index) => {
-    if (p.material !== 'Head_Skin' && p.material !== 'Body_Skin') return
-    const moved = movedPositions(base, index, moves)
-    const offset = positions.length / 3
-    for (let i = 0; i < moved.length; i++) positions.push(moved[i]!)
-    for (const i of p.indices) triangles.push(i + offset)
-  })
-  const n = positions.length / 3
-  return {
-    positions: Float32Array.from(positions),
-    normals: new Float32Array(n * 3),
-    uvs: new Float32Array(n * 2),
-    triangles: Uint32Array.from(triangles),
-  }
-}
-
 async function decodeImage(base: BaseBody, name: string, codec: PictureCodec) {
   const { json, bin } = base.glb
   const image = json.images.find((one: { name?: string }) => one.name === name)
@@ -318,16 +183,6 @@ async function decodeImage(base: BaseBody, name: string, codec: PictureCodec) {
   const view = json.bufferViews[image.bufferView]
   const bytes = bin.subarray(view.byteOffset ?? 0, (view.byteOffset ?? 0) + view.byteLength)
   return codec.decode(bytes, image.mimeType)
-}
-
-/** Median linear colour of the texels `use` picks. */
-function skinMedian(color: Float32Array, use: (i: number) => boolean): [number, number, number] {
-  const channels: number[][] = [[], [], []]
-  for (let i = 0; i < color.length / 3; i++) {
-    if (!use(i)) continue
-    for (let k = 0; k < 3; k++) channels[k]!.push(color[i * 3 + k]!)
-  }
-  return channels.map((list) => (list.length ? median(list) : 0.3)) as [number, number, number]
 }
 
 /** Median linear colour of an RGBA image's pixels that `use` picks (every third pixel: plenty). */
@@ -341,38 +196,6 @@ function imageMedian(
     for (let k = 0; k < 3; k++) channels[k]!.push(srgbToLinear(data[i * 4 + k]!))
   }
   return channels.map((list) => (list.length ? median(list) : 0.3)) as [number, number, number]
-}
-
-/** The base head texture's skin: its face island's texels the head covers (cheeks, forehead…). */
-function textureSkinMedian(
-  image: { data: ArrayLike<number>; width: number; height: number },
-  mesh: UvMesh,
-): [number, number, number] {
-  const mask = new Uint8Array(image.width * image.height)
-  const xy = new Float32Array((mesh.uvs.length / 2) * 2)
-  for (let i = 0; i < mesh.uvs.length; i += 2) {
-    xy[i] = mesh.uvs[i]! * image.width
-    xy[i + 1] = mesh.uvs[i + 1]! * image.height
-  }
-  fillTriangles(xy, mesh.triangles, image.width, image.height, mask)
-  return imageMedian(image.data, (i) => mask[i]! > 0)
-}
-
-function bodySkinMedian(
-  base: BaseBody,
-  image: { data: ArrayLike<number>; width: number; height: number },
-) {
-  const p = base.primitives.find((one) => one.material === 'Body_Skin')
-  if (!p) return imageMedian(image.data, () => true)
-  const uv = p.attributes.TEXCOORD_0!.values
-  const xy = new Float32Array(uv.length)
-  for (let i = 0; i < uv.length; i += 2) {
-    xy[i] = uv[i]! * image.width
-    xy[i + 1] = uv[i + 1]! * image.height
-  }
-  const mask = new Uint8Array(image.width * image.height)
-  fillTriangles(xy, p.indices, image.width, image.height, mask)
-  return imageMedian(image.data, (i) => mask[i]! > 0)
 }
 
 /** An RGBA image with per-channel gains (linear), alpha kept; gains clamped to `limit`. */
