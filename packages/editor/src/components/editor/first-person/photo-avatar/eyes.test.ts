@@ -20,7 +20,7 @@ import {
 } from './eyes'
 import { landmarkUvs, ringLandmarks, texelKinds } from './features'
 import { EYES } from './landmark-sets'
-import { rasterizeUv, srgbToLinear, TEXEL_EYE } from './texture'
+import { rasterizeUv, srgbToLinear, TEXEL_EYE, TEXEL_FEATURE, TEXEL_SKIN } from './texture'
 
 const PUBLIC = join(import.meta.dir, '../../../../../../../apps/editor/public/characters/photoreal')
 
@@ -264,6 +264,20 @@ describe('the photos’ lids', () => {
     }
     expect(above).toBeGreaterThan(below)
     expect(below).toBeGreaterThan(0)
+  })
+
+  test('leave the brows to every photo', () => {
+    const uv = landmarkUvs(base.head, base.headSkin.weld, base.headSkin.mesh.uvs)
+    const size = 256
+    const lids = lidTexels(uv, size)
+    // Brows low enough to reach into the oval: every other texel of it, say.
+    const kind = new Uint8Array(size * size).fill(TEXEL_SKIN)
+    for (let i = 0; i < kind.length; i += 2) if (lids[i]) kind[i] = TEXEL_FEATURE
+    const kept = lidTexels(uv, size, kind)
+    let wrong = 0
+    for (let i = 0; i < kept.length; i++) if (kept[i] !== (lids[i] && i % 2 ? 1 : 0)) wrong++
+    expect(wrong).toBe(0)
+    expect(kept.some((v) => v === 1)).toBe(true)
   })
 })
 

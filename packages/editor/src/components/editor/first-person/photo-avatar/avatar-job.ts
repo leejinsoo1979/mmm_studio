@@ -165,7 +165,7 @@ export async function runAvatarJob({
   const texels = rasterizeUv(headMesh, WORKING)
   const landmarkUv = landmarkUvs(base.head, headSkin.weld, headSkin.mesh.uvs)
   const kind = texelKinds(texels, landmarkUv)
-  const lids = lidTexels(landmarkUv, WORKING)
+  const lids = lidTexels(landmarkUv, WORKING, kind)
   const projected: ProjectedView[] = []
   const lightFit: number[] = []
   views.forEach((view, k) => {

@@ -4,7 +4,7 @@ import type { Expression } from './expressions'
 import { ringLandmarks } from './features'
 import { EYES } from './landmark-sets'
 import { fillTriangles } from './silhouette'
-import { linearToSrgb, median, srgbToLinear, type Texels } from './texture'
+import { linearToSrgb, median, srgbToLinear, TEXEL_FEATURE, type Texels } from './texture'
 
 /**
  * The eyes and mouth of a photo avatar, past what the fit and the skin
@@ -40,9 +40,11 @@ const EYE_RINGS = [EYES.slice(0, 16), EYES.slice(16)]
  * The texels (`size` across) of both eyes' lids: an oval about each
  * opening, reaching up past the lid's crease and down over the lower lid.
  * A photo with the eyes shut paints none of them: its closed lid would put
- * the lid's skin, and its crease, where the open eye's lid is not.
+ * the lid's skin, and its crease, where the open eye's lid is not. Given
+ * the texels' kinds (`kind`, texelKinds' at this size), the brows are left
+ * out: shut eyes show them as open ones do, and low brows reach the oval.
  */
-export function lidTexels(landmarkUv: Float32Array, size: number): Uint8Array {
+export function lidTexels(landmarkUv: Float32Array, size: number, kind?: Uint8Array): Uint8Array {
   const out = new Uint8Array(size * size)
   for (const all of EYE_RINGS) {
     const ring = ringLandmarks(landmarkUv, all)
@@ -74,7 +76,8 @@ export function lidTexels(landmarkUv: Float32Array, size: number): Uint8Array {
       const reach = dv < 0 ? up : down
       for (let x = x0; x <= x1; x++) {
         const du = (x + 0.5) / size - cu
-        if ((du / across) ** 2 + (dv / reach) ** 2 <= 1) out[y * size + x] = 1
+        if ((du / across) ** 2 + (dv / reach) ** 2 > 1) continue
+        if (kind?.[y * size + x] !== TEXEL_FEATURE) out[y * size + x] = 1
       }
     }
   }
