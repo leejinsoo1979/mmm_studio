@@ -362,14 +362,23 @@ function hairWeights(
   const joints = new Uint8Array(count * 4)
   const weights = new Uint8Array(count * 4)
   const write = (i: number, sum: Map<number, number>) => {
-    const top = [...sum].sort((a, b) => b[1] - a[1]).slice(0, 4)
+    const top = [...sum]
+      .filter(([, w]) => w > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
     const kept = top.reduce((s, [, w]) => s + w, 0)
-    let left = 255
-    top.forEach(([joint, w], j) => {
-      const q = j === top.length - 1 ? left : Math.round((255 * w) / kept)
+    const exact = top.map(([, w]) => (255 * w) / kept)
+    const bytes = exact.map(Math.floor)
+    // What rounding down leaves goes to the largest remainders: rounded each to the nearest,
+    // two halves would take 256 between them, and the bytes would wrap.
+    let left = 255 - bytes.reduce((s, q) => s + q, 0)
+    const order = top
+      .map((_, j) => j)
+      .sort((a, b) => exact[b]! - bytes[b]! - (exact[a]! - bytes[a]!))
+    for (let k = 0; left > 0; k++, left--) bytes[order[k]!] = bytes[order[k]!]! + 1
+    top.forEach(([joint], j) => {
       joints[i * 4 + j] = joint
-      weights[i * 4 + j] = q
-      left -= q
+      weights[i * 4 + j] = bytes[j]!
     })
   }
   for (let i = 0; i < count; i++) {

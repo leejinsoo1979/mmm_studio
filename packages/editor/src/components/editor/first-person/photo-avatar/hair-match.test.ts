@@ -162,7 +162,6 @@ describe('reading hair off photos', () => {
       const base = await loadBaseForTests(gender)
       const { views, fit } = photographed(base, gender, name)
       const reading = readHair(views, fit, base, SKIN)
-      console.log(gender, name, JSON.stringify(reading.measures), reading.length, reading.tied)
       expect(reading.length).toBe(length as never)
       if (name === 'ponytail01') expect(reading.tied).toBe(true)
       if (name?.startsWith('long01')) expect(reading.tied).toBe(false)

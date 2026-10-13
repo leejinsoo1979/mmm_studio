@@ -69,6 +69,10 @@ describe('dressing an avatar in a hair style', () => {
         ).toBeLessThan(1e-5)
       }
       for (const j of p.attributes.JOINTS_0!.values) expect(j).toBeLessThan(joints)
+      // Every vertex's weights sum to one (as bytes, 255), none of them wrapped past a byte.
+      const weights = p.attributes.WEIGHTS_0!.values
+      for (let i = 0; i < weights.length; i += 4)
+        expect(weights[i]! + weights[i + 1]! + weights[i + 2]! + weights[i + 3]!).toBeCloseTo(1, 5)
       const head = json.skins[0].joints.findIndex((n: number) => json.nodes[n].name === 'Head')
       // Hair on the crown follows the head bone.
       let top = 0
@@ -126,6 +130,8 @@ describe('dressing an avatar in a hair style', () => {
     for (let i = 0; i < joints.length; i++) if (weights[i]! > 0) used.add(names[joints[i]!]!)
     expect([...used].some((name) => /Shoulder/.test(name))).toBe(true)
     expect([...used].filter((name) => /Arm|Hand/.test(name))).toEqual([])
+    for (let i = 0; i < weights.length; i += 4)
+      expect(weights[i]! + weights[i + 1]! + weights[i + 2]! + weights[i + 3]!).toBeCloseTo(1, 5)
   })
 
   test('a bald head has no hair mesh drawn', async () => {
