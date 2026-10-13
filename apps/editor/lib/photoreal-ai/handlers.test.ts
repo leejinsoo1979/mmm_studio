@@ -253,7 +253,11 @@ describe('GET status', () => {
   })
 
   test('with no paid 3D service: available, the browser makes the avatar, and the route builds nothing', async () => {
-    const noService = setup({ AI_AVATAR_CLIENT_ID: '', AI_AVATAR_CLIENT_SECRET: '' })
+    const noService = setup({
+      AI_AVATAR_CLIENT_ID: '',
+      AI_AVATAR_CLIENT_SECRET: '',
+      AI_AVATAR_ENABLED: 'true',
+    })
     expect(await noService.status()).toMatchObject({
       available: true,
       avatarService: false,

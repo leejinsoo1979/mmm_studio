@@ -104,6 +104,7 @@ const ROUTE_ERRORS: ReadonlySet<string> = new Set<PhotorealAiRouteError>([
 
 const UNAVAILABLE_REASONS: ReadonlySet<string> = new Set<PhotorealAiUnavailableReason>([
   'disabled',
+  'not_enabled',
   'not_configured',
   'no_api_key',
   'moderation_required',

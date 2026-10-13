@@ -81,10 +81,23 @@ describe('readPhotorealAiConfig', () => {
       ok: false,
       reason: 'not_configured',
     })
-    // No keys: no paid service, and this browser makes the avatar; one key alone is broken.
-    expect(readPhotorealAiConfig({ ...IMAGE })).toMatchObject({
+    // No keys: no paid service, and this browser makes the avatar, once the owner turns it on
+    // (its pictures cost on the AI 실사 사진 key); one key alone is broken.
+    expect(readPhotorealAiConfig({ ...IMAGE })).toEqual({
+      ok: false,
+      reason: 'not_enabled',
+      part: 'portrait',
+    })
+    expect(readPhotorealAiConfig({ ...IMAGE, AI_AVATAR_ENABLED: 'yes' })).toMatchObject({
+      ok: false,
+      reason: 'not_enabled',
+    })
+    expect(readPhotorealAiConfig({ ...IMAGE, AI_AVATAR_ENABLED: 'true' })).toMatchObject({
       ok: true,
-      config: { service: null },
+      config: {
+        service: null,
+        viewLimits: { userDaily: 4, globalDaily: 25 },
+      },
     })
     expect(readPhotorealAiConfig({ ...IMAGE, AI_AVATAR_CLIENT_ID: 'id' })).toEqual({
       ok: false,

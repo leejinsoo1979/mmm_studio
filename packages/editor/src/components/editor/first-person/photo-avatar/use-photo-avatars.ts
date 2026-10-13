@@ -8,6 +8,7 @@ import {
   photoPhotorealId,
   registerPhotoAvatars,
 } from '../photoreal-catalog'
+import { releaseModel } from './model-cache'
 import {
   deletePhotoAvatar,
   listPhotoAvatars,
@@ -37,6 +38,8 @@ function urlsOf(avatar: StoredPhotoAvatar) {
 }
 
 let listing: Promise<PhotorealCharacter[]> | null = null
+/** Which listing is the latest: an older one still on its way when the store changed is not believed. */
+let generation = 0
 const readers = new Set<() => void>()
 
 type Entry = { id: string; name: string; url: string; thumbnail: string; ai: boolean }
@@ -60,18 +63,27 @@ function register() {
 }
 
 function loadPhotoAvatars(): Promise<PhotorealCharacter[]> {
-  listing ??= listPhotoAvatars()
+  if (listing) return listing
+  const mine = ++generation
+  const made: Promise<PhotorealCharacter[]> = listPhotoAvatars()
     .then((avatars) => {
+      // A listing begun before the store last changed may hold what was deleted since.
+      if (mine !== generation) return loadPhotoAvatars()
       stored = avatars.map(entryOf)
       register()
       return avatars.map((avatar) => findPhotoreal(photoPhotorealId(avatar.gender, avatar.id))!)
     })
-    .catch(() => [])
-  return listing
+    .catch(() => {
+      if (listing === made) listing = null
+      return []
+    })
+  listing = made
+  return made
 }
 
 function reloadPhotoAvatars() {
   listing = null
+  generation++
   for (const read of readers) read()
 }
 
@@ -116,9 +128,19 @@ export function discardPhotoAvatarPreview() {
   register()
 }
 
-/** Keeps a new photo avatar in this browser (the one previewed, or another); its character. */
+/**
+ * Keeps a new photo avatar in this browser (the one previewed, or another);
+ * its character. A failed save throws and leaves a previewed avatar shown,
+ * so it can be saved again.
+ */
 export async function addPhotoAvatar(avatar: StoredPhotoAvatar): Promise<PhotorealCharacter> {
   await savePhotoAvatar(avatar)
+  // The card may have been taken again (of the avatar on the stage) since it was previewed.
+  const urls = objectUrls.get(avatar.id)
+  if (urls) {
+    URL.revokeObjectURL(urls.thumbnail)
+    urls.thumbnail = URL.createObjectURL(avatar.thumbnail)
+  }
   if (preview?.id === avatar.id) preview = null
   reloadPhotoAvatars()
   await loadPhotoAvatars()
@@ -128,7 +150,7 @@ export async function addPhotoAvatar(avatar: StoredPhotoAvatar): Promise<Photore
 function forgetUrls(id: string) {
   const urls = objectUrls.get(id)
   if (!urls) return
-  URL.revokeObjectURL(urls.url)
+  releaseModel(urls.url)
   URL.revokeObjectURL(urls.thumbnail)
   objectUrls.delete(id)
 }

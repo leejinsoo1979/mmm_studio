@@ -261,9 +261,13 @@ export const AI_PORTRAIT_TOKEN_HEADER = 'X-Photoreal-AI-Token'
 /** On a portrait (portraits left today) and a started 3D job (builds left today). */
 export const PHOTOREAL_AI_REMAINING_HEADER = 'X-Photoreal-AI-Remaining'
 
-/** `moderation_required`: the image setup needs `AI_PHOTO_MODERATION_MODEL` and has none. */
+/**
+ * `moderation_required`: the image setup needs `AI_PHOTO_MODERATION_MODEL` and has none.
+ * `not_enabled`: with no paid 3D service, AI 인물 waits for `AI_AVATAR_ENABLED=true`.
+ */
 export type PhotorealAiUnavailableReason =
   | 'disabled'
+  | 'not_enabled'
   | 'not_configured'
   | 'no_api_key'
   | 'moderation_required'

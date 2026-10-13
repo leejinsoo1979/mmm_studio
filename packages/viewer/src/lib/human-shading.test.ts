@@ -1,7 +1,7 @@
 // @ts-expect-error — bun:test is provided by the Bun runtime; viewer does not
 // depend on @types/bun so the import type is unresolved at compile time.
 import { describe, expect, test } from 'bun:test'
-import { AdditiveBlending, type MeshPhysicalMaterial, MeshStandardMaterial } from 'three'
+import { AdditiveBlending, type MeshPhysicalMaterial, MeshStandardMaterial, Texture } from 'three'
 import { humanMaterial, humanSurfaceOf } from './human-shading'
 
 describe('human surfaces', () => {
@@ -35,6 +35,16 @@ describe('human surfaces', () => {
     expect(cornea.depthWrite).toBe(false)
     expect(cornea.blending).toBe(AdditiveBlending)
     expect(cornea.roughness).toBeLessThan(0.1)
+  })
+
+  test('a cornea that carries a picture keeps it, drawn as the wet eye', () => {
+    const map = new Texture()
+    const source = new MeshStandardMaterial({ name: 'Std_Cornea_L', color: 0xffffff, map })
+    const eye = humanMaterial(source, 'cornea') as MeshPhysicalMaterial
+    expect(eye.map).toBe(map)
+    expect(eye.blending).not.toBe(AdditiveBlending)
+    expect(eye.color.getHex()).toBe(0xffffff)
+    expect(eye.clearcoat).toBe(1)
   })
 
   test('an iris drawn apart reflects nothing under its cornea; the rest of the eye stays wet', () => {

@@ -175,6 +175,7 @@ describe('the lists', () => {
   test('each unavailable reason says what to set up, but only in development', () => {
     const reasons = [
       'disabled',
+      'not_enabled',
       'not_configured',
       'no_api_key',
       'moderation_required',
@@ -195,6 +196,7 @@ describe('the lists', () => {
     expect(unavailableCopy('service_not_configured', true)).toContainEqual({
       code: 'AI_AVATAR_SERVICE',
     })
+    expect(unavailableCopy('not_enabled', true)).toContainEqual({ code: 'AI_AVATAR_ENABLED=true' })
   })
 })
 

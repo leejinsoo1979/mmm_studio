@@ -87,8 +87,11 @@ describe('base body', () => {
     const before = await bufferViewBytes(base.glb)
     const after = await bufferViewBytes(glb)
     const shoes = base.primitives.find((p) => p.meshName === 'Outfit_shoes01')!
+    // By name: the file drops the meshes nothing draws, so the others' indices move up.
     const accessor = (g: typeof glb) =>
-      g.json.meshes[shoes.mesh].primitives[shoes.primitive].attributes.POSITION
+      g.json.meshes.find((mesh: { name?: string }) => mesh.name === shoes.meshName).primitives[
+        shoes.primitive
+      ].attributes.POSITION
     expect(Array.from(readAccessor(glb, after, accessor(glb)).values)).toEqual(
       Array.from(readAccessor(base.glb, before, accessor(base.glb)).values),
     )
@@ -104,6 +107,96 @@ describe('base body', () => {
     for (const node of glb.json.nodes) {
       if (node.mesh !== undefined) expect(glb.json.meshes[node.mesh].name).not.toBe('Eyebrows')
     }
+  })
+
+  test('the file holds no bytes nothing reads, and a picture that is not WebP is named plainly', async () => {
+    const coefficients = new Float64Array(base.head.targetNames.length)
+    coefficients[base.head.targetNames.indexOf('nose-scale-depth-incr')] = 1
+    const moves = baseMeshMoves(base, shapePositions(base.head, coefficients))
+    // As Safari's canvas writes them: PNG where a picture has alpha, JPEG where not.
+    const png = { bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9, 9, 9]), mimeType: 'image/png' }
+    const jpeg = { bytes: new Uint8Array([0xff, 0xd8, 0xff, 7]), mimeType: 'image/jpeg' }
+    const out = buildAvatarGlb(
+      base,
+      moves,
+      new Map([
+        ['hair_color', png],
+        ['head_color', jpeg],
+      ]),
+      { dropBrows: true },
+    )
+    const glb = parseGlb(out)
+    const { json } = glb
+
+    const drawn = new Set(json.nodes.flatMap((node: { mesh?: number }) => node.mesh ?? []))
+    expect(drawn.size).toBe(json.meshes.length)
+    expect(json.meshes.some((mesh: { name: string }) => mesh.name === 'Eyebrows')).toBe(false)
+
+    const named = new Set<number>()
+    for (const accessor of json.accessors) {
+      if (accessor.bufferView !== undefined) named.add(accessor.bufferView)
+    }
+    for (const image of json.images) named.add(image.bufferView)
+    expect(named.size).toBe(json.bufferViews.length)
+    let bytes = 0
+    for (const view of json.bufferViews) {
+      const meshopt = view.extensions?.EXT_meshopt_compression
+      bytes += meshopt ? meshopt.byteLength : view.byteLength
+    }
+    // Only the 4-byte alignment between views is left over.
+    expect(glb.bin.byteLength - bytes).toBeLessThan(4 * json.bufferViews.length)
+    // The binary chunk is the buffer padded to 4 bytes.
+    expect(glb.bin.byteLength - json.buffers[0].byteLength).toBeGreaterThanOrEqual(0)
+    expect(glb.bin.byteLength - json.buffers[0].byteLength).toBeLessThan(4)
+
+    const textureOf = (name: string) =>
+      json.textures.find(
+        (texture: { source?: number; extensions?: { EXT_texture_webp?: { source: number } } }) =>
+          json.images[texture.source ?? texture.extensions!.EXT_texture_webp!.source].name === name,
+      )
+    for (const name of ['hair_color', 'head_color']) {
+      const texture = textureOf(name)
+      expect(texture.extensions?.EXT_texture_webp).toBeUndefined()
+      expect(json.images[texture.source].mimeType).toBe(name === 'hair_color' ? 'image/png' : 'image/jpeg')
+    }
+    const hair = json.images[textureOf('hair_color').source]
+    const view = json.bufferViews[hair.bufferView]
+    expect(Array.from(glb.bin.subarray(view.byteOffset, view.byteOffset + view.byteLength))).toEqual(
+      Array.from(png.bytes),
+    )
+    // The others are still WebP, so the extension is still needed.
+    expect(json.extensionsRequired).toContain('EXT_texture_webp')
+
+    // Every mesh still reads (meshopt and all), the moved head where it was put.
+    const primitives = await readPrimitives(glb)
+    const kept = base.primitives.filter((p) => p.meshName !== 'Eyebrows')
+    expect(primitives.map((p) => `${p.meshName}/${p.material}`)).toEqual(
+      kept.map((p) => `${p.meshName}/${p.material}`),
+    )
+    const head = primitives.find((p) => p.material === 'Head_Skin')!
+    const expected = movedPositions(base, base.headSkin.primitive, moves)
+    const values = head.attributes.POSITION!.values
+    for (let i = 0; i < values.length; i += 3 * 37) {
+      const [x, y, z] = transformPoint4(base.packing, values[i]!, values[i + 1]!, values[i + 2]!)
+      expect(Math.abs(x - expected[i]!)).toBeLessThan(5e-5)
+      expect(Math.abs(y - expected[i + 1]!)).toBeLessThan(5e-5)
+      expect(Math.abs(z - expected[i + 2]!)).toBeLessThan(5e-5)
+    }
+  })
+
+  test('with no WebP picture left, the file needs no WebP', () => {
+    const jpeg = { bytes: new Uint8Array([0xff, 0xd8, 0xff, 7]), mimeType: 'image/jpeg' }
+    const names = base.glb.json.images.map((image: { name: string }) => image.name)
+    const out = buildAvatarGlb(
+      base,
+      new Float64Array(base.basemesh.length),
+      new Map(names.map((name: string) => [name, jpeg])),
+      { dropBrows: false },
+    )
+    const { json } = parseGlb(out)
+    expect(json.extensionsUsed).not.toContain('EXT_texture_webp')
+    expect(json.extensionsRequired).not.toContain('EXT_texture_webp')
+    for (const texture of json.textures) expect(json.images[texture.source].mimeType).toBe('image/jpeg')
   })
 
   test('no moves write the base body’s shape again', async () => {
