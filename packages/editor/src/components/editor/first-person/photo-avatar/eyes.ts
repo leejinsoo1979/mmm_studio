@@ -1,0 +1,517 @@
+import type { AvatarGender } from '../avatar-catalog'
+import { type BaseBody, movedPositions } from './base-body'
+import { EYES } from './landmark-sets'
+import { fillTriangles } from './silhouette'
+import { linearToSrgb, median, srgbToLinear, type Texels } from './texture'
+
+/**
+ * The eyes and mouth of a photo avatar, past what the fit and the skin
+ * give them: which photos show the eyes open (only those may paint the
+ * lids or say what colour the whites are), the eyeball's iris and sclera
+ * in the person's colours, lashes as long and as thick as a man's or a
+ * woman's, the wet pink rims where the lids meet the eye (with the
+ * caruncle in the inner corner) and inside the lips, and teeth and tongue
+ * that read as inside a mouth.
+ */
+
+/** A photo's eyes count as shut above this (MediaPipe's eyeBlink, or the lids' own measure, 0–1). */
+export const SHUT = 0.4
+
+/** What a view says of its eyes: MediaPipe's blendshapes where it read them, else the lids' opening. */
+export type EyeReading = {
+  blendshapes?: Record<string, number> | null
+  blink?: number
+}
+
+/** Whether a photo shows the eyes shut (or nearly): its lids and irises are no measure of open eyes. */
+export function eyesShut(view: EyeReading): boolean {
+  const shapes = view.blendshapes
+  if (shapes && ('eyeBlinkLeft' in shapes || 'eyeBlinkRight' in shapes))
+    return Math.max(shapes.eyeBlinkLeft ?? 0, shapes.eyeBlinkRight ?? 0) > SHUT
+  return (view.blink ?? 0) > SHUT
+}
+
+/** The eyes' openings, each a ring of landmarks (the subject's left, then right). */
+const EYE_RINGS = [EYES.slice(0, 16), EYES.slice(16)]
+
+/**
+ * The texels (`size` across) of both eyes' lids: an oval about each
+ * opening, reaching up past the lid's crease and down over the lower lid.
+ * A photo with the eyes shut paints none of them: its closed lid would put
+ * the lid's skin, and its crease, where the open eye's lid is not.
+ */
+export function lidTexels(landmarkUv: Float32Array, size: number): Uint8Array {
+  const out = new Uint8Array(size * size)
+  for (const ring of EYE_RINGS) {
+    let cu = 0
+    let cv = 0
+    for (const l of ring) {
+      cu += landmarkUv[l * 2]!
+      cv += landmarkUv[l * 2 + 1]!
+    }
+    cu /= ring.length
+    cv /= ring.length
+    let half = 0
+    let tall = 0
+    for (const l of ring) {
+      half = Math.max(half, Math.abs(landmarkUv[l * 2]! - cu))
+      tall = Math.max(tall, Math.abs(landmarkUv[l * 2 + 1]! - cv))
+    }
+    if (!(half > 0 && tall > 0)) continue
+    // The texture's v runs down: the upper lid (to the brow's crease) lies at smaller v.
+    const across = half * 1.45
+    const up = tall * 3.2
+    const down = tall * 2.2
+    const x0 = Math.max(0, Math.floor((cu - across) * size))
+    const x1 = Math.min(size - 1, Math.ceil((cu + across) * size))
+    const y0 = Math.max(0, Math.floor((cv - up) * size))
+    const y1 = Math.min(size - 1, Math.ceil((cv + down) * size))
+    for (let y = y0; y <= y1; y++) {
+      const dv = (y + 0.5) / size - cv
+      const reach = dv < 0 ? up : down
+      for (let x = x0; x <= x1; x++) {
+        const du = (x + 0.5) / size - cu
+        if ((du / across) ** 2 + (dv / reach) ** 2 <= 1) out[y * size + x] = 1
+      }
+    }
+  }
+  return out
+}
+
+/** Iris landmarks: each eye's centre then four points on its rim (the subject's right, then left). */
+const IRISES = [
+  [468, 469, 470, 471, 472],
+  [473, 474, 475, 476, 477],
+] as const
+
+/** Irises smaller than this (px) are too few pixels to read. */
+const MIN_IRIS = 3
+/** More saturated than this ((max − min) / max) is lid, lash or iris, not the white of the eye. */
+const MAX_WHITE_SATURATION = 0.25
+/** A turned face shows one white foreshortened and the other in the nose's shadow. */
+const MAX_WHITES_YAW = (25 * Math.PI) / 180
+
+type WhitesView = EyeReading & {
+  width: number
+  height: number
+  rgba: ArrayLike<number>
+  landmarks: Float32Array | null
+  yaw: number
+}
+
+/**
+ * The whites of the eyes as the photos show them (linear RGB): the lighter
+ * half of the near-grey pixels between the lids round each iris, less
+ * their brightest tenth (the light's glints), over every photo facing the
+ * camera with its eyes open. Null when no photo shows enough of them.
+ */
+export function photoWhites(views: readonly WhitesView[]): [number, number, number] | null {
+  const samples: number[][] = [[], [], []]
+  for (const view of views) {
+    if (!view.landmarks || eyesShut(view) || Math.abs(view.yaw) > MAX_WHITES_YAW) continue
+    const at = (l: number): [number, number] => [view.landmarks![l * 2]!, view.landmarks![l * 2 + 1]!]
+    const found: number[] = []
+    IRISES.forEach(([centre, ...rim], k) => {
+      const c = at(centre)
+      const radius = rim.reduce((s, l) => s + Math.hypot(at(l)[0] - c[0], at(l)[1] - c[1]), 0) / 4
+      if (!(radius >= MIN_IRIS)) return
+      // The subject's right iris (468) sits in the right eye's opening (EYE_RINGS[1]).
+      const ring = EYE_RINGS[1 - k]!.map(at)
+      const mask = new Uint8Array(view.width * view.height)
+      const xy = ring.flat()
+      const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length
+      const cy = ring.reduce((s, p) => s + p[1], 0) / ring.length
+      const triangles: number[] = []
+      for (let i = 0; i < ring.length; i++) triangles.push(ring.length, i, (i + 1) % ring.length)
+      fillTriangles([...xy, cx, cy], triangles, view.width, view.height, mask)
+      const x0 = Math.max(0, Math.floor(c[0] - 3.5 * radius))
+      const x1 = Math.min(view.width - 1, Math.ceil(c[0] + 3.5 * radius))
+      const y0 = Math.max(0, Math.floor(c[1] - 2 * radius))
+      const y1 = Math.min(view.height - 1, Math.ceil(c[1] + 2 * radius))
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const i = y * view.width + x
+          if (!mask[i] || Math.hypot(x + 0.5 - c[0], y + 0.5 - c[1]) < 1.15 * radius) continue
+          const r = view.rgba[i * 4]!
+          const g = view.rgba[i * 4 + 1]!
+          const b = view.rgba[i * 4 + 2]!
+          const top = Math.max(r, g, b)
+          if (top - Math.min(r, g, b) > MAX_WHITE_SATURATION * top) continue
+          found.push(i)
+        }
+      }
+    })
+    if (found.length < 12) continue
+    const light = (i: number) =>
+      0.2126 * view.rgba[i * 4]! + 0.7152 * view.rgba[i * 4 + 1]! + 0.0722 * view.rgba[i * 4 + 2]!
+    found.sort((a, b) => light(a) - light(b))
+    for (const i of found.slice(Math.floor(found.length / 2), Math.floor(found.length * 0.9)))
+      for (let k = 0; k < 3; k++) samples[k]!.push(srgbToLinear(view.rgba[i * 4 + k]!))
+  }
+  if (samples[0]!.length < 12) return null
+  return samples.map((s) => median(s)) as [number, number, number]
+}
+
+/** How light (linear) a sclera may be made: no paler than a living one, no darker than one in shade. */
+const SCLERA_LIGHT: [number, number] = [0.38, 0.62]
+/** Most a sclera's tint may lean from grey ((max − min) / max, linear). */
+const SCLERA_TINT = 0.14
+
+/**
+ * The sclera's colour (linear) from the photos' whites, taken to the
+ * texture's scale by the gains that took the photos' skin to the skin's
+ * colour, then held to a living eye's range (lightness and tint).
+ */
+export function scleraColour(
+  whites: [number, number, number],
+  gains: readonly number[],
+): [number, number, number] {
+  const toned = whites.map((c, k) => c * gains[k]!) as [number, number, number]
+  const light = 0.2126 * toned[0] + 0.7152 * toned[1] + 0.0722 * toned[2]
+  const scale = Math.min(SCLERA_LIGHT[1], Math.max(SCLERA_LIGHT[0], light)) / Math.max(light, 1e-4)
+  const out = toned.map((c) => c * scale) as [number, number, number]
+  const top = Math.max(...out)
+  const bottom = Math.min(...out)
+  if (top - bottom > SCLERA_TINT * top) {
+    // Pull the channels toward their lightness until the tint is within reach.
+    const grey = 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2]
+    const keep = (SCLERA_TINT * top) / (top - bottom)
+    for (let k = 0; k < 3; k++) out[k] = grey + (out[k]! - grey) * keep
+  }
+  return out
+}
+
+/** The texels (image pixels) a primitive's UVs cover. */
+function uvMask(p: BaseBody['primitives'][number], width: number, height: number): Uint8Array {
+  const mask = new Uint8Array(width * height)
+  const uv = p.attributes.TEXCOORD_0?.values
+  if (!uv) return mask
+  const xy = new Float32Array(uv.length)
+  for (let i = 0; i < uv.length; i += 2) {
+    xy[i] = uv[i]! * width
+    xy[i + 1] = uv[i + 1]! * height
+  }
+  fillTriangles(xy, p.indices, width, height, mask)
+  return mask
+}
+
+type Image = { data: ArrayLike<number>; width: number; height: number }
+
+const lightOf = (data: ArrayLike<number>, i: number) =>
+  0.2126 * srgbToLinear(data[i * 4]!) +
+  0.7152 * srgbToLinear(data[i * 4 + 1]!) +
+  0.0722 * srgbToLinear(data[i * 4 + 2]!)
+
+/**
+ * The eye texture in the person's colours: each iris texel the iris colour
+ * (linear) scaled by how light it is against the iris's median, so the iris
+ * keeps its fibres and dark rim; each sclera texel toned, channel by
+ * channel, from the texture's sclera to the sclera colour, its veins kept.
+ * Either colour may be null (that part is left as it is).
+ */
+export function eyeTexture(
+  base: BaseBody,
+  image: Image,
+  iris: [number, number, number] | null,
+  sclera: [number, number, number] | null,
+): Uint8ClampedArray {
+  const out = Uint8ClampedArray.from(image.data)
+  const { width, height, data } = image
+  const irisPart = base.primitives.find((one) => one.material === 'Eye_Iris')
+  const scleraPart = base.primitives.find((one) => one.material === 'Eye_Sclera')
+  const irisMask = irisPart ? uvMask(irisPart, width, height) : new Uint8Array(width * height)
+  if (iris && irisPart) {
+    const lights: number[] = []
+    for (let i = 0; i < irisMask.length; i++) if (irisMask[i]) lights.push(lightOf(data, i))
+    const average = Math.max(median(lights), 1e-4)
+    for (let i = 0; i < irisMask.length; i++) {
+      if (!irisMask[i]) continue
+      const scale = lightOf(data, i) / average
+      for (let k = 0; k < 3; k++) out[i * 4 + k] = linearToSrgb(iris[k]! * scale)
+    }
+  }
+  if (sclera && scleraPart) {
+    const mask = uvMask(scleraPart, width, height)
+    const channels: number[][] = [[], [], []]
+    for (let i = 0; i < mask.length; i++) {
+      if (!mask[i] || irisMask[i]) continue
+      for (let k = 0; k < 3; k++) channels[k]!.push(srgbToLinear(data[i * 4 + k]!))
+    }
+    if (channels[0]!.length) {
+      const gains = channels.map((c, k) => sclera[k]! / Math.max(median(c), 1e-4))
+      for (let i = 0; i < mask.length; i++) {
+        if (!mask[i] || irisMask[i]) continue
+        for (let k = 0; k < 3; k++)
+          out[i * 4 + k] = linearToSrgb(srgbToLinear(data[i * 4 + k]!) * gains[k]!)
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * How long a man's and a woman's lashes are against the base's (upper and
+ * lower lids), and how dense they show (their material's alpha): the base's
+ * are long, dense false lashes on both lids, for both.
+ */
+export const LASHES: Record<AvatarGender, { upper: number; lower: number; opacity: number }> = {
+  male: { upper: 0.68, lower: 0.42, opacity: 0.72 },
+  female: { upper: 0.9, lower: 0.55, opacity: 0.9 },
+}
+
+/**
+ * The lashes' positions (metres at rest, after `moves`): each lash drawn
+ * in toward where it grows from the lid (its nearest skin vertex) to a
+ * man's or a woman's length, the lower ones shortest.
+ */
+export function lashPositions(base: BaseBody, moves: Float64Array, gender: AvatarGender) {
+  const index = base.primitives.findIndex((one) => one.material === 'Eyelashes')
+  if (index < 0) return null
+  const restLash = movedPositions(base, index, new Float64Array(base.basemesh.length))
+  const moved = movedPositions(base, index, moves)
+  const skin = base.headSkin.mesh.positions
+  const skinMoved = movedPositions(base, base.headSkin.primitive, moves)
+  const { Left, Right } = base.meta.eyeCentres
+  const { upper, lower } = LASHES[gender]
+  const out = new Float32Array(moved.length)
+  for (let i = 0; i < moved.length / 3; i++) {
+    let best = 0
+    let distance = Number.POSITIVE_INFINITY
+    for (let j = 0; j < skin.length / 3; j++) {
+      const d =
+        (skin[j * 3]! - restLash[i * 3]!) ** 2 +
+        (skin[j * 3 + 1]! - restLash[i * 3 + 1]!) ** 2 +
+        (skin[j * 3 + 2]! - restLash[i * 3 + 2]!) ** 2
+      if (d < distance) {
+        distance = d
+        best = j
+      }
+    }
+    const eye = restLash[i * 3]! > 0 ? Left : Right
+    const f = restLash[i * 3 + 1]! < eye[1] ? lower : upper
+    for (let k = 0; k < 3; k++) {
+      const root = skinMoved[best * 3 + k]!
+      out[i * 3 + k] = root + f * (moved[i * 3 + k]! - root)
+    }
+  }
+  return { index, positions: out }
+}
+
+/**
+ * The teeth and tongue as they read inside a mouth: the base's bright
+ * white enamel and glossy red tongue darkened and warmed (linear gains).
+ */
+export const TEETH_TONE: [number, number, number] = [0.62, 0.58, 0.5]
+export const TONGUE_TONE: [number, number, number] = [0.62, 0.55, 0.55]
+
+export function toneImage(image: Image, gains: readonly number[]): Uint8ClampedArray {
+  const out = Uint8ClampedArray.from(image.data)
+  for (let i = 0; i < image.width * image.height; i++)
+    for (let k = 0; k < 3; k++)
+      out[i * 4 + k] = linearToSrgb(srgbToLinear(image.data[i * 4 + k]!) * gains[k]!)
+  return out
+}
+
+/** How far (m) from an eyeball's surface the lids' rims reach. */
+const RIM_REACH = 0.0025
+/** Skin facing away from the eyeball more than this (the cosine) is the lid's outside, not its rim. */
+const RIM_FACING = 0.35
+/** How far (m) round the opening from its inner corner the caruncle's pink reaches. */
+const CARUNCLE_REACH = 0.005
+/** The rims' and the caruncle's colour against the skin's (linear), and the inside of the lips' against the lips'. */
+const RIM_TINT: [number, number, number] = [0.95, 0.68, 0.66]
+const CARUNCLE_TINT: [number, number, number] = [0.92, 0.5, 0.5]
+const INNER_LIP_TINT: [number, number, number] = [0.55, 0.42, 0.42]
+/** Lip skin facing the camera less than this (its normal's forward part) turns in between the lips. */
+const INNER_LIP_FACING = 0.4
+
+/**
+ * Where the head's skin turns in under the lids and between the lips, at
+ * the texels' size (0–1, feathered): the lids' rims against the eyeballs
+ * (`rim`, with `caruncle` at each inner corner) and the lips' insides
+ * (`innerLip`) — skin no photo sees, which the fill gives the face's
+ * colour, and which on a person is wet and pink.
+ */
+export function innerSurfaces(
+  base: BaseBody,
+  moves: Float64Array,
+  texels: Texels,
+): { rim: Float32Array; caruncle: Float32Array; innerLip: Float32Array; lipFront: Float32Array } {
+  const count = texels.size * texels.size
+  const rim = new Float32Array(count)
+  const caruncle = new Float32Array(count)
+  const innerLip = new Float32Array(count)
+  const lipFront = new Float32Array(count)
+  const eyes = base.primitives.findIndex((one) => one.material === 'Eye_Sclera')
+  const balls: { centre: [number, number, number]; radius: number; inner: number }[] = []
+  if (eyes >= 0) {
+    const moved = movedPositions(base, eyes, moves)
+    for (const side of [1, -1]) {
+      const centre: [number, number, number] = [0, 0, 0]
+      let n = 0
+      for (let i = 0; i < moved.length / 3; i++) {
+        if (moved[i * 3]! * side <= 0) continue
+        for (let k = 0; k < 3; k++) centre[k] = centre[k]! + moved[i * 3 + k]!
+        n++
+      }
+      if (!n) continue
+      for (let k = 0; k < 3; k++) centre[k] = centre[k]! / n
+      let radius = 0
+      for (let i = 0; i < moved.length / 3; i++) {
+        if (moved[i * 3]! * side <= 0) continue
+        radius = Math.max(
+          radius,
+          Math.hypot(
+            moved[i * 3]! - centre[0],
+            moved[i * 3 + 1]! - centre[1],
+            moved[i * 3 + 2]! - centre[2],
+          ),
+        )
+      }
+      balls.push({ centre, radius, inner: side })
+    }
+  }
+  // The lips: between the mouth's corners, a little above and below them.
+  const mouth = mouthBox(base, moves)
+  for (let i = 0; i < count; i++) {
+    if (texels.triangle[i]! < 0) continue
+    const x = texels.position[i * 3]!
+    const y = texels.position[i * 3 + 1]!
+    const z = texels.position[i * 3 + 2]!
+    for (const ball of balls) {
+      const d = Math.hypot(x - ball.centre[0], y - ball.centre[1], z - ball.centre[2])
+      if (z < ball.centre[2] || d > ball.radius + RIM_REACH) continue
+      // The lids' outer skin lies over the eyeball too, facing away from it; the rims turn in.
+      const away =
+        (texels.normal[i * 3]! * (x - ball.centre[0]) +
+          texels.normal[i * 3 + 1]! * (y - ball.centre[1]) +
+          texels.normal[i * 3 + 2]! * (z - ball.centre[2])) /
+        Math.max(d, 1e-6)
+      if (away > RIM_FACING) continue
+      const w = (1 - Math.max(0, d - ball.radius) / RIM_REACH) * Math.min(1, (RIM_FACING - away) / 0.3)
+      rim[i] = Math.max(rim[i]!, w)
+      // The inner corner is the opening's end nearest the nose (x toward 0).
+      const fromCorner = Math.abs(x) - (Math.abs(ball.centre[0]) - ball.radius * 0.75)
+      caruncle[i] = Math.max(caruncle[i]!, w * Math.max(0, 1 - Math.max(0, fromCorner) / CARUNCLE_REACH))
+    }
+    if (
+      mouth &&
+      Math.abs(x - mouth.x) < mouth.half &&
+      y > mouth.bottom &&
+      y < mouth.top &&
+      z < mouth.front
+    ) {
+      const nz = texels.normal[i * 3 + 2]!
+      // Facing up, down or back: the lips' inner faces, not their fronts.
+      innerLip[i] = Math.min(1, Math.max(0, (INNER_LIP_FACING - nz) / 0.3))
+      if (nz > 0.75) lipFront[i] = 1
+    }
+  }
+  for (const mask of [rim, caruncle, innerLip]) feather(mask, texels.size, 2)
+  return { rim, caruncle, innerLip, lipFront }
+}
+
+/** The mouth's box on the fitted head (metres): its middle, half width, top, bottom and front. */
+function mouthBox(base: BaseBody, moves: Float64Array) {
+  const head = base.head
+  const at = (l: number) => {
+    let p = [0, 0, 0]
+    for (let k = 0; k < 3; k++) {
+      const local = head.landmarkVertices[l * 3 + k]!
+      if (local < 0) return null
+      const w = head.landmarkWeights[l * 3 + k]!
+      const v = head.vertices[local]!
+      p = p.map((c, j) => c + w * (base.basemesh[v * 3 + j]! + moves[v * 3 + j]!))
+    }
+    return p
+  }
+  const left = at(291)
+  const right = at(61)
+  const top = at(0)
+  const bottom = at(17)
+  if (!(left && right && top && bottom)) return null
+  return {
+    x: (left[0]! + right[0]!) / 2,
+    half: Math.abs(left[0]! - right[0]!) / 2 + 0.002,
+    top: top[1]! + 0.002,
+    bottom: bottom[1]! - 0.002,
+    front: Math.max(top[2]!, bottom[2]!) + 0.004,
+  }
+}
+
+/** A box blur, `radius` texels, in place (twice: near a Gaussian). */
+function feather(mask: Float32Array, size: number, radius: number) {
+  const tmp = new Float32Array(mask.length)
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        let s = 0
+        let n = 0
+        for (let d = -radius; d <= radius; d++) {
+          const xx = x + d
+          if (xx < 0 || xx >= size) continue
+          s += mask[y * size + xx]!
+          n++
+        }
+        tmp[y * size + x] = s / n
+      }
+    }
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        let s = 0
+        let n = 0
+        for (let d = -radius; d <= radius; d++) {
+          const yy = y + d
+          if (yy < 0 || yy >= size) continue
+          s += tmp[yy * size + x]!
+          n++
+        }
+        mask[y * size + x] = s / n
+      }
+    }
+  }
+}
+
+/**
+ * The head's texture (sRGB RGBA, `size` across), in place, with the lids'
+ * rims and caruncles tinted from the skin's colour (`skin`, linear) and
+ * the lips' insides darkened from the lips' fronts as the texture has them;
+ * the masks at the texels' size (`working`).
+ */
+export function paintInnerSurfaces(
+  pixels: Uint8ClampedArray,
+  size: number,
+  masks: ReturnType<typeof innerSurfaces>,
+  working: number,
+  skin: readonly number[],
+) {
+  const at = (mask: Float32Array, x: number, y: number) =>
+    mask[
+      Math.min(working - 1, Math.floor((y / size) * working)) * working +
+        Math.min(working - 1, Math.floor((x / size) * working))
+    ]!
+  const channels: number[][] = [[], [], []]
+  for (let y = 0; y < size; y += 2) {
+    for (let x = 0; x < size; x += 2) {
+      if (at(masks.lipFront, x, y) < 1) continue
+      for (let k = 0; k < 3; k++) channels[k]!.push(srgbToLinear(pixels[(y * size + x) * 4 + k]!))
+    }
+  }
+  const lips = channels.map((c, k) => (c.length ? median(c) : skin[k]! * 0.8))
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const rim = at(masks.rim, x, y)
+      const lip = at(masks.innerLip, x, y)
+      if (rim <= 0.001 && lip <= 0.001) continue
+      const corner = at(masks.caruncle, x, y)
+      const i = (y * size + x) * 4
+      for (let k = 0; k < 3; k++) {
+        let c = srgbToLinear(pixels[i + k]!)
+        const tint = RIM_TINT[k]! + (CARUNCLE_TINT[k]! - RIM_TINT[k]!) * Math.min(1, corner / Math.max(rim, 1e-3))
+        c += (skin[k]! * tint - c) * rim
+        c += (lips[k]! * INNER_LIP_TINT[k]! - c) * lip
+        pixels[i + k] = linearToSrgb(c)
+      }
+    }
+  }
+}

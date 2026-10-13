@@ -175,6 +175,7 @@ export {
   sharpness,
   startGuide,
 } from './components/editor/first-person/photo-avatar/capture-guide'
+export { eyesShut } from './components/editor/first-person/photo-avatar/eyes'
 export {
   classMap,
   classPlane,

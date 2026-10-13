@@ -69,12 +69,14 @@ export type FaceWeights = Record<EmoteFaceShape, number>
 
 /**
  * How far (mm) each move goes for its blend shape at full: the bottom lip
- * dropping (the jaw opening: MakeHuman's open mouth drops the chin 34 mm),
+ * dropping (the jaw opening: MakeHuman's open mouth drops the chin 34 mm,
+ * and past about 80 % its lips' corners push out through the cheeks, which
+ * the widest capture, a yawn's 25 mm, stays short of),
  * a lip corner lifting (a smile) or sinking (a frown), the brows, the
  * upper lid closing on the lower, the lower lid rising (a squint)…
  */
 const FULL = {
-  jaw: 24,
+  jaw: 32,
   smile: 7,
   frown: 3,
   pucker: 5,

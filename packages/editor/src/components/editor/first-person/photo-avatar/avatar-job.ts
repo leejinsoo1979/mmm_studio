@@ -7,6 +7,20 @@ import {
 } from './base-body'
 import type { Camera } from './camera'
 import { type Expression, transferExpressions } from './expressions'
+import {
+  eyesShut,
+  eyeTexture,
+  innerSurfaces,
+  LASHES,
+  lashPositions,
+  lidTexels,
+  paintInnerSurfaces,
+  photoWhites,
+  scleraColour,
+  TEETH_TONE,
+  TONGUE_TONE,
+  toneImage,
+} from './eyes'
 import { landmarkUvs, texelKinds } from './features'
 import { composite, fillVertexColors, pushPull, rasterizeVertexColors, toneGains } from './fill'
 import { type FitOptions, type FitResult, type FitView, fitHead } from './fit'
@@ -145,7 +159,9 @@ export async function runAvatarJob({
   // What hides the head from a photo: the head and the neck and shoulders below it.
   const occluder = occluderMesh(base, moves)
   const texels = rasterizeUv(headMesh, WORKING)
-  const kind = texelKinds(texels, landmarkUvs(base.head, headSkin.weld, headSkin.mesh.uvs))
+  const landmarkUv = landmarkUvs(base.head, headSkin.weld, headSkin.mesh.uvs)
+  const kind = texelKinds(texels, landmarkUv)
+  const lids = lidTexels(landmarkUv, WORKING)
   const projected: ProjectedView[] = []
   const lightFit: number[] = []
   views.forEach((view, k) => {
@@ -158,6 +174,7 @@ export async function runAvatarJob({
       skin: view.skin,
     }
     const seen = projectView(texels, kind, photo, camera, depthBuffer(occluder, camera))
+    if (eyesShut(view)) for (let i = 0; i < lids.length; i++) if (lids[i]) seen.weight[i] = 0
     lightFit.push(delight(seen, texels, kind, camera).fit)
     projected.push(seen)
     progress(0.45 + (0.25 * (k + 1)) / views.length, 'texture')
@@ -240,6 +257,13 @@ export async function runAvatarJob({
     working: WORKING,
     keep,
   })
+  paintInnerSurfaces(
+    headPixels,
+    head.width,
+    innerSurfaces(base, moves, texels),
+    WORKING,
+    target,
+  )
   images.set('head_color', await codec.encode(headPixels, head.width, head.height, 0.92))
 
   const body = await decodeImage(base, 'body_color', codec)
@@ -248,17 +272,30 @@ export async function runAvatarJob({
     'body_color',
     await codec.encode(tone(body.data, toneGains(bodySkin, target)), body.width, body.height, 0.9),
   )
-  if (colors.eyes) {
+  const whites = photoWhites(views)
+  if (colors.eyes || whites) {
     const eyes = await decodeImage(base, 'eye_color', codec)
     images.set(
       'eye_color',
       await codec.encode(
-        tintIris(base, eyes, hexLinear(colors.eyes)),
+        eyeTexture(
+          base,
+          eyes,
+          colors.eyes ? hexLinear(colors.eyes) : null,
+          whites ? scleraColour(whites, photoGains) : null,
+        ),
         eyes.width,
         eyes.height,
         0.92,
       ),
     )
+  }
+  for (const [name, gains] of [
+    ['teeth_color', TEETH_TONE],
+    ['tongue_color', TONGUE_TONE],
+  ] as const) {
+    const picture = await decodeImage(base, name, codec)
+    images.set(name, await codec.encode(toneImage(picture, gains), picture.width, picture.height, 0.9))
   }
   if (colors.hair) {
     const hair = await decodeImage(base, 'hair_color', codec)
@@ -275,9 +312,12 @@ export async function runAvatarJob({
   }
   const textured = performance.now()
   progress(0.92, 'pack')
+  const lashes = lashPositions(base, moves, base.meta.gender)
   const glb = buildAvatarGlb(base, moves, images, {
     dropBrows: true,
     expressions: transferExpressions(base, moves, expressions),
+    placed: lashes ? new Map([[lashes.index, lashes.positions]]) : undefined,
+    opacity: { Eyelashes: LASHES[base.meta.gender].opacity },
   })
   progress(1, 'pack')
   const done = performance.now()
@@ -393,42 +433,6 @@ function tone(
   for (let i = 0; i < data.length; i += 4) {
     for (let k = 0; k < 3; k++) out[i + k] = linearToSrgb(srgbToLinear(data[i + k]!) * g[k]!)
     out[i + 3] = data[i + 3]!
-  }
-  return out
-}
-
-/**
- * The eye texture with its iris in the person's colour: each iris texel's
- * colour replaced by the target's, scaled by how light the texel is
- * against the iris's average, so the iris keeps its fibres and its dark rim.
- */
-function tintIris(
-  base: BaseBody,
-  image: { data: ArrayLike<number>; width: number; height: number },
-  target: [number, number, number],
-): Uint8ClampedArray {
-  const out = Uint8ClampedArray.from(image.data)
-  const p = base.primitives.find((one) => one.material === 'Eye_Iris')
-  if (!p?.attributes.TEXCOORD_0) return out
-  const uv = p.attributes.TEXCOORD_0.values
-  const xy = new Float32Array(uv.length)
-  for (let i = 0; i < uv.length; i += 2) {
-    xy[i] = uv[i]! * image.width
-    xy[i + 1] = uv[i + 1]! * image.height
-  }
-  const mask = new Uint8Array(image.width * image.height)
-  fillTriangles(xy, p.indices, image.width, image.height, mask)
-  const light = (i: number) =>
-    0.2126 * srgbToLinear(image.data[i * 4]!) +
-    0.7152 * srgbToLinear(image.data[i * 4 + 1]!) +
-    0.0722 * srgbToLinear(image.data[i * 4 + 2]!)
-  const lights: number[] = []
-  for (let i = 0; i < mask.length; i++) if (mask[i]) lights.push(light(i))
-  const average = Math.max(median(lights), 1e-4)
-  for (let i = 0; i < mask.length; i++) {
-    if (!mask[i]) continue
-    const scale = light(i) / average
-    for (let k = 0; k < 3; k++) out[i * 4 + k] = linearToSrgb(target[k]! * scale)
   }
   return out
 }

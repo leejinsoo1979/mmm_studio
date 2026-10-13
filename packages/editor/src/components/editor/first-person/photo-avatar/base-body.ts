@@ -175,13 +175,25 @@ export type AvatarImages = Map<string, { bytes: Uint8Array; mimeType: string }>
  * pictures in `images` (by image name) replaced, the brow cards dropped
  * when the photos' brows are painted on the skin instead, and, when given,
  * `expressions` (carried onto this head) as its morph targets in place of
- * the base's.
+ * the base's, primitives `placed` where their positions say (metres at
+ * rest, by primitive index) rather than where `moves` takes them, and
+ * materials made fainter (`opacity`: their base colour's alpha, by name).
  */
 export function buildAvatarGlb(
   base: BaseBody,
   moves: Float64Array,
   images: AvatarImages,
-  { dropBrows, expressions }: { dropBrows: boolean; expressions?: readonly Expression[] },
+  {
+    dropBrows,
+    expressions,
+    placed,
+    opacity,
+  }: {
+    dropBrows: boolean
+    expressions?: readonly Expression[]
+    placed?: ReadonlyMap<number, Float32Array>
+    opacity?: Readonly<Record<string, number>>
+  },
 ): Uint8Array {
   const writer = new GlbWriter(base.glb)
   const json = writer.json
@@ -194,12 +206,18 @@ export function buildAvatarGlb(
   }
   base.primitives.forEach((p, index) => {
     const delta = primitiveMoves(p, moves)
-    let moved = false
+    const given = placed?.get(index)
+    let moved = Boolean(given)
     for (let i = 0; i < delta.length && !moved; i++) moved = Math.abs(delta[i]!) > 1e-6
     if (!moved) return
     const old = p.attributes.POSITION!.values
     const positions = new Float32Array(old.length)
     for (let i = 0; i < old.length; i += 3) {
+      if (given) {
+        const at = transformPoint4(linear, given[i]!, given[i + 1]!, given[i + 2]!)
+        positions.set(at, i)
+        continue
+      }
       const [dx, dy, dz] = transformDirection4(linear, delta[i]!, delta[i + 1]!, delta[i + 2]!)
       positions[i] = old[i]! + dx
       positions[i + 1] = old[i + 1]! + dy
@@ -237,6 +255,13 @@ export function buildAvatarGlb(
   })
   moveEyeBones(base, writer, eyeShift)
   if (expressions) writeExpressionTargets(writer, base, expressions)
+  for (const material of json.materials ?? []) {
+    const alpha = opacity?.[material.name]
+    if (alpha === undefined) continue
+    const pbr = (material.pbrMetallicRoughness ??= {})
+    const factor = pbr.baseColorFactor ?? [1, 1, 1, 1]
+    pbr.baseColorFactor = [factor[0], factor[1], factor[2], factor[3] * alpha]
+  }
   if (dropBrows) {
     for (const node of json.nodes) {
       if (node.mesh !== undefined && json.meshes[node.mesh].name === 'Eyebrows') {
