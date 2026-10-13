@@ -88,8 +88,15 @@ export type GuideAdvice = {
   take: boolean
 }
 
-/** MediaPipe reads a turned face about 15 % short of its real turn. */
-const MEASURED = 0.85
+/**
+ * How MediaPipe's nod reads a face held level, looking into the lens (degrees): about 10° chin
+ * down, give or take 4 from face to face (its average face leans back). Nods are judged from it.
+ */
+export const LEVEL_PITCH = -10
+/** The ¾ view's turns (degrees, as MediaPipe reads them: within a few degrees of the real turn). */
+const QUARTER_TURN = { least: 33, most: 60 }
+/** Still read under this turn (degrees), a face has not turned to a full side view yet. */
+const SIDE_TURN = 60
 
 function placement(step: CaptureStep, frame: GuideFrame, lastYaw: number | null): string | null {
   const side = Math.sign(step.yaw)
@@ -99,21 +106,23 @@ function placement(step: CaptureStep, frame: GuideFrame, lastYaw: number | null)
     if (frame.eyes < 0.07) return '조금 더 가까이 와 주세요'
     if (frame.eyes > 0.28) return '조금 뒤로 물러나 주세요'
     if (Math.abs(frame.yaw) > 7) return '정면을 바라봐 주세요'
-    if (Math.abs(frame.pitch ?? 0) > 10) return '고개를 숙이거나 들지 말고 정면을 봐 주세요'
+    if (Math.abs((frame.pitch ?? LEVEL_PITCH) - LEVEL_PITCH) > 10)
+      return '고개를 숙이거나 들지 말고 정면을 봐 주세요'
     if (Math.abs(frame.roll ?? 0) > 8) return '고개를 똑바로 세워 주세요'
     return null
   }
   if (Math.abs(step.yaw) === 45) {
     if (frame.yaw === null) return step.prompt
-    const turn = (frame.yaw * side) / MEASURED
-    if (turn < 33) return turn < 10 ? step.prompt : '조금 더 돌려 주세요'
-    if (turn > 58) return '너무 많이 돌렸어요. 조금 덜 돌려 주세요'
-    if (Math.abs(frame.pitch ?? 0) > 12) return '고개를 숙이거나 들지 말아 주세요'
+    const turn = frame.yaw * side
+    if (turn < QUARTER_TURN.least) return turn < 10 ? step.prompt : '조금 더 돌려 주세요'
+    if (turn > QUARTER_TURN.most) return '너무 많이 돌렸어요. 조금 덜 돌려 주세요'
+    if (Math.abs((frame.pitch ?? LEVEL_PITCH) - LEVEL_PITCH) > 12)
+      return '고개를 숙이거나 들지 말아 주세요'
     return null
   }
   // A full side view: MediaPipe has (nearly) lost the face, last seen turning this way.
   if (!frame.person) return '화면 안에 머리와 어깨가 보이게 해 주세요'
-  if (frame.yaw !== null && (frame.yaw * side) / MEASURED < 70) {
+  if (frame.yaw !== null && frame.yaw * side < SIDE_TURN) {
     return frame.yaw * side > 0 ? '조금 더 돌려 주세요. 코끝이 옆을 향하게요' : step.prompt
   }
   if (frame.yaw === null && !(lastYaw !== null && lastYaw * side > 35)) return step.prompt
@@ -177,8 +186,9 @@ export const nextStep = (state: GuideState): GuideState => ({
 })
 
 /**
- * How sharp a grey image is over a box (x, y, width, height in pixels): the
- * variance of its Laplacian, as a blurred frame from a turning head has little.
+ * How sharp a grey image is over a box (x, y, width, height in pixels; the
+ * part inside the image): the variance of its Laplacian, as a blurred frame
+ * from a turning head has little.
  */
 export function sharpness(
   gray: ArrayLike<number>,
@@ -186,10 +196,11 @@ export function sharpness(
   box: [number, number, number, number],
 ): number {
   const [bx, by, bw, bh] = box.map(Math.round) as [number, number, number, number]
+  const height = Math.floor(gray.length / width)
   let sum = 0
   let sum2 = 0
   let count = 0
-  for (let y = Math.max(1, by); y < by + bh - 1; y++) {
+  for (let y = Math.max(1, by); y < Math.min(height - 1, by + bh - 1); y++) {
     for (let x = Math.max(1, bx); x < Math.min(width - 1, bx + bw - 1); x++) {
       const i = y * width + x
       const l = gray[i - 1]! + gray[i + 1]! + gray[i - width]! + gray[i + width]! - 4 * gray[i]!
