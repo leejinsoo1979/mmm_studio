@@ -5,6 +5,7 @@ import {
   type GuideState,
   guide,
   HOLD_MS,
+  LEVEL_PITCH,
   nextStep,
   sharpness,
   startGuide,
@@ -13,7 +14,7 @@ import {
 const frame = (time: number, over: Partial<GuideFrame> = {}): GuideFrame => ({
   time,
   yaw: 0,
-  pitch: 0,
+  pitch: LEVEL_PITCH,
   roll: 0,
   eyes: 0.15,
   person: true,
@@ -64,17 +65,29 @@ describe('capture guide', () => {
     expect(guide(first.state, frame(50, { centre: [0.6, 0.45] })).message).toBe(
       '그대로 잠깐 멈춰 주세요',
     )
+    // Nodding well down or up from level.
+    expect(guide(startGuide(), frame(0, { pitch: -25 })).ready).toBe(false)
+    expect(guide(startGuide(), frame(0, { pitch: 3 })).ready).toBe(false)
     // Blurred throughout: never taken.
     const blurred = feed(startGuide(), (t) => frame(t, { sharpness: 2 }), HOLD_MS + 200)
     expect(blurred.take).toBe(false)
+  })
+
+  test('takes a level face however MediaPipe reads its nod', () => {
+    // Level faces looking into the lens read from about 4° to 16° chin down.
+    for (const pitch of [-4, -16]) {
+      expect(feed(startGuide(), (t) => frame(t, { pitch }), HOLD_MS + 50).take).toBe(true)
+    }
   })
 
   test('asks for more turn at ¾, and takes it within range', () => {
     const quarter = startGuide(1)
     expect(guide(quarter, frame(0, { yaw: 15 })).message).toBe('조금 더 돌려 주세요')
     expect(guide(quarter, frame(0, { yaw: 70 })).message).toContain('덜 돌려')
-    // MediaPipe reads 38° for a 45° turn.
-    expect(feed(quarter, (t) => frame(t, { yaw: 38 }), HOLD_MS + 50).take).toBe(true)
+    // MediaPipe reads a 45° turn as 43° to 53°.
+    for (const yaw of [38, 53]) {
+      expect(feed(quarter, (t) => frame(t, { yaw }), HOLD_MS + 50).take).toBe(true)
+    }
     // The other way is the right ¾ step's.
     expect(guide(startGuide(3), frame(0, { yaw: 38 })).ready).toBe(false)
   })
@@ -109,5 +122,15 @@ describe('sharpness', () => {
     )
     expect(sharpness(flat, width, [4, 4, 24, 24])).toBe(0)
     expect(sharpness(checks, width, [4, 4, 24, 24])).toBeGreaterThan(1000)
+  })
+
+  test('reads only the part of the box inside the image', () => {
+    const width = 32
+    const checks = Uint8Array.from({ length: width * width }, (_, i) =>
+      ((i % width) + Math.floor(i / width)) % 2 ? 200 : 40,
+    )
+    const past = sharpness(checks, width, [4, 20, 24, 40])
+    expect(Number.isFinite(past)).toBe(true)
+    expect(past).toBeGreaterThan(1000)
   })
 })
