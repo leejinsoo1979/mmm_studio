@@ -53,6 +53,25 @@ export const PHOTOREAL_CHARACTERS: readonly PhotorealCharacter[] = [
     credit: 'MakeHuman · CC0',
     local: false,
   },
+  // The base bodies a face photo is fitted onto (scripts/characters/build-mpfb-base.py).
+  {
+    id: 'mpfb-base-male',
+    label: '실사 남 기본형',
+    gender: 'male',
+    url: `${BASE}/mpfb-base-male.glb`,
+    thumbnail: `${BASE}/thumbs/mpfb-base-male.webp`,
+    credit: 'MakeHuman · CC0',
+    local: false,
+  },
+  {
+    id: 'mpfb-base-female',
+    label: '실사 여 기본형',
+    gender: 'female',
+    url: `${BASE}/mpfb-base-female.glb`,
+    thumbnail: `${BASE}/thumbs/mpfb-base-female.webp`,
+    credit: 'MakeHuman · CC0',
+    local: false,
+  },
 ]
 
 const shipped = new Map(PHOTOREAL_CHARACTERS.map((character) => [character.id, character]))

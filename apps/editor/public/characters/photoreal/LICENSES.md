@@ -22,3 +22,45 @@ README).
   texture kept at 2048, clothing and hair at 1024, eyes 512, mouth 256, all
   WebP (quality 88), geometry meshopt-compressed — 1.72 MB. The thumbnail is
   a render of it in the character studio's lighting.
+
+## mpfb-base-male.glb, mpfb-base-female.glb, thumbs/mpfb-base-*.webp, mpfb-base-*.json, mpfb-base-*.basemesh.bin, mpfb-face-targets.bin/.json
+
+- What: the base bodies a face photo is fitted onto (실사 남/여 기본형): an
+  adult man and woman made from MakeHuman's base mesh, targets and system
+  assets — a 54-bone Mixamo-named rig (MPFB's 52 plus `LeftEye`/`RightEye`),
+  eyes with separate sclera, iris and clear cornea, brows, lashes, teeth,
+  tongue, hair cards, an outfit, `eyeBlinkLeft`/`eyeBlinkRight` blend shapes,
+  and the head on its own UV layout and textures. The `.json` files say how
+  a face fitting drives them (head UV layout, vertex attributes, morphs,
+  bones), `.basemesh.bin` their base mesh at rest, and `mpfb-face-targets.*`
+  are MakeHuman's 290 face targets, compact.
+- Sources:
+  - MPFB2, https://github.com/makehumancommunity/mpfb2 (git clone, v2.0.18,
+    commit `d0a32e57`): the base mesh, macro and face targets, the
+    expression units the blinks are made from, the Mixamo rig and weights,
+    the `face_solid` UV layer and the lips/mouth/eyelid masks. Its
+    LICENSE.md, section C: these assets are released under CC0 1.0.
+  - MakeHuman 1.1.1's system assets, from Ubuntu's
+    `makehuman-data_1.1.1-1_all.deb` (archive.ubuntu.com, pool
+    universe/m/makehuman; sha256
+    `881a79c3a6640e2ecc579093f6895d161fd902856504b123ef750e843f4304a7`,
+    fetched 2026-10-13): eyes `high-poly` with the `brown` texture,
+    eyebrows `eyebrow001`/`eyebrow006`, eyelashes `eyelashes01`/`02`,
+    `teeth_base`, `tongue01`, hair `short02`/`ponytail01`, clothes
+    `male_casualsuit01`, `female_casualsuit01`, `shoes01`, `shoes02`, skins
+    `young_lightskinned_male_diffuse3`/`female_diffuse3`. MakeHuman's
+    LICENSE.md (https://github.com/makehumancommunity/makehuman), section
+    C: the bundled assets — base mesh, proxies, targets, textures, clothes
+    — are released under CC0 1.0; the 1.1.1 package's own terms already
+    put characters exported from them under CC0.
+- Licence: CC0 1.0, https://creativecommons.org/publicdomain/zero/1.0/. No
+  attribution required; credited anyway.
+- Changes: built with `scripts/characters/build-mpfb-base.py` (Blender as a
+  Python module, MPFB2), then `scripts/characters/build-photoreal-character.mjs`.
+  The MakeHuman logo on the women's T-shirt is painted over (MakeHuman's
+  trade mark isn't ours to use); the brown iris is tinted a darker brown
+  and the ponytail darkened; the head is redrawn into its own 2048 layout
+  with a normal map from its colour's fine detail and a roughness map from
+  MPFB's lip, mouth and eyelid masks; the skin under the clothes, and the
+  socks under the jeans, are removed. The thumbnails are renders in the
+  character studio's lighting.

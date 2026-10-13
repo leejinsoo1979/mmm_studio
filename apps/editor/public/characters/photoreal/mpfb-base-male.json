@@ -1,0 +1,263 @@
+{
+ "gender": "male",
+ "macro": {
+  "gender": 1.0,
+  "age": 0.5,
+  "muscle": 0.6,
+  "weight": 0.5,
+  "height": 0.55,
+  "proportions": 0.75,
+  "cupsize": 0.5,
+  "firmness": 0.5
+ },
+ "race": {
+  "asian": 0.6,
+  "caucasian": 0.3,
+  "african": 0.1
+ },
+ "units": "metres; glTF +Y up, the body faces +Z, its left is +X",
+ "positions": "packed (KHR_mesh_quantization) in one volume for every mesh: at rest a stored position p is at D · p, D = any joint's world matrix × its inverse bind matrix (three.js: bones[i].matrixWorld × boneInverses[i]); a delta in metres is stored / D's scale",
+ "fromMakeHuman": {
+  "about": "MakeHuman target deltas (decimetres, Y up, the body faces +Z, its left +X) times scale are glTF metres on the same axes; the macro shape (gender, age, …) is already in the GLB's positions",
+  "scale": 0.1
+ },
+ "attributes": {
+  "_MHVERT": "Body: its MakeHuman base mesh vertex index (hm08, 0..13379)",
+  "_MHREF": "every other mesh: the three base mesh vertices it follows (mhclo binding; the eyes, teeth, tongue and clothes follow helper vertices, 13380 and up)",
+  "_MHW": "their weights; the vertex is at sum(w_k * basemesh[ref_k]) + a fixed offset"
+ },
+ "basemesh": {
+  "file": "mpfb-base-male.basemesh.bin",
+  "about": "every base mesh vertex (19158, helpers included) at rest: float32 x, y, z in metres, glTF axes, little-endian; a face target moves these, and through _MHREF/_MHW the meshes bound to them"
+ },
+ "materials": {
+  "Head_Skin": "the head and face, own UV layout (headUV below), head_color 2048, head_normal 2048, head_roughness 1024 (R skin mask, G roughness)",
+  "Body_Skin": "the rest of the skin, MakeHuman atlas UV, body_color 1024",
+  "Eye_Sclera": "eyeball white (eye texture)",
+  "Eye_Iris": "iris and pupil (same texture)",
+  "Eye_Cornea": "the clear outer shell over each eye (KHR_materials_transmission 1, ior 1.376)",
+  "Eyebrows": "alpha cards",
+  "Eyelashes": "alpha cards",
+  "Hair": "alpha-cut cards",
+  "Teeth": "teeth and gums",
+  "Tongue": "tongue"
+ },
+ "headUV": {
+  "about": "Head_Skin UVs: each island's source UVs mapped by uv' = matrix · uv + offset, all with v up (Blender's); the GLB's TEXCOORD_0 is (u, 1 - v)",
+  "textureSize": 2048,
+  "islands": {
+   "face": {
+    "source": "MPFB data/uv_layers/face_solid.json.gz",
+    "sourceBox": [
+     0.009557,
+     0.09978,
+     0.98994,
+     0.941372
+    ],
+    "matrix": [
+     [
+      0.714007,
+      0.0
+     ],
+     [
+      0.0,
+      0.714007
+     ]
+    ],
+    "offset": [
+     -0.006824,
+     0.308305
+    ]
+   },
+   "head": {
+    "source": "MakeHuman atlas UV (the body texture's layout)",
+    "sourceBox": [
+     0.625099,
+     0.135663,
+     0.993515,
+     0.832256
+    ],
+    "matrix": [
+     [
+      0.0,
+      0.963585
+     ],
+     [
+      -0.963585,
+      0.0
+     ]
+    ],
+    "offset": [
+     -0.046336,
+     0.957336
+    ]
+   },
+   "mouth": {
+    "source": "MakeHuman atlas UV (the body texture's layout)",
+    "sourceBox": [
+     0.749231,
+     0.011863,
+     0.92374,
+     0.13644
+    ],
+    "matrix": [
+     [
+      1.604501,
+      0.0
+     ],
+     [
+      0.0,
+      1.604501
+     ]
+    ],
+    "offset": [
+     -0.482142,
+     0.621024
+    ]
+   },
+   "sockets": {
+    "source": "MakeHuman atlas UV (the body texture's layout)",
+    "sourceBox": [
+     0.011809,
+     0.538946,
+     0.163047,
+     0.64495
+    ],
+    "matrix": [
+     [
+      1.851387,
+      0.0
+     ],
+     [
+      0.0,
+      1.851387
+     ]
+    ],
+    "offset": [
+     0.698137,
+     -0.605925
+    ]
+   }
+  },
+  "boxes": {
+   "face": [
+    0.0,
+    0.36,
+    0.7,
+    1.0
+   ],
+   "head": [
+    0.0,
+    0.0,
+    0.84,
+    0.355
+   ],
+   "mouth": [
+    0.72,
+    0.62,
+    1.0,
+    0.86
+   ],
+   "sockets": [
+    0.72,
+    0.38,
+    1.0,
+    0.6
+   ]
+  }
+ },
+ "morphs": {
+  "Body": [
+   "eyeBlinkLeft",
+   "eyeBlinkRight"
+  ],
+  "Eyebrows": [
+   "eyeBlinkLeft",
+   "eyeBlinkRight"
+  ],
+  "Eyelashes": [
+   "eyeBlinkLeft",
+   "eyeBlinkRight"
+  ]
+ },
+ "bones": [
+  "Hips",
+  "LeftUpLeg",
+  "LeftLeg",
+  "LeftFoot",
+  "LeftToeBase",
+  "RightUpLeg",
+  "RightLeg",
+  "RightFoot",
+  "RightToeBase",
+  "Spine",
+  "Spine1",
+  "Spine2",
+  "LeftShoulder",
+  "LeftArm",
+  "LeftForeArm",
+  "LeftHand",
+  "LeftHandIndex1",
+  "LeftHandIndex2",
+  "LeftHandIndex3",
+  "LeftHandMiddle1",
+  "LeftHandMiddle2",
+  "LeftHandMiddle3",
+  "LeftHandPinky1",
+  "LeftHandPinky2",
+  "LeftHandPinky3",
+  "LeftHandRing1",
+  "LeftHandRing2",
+  "LeftHandRing3",
+  "LeftHandThumb1",
+  "LeftHandThumb2",
+  "LeftHandThumb3",
+  "Neck",
+  "Head",
+  "LeftEye",
+  "RightEye",
+  "RightShoulder",
+  "RightArm",
+  "RightForeArm",
+  "RightHand",
+  "RightHandIndex1",
+  "RightHandIndex2",
+  "RightHandIndex3",
+  "RightHandMiddle1",
+  "RightHandMiddle2",
+  "RightHandMiddle3",
+  "RightHandPinky1",
+  "RightHandPinky2",
+  "RightHandPinky3",
+  "RightHandRing1",
+  "RightHandRing2",
+  "RightHandRing3",
+  "RightHandThumb1",
+  "RightHandThumb2",
+  "RightHandThumb3"
+ ],
+ "eyeCentres": {
+  "about": "glTF metres",
+  "Left": [
+   0.03061,
+   1.6315920312845706,
+   0.13423
+  ],
+  "Right": [
+   -0.03061,
+   1.6315920312845706,
+   0.13423
+  ]
+ },
+ "proxies": {
+  "Eyes": "eyes/high-poly",
+  "Teeth": "teeth/teeth_base",
+  "Tongue": "tongue/tongue01",
+  "Eyebrows": "eyebrows/eyebrow001",
+  "Eyelashes": "eyelashes/eyelashes01",
+  "Hair": "hair/short02",
+  "Outfit_male_casualsuit01": "clothes/male_casualsuit01",
+  "Outfit_shoes01": "clothes/shoes01"
+ },
+ "faceTargets": "mpfb-face-targets.json / .bin (shared by both bodies)"
+}

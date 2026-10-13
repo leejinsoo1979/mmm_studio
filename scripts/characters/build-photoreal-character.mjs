@@ -27,6 +27,7 @@ const KEPT_TARGETS = new Set(['eyeBlinkLeft', 'eyeBlinkRight'])
 
 /** Each texture's longest side, by its name; the first match wins. Skin keeps the most. */
 const TEXTURE_SIZES = [
+  [/^head_/i, 2048],
   [/skin|body|diffuse2$/i, 2048],
   [/eye/i, 512],
   [/teeth|tongue/i, 256],
@@ -83,9 +84,12 @@ for (const texture of root.listTextures()) {
 
 await document.transform(
   prune(),
-  dedup(),
+  // Names stay: the shading tells surfaces by their materials' names (an eye's iris from its white).
+  dedup({ keepUniqueNames: true }),
   textureCompress({ encoder: sharp, targetFormat: 'webp', quality: QUALITY }),
-  meshopt({ encoder: MeshoptEncoder, level: 'medium' }),
+  // One quantization volume for every mesh: they keep one space (a fitted
+  // face moves the eyes and hair with the skin) and share one skin.
+  meshopt({ encoder: MeshoptEncoder, level: 'medium', quantizationVolume: 'scene' }),
 )
 await io.write(resolve(output), document)
 

@@ -1,4 +1,5 @@
 import {
+  AdditiveBlending,
   type Material,
   type MeshPhysicalMaterial,
   MeshStandardMaterial,
@@ -27,20 +28,22 @@ import { SkinMaterial } from './skin-material'
  * always on and over all of it: such a character is made to be seen so.
  */
 
-export type HumanSurface = 'skin' | 'eyes' | 'hair' | 'lashes' | 'mouth' | 'cloth'
+export type HumanSurface = 'skin' | 'eyes' | 'cornea' | 'hair' | 'lashes' | 'mouth' | 'cloth'
 
 /**
  * A surface by its material's name, as the exporters of rigged people name
  * them (MakeHuman `Human.body`, Avaturn `Head`/`Body`, `AvatarHead`,
  * Character Creator `Std_Skin_Head`, MetaHuman `M_Head`): what isn't skin,
- * eyes, hair, lashes or the mouth is clothing.
+ * eyes, hair, lashes or the mouth is clothing. A cornea is the clear shell
+ * some eyes have over the iris (`Eye_Cornea`, `Std_Cornea_L`).
  */
 export function humanSurfaceOf(name: string): HumanSurface {
   const plain = name.toLowerCase()
   if (/lash|brow/.test(plain)) return 'lashes'
   if (/hair|ponytail|braid|bun\b|wig|bang/.test(plain)) return 'hair'
   if (/teeth|tooth|tongue|gum|mouth/.test(plain)) return 'mouth'
-  if (/eye(?!lash|brow|ao|shadow|line)|cornea|iris|pupil|sclera|high-?poly/.test(plain)) {
+  if (/cornea/.test(plain)) return 'cornea'
+  if (/eye(?!lash|brow|ao|shadow|line)|iris|pupil|sclera|high-?poly/.test(plain)) {
     return /ao|occlusion|tear|meniscus|shell/.test(plain) ? 'cloth' : 'eyes'
   }
   if (/skin|body|head|face|^human$|human\.body|nail/.test(plain)) return 'skin'
@@ -82,6 +85,28 @@ const CARD_ALPHA_TEST = 0.35
 const SKIN_DETAIL_REPEAT = 24
 /** The skin's roughness where its material has no roughness texture, as most exports have none for skin. */
 const SKIN_ROUGHNESS = 0.62
+/** The cornea: glassy, with the eye's refractive index (its reflectance at a glance straight in, about 2.5%). */
+const CORNEA_ROUGHNESS = 0.03
+const CORNEA_IOR = 1.376
+
+/**
+ * The clear cornea: only what it reflects (the lights' catchlights on its
+ * bulge, the room), added over the eye beneath, so the iris shows through
+ * it whole wherever nothing is reflected.
+ */
+function corneaOf(source: Material): SheenSafePhysicalNodeMaterial {
+  const material = new SheenSafePhysicalNodeMaterial()
+  material.name = source.name
+  material.side = source.side
+  material.color.setRGB(0, 0, 0)
+  material.roughness = CORNEA_ROUGHNESS
+  material.metalness = 0
+  material.ior = CORNEA_IOR
+  material.transparent = true
+  material.depthWrite = false
+  material.blending = AdditiveBlending
+  return material
+}
 
 /** A loaded material's skin: the same textures and factors, drawn as skin. */
 function skinOf(source: Material): SkinMaterial {
@@ -102,9 +127,11 @@ function skinOf(source: Material): SkinMaterial {
 /**
  * A rigged person's material made for its surface (see humanSurfaceOf):
  * skin drawn as skin (skinOf), the eyes wet and glossy with their rims
- * shaded where the lids meet them, hair and lashes as alpha-cut cards with
- * a soft sheen along them, the mouth kept dim. Clothing is returned as it
- * is. `anisotropy` sharpens the textures at a slant.
+ * shaded where the lids meet them (an iris drawn apart unreflecting, under a
+ * cornea drawn as its reflections alone: corneaOf), hair and lashes as
+ * alpha-cut cards with a soft sheen along them, the mouth kept dim.
+ * Clothing is returned as it is. `anisotropy` sharpens the textures at a
+ * slant.
  */
 export function humanMaterial(
   source: Material,
@@ -126,16 +153,23 @@ export function humanMaterial(
     sharpen(material.normalMap)
     return material
   }
+  if (surface === 'cornea') return corneaOf(source)
   const material = new SheenSafePhysicalNodeMaterial()
   copyStandard(material, source)
   sharpen(material.map)
   sharpen(material.normalMap)
   if (surface === 'eyes') {
-    material.roughness = 0.12
     material.roughnessMap = null
     material.metalness = 0
-    material.clearcoat = 1
-    material.clearcoatRoughness = 0.04
+    if (/iris/i.test(source.name)) {
+      // An iris drawn apart sits in the eye's fluid under its cornea:
+      // nothing of its own reflects (a rough sheen would cloud it).
+      material.specularIntensity = 0
+    } else {
+      material.roughness = 0.12
+      material.clearcoat = 1
+      material.clearcoatRoughness = 0.04
+    }
     // The eye's rim, where the lids and corners shade it, darkens.
     const rim = mix(
       float(0.45),
