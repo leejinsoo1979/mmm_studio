@@ -132,6 +132,10 @@ them. Only a verifier runs `--heldout`, and it never writes fixtures. The pool:
   `singleSample` share counts the orange ones. SwiftShader shows a surface seen edge on through
   a shell a few millimetres out in one sample now and then: two concentric spheres 2 mm apart
   give 13 such pixels of 17,559 (4 mm: 4, 8 mm: 3), all along the inner sphere's outline.
+- **Tears and folds** (not gated). In each pose, the share of the hair's triangles (cards and
+  cap) with an edge over 2 mm at rest that the pose makes more than 1.5 times longer or shorter
+  (`stretch` beside the holes): hair bound to joints that part, folded into flaps. Long hair over
+  moving clothes stretches some anyway.
 
 ## Fixture tests
 

@@ -136,6 +136,15 @@ export function g7Checks(hair: any, head: Head, truthHair: any): Check[] {
           : '',
     })
   }
+  const stretch = hair.holes?.stretch ?? []
+  if (stretch.length) {
+    const torn = Math.max(...stretch.map((s: any) => s.torn))
+    const at = stretch.find((s: any) => s.torn === torn)
+    out.push({
+      ...check('G7', 'hair triangles torn or folded (worst pose)', torn, 'not gated', null),
+      note: `${at.pose}: an edge ${at.worst.toFixed(1)} times its length at rest at worst`,
+    })
+  }
   return out
 }
 

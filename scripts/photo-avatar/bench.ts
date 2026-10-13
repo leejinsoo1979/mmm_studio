@@ -325,7 +325,7 @@ async function hair(call: Call, head: Head, name: string) {
     save(`${head.id}/hair/${shot.pose}-${shot.view}.jpg`, shot.url)
     save(`${head.id}/hair/holes-${shot.pose}-${shot.view}.png`, shot.holes)
   }
-  return { avatar, holes: { results: holes.results } }
+  return { avatar, holes: { results: holes.results, stretch: holes.stretch } }
 }
 
 async function eyes(call: Call, name: string, align: unknown) {
@@ -447,8 +447,9 @@ async function hairStyles() {
           save(`${id}/holes-${shot.pose}-${shot.view}.png`, shot.holes)
         }
         const worst = Math.max(...holes.results.map((r: any) => (Number.isFinite(r.holes) ? r.holes : 1)))
-        rows.push({ style: style ?? 'bald', gender, class: avatar.class, albedo: avatar.albedo, bytes: glb.byteLength, worstHole: worst, holes: holes.results })
-        console.log(`  ${id}: ${avatar.class.length} (lowest ${avatar.class.lowest?.toFixed(3)}), worst hole ${(worst * 100).toFixed(3)} %, ${glb.byteLength} bytes`)
+        const torn = Math.max(0, ...holes.stretch.map((s: any) => s.torn))
+        rows.push({ style: style ?? 'bald', gender, class: avatar.class, albedo: avatar.albedo, bytes: glb.byteLength, worstHole: worst, torn, holes: holes.results, stretch: holes.stretch })
+        console.log(`  ${id}: ${avatar.class.length} (lowest ${avatar.class.lowest?.toFixed(3)}), worst hole ${(worst * 100).toFixed(3)} %, torn ${(torn * 100).toFixed(2)} %, ${glb.byteLength} bytes`)
         await call('forget', id)
       }
     }
@@ -456,9 +457,12 @@ async function hairStyles() {
     await stopChrome(chrome)
   }
   saveJson('styles.json', rows)
-  const table = ['| style | body | class | lowest (m) | worst hole | GLB bytes |', '|---|---|---|---|---|---|']
+  const table = [
+    '| style | body | class | lowest (m) | worst hole | torn or folded (worst pose) | GLB bytes |',
+    '|---|---|---|---|---|---|---|',
+  ]
   for (const r of rows)
-    table.push(`| ${r.style} | ${r.gender} | ${r.class.length} | ${r.class.lowest?.toFixed(3) ?? '—'} | ${(r.worstHole * 100).toFixed(3)} % | ${r.bytes} |`)
+    table.push(`| ${r.style} | ${r.gender} | ${r.class.length} | ${r.class.lowest?.toFixed(3) ?? '—'} | ${(r.worstHole * 100).toFixed(3)} % | ${(r.torn * 100).toFixed(2)} % | ${r.bytes} |`)
   writeFileSync(join(out, 'styles.md'), `${table.join('\n')}\n`)
 }
 

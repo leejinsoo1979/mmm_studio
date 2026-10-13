@@ -1425,6 +1425,8 @@ async function hairHoles(name: string) {
   ]
   const results: { pose: string; view: string; holes: number; singleSample: number; scalpPixels: number }[] =
     []
+  const restHair = hairAtRest(model)
+  const stretch: ReturnType<typeof hairStretch>[] = []
   const sheet: { pose: string; view: string; url: string; holes: string }[] = []
   setSize(400, 400)
   const savedBackground = scene.background
@@ -1436,6 +1438,7 @@ async function hairHoles(name: string) {
       mixer.setTime(time)
     }
     model.updateMatrixWorld(true)
+    stretch.push(hairStretch(pose, restHair))
     const centre = new THREE.Vector3()
     model.getObjectByName('Head')?.getWorldPosition(centre)
     for (const [view, yaw, elevation] of views) {
@@ -1520,7 +1523,83 @@ async function hairHoles(name: string) {
   }
   scene.remove(holder)
   if (truth) truth.holder.visible = true
-  return { results, sheet }
+  return { results, stretch, sheet }
+}
+
+/** A hair triangle whose edges grow or shrink past this in a pose is torn or folded over. */
+const TORN = 1.5
+/** Edges shorter than this (m) at rest are left out: their ends' rounding alone could pass TORN. */
+const TORN_EDGE = 0.002
+
+type HairAtRest = { mesh: THREE.SkinnedMesh; rest: Float32Array }[]
+
+/** The world position of a skinned mesh's vertex as it is posed now. */
+function skinnedAt(mesh: THREE.SkinnedMesh, i: number, out: THREE.Vector3) {
+  return mesh.getVertexPosition(i, out).applyMatrix4(mesh.matrixWorld)
+}
+
+/** The hair's vertices with the skeleton in its bind pose (its bones put back after). */
+function hairAtRest(model: THREE.Object3D): HairAtRest {
+  const hair: HairAtRest = []
+  const v = new THREE.Vector3()
+  model.traverse((o) => {
+    const mesh = o as THREE.SkinnedMesh
+    const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material
+    if (!(mesh.isSkinnedMesh && /hair/i.test(material?.name ?? ''))) return
+    const bones = mesh.skeleton.bones
+    const saved = bones.map((b) => [b.position.clone(), b.quaternion.clone(), b.scale.clone()] as const)
+    mesh.skeleton.pose()
+    model.updateMatrixWorld(true)
+    const position = mesh.geometry.attributes.position!
+    const rest = new Float32Array(position.count * 3)
+    for (let i = 0; i < position.count; i++) rest.set(skinnedAt(mesh, i, v).toArray(), i * 3)
+    bones.forEach((b, k) => {
+      b.position.copy(saved[k]![0])
+      b.quaternion.copy(saved[k]![1])
+      b.scale.copy(saved[k]![2])
+    })
+    model.updateMatrixWorld(true)
+    hair.push({ mesh, rest })
+  })
+  return hair
+}
+
+/**
+ * How the pose tears or folds the hair: the share of its triangles (cards and
+ * cap) with an edge, posed, more than TORN times longer or shorter than at rest.
+ */
+function hairStretch(pose: string, hair: HairAtRest) {
+  let triangles = 0
+  let torn = 0
+  let worst = 1
+  let at: number[] = []
+  const v = new THREE.Vector3()
+  for (const { mesh, rest } of hair) {
+    const posed = new Float32Array(rest.length)
+    for (let i = 0; i < rest.length / 3; i++) posed.set(skinnedAt(mesh, i, v).toArray(), i * 3)
+    const length = (p: Float32Array, a: number, b: number) =>
+      Math.hypot(p[a * 3]! - p[b * 3]!, p[a * 3 + 1]! - p[b * 3 + 1]!, p[a * 3 + 2]! - p[b * 3 + 2]!)
+    const index = mesh.geometry.index!
+    for (let t = 0; t < index.count; t += 3) {
+      triangles++
+      let most = 1
+      for (let e = 0; e < 3; e++) {
+        const a = index.getX(t + e)
+        const b = index.getX(t + ((e + 1) % 3))
+        const before = length(rest, a, b)
+        if (before < TORN_EDGE) continue
+        const ratio = length(posed, a, b) / before
+        most = Math.max(most, ratio, 1 / Math.max(ratio, 1e-6))
+      }
+      if (most > TORN) torn++
+      if (most > worst) {
+        worst = most
+        const a = index.getX(t)
+        at = [rest[a * 3]!, rest[a * 3 + 1]!, rest[a * 3 + 2]!].map((x) => Math.round(x * 1000) / 1000)
+      }
+    }
+  }
+  return { pose, triangles, torn: triangles ? torn / triangles : 0, worst, at }
 }
 
 /** What the built file carries for the face's motion and the eyes. */
