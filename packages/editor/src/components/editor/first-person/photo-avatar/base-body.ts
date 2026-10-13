@@ -1,3 +1,4 @@
+import { type Expression, writeExpressionTargets } from './expressions'
 import {
   bufferViewBytes,
   type Glb,
@@ -171,14 +172,16 @@ export type AvatarImages = Map<string, { bytes: Uint8Array; mimeType: string }>
 /**
  * The avatar's GLB: the base body's, with the moved meshes' positions (and
  * the skin's normals) written new, the eyes' bones following the eyes, the
- * pictures in `images` (by image name) replaced, and the brow cards
- * dropped when the photos' brows are painted on the skin instead.
+ * pictures in `images` (by image name) replaced, the brow cards dropped
+ * when the photos' brows are painted on the skin instead, and, when given,
+ * `expressions` (carried onto this head) as its morph targets in place of
+ * the base's.
  */
 export function buildAvatarGlb(
   base: BaseBody,
   moves: Float64Array,
   images: AvatarImages,
-  { dropBrows }: { dropBrows: boolean },
+  { dropBrows, expressions }: { dropBrows: boolean; expressions?: readonly Expression[] },
 ): Uint8Array {
   const writer = new GlbWriter(base.glb)
   const json = writer.json
@@ -233,6 +236,7 @@ export function buildAvatarGlb(
     }
   })
   moveEyeBones(base, writer, eyeShift)
+  if (expressions) writeExpressionTargets(writer, base, expressions)
   if (dropBrows) {
     for (const node of json.nodes) {
       if (node.mesh !== undefined && json.meshes[node.mesh].name === 'Eyebrows') {

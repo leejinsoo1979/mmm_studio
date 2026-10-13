@@ -1,5 +1,6 @@
 import type { AvatarGender } from '../avatar-catalog'
 import { type BaseBody, type BaseMeta, readBaseBody } from './base-body'
+import { type Expression, type ExpressionIndex, readExpressions } from './expressions'
 import { type FaceTargetIndex, type LandmarkMap, readFaceTargets } from './head-model'
 
 /** Where the app serves the base bodies a face is fitted to, and their fitting data. */
@@ -12,9 +13,36 @@ export const baseFileUrls = (gender: AvatarGender, root = PHOTO_BASE_URL) => ({
   landmarks: `${root}/mpfb-base-${gender}.landmarks.json`,
   targetIndex: `${root}/mpfb-face-targets.json`,
   targetData: `${root}/mpfb-face-targets.bin`,
+  expressionIndex: `${root}/mpfb-face-expressions.json`,
+  expressionData: `${root}/mpfb-face-expressions.bin`,
 })
 
 const loaded = new Map<string, Promise<BaseBody>>()
+const expressionsLoaded = new Map<string, Promise<Expression[]>>()
+
+async function fetched(url: string, fetcher: typeof fetch) {
+  const response = await fetcher(url)
+  if (!response.ok) throw new Error(`${url}: ${response.status}`)
+  return response
+}
+
+/** The face's expressions on the base mesh (both genders share them), read once per page or worker. */
+export function loadBaseExpressions(
+  root = PHOTO_BASE_URL,
+  fetcher: typeof fetch = fetch,
+): Promise<Expression[]> {
+  let found = expressionsLoaded.get(root)
+  if (!found) {
+    const urls = baseFileUrls('male', root)
+    found = Promise.all([
+      fetched(urls.expressionIndex, fetcher).then((r) => r.json() as Promise<ExpressionIndex>),
+      fetched(urls.expressionData, fetcher).then((r) => r.arrayBuffer()),
+    ]).then(([index, data]) => readExpressions(index, data))
+    found.catch(() => expressionsLoaded.delete(root))
+    expressionsLoaded.set(root, found)
+  }
+  return found
+}
 
 /** A base body read once per page (or worker) and gender. */
 export function loadBaseBody(
@@ -26,11 +54,7 @@ export function loadBaseBody(
   let found = loaded.get(key)
   if (!found) {
     const urls = baseFileUrls(gender, root)
-    const get = async (url: string) => {
-      const response = await fetcher(url)
-      if (!response.ok) throw new Error(`${url}: ${response.status}`)
-      return response
-    }
+    const get = (url: string) => fetched(url, fetcher)
     found = (async () => {
       const [glb, meta, basemesh, landmarks, index, data] = await Promise.all([
         get(urls.glb).then((r) => r.arrayBuffer()),

@@ -2,7 +2,7 @@
 // Makes a photo avatar off the main thread (see avatar-job.ts): fitting the
 // head to the photos and laying their skin on it takes tens of seconds.
 import { type AvatarJobReport, type PictureCodec, runAvatarJob } from './avatar-job'
-import { loadBaseBody } from './base-files'
+import { loadBaseBody, loadBaseExpressions } from './base-files'
 import type { PhotoAvatarRequest } from './build-client'
 
 declare const self: DedicatedWorkerGlobalScope
@@ -44,9 +44,13 @@ const reply = (message: WorkerReply, transfer: Transferable[] = []) =>
 self.onmessage = async (event: MessageEvent<PhotoAvatarRequest>) => {
   const request = event.data
   try {
-    const base = await loadBaseBody(request.gender, request.root)
+    const [base, expressions] = await Promise.all([
+      loadBaseBody(request.gender, request.root),
+      loadBaseExpressions(request.root),
+    ])
     const { glb, report } = await runAvatarJob({
       base,
+      expressions,
       views: request.views,
       colors: request.colors,
       codec,

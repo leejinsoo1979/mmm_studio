@@ -6,6 +6,7 @@ import {
   movedPositions,
 } from './base-body'
 import type { Camera } from './camera'
+import { type Expression, transferExpressions } from './expressions'
 import { landmarkUvs, texelKinds } from './features'
 import { composite, fillVertexColors, pushPull, rasterizeVertexColors, toneGains } from './fill'
 import { type FitOptions, type FitResult, type FitView, fitHead } from './fit'
@@ -109,6 +110,7 @@ export function fitCapture(
 
 export async function runAvatarJob({
   base,
+  expressions,
   views,
   colors,
   codec,
@@ -116,6 +118,8 @@ export async function runAvatarJob({
   fitOptions = {},
 }: {
   base: BaseBody
+  /** The face's expressions on the base mesh (base-files.ts), carried onto the fitted head. */
+  expressions: readonly Expression[]
   views: CaptureView[]
   colors: CaptureColors
   codec: PictureCodec
@@ -271,7 +275,10 @@ export async function runAvatarJob({
   }
   const textured = performance.now()
   progress(0.92, 'pack')
-  const glb = buildAvatarGlb(base, moves, images, { dropBrows: true })
+  const glb = buildAvatarGlb(base, moves, images, {
+    dropBrows: true,
+    expressions: transferExpressions(base, moves, expressions),
+  })
   progress(1, 'pack')
   const done = performance.now()
   return {
