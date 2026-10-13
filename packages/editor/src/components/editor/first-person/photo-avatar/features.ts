@@ -58,18 +58,39 @@ const BROW_RINGS = [
   [46, 53, 52, 65, 55, 107, 66, 105, 63, 70],
 ] as const
 
+/**
+ * A ring's landmarks that lie on the face with the rest of it. A few of the
+ * landmark map's points (an eye's corner, an inner lip) sit on skin out of
+ * sight of the photos it was made from — inside the mouth, in the eye
+ * socket — whose texture coordinates are on another island: a ring through
+ * them would cut across the face.
+ */
+export function ringLandmarks(uvs: Float32Array, indices: readonly number[]): number[] {
+  const known = indices.filter((i) => Number.isFinite(uvs[i * 2]!))
+  const middle = (k: 0 | 1) => {
+    const sorted = known.map((i) => uvs[i * 2 + k]!).sort((a, b) => a - b)
+    return sorted[sorted.length >> 1] ?? 0
+  }
+  const mu = middle(0)
+  const mv = middle(1)
+  const reach = known.map((i) => Math.hypot(uvs[i * 2]! - mu, uvs[i * 2 + 1]! - mv))
+  const typical = [...reach].sort((a, b) => a - b)[reach.length >> 1] ?? 0
+  return known.filter((_, k) => reach[k]! <= 3 * typical)
+}
+
 /** A ring of landmarks pushed out from its centre by `grow` (a fraction of its size). */
 function ring(uvs: Float32Array, indices: readonly number[], grow: number, size: number): number[] {
+  const kept = ringLandmarks(uvs, indices)
   let cx = 0
   let cy = 0
-  for (const i of indices) {
+  for (const i of kept) {
     cx += uvs[i * 2]!
     cy += uvs[i * 2 + 1]!
   }
-  cx /= indices.length
-  cy /= indices.length
+  cx /= kept.length
+  cy /= kept.length
   const out: number[] = []
-  for (const i of indices) {
+  for (const i of kept) {
     out.push(
       (cx + (uvs[i * 2]! - cx) * (1 + grow)) * size,
       (cy + (uvs[i * 2 + 1]! - cy) * (1 + grow)) * size,

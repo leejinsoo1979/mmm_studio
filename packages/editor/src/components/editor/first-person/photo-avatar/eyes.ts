@@ -1,5 +1,7 @@
 import type { AvatarGender } from '../avatar-catalog'
 import { type BaseBody, movedPositions } from './base-body'
+import type { Expression } from './expressions'
+import { ringLandmarks } from './features'
 import { EYES } from './landmark-sets'
 import { fillTriangles } from './silhouette'
 import { linearToSrgb, median, srgbToLinear, type Texels } from './texture'
@@ -42,7 +44,8 @@ const EYE_RINGS = [EYES.slice(0, 16), EYES.slice(16)]
  */
 export function lidTexels(landmarkUv: Float32Array, size: number): Uint8Array {
   const out = new Uint8Array(size * size)
-  for (const ring of EYE_RINGS) {
+  for (const all of EYE_RINGS) {
+    const ring = ringLandmarks(landmarkUv, all)
     let cu = 0
     let cv = 0
     for (const l of ring) {
@@ -60,7 +63,7 @@ export function lidTexels(landmarkUv: Float32Array, size: number): Uint8Array {
     if (!(half > 0 && tall > 0)) continue
     // The texture's v runs down: the upper lid (to the brow's crease) lies at smaller v.
     const across = half * 1.45
-    const up = tall * 3.2
+    const up = tall * 2.4
     const down = tall * 2.2
     const x0 = Math.max(0, Math.floor((cu - across) * size))
     const x1 = Math.min(size - 1, Math.ceil((cu + across) * size))
@@ -173,9 +176,9 @@ export function scleraColour(
   const top = Math.max(...out)
   const bottom = Math.min(...out)
   if (top - bottom > SCLERA_TINT * top) {
-    // Pull the channels toward their lightness until the tint is within reach.
+    // Pull the channels toward their lightness by the share that leaves the tint at its most.
     const grey = 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2]
-    const keep = (SCLERA_TINT * top) / (top - bottom)
+    const keep = (SCLERA_TINT * grey) / (top - bottom - SCLERA_TINT * (top - grey))
     for (let k = 0; k < 3; k++) out[k] = grey + (out[k]! - grey) * keep
   }
   return out
@@ -407,7 +410,9 @@ export function innerSurfaces(
       if (nz > 0.75) lipFront[i] = 1
     }
   }
-  for (const mask of [rim, caruncle, innerLip]) feather(mask, texels.size, 2)
+  // About a millimetre of the face either way, whatever the texels' size.
+  for (const mask of [rim, caruncle, innerLip])
+    feather(mask, texels.size, Math.max(1, Math.round(texels.size / 512)))
   return { rim, caruncle, innerLip, lipFront }
 }
 
@@ -437,6 +442,119 @@ function mouthBox(base: BaseBody, moves: Float64Array) {
     bottom: bottom[1]! - 0.002,
     front: Math.max(top[2]!, bottom[2]!) + 0.004,
   }
+}
+
+/** The photos' lips are together below this: the inner lips' gap against the mouth's width. */
+const LIPS_TOGETHER = 0.05
+/** A face turned further than this foreshortens its mouth. */
+const MAX_LIPS_YAW = (30 * Math.PI) / 180
+
+/** Whether the photos facing the camera show the lips together (by the median of their gaps). */
+export function lipsTogether(
+  views: readonly { landmarks: Float32Array | null; yaw: number }[],
+): boolean {
+  const gaps: number[] = []
+  for (const view of views) {
+    const p = view.landmarks
+    if (!p || Math.abs(view.yaw) > MAX_LIPS_YAW) continue
+    const d = (a: number, b: number) =>
+      Math.hypot(p[a * 2]! - p[b * 2]!, p[a * 2 + 1]! - p[b * 2 + 1]!)
+    const width = d(61, 291)
+    if (width > 0) gaps.push(d(13, 14) / width)
+  }
+  return gaps.length > 0 && median(gaps) < LIPS_TOGETHER
+}
+
+/** The most the lips are drawn together (the jaw's opening taken back, as jawOpen's weight), and its steps. */
+const MAX_SEAL = 0.15
+const SEAL_STEP = 0.01
+/** How far (m) past the mouth's corners and below the lower lip the lift fades out. */
+const SEAL_FADE = 0.008
+/** The front view's pixel (m) where the slit between the lips is looked for. */
+const SEAL_PIXEL = 0.0002
+/** Columns across the mouth's middle with a gap between the lips, past which it shows a slit. */
+const SLIT_COLUMNS = 0.03
+
+/**
+ * `moves` with the lips brought together where the fitted head leaves a
+ * slit between them that the teeth show through: the lower lip raised by
+ * the least of the jaw's closing (`jaw`, the jawOpen shape taken back) that
+ * leaves no gap across the mouth's middle seen from the front, and a step
+ * more so they press, fading out past the corners and below the lip so
+ * the chin stays where the fit put it.
+ */
+export function sealLips(base: BaseBody, moves: Float64Array, jaw: Expression): Float64Array {
+  const mouth = mouthBox(base, moves)
+  const teethIndex = base.primitives.findIndex((one) => one.material === 'Teeth')
+  if (!mouth || teethIndex < 0) return moves
+  const { weld, mesh, primitive } = base.headSkin
+  const isSkin = new Uint8Array(base.basemesh.length / 3)
+  for (const v of weld) isSkin[v] = 1
+  const lift = new Float64Array(base.basemesh.length)
+  jaw.vertices.forEach((v, i) => {
+    if (!isSkin[v]) return
+    const x = base.basemesh[v * 3]! + moves[v * 3]!
+    const y = base.basemesh[v * 3 + 1]! + moves[v * 3 + 1]!
+    const across = Math.min(1, Math.max(0, (Math.abs(x - mouth.x) - mouth.half) / SEAL_FADE))
+    const below = Math.min(1, Math.max(0, (mouth.bottom - y) / SEAL_FADE))
+    const w = (1 - across) * (1 - below)
+    for (let k = 0; k < 3; k++) lift[v * 3 + k] = -w * jaw.deltas[i * 3 + k]!
+  })
+  // Only the lips' fronts, ahead of the teeth: deeper skin would hide the slit from a front view.
+  const teeth = movedPositions(base, teethIndex, moves)
+  let teethFront = Number.NEGATIVE_INFINITY
+  for (let i = 2; i < teeth.length; i += 3) teethFront = Math.max(teethFront, teeth[i]!)
+  const rest = movedPositions(base, primitive, moves)
+  const middle = (mouth.half - 0.002) * 0.7
+  const width = Math.ceil((2 * middle) / SEAL_PIXEL)
+  const height = Math.ceil((mouth.top - mouth.bottom) / SEAL_PIXEL)
+  const lips: number[] = []
+  for (let t = 0; t < mesh.triangles.length; t += 3) {
+    const c = [0, 0, 0]
+    for (let j = 0; j < 3; j++)
+      for (let k = 0; k < 3; k++) c[k] = c[k]! + rest[mesh.triangles[t + j]! * 3 + k]! / 3
+    if (
+      Math.abs(c[0]! - mouth.x) < middle + 0.003 &&
+      c[1]! > mouth.bottom - 0.003 &&
+      c[1]! < mouth.top + 0.003 &&
+      c[2]! > teethFront - 0.001
+    )
+      lips.push(mesh.triangles[t]!, mesh.triangles[t + 1]!, mesh.triangles[t + 2]!)
+  }
+  const xy = new Float32Array((rest.length / 3) * 2)
+  const cover = new Uint8Array(width * height)
+  const slit = (s: number) => {
+    for (let i = 0; i < rest.length / 3; i++) {
+      const v = weld[i]!
+      xy[i * 2] = (rest[i * 3]! + s * lift[v * 3]! - (mouth.x - middle)) / SEAL_PIXEL
+      xy[i * 2 + 1] = (mouth.top - (rest[i * 3 + 1]! + s * lift[v * 3 + 1]!)) / SEAL_PIXEL
+    }
+    cover.fill(0)
+    fillTriangles(xy, lips, width, height, cover)
+    let open = 0
+    for (let x = 0; x < width; x++) {
+      let top = -1
+      let bottom = -1
+      for (let y = 0; y < height; y++) {
+        if (!cover[y * width + x]) continue
+        if (top < 0) top = y
+        bottom = y
+      }
+      for (let y = top + 1; top >= 0 && y < bottom; y++) {
+        if (cover[y * width + x]) continue
+        open++
+        break
+      }
+    }
+    return open > SLIT_COLUMNS * width
+  }
+  if (!slit(0)) return moves
+  let s = SEAL_STEP
+  while (s < MAX_SEAL && slit(s)) s += SEAL_STEP
+  s = Math.min(MAX_SEAL, s + SEAL_STEP)
+  const out = Float64Array.from(moves)
+  for (let i = 0; i < out.length; i++) out[i] = out[i]! + s * lift[i]!
+  return out
 }
 
 /** A box blur, `radius` texels, in place (twice: near a Gaussian). */

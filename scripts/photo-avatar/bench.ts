@@ -395,7 +395,16 @@ function verdicts(head: Head, result: any, base: any): Check[] {
     checks.push(...g6Checks(result.skin))
     checks.push(...g7Checks(result.hair && { ...result.hair, colourDeltaE: hairDeltaE(result) }, head, result.truth?.hairClass))
     const front = result.skin?.soft?.renders?.soft?.find((r: { yaw: number }) => r.yaw === 0)
-    checks.push(...g8Checks(result.eyes && { ...result.eyes, irisDeltaE: front?.iris }))
+    checks.push(
+      ...g8Checks(
+        result.eyes && {
+          ...result.eyes,
+          irisDeltaE: front?.iris,
+          irisColours: front?.irisColours,
+          truthEyesShut: front?.truthEyesShut,
+        },
+      ),
+    )
     const five = result.configs.five
     checks.push(
       ...g9Checks({

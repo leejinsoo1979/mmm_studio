@@ -14,9 +14,11 @@ import {
   LASHES,
   lashPositions,
   lidTexels,
+  lipsTogether,
   paintInnerSurfaces,
   photoWhites,
   scleraColour,
+  sealLips,
   TEETH_TONE,
   TONGUE_TONE,
   toneImage,
@@ -147,7 +149,9 @@ export async function runAvatarJob({
   const fitted = performance.now()
   progress(0.45, 'texture')
 
-  const moves = baseMeshMoves(base, fit.positions)
+  const fitMoves = baseMeshMoves(base, fit.positions)
+  const jaw = expressions.find((one) => one.name === 'jawOpen')
+  const moves = jaw && lipsTogether(views) ? sealLips(base, fitMoves, jaw) : fitMoves
   const { headSkin } = base
   const headPositions = movedPositions(base, headSkin.primitive, moves)
   const headMesh: UvMesh = {

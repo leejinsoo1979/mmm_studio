@@ -5,6 +5,7 @@ import {
   GATE_POINTS,
   GATES,
 } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/__bench__/gates'
+import { deltaERgb } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/__bench__/colour'
 import type { Head } from './heads'
 
 type Num = number | null | undefined
@@ -131,13 +132,43 @@ export function g7Checks(hair: any, head: Head, truthHair: any): Check[] {
   return out
 }
 
+/** Closer than this (ΔE2000) to the shut lids the truth shows where its irises would be is a flesh-coloured iris. */
+const FLESH_IRIS = 20
+
+/**
+ * G8's iris: the avatar's against the truth's (ΔE). A truth with its eyes
+ * shut shows lids where its irises would be, which an avatar must not copy
+ * (it falls back to the neutral iris): for it a second row says how far the
+ * avatar's iris is from that lid colour, the gate's own row standing.
+ */
+function irisChecks(eyes: any): Check[] {
+  const out = [
+    check('G8', 'iris ΔE', eyes.irisDeltaE, `≤ ${GATES.G8.iris}`, finite(eyes.irisDeltaE) && eyes.irisDeltaE <= GATES.G8.iris),
+  ]
+  const [truth, avatar] = (eyes.irisColours ?? [null, null]) as [string | null, string | null]
+  if (eyes.truthEyesShut && truth && avatar) {
+    const rgb = (hex: string) =>
+      [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)) as [number, number, number]
+    const fromLids = deltaERgb(rgb(truth), rgb(avatar))
+    out.push({
+      gate: 'G8',
+      name: 'iris, truth’s eyes shut: ΔE from the lids',
+      value: fromLids,
+      limit: `≥ ${FLESH_IRIS} (not flesh)`,
+      pass: fromLids >= FLESH_IRIS,
+      note: `avatar ${avatar}, lids ${truth}`,
+    })
+  }
+  return out
+}
+
 /** G8: iris colour, the face's morphs, and no white line on closed lips. */
 export function g8Checks(eyes: any): Check[] {
   if (!eyes) return [check('G8', 'run', Number.NaN, 'ran', false)]
   const morphs: string[] = eyes.facts?.morphs ?? []
   const has = (re: RegExp) => morphs.some((m) => re.test(m))
   return [
-    check('G8', 'iris ΔE', eyes.irisDeltaE, `≤ ${GATES.G8.iris}`, finite(eyes.irisDeltaE) && eyes.irisDeltaE <= GATES.G8.iris),
+    ...irisChecks(eyes),
     {
       gate: 'G8',
       name: 'morphs',

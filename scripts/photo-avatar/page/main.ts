@@ -47,6 +47,7 @@ import { loadBaseBody } from '../../../packages/editor/src/components/editor/fir
 import { buildPhotoAvatar } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/build-client'
 import type { Camera } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/camera'
 import { startGuide } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/capture-guide'
+import { eyesShut } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/eyes'
 import { landmarkUvs } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/features'
 import { parseGlb, readPrimitives } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/glb'
 import {
@@ -1054,13 +1055,15 @@ async function skinRenders(name: string, shots: ShotSpec[], align: GeometryRepor
     }
     let iris = Number.NaN
     let irisColours: [string | null, string | null] = [null, null]
+    let truthEyesShut: boolean | null = null
     if (tFace && aFace && Math.abs(shots[k]!.yaw) < 1) {
       const ti = sampleIrisColor(tImage, tFace.points)
       const ai = sampleIrisColor(aImage, aFace.points)
       irisColours = [ti, ai]
       if (ti && ai) iris = deltaERgb(hexRgb(ti), hexRgb(ai))
+      truthEyesShut = eyesShut({ blendshapes: tFace.blendshapes })
     }
-    out.push({ yaw: shots[k]!.yaw, light: shots[k]!.light, cheeks, iris, irisColours, truthUrl, avatarUrl, avatarFound: Boolean(aFace) })
+    out.push({ yaw: shots[k]!.yaw, light: shots[k]!.light, cheeks, iris, irisColours, truthEyesShut, truthUrl, avatarUrl, avatarFound: Boolean(aFace) })
   }
   return out
 }
