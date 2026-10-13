@@ -832,8 +832,8 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const rootRef = useRef<HTMLDivElement>(null)
 
   const shown = photoPreview ? { ...(preview ?? draft), real: photoPreview } : (preview ?? draft)
-  // A 실사 character takes no look: only 프리셋 and 동작 apply to it. An AI
-  // 인물, a photo avatar or one from the local folder goes by the name its listing gives it.
+  // A 실사 character takes no look but a photo avatar's hair colour: 프리셋 and 동작 apply to it.
+  // An AI 인물, a photo avatar or one from the local folder goes by the name its listing gives it.
   const local = useLocalPhotoreal()
   const people = useAiPeople()
   const photos = usePhotoAvatars()
@@ -841,7 +841,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
     [...(people ?? []), ...(photos ?? []), ...(local ?? [])].find(({ id }) => id === shown.real) ??
     findPhotoreal(shown.real)
   const job = useAvatarJob()
-  const tabs = studioTabs(isNpc, real !== null)
+  const tabs = studioTabs(isNpc, real !== null, real?.photo === true)
   const stageLook = useThrottled(shown.look, 90)
   const faceTarget = useFaceTarget(shown.avatar)
   const dirty =
@@ -1447,7 +1447,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
             ) : (
               <HairColorBody
                 hair={look.hair}
-                hairStyle={wornHairStyle(look.hairStyle)}
+                hairStyle={real ? null : wornHairStyle(look.hairStyle)}
                 onCommit={(hair) => lookPatch({ hair }, true)}
                 onPreview={(hair) => lookPatch({ hair }, false)}
               />

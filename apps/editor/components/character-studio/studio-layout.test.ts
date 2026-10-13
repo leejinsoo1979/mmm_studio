@@ -60,6 +60,13 @@ describe('the tabs', () => {
   test('a 실사 character keeps 프리셋 and 동작 alone: the look tabs fit Rocketbox bodies', () => {
     expect(studioTabs(false, true).map(({ label }) => label)).toEqual(['프리셋', '동작'])
     expect(studioTabs(true, true).map(({ id }) => id)).toEqual(['preset'])
+    // A photo avatar's hair, matched to its photos, still takes a colour.
+    expect(studioTabs(false, true, true).map(({ label }) => label)).toEqual([
+      '프리셋',
+      '헤어',
+      '동작',
+    ])
+    expect(categoriesOf('hair', false, true).map(({ id }) => id)).toEqual(['color'])
   })
 
   test('프리셋 lists the 실사 set as one category, marked while a 실사 character is picked', () => {

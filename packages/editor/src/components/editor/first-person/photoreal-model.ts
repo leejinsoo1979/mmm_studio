@@ -1,5 +1,12 @@
 import { humanMaterial, humanSurfaceOf } from '@pascal-app/viewer'
-import type { Material, Mesh, Object3D, SkinnedMesh } from 'three'
+import {
+  Color,
+  type Material,
+  type Mesh,
+  type MeshStandardMaterial,
+  type Object3D,
+  type SkinnedMesh,
+} from 'three'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 
 /**
@@ -31,6 +38,42 @@ export function preparePhotorealModel(source: Object3D, anisotropy = 1): Object3
     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material)
   })
   return model
+}
+
+/** How far a dye may lift or darken a hair picture's colour, per channel (linear). */
+const DYE_GAIN = 8
+
+/**
+ * Dyes a body's hair `hex` (null: its own colour back), where its hair
+ * materials name the colour their pictures hold (a photo avatar's: the
+ * `hairColour` extra, photo-avatar/hair-glb.ts). The prepared materials are
+ * shared by every copy of the body, so all of them take it. Whether the
+ * body has such hair.
+ */
+export function dyeHair(model: Object3D, hex: string | null): boolean {
+  let found = false
+  const own = new Color()
+  const want = new Color()
+  model.traverse((object) => {
+    const mesh = object as Mesh
+    if (!mesh.isMesh) return
+    for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      const held = material.userData.hairColour as string | undefined
+      const color = (material as MeshStandardMaterial).color
+      if (!(held && color)) continue
+      found = true
+      if (!hex) {
+        color.setRGB(1, 1, 1)
+        continue
+      }
+      own.set(held)
+      want.set(hex)
+      const gain = (to: number, from: number) =>
+        Math.min(DYE_GAIN, Math.max(1 / DYE_GAIN, to / Math.max(from, 1e-4)))
+      color.setRGB(gain(want.r, own.r), gain(want.g, own.g), gain(want.b, own.b))
+    }
+  })
+  return found
 }
 
 /** How tall a body stands as it is posed now (m): its skinned meshes' highest point over its lowest. */

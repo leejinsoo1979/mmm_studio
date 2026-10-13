@@ -215,7 +215,7 @@ export {
   photoPhotorealId,
   useLocalPhotoreal,
 } from './components/editor/first-person/photoreal-catalog'
-export { Blinker } from './components/editor/first-person/photoreal-model'
+export { Blinker, dyeHair } from './components/editor/first-person/photoreal-model'
 export {
   type LocalPresence,
   lerpAngle,

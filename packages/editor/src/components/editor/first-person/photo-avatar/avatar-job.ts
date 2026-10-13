@@ -9,6 +9,10 @@ import type { Camera } from './camera'
 import { landmarkUvs, texelKinds } from './features'
 import { composite, fillVertexColors, pushPull, rasterizeVertexColors, toneGains } from './fill'
 import { type FitOptions, type FitResult, type FitView, fitHead } from './fit'
+import { type DressedPicture, dressHair } from './hair-glb'
+import type { HairStyle, HairStyleName } from './hair-library'
+import { type HairReading, hairStyleFor, readHair } from './hair-match'
+import { hairGains, scalpDensity, tintScalp, tonePicture } from './hair-paint'
 import { vertexNormals } from './head-model'
 import type { FaceBlendshapes, SegmentMasks } from './segment'
 import { fillTriangles } from './silhouette'
@@ -70,6 +74,11 @@ export type PictureCodec = {
   ) => Promise<{ bytes: Uint8Array; mimeType: string }>
 }
 
+/** A style of the hair library and its pictures (bytes as served), by name (see hair-library.ts). */
+export type HairSource = (
+  name: HairStyleName,
+) => Promise<{ style: HairStyle; pictures: Map<string, Uint8Array> }>
+
 export type AvatarJobReport = {
   views: FitResult['views']
   /** Per view, how well a smooth light explained its skin (r²). */
@@ -78,6 +87,8 @@ export type AvatarJobReport = {
   photoShare: number
   /** Each view's solved camera (the fitted head's frame to its pixels). */
   cameras: Camera[]
+  /** The hair read off the photos and the style given for it (null: bald). */
+  hair: HairReading & { style: HairStyleName | null }
   seconds: { fit: number; texture: number; pack: number }
 }
 
@@ -89,6 +100,8 @@ export type AvatarJobResult = {
 
 /** Texels per side the photos are laid at (the face island then holds ≈ 730 photo pixels across). */
 const WORKING = 1024
+/** The hair's colour (sRGB) where no photo showed any. */
+const UNSEEN_HAIR = '#3b2a20'
 
 const hexLinear = (hex: string): [number, number, number] => {
   const n = Number.parseInt(hex.replace('#', ''), 16)
@@ -112,6 +125,7 @@ export async function runAvatarJob({
   views,
   colors,
   codec,
+  hair,
   progress = () => {},
   fitOptions = {},
 }: {
@@ -119,6 +133,7 @@ export async function runAvatarJob({
   views: CaptureView[]
   colors: CaptureColors
   codec: PictureCodec
+  hair: HairSource
   progress?: (fraction: number, stage: 'fit' | 'texture' | 'pack') => void
   /** The fit's settings, past what the capture implies. */
   fitOptions?: FitOptions
@@ -217,6 +232,12 @@ export async function runAvatarJob({
   pushPull(coverage, covered, WORKING, 1)
   progress(0.8, 'texture')
 
+  const gender = base.meta.gender
+  const reading = readHair(views, fit, base, target)
+  const styleName = hairStyleFor(reading, gender)
+  const style = styleName ? await hair(styleName) : null
+  const hairColour = reading.colour ?? hexLinear(colors.hair ?? UNSEEN_HAIR)
+
   const images: AvatarImages = new Map()
   const head = await decodeImage(base, 'head_color', codec)
   const headUv = base.meta.headUV
@@ -236,6 +257,12 @@ export async function runAvatarJob({
     working: WORKING,
     keep,
   })
+  if (style)
+    tintScalp(
+      headPixels,
+      scalpDensity(style.style, gender, headMesh, headSkin.weld, head.width),
+      hairColour,
+    )
   images.set('head_color', await codec.encode(headPixels, head.width, head.height, 0.92))
 
   const body = await decodeImage(base, 'body_color', codec)
@@ -256,22 +283,31 @@ export async function runAvatarJob({
       ),
     )
   }
-  if (colors.hair) {
-    const hair = await decodeImage(base, 'hair_color', codec)
-    const hairMedian = imageMedian(hair.data, (i) => hair.data[i * 4 + 3]! > 128)
-    images.set(
-      'hair_color',
-      await codec.encode(
-        tone(hair.data, toneGains(hairMedian, hexLinear(colors.hair)), 6),
-        hair.width,
-        hair.height,
-        0.9,
-      ),
-    )
+  const pictures = new Map<string, DressedPicture>()
+  if (style) {
+    const decoded = new Map<string, Awaited<ReturnType<PictureCodec['decode']>>>()
+    for (const [file, bytes] of style.pictures)
+      decoded.set(file, await codec.decode(bytes, 'image/webp'))
+    const own = style.style.parts.find((part) => part.material === 'Hair')!.texture
+    const gains = hairGains(decoded.get(own)!.data, hairColour)
+    for (const [file, picture] of decoded) {
+      pictures.set(
+        file,
+        await codec.encode(tonePicture(picture.data, gains), picture.width, picture.height, 0.9),
+      )
+    }
   }
   const textured = performance.now()
   progress(0.92, 'pack')
-  const glb = buildAvatarGlb(base, moves, images, { dropBrows: true })
+  const basemesh = new Float64Array(base.basemesh.length)
+  for (let i = 0; i < basemesh.length; i++) basemesh[i] = base.basemesh[i]! + moves[i]!
+  const glb = dressHair(buildAvatarGlb(base, moves, images, { dropBrows: true }), base, {
+    style: style?.style ?? null,
+    gender,
+    basemesh,
+    pictures,
+    colour: hairColour,
+  })
   progress(1, 'pack')
   const done = performance.now()
   return {
@@ -282,6 +318,7 @@ export async function runAvatarJob({
       lightFit,
       photoShare: skinTexels ? seenTexels / skinTexels : 0,
       cameras: fit.cameras,
+      hair: { ...reading, style: styleName },
       seconds: {
         fit: (fitted - started) / 1000,
         texture: (textured - fitted) / 1000,

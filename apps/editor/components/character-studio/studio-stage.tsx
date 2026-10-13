@@ -4,6 +4,7 @@ import {
   type AvatarLook,
   Blinker,
   bodyHeightScale,
+  dyeHair,
   EmoteLayer,
   findAvatar,
   type HeadDetail,
@@ -940,14 +941,17 @@ function StudioAvatar({
 
 /**
  * A 실사 character (photoreal-body.ts): its own shading and the shared clips
- * on its rig, blinking; no look. Its height, measured as it loads, frames it.
+ * on its rig, blinking; of a look only a photo avatar's hair dye. Its
+ * height, measured as it loads, frames it.
  */
 function PhotorealAvatar({
   character,
+  hair,
   state,
   onCueEnd,
 }: {
   character: PhotorealCharacter
+  hair: string | null
   state: StageState
   onCueEnd: () => void
 }) {
@@ -955,6 +959,9 @@ function PhotorealAvatar({
   const body = usePhotorealBody(character, { anisotropy })
   const emoteClips = usePhotorealEmoteClips(body, true)
   const blinker = useMemo(() => new Blinker(body.model), [body.model])
+  useEffect(() => {
+    dyeHair(body.model, hair)
+  }, [body.model, hair])
   useEffect(() => {
     state.stature = body.stature
   }, [state, body.stature])
@@ -1479,7 +1486,12 @@ export function StudioStage({
               key={real.id}
               scope="studio-photoreal"
             >
-              <PhotorealAvatar character={real} onCueEnd={onCueEnd} state={state} />
+              <PhotorealAvatar
+                character={real}
+                hair={look.hair}
+                onCueEnd={onCueEnd}
+                state={state}
+              />
             </ErrorBoundary>
           ) : (
             <StudioAvatar avatarId={avatarId} look={look} onCueEnd={onCueEnd} state={state} />
