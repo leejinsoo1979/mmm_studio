@@ -3,7 +3,13 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readBaseBody } from './base-body'
 import { type FitView, fitHead } from './fit'
-import { type HeadModel, landmarkPosition, readFaceTargets, shapePositions } from './head-model'
+import {
+  type FaceTarget,
+  type HeadModel,
+  landmarkPosition,
+  readFaceTargets,
+  shapePositions,
+} from './head-model'
 import type { Vec3 } from './linalg'
 import { type HeadSurface, type ProfileError, profileError } from './profile'
 import { syntheticCapture } from './synthetic-capture'
@@ -33,19 +39,21 @@ let base: Float64Array
 let truth: Float64Array
 
 beforeAll(async () => {
+  const targets = readFaceTargets(
+    JSON.parse(read('mpfb-face-targets.json').toString()),
+    buffer('mpfb-face-targets.bin'),
+  )
   const body = await readBaseBody({
     glb: buffer('mpfb-base-female.glb'),
     basemesh: buffer('mpfb-base-female.basemesh.bin'),
     meta: JSON.parse(read('mpfb-base-female.json').toString()),
     landmarks: JSON.parse(read('mpfb-base-female.landmarks.json').toString()),
-    targets: readFaceTargets(
-      JSON.parse(read('mpfb-face-targets.json').toString()),
-      buffer('mpfb-face-targets.bin'),
-    ),
+    targets,
   })
   model = body.head
   base = shapePositions(model, new Float64Array(model.targetNames.length))
   const coefficients = new Float64Array(model.targetNames.length)
+  const unfitted: [FaceTarget, number][] = []
   for (const [name, value] of [
     ['nose-scale-depth-incr', 0.8],
     ['nose-hump-incr', 0.5],
@@ -58,10 +66,29 @@ beforeAll(async () => {
     ['head-scale-depth-incr', 0.2],
   ] as const) {
     const j = model.targetNames.indexOf(name)
-    if (j < 0) throw new Error(`no target ${name}`)
-    coefficients[j] = value
+    if (j >= 0) {
+      coefficients[j] = value
+      continue
+    }
+    const target = targets.find((t) => t.name === name)
+    if (!target) throw new Error(`no target ${name}`)
+    unfitted.push([target, value])
   }
   truth = shapePositions(model, coefficients)
+  // Targets the fit has no say in (the whole head's shape) still shape the person, faded down the
+  // neck as the model fades its own.
+  const region = new Map<number, number>()
+  model.vertices.forEach((v, i) => {
+    region.set(v, i)
+  })
+  for (const [target, value] of unfitted) {
+    target.vertices.forEach((v, k) => {
+      const i = region.get(v)
+      if (i === undefined) return
+      for (let c = 0; c < 3; c++)
+        truth[i * 3 + c] = truth[i * 3 + c]! + value * target.deltas[k * 3 + c]! * model.reach[i]!
+    })
+  }
   // Bumps along the normals at the nose's root (landmark 6) and under the lower lip (17).
   for (const [landmark, mm, radius] of [
     [6, 2.5, 0.008],

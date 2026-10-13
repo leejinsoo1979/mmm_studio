@@ -37,11 +37,12 @@ export function readFaceTargets(index: FaceTargetIndex, data: ArrayBuffer): Face
 }
 
 /**
- * Targets that move the whole head or neck, which the cameras' poses
- * already do, or that a photo can't see (the neck under the jaw).
+ * Targets that move or reshape the whole head or neck, which the cameras'
+ * poses and the head's size already do or that a photo can't see (the
+ * skull under hair, the neck under the jaw): left in, they let the skull
+ * drift against the face while the outlines barely notice.
  */
-const SKIPPED_TARGET =
-  /^(head-trans-|head-angle-|measure-neck-|neck-|head-back-scale-depth|chin-jaw-drop|mouth-dimples|mouth-laugh-lines)/
+const SKIPPED_TARGET = /^(head-|measure-neck-|neck-|chin-jaw-drop|mouth-dimples|mouth-laugh-lines)/
 
 /** How far below the chin (m) the fitted region reaches: the upper neck, blended into the body below. */
 const NECK_REACH = 0.07

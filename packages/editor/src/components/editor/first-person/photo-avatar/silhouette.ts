@@ -304,3 +304,103 @@ export function outerContour(
   }
   return { points, coverage }
 }
+
+/** A point of a mesh's smooth occluding contour: on a triangle, as three vertices and weights. */
+export type SmoothContourPoint = {
+  a: number
+  b: number
+  c: number
+  wa: number
+  wb: number
+  wc: number
+  /** Where it lands (pixels), and the outline's outward normal there (unit, image space). */
+  x: number
+  y: number
+  nx: number
+  ny: number
+}
+
+/**
+ * The mesh's occluding contour as the smooth surface its vertex normals
+ * describe has it: where the normal turns side-on to the camera, found
+ * inside each triangle whose corners face it differently. Unlike the
+ * polygonal outline (edges between a facing and a turned-away triangle), it
+ * moves continuously as the mesh deforms, so a fit pulling it onto a photo's
+ * outline sees a smooth cost. Kept where it is the mesh's outer outline
+ * (just outside it along the normal, `coverage` is empty) unless `inner`.
+ * `normals` are unit vertex normals of `positions`; `rotation` takes body
+ * space to the camera's.
+ */
+export function smoothContour(
+  positions: ArrayLike<number>,
+  normals: ArrayLike<number>,
+  xy: ArrayLike<number>,
+  triangles: ArrayLike<number>,
+  centre: readonly [number, number, number],
+  rotation: ArrayLike<number>,
+  keep: (a: number, b: number, c: number) => boolean,
+  coverage: { data: Uint8Array; width: number; height: number } | null,
+): SmoothContourPoint[] {
+  const count = positions.length / 3
+  const g = new Float64Array(count)
+  for (let i = 0; i < count; i++) {
+    g[i] =
+      normals[i * 3]! * (centre[0] - positions[i * 3]!) +
+      normals[i * 3 + 1]! * (centre[1] - positions[i * 3 + 1]!) +
+      normals[i * 3 + 2]! * (centre[2] - positions[i * 3 + 2]!)
+  }
+  const covered = (x: number, y: number) => {
+    if (!coverage) return false
+    const px = Math.floor(x)
+    const py = Math.floor(y)
+    if (px < 0 || py < 0 || px >= coverage.width || py >= coverage.height) return false
+    return coverage.data[py * coverage.width + px]! > 0
+  }
+  const out: SmoothContourPoint[] = []
+  const w = [0, 0, 0]
+  for (let t = 0; t < triangles.length; t += 3) {
+    const v = [triangles[t]!, triangles[t + 1]!, triangles[t + 2]!]
+    const ga = g[v[0]!]!
+    const gb = g[v[1]!]!
+    const gc = g[v[2]!]!
+    if ((ga > 0 && gb > 0 && gc > 0) || (ga <= 0 && gb <= 0 && gc <= 0)) continue
+    if (!keep(v[0]!, v[1]!, v[2]!)) continue
+    // The two edges the sign changes across, and where (linearly) it is zero on each.
+    w[0] = 0
+    w[1] = 0
+    w[2] = 0
+    let crossings = 0
+    for (let k = 0; k < 3; k++) {
+      const i = k
+      const j = (k + 1) % 3
+      const gi = g[v[i]!]!
+      const gj = g[v[j]!]!
+      if (gi > 0 === gj > 0) continue
+      const s = gi / (gi - gj)
+      w[i] = w[i]! + (1 - s) / 2
+      w[j] = w[j]! + s / 2
+      crossings++
+    }
+    if (crossings !== 2) continue
+    const x = w[0]! * xy[v[0]! * 2]! + w[1]! * xy[v[1]! * 2]! + w[2]! * xy[v[2]! * 2]!
+    const y = w[0]! * xy[v[0]! * 2 + 1]! + w[1]! * xy[v[1]! * 2 + 1]! + w[2]! * xy[v[2]! * 2 + 1]!
+    // The surface's normal there, side-on to the camera, is the outline's outward normal.
+    let mx = 0
+    let my = 0
+    let mz = 0
+    for (let k = 0; k < 3; k++) {
+      mx += w[k]! * normals[v[k]! * 3]!
+      my += w[k]! * normals[v[k]! * 3 + 1]!
+      mz += w[k]! * normals[v[k]! * 3 + 2]!
+    }
+    let nx = rotation[0]! * mx + rotation[1]! * my + rotation[2]! * mz
+    let ny = rotation[3]! * mx + rotation[4]! * my + rotation[5]! * mz
+    const length = Math.hypot(nx, ny)
+    if (length < 1e-9) continue
+    nx /= length
+    ny /= length
+    if (covered(x + 3 * nx, y + 3 * ny)) continue
+    out.push({ a: v[0]!, b: v[1]!, c: v[2]!, wa: w[0]!, wb: w[1]!, wc: w[2]!, x, y, nx, ny })
+  }
+  return out
+}

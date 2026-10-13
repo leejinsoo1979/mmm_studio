@@ -8,7 +8,7 @@ import {
 import type { Camera } from './camera'
 import { landmarkUvs, texelKinds } from './features'
 import { composite, fillVertexColors, pushPull, rasterizeVertexColors, toneGains } from './fill'
-import { type FitOptions, type FitResult, type FitView, fitHead } from './fit'
+import { type FitOptions, type FitResult, type FitView, fitHead, PUPIL_DISTANCE } from './fit'
 import { vertexNormals } from './head-model'
 import type { FaceBlendshapes, SegmentMasks } from './segment'
 import { fillTriangles } from './silhouette'
@@ -103,6 +103,7 @@ export function fitCapture(
 ): FitResult {
   return fitHead(base.head, views, {
     sameCamera: views.every((view) => view.slot !== 'free'),
+    pupils: PUPIL_DISTANCE[base.meta.gender],
     ...fitOptions,
   })
 }

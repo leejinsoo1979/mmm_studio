@@ -44,16 +44,29 @@ export const MIDLINE = [
 /** Iris centres (the subject's right, then left). */
 export const IRIS_CENTRES = [468, 473] as const
 
-/** How much each of the 468 face points counts as a fixed point on the skin (0 for the outline). */
+/**
+ * Points on the face's midline where nothing marks the height: the nose's bridge, the forehead
+ * and the chin's front. MediaPipe slides them up and down with the face's proportions, so only
+ * where they are across the face counts.
+ */
+export const SLIDING = [10, 151, 9, 8, 168, 6, 197, 195, 5, 199, 175] as const
+
+/**
+ * How much each of the 478 points counts as a fixed point on the skin (0 for the outline). The
+ * points MediaPipe spreads over the cheeks and forehead come from its average face and move with
+ * it, not with the person's: they count for little. The irises' centres count in a front view.
+ */
 export const LANDMARK_WEIGHT: Float32Array = (() => {
-  const weights = new Float32Array(478).fill(0.25)
+  const weights = new Float32Array(478).fill(0.08)
   for (const i of EYES) weights[i] = 1
   for (const i of NOSE) weights[i] = 1
-  for (const i of BROWS) weights[i] = 0.6
+  for (const i of BROWS) weights[i] = 0.5
   for (const i of LIPS_OUTER) weights[i] = 0.8
   for (const i of LIPS_INNER) weights[i] = 0.3
+  for (const i of SLIDING) weights[i] = 0.6
   for (const i of OVAL) weights[i] = 0
   for (let i = 468; i < 478; i++) weights[i] = 0
+  for (const i of IRIS_CENTRES) weights[i] = 0.5
   return weights
 })()
 
@@ -68,6 +81,14 @@ export const isEye = (() => {
   for (const i of EYES) set[i] = 1
   return (i: number) => set[i] === 1
 })()
+
+export const isSliding = (() => {
+  const set = new Uint8Array(478)
+  for (const i of SLIDING) set[i] = 1
+  return (i: number) => set[i] === 1
+})()
+
+export const isIris = (i: number) => i >= 468
 
 export const isLip = (() => {
   const set = new Uint8Array(478)
