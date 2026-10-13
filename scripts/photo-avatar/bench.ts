@@ -66,6 +66,7 @@ const { values: flags } = parseArgs({
     out: { type: 'string' },
     cache: { type: 'string' },
     fixtures: { type: 'boolean', default: false },
+    'fixtures-out': { type: 'string' },
     'keep-images': { type: 'boolean', default: true },
   },
 })
@@ -256,7 +257,7 @@ async function runHead(head: Head, first: boolean) {
     }
 
     result.checks = verdicts(head, result, base)
-    if (head.redistributable && fixtures.five && fixtures.perturbed)
+    if (fixtures.five && fixtures.perturbed)
       result.fixture = {
         id: head.id,
         gender: head.gender,
@@ -283,7 +284,13 @@ function compressMaps(views: FixtureView[]): FixtureView[] {
       : brotliCompressSync(Buffer.from(text, 'base64'), {
           params: { [zlib.BROTLI_PARAM_QUALITY]: 11, [zlib.BROTLI_PARAM_LGWIN]: 24 },
         }).toString('base64')
-  return views.map((v) => ({ ...v, mask: brotli(v.mask), skin: brotli(v.skin), covered: brotli(v.covered) }))
+  return views.map((v) => ({
+    ...v,
+    mask: brotli(v.mask),
+    skin: brotli(v.skin),
+    covered: brotli(v.covered),
+    classes: brotli(v.classes ?? null),
+  }))
 }
 
 /** Everything sent from the page or its workers during the five-photo build: none may leave its server or carry a body. */
@@ -423,8 +430,13 @@ for (const [i, head] of heads.entries()) {
   results.push({ head, result })
   saveJson(`${head.id}/report.json`, { ...result, fixture: undefined })
   writeFileSync(join(out, head.id, 'report.md'), headMarkdown(head, result))
-  if (flags.fixtures && result.fixture && !heldout) {
-    const dir = join(REPO, 'packages/editor/src/components/editor/first-person/photo-avatar/__bench__/fixtures')
+  // Fixtures of heads that may not be shared go only to a folder outside the repo (--fixtures-out).
+  const fixtureDir = resolve(
+    flags['fixtures-out'] ?? join(REPO, 'packages/editor/src/components/editor/first-person/photo-avatar/__bench__/fixtures'),
+  )
+  const shareable = head.redistributable || !fixtureDir.startsWith(`${REPO}/`)
+  if (flags.fixtures && result.fixture && !heldout && shareable) {
+    const dir = fixtureDir
     mkdirSync(dir, { recursive: true })
     const file = join(dir, `${head.id}.json`)
     writeFileSync(file, JSON.stringify(result.fixture))

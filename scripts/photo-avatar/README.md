@@ -41,6 +41,7 @@ bun scripts/photo-avatar/bench.ts --heldout rocketbox:Business_Male_03,mpfb:101
 | `--out <dir>` | where reports go (default `<cache>/out/tuning` or `<cache>/out/heldout`) |
 | `--cache <dir>` | the bench's cache (or `BENCH_CACHE`). It holds the MPFB and scan heads, the bundled page, the Chrome profile and the clips. Default is `$TMPDIR/photo-avatar-bench`. |
 | `--fixtures` | write `__bench__/fixtures/<head>.json` for redistributable tuning heads |
+| `--fixtures-out <dir>` | write fixtures there instead; a folder outside the repo also takes heads that may not be shared (LPS), for local fixture runs |
 
 Environment:
 - `BENCH_DISPLAY`, `BENCH_CDP` and `BENCH_HTTP` set the Xvfb display, the Chrome DevTools port and
@@ -123,9 +124,11 @@ the result against the truth. The gates are checked at their own limits:
 - G4 on three photos and on one photo (against the untouched base head).
 
 What a fixture keeps:
-- **Each view's MediaPipe landmarks**, exactly.
+- **Each view's MediaPipe landmarks**, exactly, and its face blendshapes.
 - **Each view's mask, skin and strand maps**, as which side of 127 each pixel is on. That is all the
-  fit reads of them, so the photo and the class planes are left out.
+  fit reads of them, so the photo is left out.
+- **Each view's segment classes**, as the most likely class of each pixel (`decodeView` turns them
+  back into 0/255 class planes).
 - **The truth's summary**: landmarks, a skull cloud, the side profile, the ¾ outlines and widths.
 
 The bench's own numbers for the same views are stored in each fixture under `bench`.

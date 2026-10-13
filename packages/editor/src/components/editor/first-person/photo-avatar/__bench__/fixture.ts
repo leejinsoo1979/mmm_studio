@@ -1,5 +1,6 @@
 import type { CaptureSlot, CaptureView } from '../avatar-job'
 import type { Vec3 } from '../linalg'
+import { type FaceBlendshapes, SEGMENT_CLASSES, type SegmentMasks } from '../segment'
 import type { Outline, SideProfile, TruthHead } from './measure'
 
 /**
@@ -11,8 +12,9 @@ import type { Outline, SideProfile, TruthHead } from './measure'
  * Of a view's maps the fit reads only which side of 127 each pixel is on
  * (the mask through its distance field, skin and strands by sampling), so
  * that is all a fixture keeps of them: one bit a pixel, brotli-compressed by
- * the bench. The photo itself and the segmenter's class planes, which only
- * the texture reads, are left out.
+ * the bench. Of the segmenter's class planes it keeps each pixel's most
+ * likely class (the fit reads which class wins), and the face's blendshapes.
+ * The photo itself is left out.
  */
 
 export type FixtureView = {
@@ -31,6 +33,9 @@ export type FixtureView = {
   mask: string | null
   skin: string | null
   covered: string | null
+  /** Each pixel's most likely segment class (its index in SEGMENT_CLASSES, a byte), compressed, base64. */
+  classes?: string | null
+  blendshapes?: FaceBlendshapes | null
   /** How the bench photographed it (degrees; focal in pixels). */
   truth: { yaw: number; pitch: number; roll: number; focal: number; light: string }
 }
@@ -196,6 +201,14 @@ export function decodeTruth(truth: FixtureTruth): TruthHead {
   }
 }
 
+/** Class planes (0 or 255) from each pixel's most likely class. */
+export function classPlanes(classes: Uint8Array, width: number, height: number): SegmentMasks {
+  const size = width * height
+  const planes = new Uint8Array(size * SEGMENT_CLASSES.length)
+  for (let i = 0; i < size; i++) planes[classes[i]! * size + i] = 255
+  return { width, height, planes }
+}
+
 /** A fixture's view as the job takes it (a blank photo); `decompress` undoes the bench's brotli. */
 export function decodeView(
   view: FixtureView,
@@ -216,8 +229,10 @@ export function decodeView(
     mask: map(view.mask),
     skin: map(view.skin),
     covered: map(view.covered),
-    classes: null,
-    blendshapes: null,
+    classes: view.classes
+      ? classPlanes(decompress(fromBase64(view.classes)), view.width, view.height)
+      : null,
+    blendshapes: view.blendshapes ?? null,
     yaw: view.yaw,
     pitch: view.pitch,
     roll: view.roll,

@@ -61,6 +61,7 @@ import {
 } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/linalg'
 import { transformPoint4 } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/mat4'
 import { profileError } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/profile'
+import { classMap } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/segment'
 import { fillTriangles } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/silhouette'
 import { retargetClip, rigRest } from '../../../packages/editor/src/components/editor/first-person/humanoid-rig'
 import { preparePhotorealModel } from '../../../packages/editor/src/components/editor/first-person/photoreal-model'
@@ -1556,6 +1557,8 @@ function fixtureViews(name: string, shots: ShotSpec[]): FixtureView[] {
       mask: packed(v.mask),
       skin: packed(v.skin),
       covered: packed(v.covered),
+      classes: v.classes ? toBase64(classMap(v.classes)) : null,
+      blendshapes: v.blendshapes,
       truth: { yaw: shot.yaw, pitch: shot.pitch, roll: shot.roll, focal: shot.focal * (v.width / shot.width), light: shot.light },
     })
   }
