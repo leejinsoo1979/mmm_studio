@@ -60,7 +60,11 @@ export {
   PhotorealThumbnail,
   usePickedCharacter,
 } from './components/editor/first-person/character-picker'
-export { EmoteLayer, useEmoteClips } from './components/editor/first-person/emote-player'
+export {
+  EmoteLayer,
+  useEmoteClips,
+  useEmoteFaces,
+} from './components/editor/first-person/emote-player'
 export {
   canBindKey,
   DEFAULT_EMOTE_KEYS,
@@ -215,7 +219,7 @@ export {
   photoPhotorealId,
   useLocalPhotoreal,
 } from './components/editor/first-person/photoreal-catalog'
-export { Blinker } from './components/editor/first-person/photoreal-model'
+export { FaceMotion } from './components/editor/first-person/face-motion'
 export {
   type LocalPresence,
   lerpAngle,

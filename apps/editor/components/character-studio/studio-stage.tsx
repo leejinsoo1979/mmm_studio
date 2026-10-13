@@ -2,9 +2,9 @@
 
 import {
   type AvatarLook,
-  Blinker,
   bodyHeightScale,
   EmoteLayer,
+  FaceMotion,
   findAvatar,
   type HeadDetail,
   loadHeadDetail,
@@ -12,6 +12,7 @@ import {
   useAvatarBody,
   useAvatarLook,
   useEmoteClips,
+  useEmoteFaces,
   useFaceTarget,
   usePhotorealBody,
   usePhotorealEmoteClips,
@@ -842,7 +843,7 @@ function showDetail(model: Object3D, { twins, worn, seen }: HeadTwins) {
  * A body on the turntable: idling, playing the emote being previewed, or
  * holding still facing the camera (studio-pose.ts); its model is put in
  * the state for the camera and the handles to go by. `onFrame` runs each
- * frame before it is posed.
+ * frame before it is posed, given the emotes it plays.
  */
 function StagedBody({
   model,
@@ -857,7 +858,7 @@ function StagedBody({
   emoteClips: AnimationClip[] | null
   state: StageState
   onCueEnd: () => void
-  onFrame?: (delta: number) => void
+  onFrame?: (delta: number, emotes: EmoteLayer) => void
 }) {
   const camera = useThree((three) => three.camera)
   useEffect(() => {
@@ -881,7 +882,7 @@ function StagedBody({
   }, [clips, pose])
 
   useFrame((_, delta) => {
-    onFrame?.(delta)
+    onFrame?.(delta, layer)
     const group = groupRef.current
     if (group) {
       group.rotation.y += (state.yaw - group.rotation.y) * (1 - Math.exp(-TURN_RESPONSE * delta))
@@ -940,7 +941,8 @@ function StudioAvatar({
 
 /**
  * A 실사 character (photoreal-body.ts): its own shading and the shared clips
- * on its rig, blinking; no look. Its height, measured as it loads, frames it.
+ * on its rig, blinking, its face making each emote's face; no look. Its
+ * height, measured as it loads, frames it.
  */
 function PhotorealAvatar({
   character,
@@ -954,7 +956,9 @@ function PhotorealAvatar({
   const anisotropy = useThree((three) => (three.gl as unknown as WebGPURenderer).getMaxAnisotropy())
   const body = usePhotorealBody(character, { anisotropy })
   const emoteClips = usePhotorealEmoteClips(body, true)
-  const blinker = useMemo(() => new Blinker(body.model), [body.model])
+  const faces = useEmoteFaces(character.gender, true)
+  const face = useMemo(() => new FaceMotion(body.model), [body.model])
+  useEffect(() => face.setFaces(faces), [face, faces])
   useEffect(() => {
     state.stature = body.stature
   }, [state, body.stature])
@@ -964,7 +968,7 @@ function PhotorealAvatar({
       emoteClips={emoteClips}
       model={body.model}
       onCueEnd={onCueEnd}
-      onFrame={(delta) => blinker.update(delta)}
+      onFrame={(delta, emotes) => face.update(delta, emotes)}
       state={state}
     />
   )
