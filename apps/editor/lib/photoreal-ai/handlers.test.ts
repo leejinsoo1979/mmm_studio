@@ -246,9 +246,22 @@ describe('GET status', () => {
       signedIn: true,
       portraitsLeft: 8,
       avatarsLeft: 2,
+      avatarService: true,
       notice: expect.stringContaining('AI가 새로 만든 가상의 성인'),
     })
     expect(await setup().status(null)).toMatchObject({ signedIn: false, portraitsLeft: null })
+  })
+
+  test('with no paid 3D service: available, the browser makes the avatar, and the route builds nothing', async () => {
+    const noService = setup({ AI_AVATAR_CLIENT_ID: '', AI_AVATAR_CLIENT_SECRET: '' })
+    expect(await noService.status()).toMatchObject({
+      available: true,
+      avatarService: false,
+      avatarsLeft: null,
+    })
+    const portrait = await noService.signed()
+    expect((await noService.start(portrait)).status).toBe(503)
+    expect(noService.calls.some((call) => call.url.includes('avatarsdk.com'))).toBe(false)
   })
 
   test('only the 목업 lets the development user header name the user', async () => {

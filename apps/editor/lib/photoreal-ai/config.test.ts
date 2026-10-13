@@ -81,7 +81,12 @@ describe('readPhotorealAiConfig', () => {
       ok: false,
       reason: 'not_configured',
     })
-    expect(readPhotorealAiConfig({ ...IMAGE })).toEqual({
+    // No keys: no paid service, and this browser makes the avatar; one key alone is broken.
+    expect(readPhotorealAiConfig({ ...IMAGE })).toMatchObject({
+      ok: true,
+      config: { service: null },
+    })
+    expect(readPhotorealAiConfig({ ...IMAGE, AI_AVATAR_CLIENT_ID: 'id' })).toEqual({
       ok: false,
       reason: 'service_not_configured',
       part: 'avatar',

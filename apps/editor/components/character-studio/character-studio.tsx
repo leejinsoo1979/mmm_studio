@@ -35,14 +35,18 @@ import {
   PHOTOREAL_LOOK_NOTE,
   type PhotorealCharacter,
   PhotorealThumbnail,
+  photoAvatarIdOf,
+  removePhotoAvatar,
   useAvatarProfile,
   useFaceTarget,
   useLocalPhotoreal,
+  usePhotoAvatars,
   useWalkthroughView,
   wornHairStyle,
 } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import {
+  Camera,
   Check,
   ChevronRight,
   Eye,
@@ -71,6 +75,7 @@ import { FaceEditor } from './face-editor'
 import { FaceRegionBody, FaceRegionFooter, regionHasChanges, resetRegion } from './face-shape-panel'
 import { HairColorBody, HairStyleBody } from './hair-panel'
 import { MakeupBody, MakeupFooter } from './makeup-panel'
+import { PhotoAvatarDialog } from './photo-avatar-dialog'
 import { randomLook } from './random-look'
 import {
   COACH_WIDTH,
@@ -315,30 +320,66 @@ function AiPersonCard({ job, onOpen }: { job: AvatarJob | null; onOpen: () => vo
   )
 }
 
+/** 사진으로 실사 아바타 만들기, first in the 실사 set. */
+function PhotoAvatarCard({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      className={cn(
+        'group flex w-full items-center gap-3 rounded-2xl border border-emerald-300/35 border-dashed bg-emerald-400/[0.07] px-3 py-3 text-left transition duration-200 ease-out hover:border-emerald-300/70 hover:bg-emerald-400/[0.12] motion-reduce:transition-none',
+        FOCUS_RING,
+      )}
+      data-photo-avatar-card
+      onClick={onOpen}
+      type="button"
+    >
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-emerald-400/15 text-emerald-300">
+        <Camera className="size-5" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="font-semibold text-[13px] text-white">사진으로 실사 아바타 만들기</span>
+        <span className="text-[11px] text-white/55 leading-4">
+          얼굴을 정면과 옆에서 찍으면 옆모습까지 내 얼굴 모양 그대로 · 이 브라우저 안에서만 만들어요
+        </span>
+      </span>
+      <ChevronRight className="size-4 shrink-0 text-white/40 group-hover:text-white/70" />
+    </button>
+  )
+}
+
 /**
- * The 실사 set as tall cards: AI 인물 만들기 first, then those shipped, the
- * user's AI 인물 (marked, and deletable), the owner's own from the local
- * folder (with how to add them when there are none), and what a 실사
- * character can't take from the look tabs.
+ * The 실사 set as tall cards: 사진으로 만들기 and AI 인물 만들기 first, then
+ * those shipped, the user's photo avatars and AI 인물 (marked, and
+ * deletable), the owner's own from the local folder (with how to add them
+ * when there are none), and what a 실사 character can't take from the look
+ * tabs.
  */
 function RealGallery({
   real,
   people,
+  photos,
   local,
   job,
   onPick,
   onCreate,
+  onPhoto,
   onDelete,
 }: {
   real: string | null
   people: PhotorealCharacter[] | null
+  photos: PhotorealCharacter[] | null
   local: PhotorealCharacter[] | null
   job: AvatarJob | null
   onPick: (id: string) => void
   onCreate: () => void
+  onPhoto: () => void
   onDelete: (character: PhotorealCharacter) => Promise<boolean>
 }) {
-  const characters = [...PHOTOREAL_CHARACTERS, ...(people ?? []), ...(local ?? [])]
+  const characters = [
+    ...PHOTOREAL_CHARACTERS,
+    ...(photos ?? []),
+    ...(people ?? []),
+    ...(local ?? []),
+  ]
   const [deleting, setDeleting] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const remove = async (character: PhotorealCharacter) => {
@@ -351,6 +392,7 @@ function RealGallery({
   }
   return (
     <div className="flex flex-col gap-4">
+      <PhotoAvatarCard onOpen={onPhoto} />
       <AiPersonCard job={job} onOpen={onCreate} />
       <div className="grid grid-cols-3 gap-x-2.5 gap-y-3">
         {characters.map((entry) => {
@@ -402,7 +444,7 @@ function RealGallery({
               </span>
             </button>
           )
-          if (!entry.ai) return card
+          if (!entry.ai && !entry.photo) return card
           return (
             <div className="group/ai relative" key={entry.id}>
               {card}
@@ -412,7 +454,9 @@ function RealGallery({
                   role="alertdialog"
                 >
                   <span className="text-[11px] text-white/85 leading-4">
-                    이 AI 인물을 지울까요?
+                    {entry.photo
+                      ? '이 아바타를 이 브라우저에서 지울까요?'
+                      : '이 AI 인물을 지울까요?'}
                   </span>
                   <button
                     className={cn(
@@ -778,19 +822,23 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
   const [snapshotting, setSnapshotting] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
   const [personOpen, setPersonOpen] = useState(false)
+  const [photoOpen, setPhotoOpen] = useState(false)
+  /** A photo avatar just made, on the stage before it is kept (not part of the draft). */
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [coach, setCoach] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const stageRef = useRef<StudioStageApi>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
-  const shown = preview ?? draft
+  const shown = photoPreview ? { ...(preview ?? draft), real: photoPreview } : (preview ?? draft)
   // A 실사 character takes no look: only 프리셋 and 동작 apply to it. An AI
-  // 인물 or one from the local folder goes by the name its listing gives it.
+  // 인물, a photo avatar or one from the local folder goes by the name its listing gives it.
   const local = useLocalPhotoreal()
   const people = useAiPeople()
+  const photos = usePhotoAvatars()
   const real =
-    [...(people ?? []), ...(local ?? [])].find(({ id }) => id === shown.real) ??
+    [...(people ?? []), ...(photos ?? []), ...(local ?? [])].find(({ id }) => id === shown.real) ??
     findPhotoreal(shown.real)
   const job = useAvatarJob()
   const tabs = studioTabs(isNpc, real !== null)
@@ -907,17 +955,26 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
     const current = draftRef.current
     if (id !== current.real) commit({ ...current, real: id })
   }
-  // An AI 인물 deleted while on stage gives way to the first shipped one (one undo step).
+  // An AI 인물 or a photo avatar deleted while on stage gives way to the first shipped one (one
+  // undo step).
   const deletePerson = async (character: PhotorealCharacter) => {
+    const photoId = photoAvatarIdOf(character.id)
     const avatarId = aiAvatarIdOf(character.id)
-    if (!avatarId || !(await deleteAiPerson(avatarId))) {
-      showToast('AI 인물을 지우지 못했어요. 잠시 뒤 다시 시도해 주세요.')
+    const deleted = photoId
+      ? await removePhotoAvatar(photoId)
+      : avatarId !== null && (await deleteAiPerson(avatarId))
+    if (!deleted) {
+      showToast(
+        photoId
+          ? '아바타를 지우지 못했어요. 다시 시도해 주세요.'
+          : 'AI 인물을 지우지 못했어요. 잠시 뒤 다시 시도해 주세요.',
+      )
       return false
     }
     if (lastReal.current === character.id) lastReal.current = null
     const current = draftRef.current
     if (current.real === character.id) commit({ ...current, real: PHOTOREAL_CHARACTERS[0]!.id })
-    showToast('AI 인물을 지웠어요')
+    showToast(photoId ? '아바타를 지웠어요' : 'AI 인물을 지웠어요')
     return true
   }
   /** 기본 | 실사: the Rocketbox body, or the 실사 character last shown (the first, at first). */
@@ -1296,8 +1353,10 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
                   local={local}
                   onCreate={() => setPersonOpen(true)}
                   onDelete={deletePerson}
+                  onPhoto={() => setPhotoOpen(true)}
                   onPick={pickReal}
                   people={people}
+                  photos={photos}
                   real={real.id}
                 />
               ) : (
@@ -1694,6 +1753,28 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
             setPersonOpen(false)
             rootRef.current?.querySelector<HTMLElement>('[data-ai-person-card]')?.focus()
           }}
+          onMade={pickReal}
+        />
+      )}
+
+      {photoOpen && (
+        <PhotoAvatarDialog
+          defaultGender={real?.gender ?? 'female'}
+          onAiPerson={() => {
+            setPhotoOpen(false)
+            setPersonOpen(true)
+          }}
+          onAnnounce={announce}
+          onClose={() => {
+            setPhotoOpen(false)
+            setPhotoPreview(null)
+            rootRef.current?.querySelector<HTMLElement>('[data-photo-avatar-card]')?.focus()
+          }}
+          onKeep={(id) => {
+            setPhotoPreview(null)
+            pickReal(id)
+          }}
+          onShow={setPhotoPreview}
         />
       )}
 

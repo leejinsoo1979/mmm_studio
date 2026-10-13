@@ -278,7 +278,13 @@ export type PhotorealAiStatus =
       signedIn: boolean
       /** Null when signed out. */
       portraitsLeft: number | null
+      /** Null when signed out, or with no paid 3D service. */
       avatarsLeft: number | null
+      /**
+       * Whether the paid 3D service makes the avatar; false: this browser makes it from the
+       * portrait (the photo avatar pipeline), and nothing but the choices reaches the server.
+       */
+      avatarService: boolean
       notice: string
     }
   | {

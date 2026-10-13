@@ -10,12 +10,13 @@ import type { PhotorealAiUnavailableReason } from './shared'
 
 /**
  * AI 인물 settings, from the server's environment only (never
- * `NEXT_PUBLIC_`). Two parts, both needed: the portrait reuses the AI 실사
- * 사진 image API (`AI_PHOTO_PROVIDER/BASE_URL/API_KEY/MODEL` and its
- * moderation settings) with its own extra params and caps; the 3D step uses
- * the avatar service (`AI_AVATAR_CLIENT_ID/SECRET`). A portrait that can't
- * become an avatar would be paid for nothing, so the feature is available
- * only when both are. Broken settings fail closed.
+ * `NEXT_PUBLIC_`). The portrait reuses the AI 실사 사진 image API
+ * (`AI_PHOTO_PROVIDER/BASE_URL/API_KEY/MODEL` and its moderation settings)
+ * with its own extra params and caps, and is needed. The 3D step uses the
+ * paid avatar service when its keys (`AI_AVATAR_CLIENT_ID/SECRET`) are set;
+ * without them the browser makes the avatar from the portrait itself (the
+ * photo avatar pipeline), so a portrait is never paid for nothing. Broken
+ * settings fail closed.
  *
  * `AI_AVATAR_MOCK=true` runs the whole flow with no external call (a drawn
  * portrait, and the avatar service's protocol answered in-process): ignored
@@ -51,7 +52,8 @@ export type PhotorealAiConfig = {
   /** `AI_AVATAR_PORTRAIT_EXTRA_PARAMS`. */
   portraitExtraParams: AiPhotoExtraParams
   portraitLimits: PhotorealAiLimits
-  service: AvatarServiceConfig
+  /** The paid 3D service; null when its keys are not set (the browser makes the avatar). */
+  service: AvatarServiceConfig | null
   avatarLimits: PhotorealAiLimits
   /** Where finished avatars, their portraits and job records live (absolute). */
   storeDir: string
@@ -113,6 +115,10 @@ function portraitParams(raw: string | undefined): AiPhotoExtraParams | null {
   }
   return params
 }
+
+/** The service's keys: neither set means no paid service (not a broken one). */
+const serviceKeysSet = (env: Env) =>
+  Boolean(value(env, 'AI_AVATAR_CLIENT_ID') || value(env, 'AI_AVATAR_CLIENT_SECRET'))
 
 function readService(env: Env): AvatarServiceConfig | null {
   const kind = value(env, 'AI_AVATAR_SERVICE') ?? 'metaperson'
@@ -180,15 +186,16 @@ export function readPhotorealAiConfig(
   if (!portraitExtraParams) return { ok: false, reason: 'not_configured', part: 'portrait' }
 
   let image: AiPhotoConfig | null = null
-  let service = MOCK_SERVICE
+  let service: AvatarServiceConfig | null = MOCK_SERVICE
   if (!mock) {
     // No face photo is ever sent here, so AI 실사 사진's face switch must not turn this off.
     const photo = readAiPhotoConfig({ ...env, AI_PHOTO_FACE_ENABLED: undefined })
     if (!photo.ok) return { ok: false, reason: photo.reason, part: 'portrait' }
     image = photo.config
-    const configured = readService(env)
-    if (!configured) return { ok: false, reason: 'service_not_configured', part: 'avatar' }
-    service = configured
+    service = readService(env)
+    if (!service && serviceKeysSet(env)) {
+      return { ok: false, reason: 'service_not_configured', part: 'avatar' }
+    }
   }
 
   return {

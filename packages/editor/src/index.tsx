@@ -150,6 +150,40 @@ export {
   MOTION_SETS,
   WALK_SPEED,
 } from './components/editor/first-person/locomotion'
+export type {
+  AvatarJobReport,
+  CaptureColors,
+  CaptureSlot,
+  CaptureView,
+} from './components/editor/first-person/photo-avatar/avatar-job'
+export {
+  buildPhotoAvatar,
+  type PhotoAvatarProgress,
+  type PhotoAvatarRequest,
+} from './components/editor/first-person/photo-avatar/build-client'
+export {
+  CAPTURE_STEPS,
+  type CaptureStep,
+  type GuideFrame,
+  type GuideState,
+  guide,
+  nextStep,
+  sharpness,
+  startGuide,
+} from './components/editor/first-person/photo-avatar/capture-guide'
+export {
+  hairColor,
+  skinMaps,
+  skinModel,
+} from './components/editor/first-person/photo-avatar/skin-map'
+export type { StoredPhotoAvatar } from './components/editor/first-person/photo-avatar/store'
+export {
+  addPhotoAvatar,
+  discardPhotoAvatarPreview,
+  previewPhotoAvatar,
+  removePhotoAvatar,
+  usePhotoAvatars,
+} from './components/editor/first-person/photo-avatar/use-photo-avatars'
 export {
   type PhotorealBody,
   usePhotorealBody,
@@ -163,11 +197,14 @@ export {
   CHARACTER_EDITIONS,
   type CharacterEdition,
   findPhotoreal,
+  PHOTO_AVATAR_CREDIT,
   PHOTOREAL_AI_CREDIT,
   PHOTOREAL_CHARACTERS,
   PHOTOREAL_LOCAL_FOLDER,
   PHOTOREAL_LOOK_NOTE,
   type PhotorealCharacter,
+  photoAvatarIdOf,
+  photoPhotorealId,
   useLocalPhotoreal,
 } from './components/editor/first-person/photoreal-catalog'
 export { Blinker } from './components/editor/first-person/photoreal-model'

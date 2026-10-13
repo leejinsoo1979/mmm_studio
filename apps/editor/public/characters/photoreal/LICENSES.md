@@ -64,3 +64,15 @@ README).
   MPFB's lip, mouth and eyelid masks; the skin under the clothes, and the
   socks under the jeans, are removed. The thumbnails are renders in the
   character studio's lighting.
+
+## mpfb-base-male.landmarks.json, mpfb-base-female.landmarks.json
+
+- What: where MediaPipe Face Landmarker's 478 face landmarks sit on each
+  base body's skin (three base mesh vertices and weights per landmark), for
+  fitting the head to photos (사진으로 실사 아바타).
+- Source: made here from the base bodies above, by running MediaPipe Face
+  Landmarker (Apache 2.0, `../../mediapipe/`) on renders of each head (front,
+  and turned 14° each way) and looking every landmark up on the rendered
+  skin. Only vertex indices and weights of the CC0 base mesh; no face data
+  of any person.
+- Licence: CC0 1.0, as the base bodies.

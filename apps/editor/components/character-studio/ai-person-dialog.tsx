@@ -1,5 +1,6 @@
 'use client'
 
+import { addPhotoAvatar } from '@pascal-app/editor'
 import {
   Box,
   Check,
@@ -63,6 +64,7 @@ import {
   unavailableCopy,
 } from './ai-person-view'
 import { AI_LABEL_TEXT, download, labelImage, stampedName } from './ai-photo-label'
+import { makePhotoAvatar, openPicture, PhotoAvatarError } from './photo-avatar-make'
 import { FOCUS_RING, Segmented } from './studio-controls'
 
 /** The portraits of this dialog the player can go back to. */
@@ -231,13 +233,18 @@ function Bar({ value }: { value: number }) {
  * back as it came, with the token the server signed for it, to be made into
  * an avatar. The build takes minutes and goes on with the dialog closed;
  * when it is done the studio picks the new 실사 character (see `avatarJobs`).
+ * With no paid 3D service configured, this browser makes the avatar from the
+ * portrait itself (the photo avatar pipeline) and keeps it here.
  */
 export function AiPersonDialog({
   onClose,
   onAnnounce,
+  onMade,
 }: {
   onClose: () => void
   onAnnounce: (text: string) => void
+  /** An avatar made in this browser was kept: pick it. */
+  onMade: (id: string) => void
 }) {
   const titleId = useId()
   const client = photorealAiClient()
@@ -253,6 +260,7 @@ export function AiPersonDialog({
   const [retryAt, setRetryAt] = useState(0)
   const [confirmingClose, setConfirmingClose] = useState(false)
   const inFlight = useRef<AbortController | null>(null)
+  const making = useRef<AbortController | null>(null)
   const urls = useRef(new Set<string>())
   const dialog = useRef<HTMLDivElement>(null)
 
@@ -277,6 +285,7 @@ export function AiPersonDialog({
     () => () => {
       inFlight.current?.abort()
       inFlight.current = null
+      making.current?.abort()
       for (const url of urls.current) URL.revokeObjectURL(url)
       urls.current.clear()
     },
@@ -384,6 +393,7 @@ export function AiPersonDialog({
       blob,
       token: result.token,
       madeAt: Date.now(),
+      sex: choices.sex,
       check: { kind: 'checking' },
     }
     keep(portrait)
@@ -395,6 +405,7 @@ export function AiPersonDialog({
 
   const cancel = () => {
     inFlight.current?.abort()
+    making.current?.abort()
   }
 
   const build = async () => {
@@ -421,6 +432,51 @@ export function AiPersonDialog({
     onAnnounce('3D 아바타를 만들기 시작했어요. 몇 분 걸려요')
   }
 
+  /** No paid service: this browser makes the avatar from the portrait, and keeps it. */
+  const makeHere = async () => {
+    if (!shown || making.current) return
+    const controller = new AbortController()
+    making.current = controller
+    setStep({ kind: 'making', fraction: 0, text: '시작하고 있어요' })
+    onAnnounce('이 얼굴로 아바타를 만들기 시작했어요')
+    try {
+      const picture = await openPicture(shown.blob)
+      const avatar = await makePhotoAvatar({
+        photos: [{ picture, slot: 'front' }],
+        gender: shown.sex,
+        name: 'AI 인물',
+        source: 'ai',
+        signal: controller.signal,
+        onProgress: ({ fraction, text }) => {
+          if (making.current === controller) setStep({ kind: 'making', fraction, text })
+        },
+      })
+      const character = await addPhotoAvatar(avatar)
+      if (making.current !== controller) return
+      making.current = null
+      onMade(character.id)
+      setStep({ kind: 'made', name: character.label })
+      onAnnounce('AI 인물 아바타가 완성됐어요')
+    } catch (error) {
+      if (making.current !== controller) return
+      making.current = null
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setStep({ kind: 'review' })
+        return
+      }
+      setStep({
+        kind: 'error',
+        message:
+          error instanceof PhotoAvatarError
+            ? error.message
+            : '아바타를 만들지 못했어요. 다시 시도해 주세요.',
+        retryAfter: null,
+        back: 'review',
+      })
+      onAnnounce('아바타를 만들지 못했어요')
+    }
+  }
+
   /** After a finished job: back to the choices for another person (a portrait makes one avatar). */
   const again = () => {
     avatarJobs().clear()
@@ -428,7 +484,7 @@ export function AiPersonDialog({
   }
 
   const close = useCallback(() => {
-    if (inFlight.current) {
+    if (inFlight.current || making.current) {
       setConfirmingClose(true)
       return
     }
@@ -824,6 +880,31 @@ export function AiPersonDialog({
             </p>
           )}
 
+          {view.kind === 'making' && (
+            <div className="flex flex-col gap-3" role="status">
+              <Bar value={view.fraction} />
+              <p className="flex items-center gap-2 text-[12px] text-white/70 leading-5">
+                <LoaderCircle className="size-3.5 shrink-0 animate-spin text-sky-300 motion-reduce:animate-none" />
+                {view.text}
+              </p>
+              <p className="rounded-xl bg-white/[0.05] px-3 py-2 text-[12px] text-white/60 leading-5">
+                이 브라우저에서 바로 만들어요 (1분쯤). 창을 닫으면 멈춰요.
+              </p>
+            </div>
+          )}
+
+          {view.kind === 'made' && (
+            <div className="flex flex-col gap-2" role="status">
+              <p className="flex items-center gap-2 font-bold text-[16px]">
+                <CircleCheck className="size-5 text-emerald-300" /> AI 인물이 완성됐어요
+              </p>
+              <p className="text-[13px] text-white/70 leading-5">
+                ‘{view.name}’ — 실사 목록에 AI 생성 인물로 추가하고 골라 두었어요. 이 브라우저에만
+                저장돼요. 걷기·뛰기와 감정 동작을 바로 쓸 수 있어요.
+              </p>
+            </div>
+          )}
+
           {view.kind === 'building' && (
             <div className="flex flex-col gap-3" role="status">
               <Bar value={view.job.progress / 100} />
@@ -904,14 +985,25 @@ export function AiPersonDialog({
             )}
             {view.kind === 'review' && shown && (
               <>
-                <button
-                  className={primary}
-                  disabled={!view.gate.ready}
-                  onClick={() => setStep({ kind: 'confirm' })}
-                  type="button"
-                >
-                  <Box className="size-4" /> 이 얼굴로 3D 아바타 만들기
-                </button>
+                {status?.available && !status.avatarService ? (
+                  <button
+                    className={primary}
+                    disabled={!view.gate.ready}
+                    onClick={() => void makeHere()}
+                    type="button"
+                  >
+                    <Box className="size-4" /> 이 얼굴로 아바타 만들기
+                  </button>
+                ) : (
+                  <button
+                    className={primary}
+                    disabled={!view.gate.ready}
+                    onClick={() => setStep({ kind: 'confirm' })}
+                    type="button"
+                  >
+                    <Box className="size-4" /> 이 얼굴로 3D 아바타 만들기
+                  </button>
+                )}
                 <button
                   className={secondary}
                   disabled={view.portraitsLeft === 0}
@@ -948,6 +1040,25 @@ export function AiPersonDialog({
               <button className={primary} onClick={close} type="button">
                 닫고 기다리기
               </button>
+            )}
+            {view.kind === 'making' && (
+              <button className={secondary} onClick={() => making.current?.abort()} type="button">
+                멈추기
+              </button>
+            )}
+            {view.kind === 'made' && (
+              <>
+                <button className={primary} onClick={close} type="button">
+                  <Check className="size-4" strokeWidth={3} /> 확인
+                </button>
+                <button
+                  className={secondary}
+                  onClick={() => setStep({ kind: 'choose' })}
+                  type="button"
+                >
+                  <Sparkles className="size-4" /> 한 명 더 만들기
+                </button>
+              </>
             )}
             {view.kind === 'done' && (
               <>
@@ -1023,7 +1134,7 @@ export function AiPersonDialog({
               data-focus-scope
               role="alertdialog"
             >
-              <p className="font-bold text-[15px]">사진 만들기를 멈추고 닫을까요?</p>
+              <p className="font-bold text-[15px]">만들기를 멈추고 닫을까요?</p>
               <div className="flex gap-2">
                 <button
                   className={cn(secondary, 'flex-1')}

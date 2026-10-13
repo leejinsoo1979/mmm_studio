@@ -16,7 +16,10 @@ import type { AvatarGender } from './avatar-catalog'
  */
 
 export type PhotorealCharacter = {
-  /** `local:<gender>:<file>` for one from the local folder, `ai:<gender>:<avatar id>` for an AI 인물. */
+  /**
+   * `local:<gender>:<file>` for one from the local folder, `ai:<gender>:<avatar id>` for an AI 인물,
+   * `photo:<gender>:<uuid>` for one made from photos in this browser.
+   */
   id: string
   /** Korean label: "실사 여 1", or a local file's name. */
   label: string
@@ -29,6 +32,8 @@ export type PhotorealCharacter = {
   local: boolean
   /** A fictional person the AI made, listed as AI 생성 인물 wherever it is picked. */
   ai?: boolean
+  /** Made from photos in this browser and kept in it (photo-avatar/store.ts). */
+  photo?: boolean
 }
 
 const BASE = '/characters/photoreal'
@@ -80,10 +85,35 @@ const LOCAL_ID = /^local:(male|female):([^/\\:]+\.glb)$/i
 /** The app's avatar ids: the owner's key, then a random part. */
 const AI_ID = /^ai:(male|female):([0-9a-f]{16}-[0-9a-f]{24})$/
 
+const PHOTO_ID =
+  /^photo:(male|female):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
+
 export const localPhotorealId = (gender: AvatarGender, file: string) => `local:${gender}:${file}`
 export const aiPhotorealId = (gender: AvatarGender, avatarId: string) => `ai:${gender}:${avatarId}`
 /** The app's avatar id inside an AI 인물's id, or null for any other id. */
 export const aiAvatarIdOf = (id: string) => AI_ID.exec(id)?.[2] ?? null
+export const photoPhotorealId = (gender: AvatarGender, avatarId: string) =>
+  `photo:${gender}:${avatarId}`
+/** The stored avatar's id inside a photo avatar's id, or null for any other id. */
+export const photoAvatarIdOf = (id: string) => PHOTO_ID.exec(id)?.[2] ?? null
+
+/** What a photo avatar's file is called before this page has read it from the browser's store. */
+export const PHOTO_AVATAR_SCHEME = 'photo-avatar:'
+/** The credit a photo avatar carries. */
+export const PHOTO_AVATAR_CREDIT = '사진으로 만든 아바타 · 이 브라우저에만'
+/** The credit one made from an AI 인물's portrait carries. */
+export const PHOTO_AVATAR_AI_CREDIT = `${PHOTOREAL_AI_CREDIT} · 이 브라우저에만`
+
+type PhotoAvatarEntry = { name: string; url: string; thumbnail: string; ai?: boolean }
+
+/** The photo avatars this page has read from the browser's store: name and object URLs, by stored id. */
+const photoAvatars = new Map<string, PhotoAvatarEntry>()
+
+/** Tells the catalog what the browser's store holds (photo-avatar/use-photo-avatars.ts). */
+export function registerPhotoAvatars(entries: readonly ({ id: string } & PhotoAvatarEntry)[]) {
+  photoAvatars.clear()
+  for (const { id, ...rest } of entries) photoAvatars.set(id, rest)
+}
 
 /** A local file's name without its extension, for its label. */
 const stem = (file: string) => file.replace(/\.glb$/i, '')
@@ -113,6 +143,22 @@ export function findPhotoreal(id: string | null | undefined): PhotorealCharacter
       credit: PHOTOREAL_AI_CREDIT,
       local: false,
       ai: true,
+    }
+  }
+  const photo = PHOTO_ID.exec(id)
+  if (photo) {
+    const stored = photo[2]!
+    const known = photoAvatars.get(stored)
+    return {
+      id,
+      label: known?.name || '사진 아바타',
+      gender: photo[1] as AvatarGender,
+      url: known?.url ?? `${PHOTO_AVATAR_SCHEME}${stored}`,
+      thumbnail: known?.thumbnail ?? null,
+      credit: known?.ai ? PHOTO_AVATAR_AI_CREDIT : PHOTO_AVATAR_CREDIT,
+      local: true,
+      photo: true,
+      ...(known?.ai ? { ai: true } : {}),
     }
   }
   const local = LOCAL_ID.exec(id)

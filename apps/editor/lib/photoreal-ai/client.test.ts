@@ -30,6 +30,7 @@ const AVAILABLE = {
   signedIn: true,
   portraitsLeft: 8,
   avatarsLeft: 2,
+  avatarService: true,
   notice: 'AI가 새로 만든 가상의 성인 인물이에요.',
 }
 
@@ -50,7 +51,7 @@ describe('status', () => {
     expect(calls).toHaveLength(2)
   })
 
-  test('mock and sign-in default to no; odd counts read as unknown', async () => {
+  test('mock, sign-in and the paid 3D service default to no; odd counts read as unknown', async () => {
     const { fetch } = fakeFetch(() =>
       Response.json({ available: true, mock: 'yes', portraitsLeft: '3', avatarsLeft: -2.5 }),
     )
@@ -60,6 +61,7 @@ describe('status', () => {
       signedIn: false,
       portraitsLeft: null,
       avatarsLeft: 0,
+      avatarService: false,
       notice: '',
     })
   })

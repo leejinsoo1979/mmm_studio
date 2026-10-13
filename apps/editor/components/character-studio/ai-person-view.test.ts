@@ -43,6 +43,7 @@ const READY: PhotorealAiClientStatus = {
   mock: false,
   portraitsLeft: 5,
   avatarsLeft: 2,
+  avatarService: true,
   notice: '',
 }
 
@@ -53,6 +54,7 @@ const portrait = (check: PortraitCheck, madeAt = NOW - 1000): Portrait => ({
   blob: new Blob(),
   token: 'signed',
   madeAt,
+  sex: 'female',
   check,
 })
 
@@ -238,6 +240,13 @@ describe('aiPersonView', () => {
     expect(view({ step: { kind: 'starting' } })).toEqual({ kind: 'starting' })
     const error: AiPersonStep = { kind: 'error', message: 'x', retryAfter: 3, back: 'review' }
     expect(view({ step: error })).toEqual(error)
+    // With no paid service, this browser making the avatar, then done.
+    const making: AiPersonStep = { kind: 'making', fraction: 0.4, text: '피부' }
+    expect(view({ step: making })).toEqual(making)
+    expect(view({ step: { kind: 'made', name: 'AI 인물' } })).toEqual({
+      kind: 'made',
+      name: 'AI 인물',
+    })
   })
 
   test('review and confirm carry the counts left', () => {
@@ -285,7 +294,7 @@ describe('aiPersonView', () => {
 })
 
 describe('portraitGate', () => {
-  const context = { mock: false, avatarsLeft: 2, now: NOW }
+  const context = { mock: false, avatarsLeft: 2, now: NOW, avatarService: true }
 
   test('a good, fresh portrait may go on', () => {
     expect(portraitGate(portrait({ kind: 'checked', issues: [] }), context)).toEqual({
@@ -316,6 +325,22 @@ describe('portraitGate', () => {
     expect(
       portraitGate({ ...portrait({ kind: 'checked', issues: [] }), used: true }, context),
     ).toMatchObject({ ready: false, note: PHOTOREAL_AI_ERROR_TEXT.portrait_used })
+  })
+
+  test('made in this browser, a portrait is neither spent, nor too old, nor counted', () => {
+    const inHouse = { ...context, avatarsLeft: null, avatarService: false }
+    const fresh = portrait({ kind: 'checked', issues: [] })
+    expect(portraitGate({ ...fresh, used: true }, inHouse).ready).toBe(true)
+    expect(
+      portraitGate(
+        portrait({ kind: 'checked', issues: [] }, NOW - AI_PORTRAIT_TOKEN_TTL_MS),
+        inHouse,
+      ).ready,
+    ).toBe(true)
+    // A face it can't find still stops it: the fit needs one.
+    expect(portraitGate(portrait({ kind: 'checked', issues: ['no_face'] }), inHouse).ready).toBe(
+      false,
+    )
   })
 
   test('a check that could not run, or the mock figure, does not stop it', () => {

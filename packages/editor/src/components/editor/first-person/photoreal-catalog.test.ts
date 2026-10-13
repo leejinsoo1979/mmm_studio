@@ -7,10 +7,16 @@ import {
   guessGender,
   localCharacters,
   localPhotorealId,
+  PHOTO_AVATAR_AI_CREDIT,
+  PHOTO_AVATAR_CREDIT,
+  PHOTO_AVATAR_SCHEME,
   PHOTOREAL_AI_CREDIT,
   PHOTOREAL_CHARACTERS,
   PHOTOREAL_LOCAL_URL,
+  photoAvatarIdOf,
+  photoPhotorealId,
   readPhotorealId,
+  registerPhotoAvatars,
 } from './photoreal-catalog'
 
 describe('the 실사 set', () => {
@@ -114,5 +120,49 @@ describe('the 실사 set', () => {
       ['AI 인물 1', 'AI 생성 인물 · 목업', true],
       ['AI 인물', PHOTOREAL_AI_CREDIT, true],
     ])
+  })
+
+  test('finds a photo avatar made in this browser, by its stored id, before and after the store is read', () => {
+    const stored = '0b8a3f52-6d4e-4c1a-9e2f-7a5b1c3d9e10'
+    const id = photoPhotorealId('female', stored)
+    expect(id).toBe(`photo:female:${stored}`)
+    expect(photoAvatarIdOf(id)).toBe(stored)
+    expect(readPhotorealId(id)).toBe(id)
+    // Not read yet: a placeholder file the body waits on, no name.
+    expect(findPhotoreal(id)).toEqual({
+      id,
+      label: '사진 아바타',
+      gender: 'female',
+      url: `${PHOTO_AVATAR_SCHEME}${stored}`,
+      thumbnail: null,
+      credit: PHOTO_AVATAR_CREDIT,
+      local: true,
+      photo: true,
+    })
+    registerPhotoAvatars([
+      { id: stored, name: '내 얼굴', url: 'blob:glb', thumbnail: 'blob:thumb' },
+    ])
+    expect(findPhotoreal(id)).toMatchObject({
+      label: '내 얼굴',
+      url: 'blob:glb',
+      thumbnail: 'blob:thumb',
+    })
+    expect(findPhotoreal(id)?.ai).toBeUndefined()
+    // One made from an AI 인물's portrait is credited as AI-made.
+    registerPhotoAvatars([
+      { id: stored, name: 'AI 인물', url: 'blob:glb', thumbnail: 'blob:thumb', ai: true },
+    ])
+    expect(findPhotoreal(id)).toMatchObject({ ai: true, credit: PHOTO_AVATAR_AI_CREDIT })
+    registerPhotoAvatars([])
+    expect(findPhotoreal(id)?.url).toBe(`${PHOTO_AVATAR_SCHEME}${stored}`)
+    for (const bad of [
+      `photo:other:${stored}`,
+      'photo:male:../x.glb',
+      `photo:male:${stored}/x`,
+      'photo:male:1234',
+    ]) {
+      expect(findPhotoreal(bad)).toBeNull()
+      expect(photoAvatarIdOf(bad)).toBeNull()
+    }
   })
 })

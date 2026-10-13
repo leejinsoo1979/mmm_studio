@@ -322,7 +322,7 @@ export function createPhotorealAiHandlers(deps: PhotorealAiHandlerDeps) {
     const uid = await userOf(request, config.mock)
     const key = uid ? `uid:${uid}` : null
     let avatarsLeft: number | null = null
-    if (uid && key) {
+    if (uid && key && config.service) {
       const { store, ledger } = storeOf(config.storeDir)
       const counts = await ledger.counts(store.userKey(uid)).catch(() => null)
       avatarsLeft = Math.min(
@@ -337,6 +337,7 @@ export function createPhotorealAiHandlers(deps: PhotorealAiHandlerDeps) {
       signedIn: uid !== null,
       portraitsLeft: key ? portraitLimiter.remaining(key, false, config.portraitLimits) : null,
       avatarsLeft,
+      avatarService: config.service !== null,
       notice: AI_PERSON_NOTICE,
     }
     return sceneApiJson(request, body)
@@ -464,6 +465,9 @@ export function createPhotorealAiHandlers(deps: PhotorealAiHandlerDeps) {
     const begun = await begin(request)
     if ('refused' in begun) return begun.refused
     const { config, uid } = begun
+    const paid = config.service
+    // No paid service: the browser makes the avatar from the portrait, and nothing is sent here.
+    if (!paid) return refuse(request, 503, 'unavailable')
 
     const contentType = request.headers.get('content-type') ?? ''
     if (!/^multipart\/form-data\s*;/i.test(contentType)) {
@@ -560,7 +564,7 @@ export function createPhotorealAiHandlers(deps: PhotorealAiHandlerDeps) {
     }
     const service = serviceOf({
       mock: config.mock,
-      service: config.service,
+      service: paid,
       mockGlbPath: config.mockGlbPath,
     })
     const logFailure = (status: number, code: PhotorealAiRouteError, detail: string) =>

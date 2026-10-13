@@ -151,6 +151,7 @@ export function readStatus(value: unknown): PhotorealAiClientStatus {
       signedIn: status.signedIn === true,
       portraitsLeft: count(status.portraitsLeft),
       avatarsLeft: count(status.avatarsLeft),
+      avatarService: status.avatarService === true,
       notice: typeof status.notice === 'string' ? status.notice : '',
     }
   }

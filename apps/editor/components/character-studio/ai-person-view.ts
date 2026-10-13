@@ -235,6 +235,8 @@ export type Portrait = {
   blob: Blob
   token: string
   madeAt: number
+  /** Whom it shows: the avatar's body, when this browser makes it. */
+  sex: AiPersonSex
   check: PortraitCheck
   /** A 3D avatar was asked for with it: the server takes each portrait once. */
   used?: boolean
@@ -247,6 +249,9 @@ export type AiPersonStep =
   | { kind: 'review' }
   | { kind: 'confirm' }
   | { kind: 'starting' }
+  /** With no paid 3D service: this browser making the avatar from the portrait. */
+  | { kind: 'making'; fraction: number; text: string }
+  | { kind: 'made'; name: string }
   | { kind: 'error'; message: string; retryAfter: number | null; back: 'choose' | 'review' }
 
 export const portraitExpired = (portrait: Portrait, now: number) =>
@@ -265,17 +270,20 @@ export type PortraitGate = {
 
 export function portraitGate(
   portrait: Portrait,
-  context: { mock: boolean; avatarsLeft: number | null; now: number },
+  context: { mock: boolean; avatarsLeft: number | null; now: number; avatarService: boolean },
 ): PortraitGate {
   const { check } = portrait
   const issues = check.kind === 'checked' ? check.issues.map((id) => PORTRAIT_ISSUE_TEXT[id]) : []
   const good = check.kind === 'checked' && check.issues.length === 0
   const stop = (note: string): PortraitGate => ({ ready: false, good, issues, note })
-  if (portrait.used) return stop(PHOTOREAL_AI_ERROR_TEXT.portrait_used)
-  if (portraitExpired(portrait, context.now)) {
-    return stop(PHOTOREAL_AI_ERROR_TEXT.portrait_expired)
+  // The paid service takes each signed portrait once, in time; this browser any portrait it has.
+  if (context.avatarService) {
+    if (portrait.used) return stop(PHOTOREAL_AI_ERROR_TEXT.portrait_used)
+    if (portraitExpired(portrait, context.now)) {
+      return stop(PHOTOREAL_AI_ERROR_TEXT.portrait_expired)
+    }
+    if (context.avatarsLeft === 0) return stop(PHOTOREAL_AI_DAILY_TEXT.avatar)
   }
-  if (context.avatarsLeft === 0) return stop(PHOTOREAL_AI_DAILY_TEXT.avatar)
   if (check.kind === 'checking') return stop('3D로 만들기 좋은 사진인지 확인하고 있어요…')
   if (check.kind === 'unchecked') {
     return { ready: true, good, issues, note: '사진을 확인하지 못했어요. 그대로 만들 수는 있어요.' }
@@ -309,6 +317,8 @@ export type AiPersonView =
     }
   | { kind: 'confirm'; avatarsLeft: number | null }
   | { kind: 'starting' }
+  | { kind: 'making'; fraction: number; text: string }
+  | { kind: 'made'; name: string }
   | { kind: 'error'; message: string; retryAfter: number | null; back: 'choose' | 'review' }
   | { kind: 'building'; job: AvatarJob }
   | { kind: 'done'; name: string }
@@ -341,11 +351,13 @@ export function aiPersonView(input: {
   if (!status.signedIn) {
     return { kind: 'blocked', message: PHOTOREAL_AI_ERROR_TEXT.sign_in_required }
   }
-  const { portraitsLeft, avatarsLeft, mock } = status
+  const { portraitsLeft, avatarsLeft, mock, avatarService } = status
   switch (step.kind) {
     case 'generating':
     case 'starting':
       return { kind: step.kind }
+    case 'making':
+    case 'made':
     case 'error':
       return step
     case 'review':
@@ -354,7 +366,7 @@ export function aiPersonView(input: {
       if (step.kind === 'confirm') return { kind: 'confirm', avatarsLeft }
       return {
         kind: 'review',
-        gate: portraitGate(portrait, { mock, avatarsLeft, now }),
+        gate: portraitGate(portrait, { mock, avatarsLeft, now, avatarService }),
         portraitsLeft,
         avatarsLeft,
       }

@@ -14,6 +14,7 @@ import {
   avatarThumbnailUrl,
   findAvatar,
 } from './avatar-catalog'
+import { usePhotoAvatars } from './photo-avatar/use-photo-avatars'
 import {
   CHARACTER_EDITIONS,
   type CharacterEdition,
@@ -97,8 +98,10 @@ export function EditionSwitch({
 export function usePickedCharacter() {
   const rocketbox = findAvatar(useWalkthroughView((state) => state.character))
   const id = useAvatarProfile((state) => state.real)
-  // A local character's name comes with the folder's listing: shown once it has.
+  // A local character's name comes with the folder's listing, a photo avatar's with the
+  // browser's store: shown once they have.
   useLocalPhotoreal()
+  usePhotoAvatars()
   return { rocketbox, real: findPhotoreal(id) }
 }
 
@@ -121,7 +124,8 @@ export function CharacterGallery({
   const [tab, setTab] = useState<AvatarTab>(() => avatarTab(current))
   const avatars = useMemo(() => ALL_AVATARS.filter((avatar) => avatarTab(avatar) === tab), [tab])
   const local = useLocalPhotoreal()
-  const reals = [...PHOTOREAL_CHARACTERS, ...(local ?? [])]
+  const photos = usePhotoAvatars()
+  const reals = [...PHOTOREAL_CHARACTERS, ...(photos ?? []), ...(local ?? [])]
   const grid = { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }
 
   return (
@@ -231,7 +235,7 @@ export function CharacterGallery({
       <p className="mt-2 text-center text-[11px] text-muted-foreground/70">
         {edition === 'basic'
           ? `Microsoft Rocketbox 아바타 ${ALL_AVATARS.length}명 · 고르면 바로 바뀝니다`
-          : `실사 ${PHOTOREAL_CHARACTERS.length}명${local?.length ? ` · 내 PC ${local.length}명` : ''} · 얼굴·몸 꾸미기는 기본 캐릭터만 돼요`}
+          : `실사 ${PHOTOREAL_CHARACTERS.length}명${photos?.length ? ` · 사진 아바타 ${photos.length}명` : ''}${local?.length ? ` · 내 PC ${local.length}명` : ''} · 얼굴·몸 꾸미기는 기본 캐릭터만 돼요`}
       </p>
     </div>
   )
