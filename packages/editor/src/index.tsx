@@ -172,6 +172,14 @@ export {
   startGuide,
 } from './components/editor/first-person/photo-avatar/capture-guide'
 export {
+  classMap,
+  classPlane,
+  type FaceBlendshapes,
+  SEGMENT_CLASSES,
+  type SegmentClass,
+  type SegmentMasks,
+} from './components/editor/first-person/photo-avatar/segment'
+export {
   hairColor,
   skinMaps,
   skinModel,

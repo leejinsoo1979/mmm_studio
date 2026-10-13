@@ -5,10 +5,12 @@ import {
   buildAvatarGlb,
   movedPositions,
 } from './base-body'
+import type { Camera } from './camera'
 import { landmarkUvs, texelKinds } from './features'
 import { composite, fillVertexColors, pushPull, rasterizeVertexColors, toneGains } from './fill'
 import { type FitOptions, type FitResult, type FitView, fitHead } from './fit'
 import { vertexNormals } from './head-model'
+import type { FaceBlendshapes, SegmentMasks } from './segment'
 import { fillTriangles } from './silhouette'
 import {
   blendViews,
@@ -46,6 +48,10 @@ export type CaptureView = Omit<FitView, 'mask' | 'skin' | 'covered'> & {
   mask: Uint8Array | null
   skin: Uint8Array | null
   covered: Uint8Array | null
+  /** The multiclass segmenter's per-class confidences at the view's size, or null. */
+  classes: SegmentMasks | null
+  /** The face's blendshapes where MediaPipe found a face, else null. */
+  blendshapes: FaceBlendshapes | null
 }
 
 /** Colours as a character's textures hold them (sRGB hex), read from the front photo. */
@@ -70,6 +76,8 @@ export type AvatarJobReport = {
   lightFit: number[]
   /** How much of the head's skin texels a photo saw well. */
   photoShare: number
+  /** Each view's solved camera (the fitted head's frame to its pixels). */
+  cameras: Camera[]
   seconds: { fit: number; texture: number; pack: number }
 }
 
@@ -85,6 +93,18 @@ const WORKING = 1024
 const hexLinear = (hex: string): [number, number, number] => {
   const n = Number.parseInt(hex.replace('#', ''), 16)
   return [srgbToLinear((n >> 16) & 255), srgbToLinear((n >> 8) & 255), srgbToLinear(n & 255)]
+}
+
+/** The head fitted to every view, as the job fits it. */
+export function fitCapture(
+  base: BaseBody,
+  views: CaptureView[],
+  fitOptions: FitOptions = {},
+): FitResult {
+  return fitHead(base.head, views, {
+    sameCamera: views.every((view) => view.slot !== 'free'),
+    ...fitOptions,
+  })
 }
 
 export async function runAvatarJob({
@@ -105,10 +125,7 @@ export async function runAvatarJob({
 }): Promise<AvatarJobResult> {
   const started = performance.now()
   progress(0.02, 'fit')
-  const fit = fitHead(base.head, views, {
-    sameCamera: views.every((view) => view.slot !== 'free'),
-    ...fitOptions,
-  })
+  const fit = fitCapture(base, views, fitOptions)
   const fitted = performance.now()
   progress(0.45, 'texture')
 
@@ -264,6 +281,7 @@ export async function runAvatarJob({
       views: fit.views,
       lightFit,
       photoShare: skinTexels ? seenTexels / skinTexels : 0,
+      cameras: fit.cameras,
       seconds: {
         fit: (fitted - started) / 1000,
         texture: (textured - fitted) / 1000,

@@ -50,7 +50,7 @@ export function buildPhotoAvatar(
     }
     // The photos' pixels go across without a copy.
     const transfer = request.views.flatMap((view) =>
-      [view.rgba, view.mask, view.skin, view.covered, view.landmarks]
+      [view.rgba, view.mask, view.skin, view.covered, view.landmarks, view.classes?.planes]
         .filter((part): part is NonNullable<typeof part> => Boolean(part))
         .map((part) => part.buffer as ArrayBuffer),
     )

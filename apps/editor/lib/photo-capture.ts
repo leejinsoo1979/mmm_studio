@@ -5,6 +5,8 @@ import {
   type CaptureView,
   type GuideFrame,
   hairColor,
+  SEGMENT_CLASSES,
+  type SegmentMasks,
   sharpness,
   skinMaps,
   skinModel,
@@ -15,7 +17,9 @@ import { type DetectedFace, detectFaces, sampleFaceColors } from './face-detect'
  * Reading photos for a photo avatar, all in this browser: each photo
  * scaled to a working size, MediaPipe's face landmarks and head turn on it,
  * the person's outline (MediaPipe's selfie segmenter — the profile of a side
- * view, where no landmarks are found), and where it shows bare skin. Then
+ * view, where no landmarks are found), what each pixel is (its multiclass
+ * segmenter: hair, face and body skin, clothes), the face's blendshapes,
+ * and where it shows bare skin. Then
  * the skin, eye and hair colours from the front photo. Nothing leaves the
  * browser.
  */
@@ -43,10 +47,12 @@ function workingCopy(picture: Picture) {
   return { canvas, pixels: context.getImageData(0, 0, canvas.width, canvas.height) }
 }
 
-let segmenter: Promise<ImageSegmenter> | null = null
+const segmenters = new Map<string, Promise<ImageSegmenter>>()
 
-function loadSegmenter(): Promise<ImageSegmenter> {
-  if (segmenter) return segmenter
+/** A MediaPipe image segmenter for a model under /mediapipe, created once. */
+function loadSegmenter(model: string): Promise<ImageSegmenter> {
+  const found = segmenters.get(model)
+  if (found) return found
   const loading = (async () => {
     const { ImageSegmenter } = await import('@mediapipe/tasks-vision')
     const create = (delegate: 'GPU' | 'CPU') =>
@@ -57,7 +63,7 @@ function loadSegmenter(): Promise<ImageSegmenter> {
         },
         {
           canvas: document.createElement('canvas'),
-          baseOptions: { modelAssetPath: '/mediapipe/selfie_segmenter.tflite', delegate },
+          baseOptions: { modelAssetPath: `/mediapipe/${model}`, delegate },
           runningMode: 'IMAGE',
           outputCategoryMask: false,
           outputConfidenceMasks: true,
@@ -70,41 +76,50 @@ function loadSegmenter(): Promise<ImageSegmenter> {
     }
   })()
   loading.catch(() => {
-    if (segmenter === loading) segmenter = null
+    if (segmenters.get(model) === loading) segmenters.delete(model)
   })
-  segmenter = loading
+  segmenters.set(model, loading)
   return loading
 }
 
-/** The segmenter's confidence (0–1) that each pixel of `canvas` is the person, as bytes. */
-async function segment(canvas: HTMLCanvasElement): Promise<Uint8Array> {
-  const result = (await loadSegmenter()).segment(canvas)
+/** The person against the background. */
+const PERSON_MODEL = 'selfie_segmenter.tflite'
+/** Background, hair, body skin, face skin, clothes, others (SEGMENT_CLASSES' order). */
+const CLASS_MODEL = 'selfie_multiclass_256x256.tflite'
+
+/** A segmenter's confidences (0–1) for each pixel of `canvas`, as bytes: one plane per class it gives. */
+async function segmentPlanes(
+  canvas: HTMLCanvasElement,
+  model: string,
+  classes: number,
+): Promise<Uint8Array> {
+  const size = canvas.width * canvas.height
+  const out = new Uint8Array(size * classes)
+  const result = (await loadSegmenter(model)).segment(canvas)
   try {
-    const mask = result.confidenceMasks?.[0]
-    if (!mask) return new Uint8Array(canvas.width * canvas.height)
-    const values = mask.getAsFloat32Array()
-    const out = new Uint8Array(values.length)
-    for (let i = 0; i < values.length; i++)
-      out[i] = Math.round(Math.min(1, Math.max(0, values[i]!)) * 255)
+    for (let c = 0; c < classes; c++) {
+      const mask = result.confidenceMasks?.[c]
+      if (!mask) continue
+      const values = mask.getAsFloat32Array()
+      for (let i = 0; i < size; i++)
+        out[c * size + i] = Math.round(Math.min(1, Math.max(0, values[i]!)) * 255)
+    }
     return out
   } finally {
     result.close()
   }
 }
 
-/**
- * The person's outline, sharp: the segmenter sees a small (256-pixel) copy
- * of the picture, so it is run again on a square around the head, where the
- * profile is, and that pasted over the whole-picture mask.
- */
-async function personMask(
-  canvas: HTMLCanvasElement,
+type HeadBox = { x: number; y: number; size: number }
+
+/** A square about the head: the face's box when MediaPipe found it, else the top of the person's outline. */
+function headBox(
+  width: number,
+  height: number,
   face: DetectedFace | null,
-): Promise<Uint8Array> {
-  const { width, height } = canvas
-  const whole = await segment(canvas)
-  // The head: the face's box when MediaPipe found it, else the top of the person's outline.
-  let box: { x: number; y: number; size: number } | null = null
+  person: Uint8Array,
+): HeadBox | null {
+  let box: HeadBox | null = null
   if (face) {
     const xs = face.points.map((p) => p[0])
     const ys = face.points.map((p) => p[1])
@@ -121,7 +136,7 @@ async function personMask(
     let right = 0
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        if (whole[y * width + x]! < 128) continue
+        if (person[y * width + x]! < 128) continue
         top = Math.min(top, y)
         if (y < top + height * 0.25) {
           left = Math.min(left, x)
@@ -134,7 +149,23 @@ async function personMask(
       box = { x: (left + right) / 2 - size / 2, y: top - size * 0.12, size }
     }
   }
-  if (!box || box.size < 32) return whole
+  return box && box.size >= 32 ? box : null
+}
+
+/**
+ * A segmenter's planes, sharp about the head: it sees a small (256-pixel)
+ * copy of the picture, so it is run again on a square around the head (the
+ * profile, the hairline) and that pasted over the whole picture's planes.
+ */
+async function segmentAboutHead(
+  canvas: HTMLCanvasElement,
+  box: HeadBox | null,
+  whole: Uint8Array,
+  model: string,
+  classes: number,
+): Promise<Uint8Array> {
+  if (!box) return whole
+  const { width, height } = canvas
   const side = 512
   const crop = document.createElement('canvas')
   crop.width = crop.height = side
@@ -143,8 +174,9 @@ async function personMask(
   context.fillRect(0, 0, side, side)
   const scale = side / box.size
   context.drawImage(canvas, -box.x * scale, -box.y * scale, width * scale, height * scale)
-  const near = await segment(crop)
+  const near = await segmentPlanes(crop, model, classes)
   const out = Uint8Array.from(whole)
+  const size = width * height
   for (
     let y = Math.max(0, Math.floor(box.y));
     y < Math.min(height, Math.ceil(box.y + box.size));
@@ -157,10 +189,34 @@ async function personMask(
     ) {
       const cx = Math.min(side - 1, Math.max(0, Math.floor((x - box.x) * scale)))
       const cy = Math.min(side - 1, Math.max(0, Math.floor((y - box.y) * scale)))
-      out[y * width + x] = near[cy * side + cx]!
+      for (let c = 0; c < classes; c++)
+        out[c * size + y * width + x] = near[c * side * side + cy * side + cx]!
     }
   }
   return out
+}
+
+/** The person's outline, sharp about the head (see `segmentAboutHead`). */
+async function personMask(
+  canvas: HTMLCanvasElement,
+  face: DetectedFace | null,
+): Promise<Uint8Array> {
+  const whole = await segmentPlanes(canvas, PERSON_MODEL, 1)
+  const box = headBox(canvas.width, canvas.height, face, whole)
+  return segmentAboutHead(canvas, box, whole, PERSON_MODEL, 1)
+}
+
+/** What each pixel is (SEGMENT_CLASSES), sharp about the head. */
+async function classMasks(
+  canvas: HTMLCanvasElement,
+  face: DetectedFace | null,
+  person: Uint8Array,
+): Promise<SegmentMasks> {
+  const classes = SEGMENT_CLASSES.length
+  const whole = await segmentPlanes(canvas, CLASS_MODEL, classes)
+  const box = headBox(canvas.width, canvas.height, face, person)
+  const planes = await segmentAboutHead(canvas, box, whole, CLASS_MODEL, classes)
+  return { width: canvas.width, height: canvas.height, planes }
 }
 
 const DEGREES = Math.PI / 180
@@ -204,6 +260,7 @@ export async function readPhoto(picture: Picture, slot: CaptureSlot): Promise<Re
   const side = Math.abs(asked) === 90 && !(face && Math.abs(face.yaw) < 55)
   const landmarks = face && !side ? Float32Array.from(face.points.flat()) : null
   const mask = await personMask(canvas, face && !side ? face : null)
+  const classes = await classMasks(canvas, face && !side ? face : null, mask)
   const measured = face && !side ? face.yaw : asked
   const view: CaptureView = {
     slot,
@@ -214,6 +271,8 @@ export async function readPhoto(picture: Picture, slot: CaptureSlot): Promise<Re
     mask,
     skin: null,
     covered: null,
+    classes,
+    blendshapes: face && !side ? (face.blendshapes ?? null) : null,
     yaw: measured * DEGREES,
     pitch: face && !side ? face.pitch * DEGREES : undefined,
     roll: face && !side ? face.roll * DEGREES : undefined,
@@ -331,7 +390,7 @@ export async function readGuideFrame(
   }
   if (side) {
     // The head from the person's outline: the top of it, as wide as it is there.
-    const mask = await segment(canvas)
+    const mask = await segmentPlanes(canvas, PERSON_MODEL, 1)
     let count = 0
     let sx = 0
     let sy = 0

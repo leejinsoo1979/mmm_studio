@@ -25,6 +25,8 @@ export type DetectedFace = {
   yaw: number
   pitch: number
   roll: number
+  /** MediaPipe's face blendshapes (0–1 by ARKit name: eyeBlinkLeft, jawOpen, mouthSmileLeft…). */
+  blendshapes?: Record<string, number>
 }
 
 let landmarker: Promise<FaceLandmarker> | null = null
@@ -66,6 +68,7 @@ async function createFaceLandmarker(onContextLost: () => void) {
         runningMode: 'IMAGE',
         numFaces: 4,
         outputFacialTransformationMatrixes: true,
+        outputFaceBlendshapes: true,
       },
     )
     canvas.addEventListener('webglcontextlost', onContextLost, { once: true })
@@ -105,7 +108,14 @@ export async function detectFaces(
     if (area <= largestArea) continue
     largestArea = area
     const matrix = found.facialTransformationMatrixes[i]
-    largest = { points, ...(matrix ? poseFromMatrix(matrix.data) : { yaw: 0, pitch: 0, roll: 0 }) }
+    const shapes = found.faceBlendshapes?.[i]?.categories
+    largest = {
+      points,
+      ...(matrix ? poseFromMatrix(matrix.data) : { yaw: 0, pitch: 0, roll: 0 }),
+      ...(shapes
+        ? { blendshapes: Object.fromEntries(shapes.map((c) => [c.categoryName, c.score])) }
+        : {}),
+    }
   }
   return { largest, count: found.faceLandmarks.length }
 }

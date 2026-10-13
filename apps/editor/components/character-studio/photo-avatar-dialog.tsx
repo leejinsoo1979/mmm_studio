@@ -7,8 +7,6 @@ import {
   type CaptureSlot,
   discardPhotoAvatarPreview,
   type GuideState,
-  guide,
-  nextStep,
   previewPhotoAvatar,
   type StoredPhotoAvatar,
   startGuide,
@@ -28,8 +26,8 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { runGuidedCapture } from '@/lib/guided-capture'
 import { readPhotoAvatarStatus } from '@/lib/photo-avatar-policy'
-import { readGuideFrame } from '@/lib/photo-capture'
 import { type PhotorealAiClientStatus, photorealAiClient } from '@/lib/photoreal-ai/client'
 import { cn } from '@/lib/utils'
 import {
@@ -101,15 +99,6 @@ function Bar({ value }: { value: number }) {
   )
 }
 
-/** A full-size copy of a camera frame, as it is now. */
-function copyFrame(video: HTMLVideoElement, into?: HTMLCanvasElement): HTMLCanvasElement {
-  const canvas = into ?? document.createElement('canvas')
-  canvas.width = video.videoWidth
-  canvas.height = video.videoHeight
-  canvas.getContext('2d')!.drawImage(video, 0, 0)
-  return canvas
-}
-
 function shotOf(canvas: HTMLCanvasElement): Shot {
   return { picture: canvas, url: canvas.toDataURL('image/jpeg', 0.7) }
 }
@@ -167,52 +156,22 @@ function GuidedCapture({
   }, [])
 
   // Frame by frame (a few a second): read the pose, tell the person, keep the sharpest steady frame.
-  useEffect(() => {
-    let stopped = false
-    let timer = 0
-    const frame = document.createElement('canvas')
-    const best = document.createElement('canvas')
-    const loop = async () => {
-      const video = videoRef.current
-      const current = stateRef.current
-      const step = CAPTURE_STEPS[current.step]
-      if (stopped) return
-      // Every pose taken: wait, still looking, in case one is picked to be taken again.
-      if (step && video?.videoWidth) {
-        try {
-          copyFrame(video, frame)
-          const read = await readGuideFrame(frame, performance.now(), Math.abs(step.yaw) === 90)
-          if (stopped) return
-          const advice = guide(stateRef.current, read)
-          if (advice.state.best?.time === read.time) copyFrame(video, best)
-          setMessage(advice.message)
-          setReady(advice.ready)
-          if (advice.take) {
-            const taken = document.createElement('canvas')
-            taken.width = best.width
-            taken.height = best.height
-            taken.getContext('2d')!.drawImage(best, 0, 0)
-            onShot(step.slot, shotOf(taken))
-            onAnnounce(`${step.label} 사진을 찍었어요`)
-            const next = nextStep(advice.state)
-            stateRef.current = next
-            setState(next)
-          } else {
-            stateRef.current = advice.state
-            setState(advice.state)
-          }
-        } catch {
-          setMessage('얼굴을 읽지 못했어요. 잠시만 기다려 주세요')
-        }
-      }
-      timer = window.setTimeout(() => void loop(), 120)
-    }
-    void loop()
-    return () => {
-      stopped = true
-      window.clearTimeout(timer)
-    }
-  }, [onAnnounce, onShot])
+  useEffect(
+    () =>
+      runGuidedCapture(() => videoRef.current, stateRef, {
+        onAdvice: (text, inPosition) => {
+          setMessage(text)
+          setReady(inPosition)
+        },
+        onShot: (step, frame) => {
+          onShot(step.slot, shotOf(frame))
+          onAnnounce(`${step.label} 사진을 찍었어요`)
+        },
+        onState: setState,
+        onError: () => setMessage('얼굴을 읽지 못했어요. 잠시만 기다려 주세요'),
+      }),
+    [onAnnounce, onShot],
+  )
 
   const step = CAPTURE_STEPS[state.step]
   const goTo = (index: number) => {
