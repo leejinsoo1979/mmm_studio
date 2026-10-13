@@ -1,0 +1,14 @@
+{
+  "extends": "../../tooling/typescript/react-library.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["bun"],
+    "lib": ["ES2022", "ESNext", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@pascal-app/editor": ["./page/editor-shim.ts"],
+      "@pascal-app/viewer": ["./page/viewer-shim.ts"],
+      "@/*": ["../../apps/editor/*"]
+    }
+  },
+  "include": ["*.ts", "lib/*.ts", "page/*.ts"]
+}
