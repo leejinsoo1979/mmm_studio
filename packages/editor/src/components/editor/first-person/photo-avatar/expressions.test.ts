@@ -216,5 +216,20 @@ describe('face expressions', () => {
     }
     expect(down / count).toBeGreaterThan(0.3)
     expect(still / count).toBeGreaterThan(0.3)
+
+    // And the tongue with them, rather than staying up behind the upper teeth.
+    const tongue = primitives.find((p) => p.meshName === 'Tongue')!
+    const tongueJaw = readAccessor(
+      out,
+      views,
+      out.json.meshes[tongue.mesh].primitives[tongue.primitive].targets[jaw].POSITION,
+    ).values
+    let lowered = 0
+    for (let i = 0; i < tongueJaw.length / 3; i++) {
+      const y =
+        m[1]! * tongueJaw[i * 3]! + m[5]! * tongueJaw[i * 3 + 1]! + m[9]! * tongueJaw[i * 3 + 2]!
+      if (y < -0.008) lowered++
+    }
+    expect(lowered / (tongueJaw.length / 3)).toBeGreaterThan(0.5)
   })
 })

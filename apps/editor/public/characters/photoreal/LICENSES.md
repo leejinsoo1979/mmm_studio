@@ -83,10 +83,11 @@ README).
   attribution required; credited anyway.
 - Changes: built with `scripts/characters/build-mpfb-expressions.py`: each
   shape one unit or a sum of units, split into the face's halves where
-  ARKit has a side (blended over 1 cm at the middle), deltas in 0.01 mm
-  steps. sha256: `.bin`
-  `0c47dbe9e8e5fe911106e22fe53c1408cfdf603949cb08c4d1133873538cf902`,
-  `.json` `e89a6645873a6217cb54ad8c7b8f4ba7734ac27d3a3fed0d491696d07311c8b9`.
+  ARKit has a side (blended over 1 cm at the middle), the tongue carried
+  rigidly with the lower teeth where a shape moves them (MakeHuman's
+  mouth-open leaves it behind), deltas in 0.01 mm steps. sha256: `.bin`
+  `c7599b41905ee9b6d9cad83434631d74fe8f3ccea281928e64fb43abb3277d44`,
+  `.json` `9df5e2a908567b938e734fa522ae28b497d5114854f0164072bf5b53705fbdfc`.
 
 ## mpfb-base-male.landmarks.json, mpfb-base-female.landmarks.json
 

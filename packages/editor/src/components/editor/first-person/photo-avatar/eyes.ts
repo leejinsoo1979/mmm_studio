@@ -367,6 +367,14 @@ export function innerSurfaces(
   const cavity = new Float32Array(count)
   // The mouth's inside has its own UV island (v up, as Blender's; the texels' rows run down).
   const inside = base.meta.headUV.boxes.mouth
+  const cavityBox = inside
+    ? [
+        Math.floor(inside[0] * texels.size),
+        Math.floor((1 - inside[3]) * texels.size),
+        Math.ceil(inside[2] * texels.size),
+        Math.ceil((1 - inside[1]) * texels.size),
+      ]
+    : null
   const eyes = base.primitives.findIndex((one) => one.material === 'Eye_Sclera')
   const balls: { centre: [number, number, number]; radius: number; inner: number }[] = []
   if (eyes >= 0) {
@@ -404,8 +412,10 @@ export function innerSurfaces(
     const y = texels.position[i * 3 + 1]!
     const z = texels.position[i * 3 + 2]!
     for (const ball of balls) {
-      const d = Math.hypot(x - ball.centre[0], y - ball.centre[1], z - ball.centre[2])
-      if (z < ball.centre[2] || d > ball.radius + RIM_REACH) continue
+      if (z < ball.centre[2]) continue
+      const d2 = (x - ball.centre[0]) ** 2 + (y - ball.centre[1]) ** 2 + (z - ball.centre[2]) ** 2
+      if (d2 > (ball.radius + RIM_REACH) ** 2) continue
+      const d = Math.sqrt(d2)
       // The lids' outer skin lies over the eyeball too, facing away from it; the rims turn in.
       const away =
         (texels.normal[i * 3]! * (x - ball.centre[0]) +
@@ -435,10 +445,10 @@ export function innerSurfaces(
       innerLip[i] = Math.min(1, Math.max(0, (INNER_LIP_FACING - nz) / 0.3))
       if (nz > 0.75) lipFront[i] = 1
     }
-    if (mouth && inside) {
-      const u = ((i % texels.size) + 0.5) / texels.size
-      const v = 1 - (Math.floor(i / texels.size) + 0.5) / texels.size
-      if (u >= inside[0] && u <= inside[2] && v >= inside[1] && v <= inside[3]) {
+    if (mouth && cavityBox) {
+      const tx = i % texels.size
+      const ty = Math.floor(i / texels.size)
+      if (tx >= cavityBox[0] && tx <= cavityBox[2] && ty >= cavityBox[1] && ty <= cavityBox[3]) {
         const depth = Math.min(1, Math.max(0, (mouth.front - 0.004 - z) / CAVITY_DEPTH))
         cavity[i] = CAVITY_NEAR + (1 - CAVITY_NEAR) * depth
       }
@@ -448,22 +458,22 @@ export function innerSurfaces(
   for (const mask of [rim, caruncle, innerLip])
     feather(mask, texels.size, Math.max(1, Math.round(texels.size / 512)))
   // Out over the island's edge too, where the texture's sampling reaches past it.
-  for (let pass = 0; pass < 2; pass++) {
-    const was = Float32Array.from(cavity)
-    for (let i = 0; i < count; i++) {
-      if (texels.triangle[i]! >= 0) continue
-      const x = i % texels.size
-      const y = Math.floor(i / texels.size)
-      for (const [dx, dy] of [
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-      ] as const) {
-        const nx = x + dx
-        const ny = y + dy
-        if (nx < 0 || ny < 0 || nx >= texels.size || ny >= texels.size) continue
-        cavity[i] = Math.max(cavity[i]!, was[ny * texels.size + nx]!)
+  if (cavityBox) {
+    const size = texels.size
+    const [x0, y0, x1, y1] = [
+      Math.max(1, cavityBox[0] - 2),
+      Math.max(1, cavityBox[1] - 2),
+      Math.min(size - 2, cavityBox[2] + 2),
+      Math.min(size - 2, cavityBox[3] + 2),
+    ]
+    for (let pass = 0; pass < 2; pass++) {
+      const was = Float32Array.from(cavity)
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const i = y * size + x
+          if (texels.triangle[i]! >= 0) continue
+          cavity[i] = Math.max(was[i - 1]!, was[i + 1]!, was[i - size]!, was[i + size]!, was[i]!)
+        }
       }
     }
   }
@@ -611,12 +621,31 @@ export function sealLips(base: BaseBody, moves: Float64Array, jaw: Expression): 
   return out
 }
 
-/** A box blur, `radius` texels, in place (twice: near a Gaussian). */
+/** A box blur, `radius` texels, in place (twice: near a Gaussian), over the part of `mask` that isn't zero. */
 function feather(mask: Float32Array, size: number, radius: number) {
+  let x0 = size
+  let y0 = size
+  let x1 = -1
+  let y1 = -1
+  for (let i = 0; i < mask.length; i++) {
+    if (!mask[i]) continue
+    const x = i % size
+    const y = Math.floor(i / size)
+    x0 = Math.min(x0, x)
+    x1 = Math.max(x1, x)
+    y0 = Math.min(y0, y)
+    y1 = Math.max(y1, y)
+  }
+  if (x1 < 0) return
+  // Two passes spread it twice the radius.
+  x0 = Math.max(0, x0 - 2 * radius)
+  y0 = Math.max(0, y0 - 2 * radius)
+  x1 = Math.min(size - 1, x1 + 2 * radius)
+  y1 = Math.min(size - 1, y1 + 2 * radius)
   const tmp = new Float32Array(mask.length)
   for (let pass = 0; pass < 2; pass++) {
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
         let s = 0
         let n = 0
         for (let d = -radius; d <= radius; d++) {
@@ -628,8 +657,8 @@ function feather(mask: Float32Array, size: number, radius: number) {
         tmp[y * size + x] = s / n
       }
     }
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
         let s = 0
         let n = 0
         for (let d = -radius; d <= radius; d++) {
@@ -658,36 +687,40 @@ export function paintInnerSurfaces(
   working: number,
   skin: readonly number[],
 ) {
-  const at = (mask: Float32Array, x: number, y: number) =>
-    mask[
-      Math.min(working - 1, Math.floor((y / size) * working)) * working +
-        Math.min(working - 1, Math.floor((x / size) * working))
-    ]!
+  // The pixels each texel covers: from the first whose texel it is to the next texel's first.
+  const first = (t: number) => Math.ceil((t * size) / working)
   const channels: number[][] = [[], [], []]
-  for (let y = 0; y < size; y += 2) {
-    for (let x = 0; x < size; x += 2) {
-      if (at(masks.lipFront, x, y) < 1) continue
-      for (let k = 0; k < 3; k++) channels[k]!.push(srgbToLinear(pixels[(y * size + x) * 4 + k]!))
-    }
+  for (let j = 0; j < working * working; j++) {
+    const x = first(j % working)
+    const y = first(Math.floor(j / working))
+    if (masks.lipFront[j]! < 1 || x >= size || y >= size) continue
+    for (let k = 0; k < 3; k++) channels[k]!.push(srgbToLinear(pixels[(y * size + x) * 4 + k]!))
   }
   const lips = channels.map((c, k) => (c.length ? median(c) : skin[k]! * 0.8))
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const rim = at(masks.rim, x, y)
-      const lip = at(masks.innerLip, x, y)
-      const deep = at(masks.cavity, x, y)
+  for (let ty = 0; ty < working; ty++) {
+    for (let tx = 0; tx < working; tx++) {
+      const j = ty * working + tx
+      const rim = masks.rim[j]!
+      const lip = masks.innerLip[j]!
+      const deep = masks.cavity[j]!
       if (rim <= 0.001 && lip <= 0.001 && deep <= 0) continue
-      const corner = at(masks.caruncle, x, y)
-      const i = (y * size + x) * 4
-      for (let k = 0; k < 3; k++) {
-        let c = srgbToLinear(pixels[i + k]!)
-        const tint =
+      const corner = masks.caruncle[j]!
+      const gains = [0, 1, 2].map((k) => 1 + (CAVITY_TINT[k]! - 1) * deep)
+      const tints = [0, 1, 2].map(
+        (k) =>
           RIM_TINT[k]! +
-          (CARUNCLE_TINT[k]! - RIM_TINT[k]!) * Math.min(1, corner / Math.max(rim, 1e-3))
-        c += (skin[k]! * tint - c) * rim
-        c += (lips[k]! * INNER_LIP_TINT[k]! - c) * lip
-        c *= 1 + (CAVITY_TINT[k]! - 1) * deep
-        pixels[i + k] = linearToSrgb(c)
+          (CARUNCLE_TINT[k]! - RIM_TINT[k]!) * Math.min(1, corner / Math.max(rim, 1e-3)),
+      )
+      for (let y = first(ty); y < Math.min(size, first(ty + 1)); y++) {
+        for (let x = first(tx); x < Math.min(size, first(tx + 1)); x++) {
+          const i = (y * size + x) * 4
+          for (let k = 0; k < 3; k++) {
+            let c = srgbToLinear(pixels[i + k]!)
+            c += (skin[k]! * tints[k]! - c) * rim
+            c += (lips[k]! * INNER_LIP_TINT[k]! - c) * lip
+            pixels[i + k] = linearToSrgb(c * gains[k]!)
+          }
+        }
       }
     }
   }
