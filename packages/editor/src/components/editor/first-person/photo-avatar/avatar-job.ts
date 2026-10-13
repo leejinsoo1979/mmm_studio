@@ -261,13 +261,7 @@ export async function runAvatarJob({
     working: WORKING,
     keep,
   })
-  paintInnerSurfaces(
-    headPixels,
-    head.width,
-    innerSurfaces(base, moves, texels),
-    WORKING,
-    target,
-  )
+  paintInnerSurfaces(headPixels, head.width, innerSurfaces(base, moves, texels), WORKING, target)
   images.set('head_color', await codec.encode(headPixels, head.width, head.height, 0.92))
 
   const body = await decodeImage(base, 'body_color', codec)
@@ -299,7 +293,10 @@ export async function runAvatarJob({
     ['tongue_color', TONGUE_TONE],
   ] as const) {
     const picture = await decodeImage(base, name, codec)
-    images.set(name, await codec.encode(toneImage(picture, gains), picture.width, picture.height, 0.9))
+    images.set(
+      name,
+      await codec.encode(toneImage(picture, gains), picture.width, picture.height, 0.9),
+    )
   }
   if (colors.hair) {
     const hair = await decodeImage(base, 'hair_color', codec)

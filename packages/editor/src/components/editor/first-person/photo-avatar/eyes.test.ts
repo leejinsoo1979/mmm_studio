@@ -107,8 +107,7 @@ describe('the eye texture', () => {
     const width = 128
     const height = 128
     const data = new Uint8ClampedArray(width * height * 4)
-    for (let i = 0; i < width * height; i++)
-      data.set([200 + (i % 3) * 10, 200, 200, 255], i * 4)
+    for (let i = 0; i < width * height; i++) data.set([200 + (i % 3) * 10, 200, 200, 255], i * 4)
     const iris: [number, number, number] = [0.05, 0.12, 0.2]
     const sclera: [number, number, number] = [0.5, 0.45, 0.4]
     const out = eyeTexture(base, { data, width, height }, iris, sclera)
@@ -154,8 +153,12 @@ describe('lashes', () => {
       }
       return most
     }
-    expect(reach(shaped.positions, false)).toBeLessThan(reach(before, false) * (LASHES.male.upper + 0.08))
-    expect(reach(shaped.positions, true)).toBeLessThan(reach(before, true) * (LASHES.male.lower + 0.08))
+    expect(reach(shaped.positions, false)).toBeLessThan(
+      reach(before, false) * (LASHES.male.upper + 0.08),
+    )
+    expect(reach(shaped.positions, true)).toBeLessThan(
+      reach(before, true) * (LASHES.male.lower + 0.08),
+    )
   })
 })
 
@@ -179,7 +182,8 @@ describe('the skin that turns in under the lids and between the lips', () => {
       const eye = p[0]! > 0 ? Left : Right
       const d = Math.hypot(p[0]! - eye[0], p[1]! - eye[1], p[2]! - eye[2])
       if (d > 0.016 || p[2]! < eye[2]) continue
-      const away = [0, 1, 2].reduce((s, k) => s + texels.normal[i * 3 + k]! * (p[k]! - eye[k]!), 0) / d
+      const away =
+        [0, 1, 2].reduce((s, k) => s + texels.normal[i * 3 + k]! * (p[k]! - eye[k]!), 0) / d
       if (away < 0.85) continue
       outer++
       painted += masks.rim[i]!
@@ -188,21 +192,57 @@ describe('the skin that turns in under the lids and between the lips', () => {
     expect(painted).toBeLessThan(0.02 * outer)
   })
 
+  test('the mouth’s inside is the darker the deeper it lies behind the lips', () => {
+    const moves = new Float64Array(base.basemesh.length)
+    const texels = rasterizeUv(base.headSkin.mesh, 512)
+    const { cavity } = innerSurfaces(base, moves, texels)
+    const found: { z: number; dark: number }[] = []
+    for (let i = 0; i < cavity.length; i++)
+      if (cavity[i]! > 0 && texels.triangle[i]! >= 0)
+        found.push({ z: texels.position[i * 3 + 2]!, dark: cavity[i]! })
+    expect(found.length).toBeGreaterThan(200)
+    found.sort((a, b) => b.z - a.z)
+    const front = found.slice(0, found.length / 5)
+    const back = found.slice((found.length * 4) / 5)
+    const mean = (list: typeof found) => list.reduce((s, f) => s + f.dark, 0) / list.length
+    expect(mean(back)).toBeGreaterThan(mean(front) + 0.3)
+    // None of the face itself.
+    const face = base.meta.headUV.boxes.face!
+    let onFace = 0
+    for (let i = 0; i < cavity.length; i++) {
+      const u = ((i % texels.size) + 0.5) / texels.size
+      const v = 1 - (Math.floor(i / texels.size) + 0.5) / texels.size
+      if (u > face[0] && u < face[2] && v > face[1] && v < face[3] && cavity[i]! > 0) onFace++
+    }
+    expect(onFace).toBe(0)
+  })
+
   test('is painted pink and wet there and nowhere else', () => {
     const size = 64
     const working = 32
     const pixels = new Uint8ClampedArray(size * size * 4).fill(180)
     const zero = () => new Float32Array(working * working)
-    const masks = { rim: zero(), caruncle: zero(), innerLip: zero(), lipFront: zero() }
+    const masks = {
+      rim: zero(),
+      caruncle: zero(),
+      innerLip: zero(),
+      lipFront: zero(),
+      cavity: zero(),
+    }
     masks.rim[5 * working + 5] = 1
     masks.innerLip[20 * working + 20] = 1
     masks.lipFront[21 * working + 21] = 1
+    masks.cavity[28 * working + 4] = 1
     const before = Uint8ClampedArray.from(pixels)
     paintInnerSurfaces(pixels, size, masks, working, [0.5, 0.35, 0.3])
-    const at = (x: number, y: number) => Array.from(pixels.subarray((y * size + x) * 4, (y * size + x) * 4 + 3))
+    const at = (x: number, y: number) =>
+      Array.from(pixels.subarray((y * size + x) * 4, (y * size + x) * 4 + 3))
     expect(at(10, 10)[0]!).toBeGreaterThan(at(10, 10)[1]!)
     expect(at(40, 40)[0]!).toBeLessThan(180)
-    expect(at(60, 2)).toEqual(Array.from(before.subarray((2 * size + 60) * 4, (2 * size + 60) * 4 + 3)))
+    expect(at(8, 56)[0]!).toBeLessThan(100)
+    expect(at(60, 2)).toEqual(
+      Array.from(before.subarray((2 * size + 60) * 4, (2 * size + 60) * 4 + 3)),
+    )
   })
 })
 
@@ -278,7 +318,9 @@ describe('the mouth', () => {
   test('lips left apart by the head are brought together, the chin and upper lip kept', () => {
     const bytes = readFileSync(join(PUBLIC, 'mpfb-face-expressions.bin'))
     const jaw = readExpressions(
-      JSON.parse(readFileSync(join(PUBLIC, 'mpfb-face-expressions.json'), 'utf8')) as ExpressionIndex,
+      JSON.parse(
+        readFileSync(join(PUBLIC, 'mpfb-face-expressions.json'), 'utf8'),
+      ) as ExpressionIndex,
       bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
     ).find((one) => one.name === 'jawOpen')!
     // The base's own mouth rests a little open.

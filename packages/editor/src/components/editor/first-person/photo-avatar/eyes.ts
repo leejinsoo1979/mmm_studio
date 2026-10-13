@@ -112,7 +112,10 @@ export function photoWhites(views: readonly WhitesView[]): [number, number, numb
   const samples: number[][] = [[], [], []]
   for (const view of views) {
     if (!view.landmarks || eyesShut(view) || Math.abs(view.yaw) > MAX_WHITES_YAW) continue
-    const at = (l: number): [number, number] => [view.landmarks![l * 2]!, view.landmarks![l * 2 + 1]!]
+    const at = (l: number): [number, number] => [
+      view.landmarks![l * 2]!,
+      view.landmarks![l * 2 + 1]!,
+    ]
     const found: number[] = []
     IRISES.forEach(([centre, ...rim], k) => {
       const c = at(centre)
@@ -327,24 +330,43 @@ const CARUNCLE_TINT: [number, number, number] = [0.92, 0.5, 0.5]
 const INNER_LIP_TINT: [number, number, number] = [0.55, 0.42, 0.42]
 /** Lip skin facing the camera less than this (its normal's forward part) turns in between the lips. */
 const INNER_LIP_FACING = 0.4
+/**
+ * The mouth's inside, as deep in it as the light doesn't reach (linear
+ * gains on its texture), how deep (m behind the lips) that is, and how much
+ * of it the inside just behind the lips already has: the renderer shades
+ * no cavity, so the texture must.
+ */
+const CAVITY_TINT: [number, number, number] = [0.16, 0.09, 0.09]
+const CAVITY_DEPTH = 0.025
+const CAVITY_NEAR = 0.25
 
 /**
  * Where the head's skin turns in under the lids and between the lips, at
  * the texels' size (0–1, feathered): the lids' rims against the eyeballs
  * (`rim`, with `caruncle` at each inner corner) and the lips' insides
  * (`innerLip`) — skin no photo sees, which the fill gives the face's
- * colour, and which on a person is wet and pink.
+ * colour, and which on a person is wet and pink — and how far into the
+ * mouth's inside each of its texels lies (`cavity`, 0 at the lips).
  */
 export function innerSurfaces(
   base: BaseBody,
   moves: Float64Array,
   texels: Texels,
-): { rim: Float32Array; caruncle: Float32Array; innerLip: Float32Array; lipFront: Float32Array } {
+): {
+  rim: Float32Array
+  caruncle: Float32Array
+  innerLip: Float32Array
+  lipFront: Float32Array
+  cavity: Float32Array
+} {
   const count = texels.size * texels.size
   const rim = new Float32Array(count)
   const caruncle = new Float32Array(count)
   const innerLip = new Float32Array(count)
   const lipFront = new Float32Array(count)
+  const cavity = new Float32Array(count)
+  // The mouth's inside has its own UV island (v up, as Blender's; the texels' rows run down).
+  const inside = base.meta.headUV.boxes.mouth
   const eyes = base.primitives.findIndex((one) => one.material === 'Eye_Sclera')
   const balls: { centre: [number, number, number]; radius: number; inner: number }[] = []
   if (eyes >= 0) {
@@ -391,11 +413,15 @@ export function innerSurfaces(
           texels.normal[i * 3 + 2]! * (z - ball.centre[2])) /
         Math.max(d, 1e-6)
       if (away > RIM_FACING) continue
-      const w = (1 - Math.max(0, d - ball.radius) / RIM_REACH) * Math.min(1, (RIM_FACING - away) / 0.3)
+      const w =
+        (1 - Math.max(0, d - ball.radius) / RIM_REACH) * Math.min(1, (RIM_FACING - away) / 0.3)
       rim[i] = Math.max(rim[i]!, w)
       // The inner corner is the opening's end nearest the nose (x toward 0).
       const fromCorner = Math.abs(x) - (Math.abs(ball.centre[0]) - ball.radius * 0.75)
-      caruncle[i] = Math.max(caruncle[i]!, w * Math.max(0, 1 - Math.max(0, fromCorner) / CARUNCLE_REACH))
+      caruncle[i] = Math.max(
+        caruncle[i]!,
+        w * Math.max(0, 1 - Math.max(0, fromCorner) / CARUNCLE_REACH),
+      )
     }
     if (
       mouth &&
@@ -409,11 +435,39 @@ export function innerSurfaces(
       innerLip[i] = Math.min(1, Math.max(0, (INNER_LIP_FACING - nz) / 0.3))
       if (nz > 0.75) lipFront[i] = 1
     }
+    if (mouth && inside) {
+      const u = ((i % texels.size) + 0.5) / texels.size
+      const v = 1 - (Math.floor(i / texels.size) + 0.5) / texels.size
+      if (u >= inside[0] && u <= inside[2] && v >= inside[1] && v <= inside[3]) {
+        const depth = Math.min(1, Math.max(0, (mouth.front - 0.004 - z) / CAVITY_DEPTH))
+        cavity[i] = CAVITY_NEAR + (1 - CAVITY_NEAR) * depth
+      }
+    }
   }
   // About a millimetre of the face either way, whatever the texels' size.
   for (const mask of [rim, caruncle, innerLip])
     feather(mask, texels.size, Math.max(1, Math.round(texels.size / 512)))
-  return { rim, caruncle, innerLip, lipFront }
+  // Out over the island's edge too, where the texture's sampling reaches past it.
+  for (let pass = 0; pass < 2; pass++) {
+    const was = Float32Array.from(cavity)
+    for (let i = 0; i < count; i++) {
+      if (texels.triangle[i]! >= 0) continue
+      const x = i % texels.size
+      const y = Math.floor(i / texels.size)
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ] as const) {
+        const nx = x + dx
+        const ny = y + dy
+        if (nx < 0 || ny < 0 || nx >= texels.size || ny >= texels.size) continue
+        cavity[i] = Math.max(cavity[i]!, was[ny * texels.size + nx]!)
+      }
+    }
+  }
+  return { rim, caruncle, innerLip, lipFront, cavity }
 }
 
 /** The mouth's box on the fitted head (metres): its middle, half width, top, bottom and front. */
@@ -592,9 +646,10 @@ function feather(mask: Float32Array, size: number, radius: number) {
 
 /**
  * The head's texture (sRGB RGBA, `size` across), in place, with the lids'
- * rims and caruncles tinted from the skin's colour (`skin`, linear) and
- * the lips' insides darkened from the lips' fronts as the texture has them;
- * the masks at the texels' size (`working`).
+ * rims and caruncles tinted from the skin's colour (`skin`, linear), the
+ * lips' insides darkened from the lips' fronts as the texture has them,
+ * and the mouth's inside the darker the deeper; the masks at the texels'
+ * size (`working`).
  */
 export function paintInnerSurfaces(
   pixels: Uint8ClampedArray,
@@ -620,14 +675,18 @@ export function paintInnerSurfaces(
     for (let x = 0; x < size; x++) {
       const rim = at(masks.rim, x, y)
       const lip = at(masks.innerLip, x, y)
-      if (rim <= 0.001 && lip <= 0.001) continue
+      const deep = at(masks.cavity, x, y)
+      if (rim <= 0.001 && lip <= 0.001 && deep <= 0) continue
       const corner = at(masks.caruncle, x, y)
       const i = (y * size + x) * 4
       for (let k = 0; k < 3; k++) {
         let c = srgbToLinear(pixels[i + k]!)
-        const tint = RIM_TINT[k]! + (CARUNCLE_TINT[k]! - RIM_TINT[k]!) * Math.min(1, corner / Math.max(rim, 1e-3))
+        const tint =
+          RIM_TINT[k]! +
+          (CARUNCLE_TINT[k]! - RIM_TINT[k]!) * Math.min(1, corner / Math.max(rim, 1e-3))
         c += (skin[k]! * tint - c) * rim
         c += (lips[k]! * INNER_LIP_TINT[k]! - c) * lip
+        c *= 1 + (CAVITY_TINT[k]! - 1) * deep
         pixels[i + k] = linearToSrgb(c)
       }
     }

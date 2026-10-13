@@ -258,7 +258,8 @@ export function buildAvatarGlb(
   for (const material of json.materials ?? []) {
     const alpha = opacity?.[material.name]
     if (alpha === undefined) continue
-    const pbr = (material.pbrMetallicRoughness ??= {})
+    material.pbrMetallicRoughness = material.pbrMetallicRoughness ?? {}
+    const pbr = material.pbrMetallicRoughness
     const factor = pbr.baseColorFactor ?? [1, 1, 1, 1]
     pbr.baseColorFactor = [factor[0], factor[1], factor[2], factor[3] * alpha]
   }

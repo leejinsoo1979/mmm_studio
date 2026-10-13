@@ -21,7 +21,8 @@ const grin = {
   },
 } as unknown as EmoteFace
 
-const at = (mesh: Mesh, name: string) => mesh.morphTargetInfluences![mesh.morphTargetDictionary![name]!]!
+const at = (mesh: Mesh, name: string) =>
+  mesh.morphTargetInfluences![mesh.morphTargetDictionary![name]!]!
 
 describe('a 실사 face in motion', () => {
   test('shows an emote’s face by how much the emote shows, on every mesh carrying the shapes', () => {

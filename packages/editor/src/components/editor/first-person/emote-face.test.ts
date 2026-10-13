@@ -12,13 +12,7 @@ import {
 } from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import {
-  EmoteFace,
-  type EmoteFaceShape,
-  type FaceRest,
-  faceRest,
-  restingFace,
-} from './emote-face'
+import { EmoteFace, type EmoteFaceShape, type FaceRest, faceRest, restingFace } from './emote-face'
 
 const EMOTES = join(import.meta.dir, '../../../../../../apps/editor/public/characters/rocketbox')
 

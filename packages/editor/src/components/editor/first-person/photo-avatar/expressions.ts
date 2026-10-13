@@ -98,7 +98,7 @@ export function transferExpressions(
               if (d2 > reach * reach) continue
               from.push(p)
               to.push(point(u, true))
-              weights.push(Math.exp(-d2 / (2 * (FALLOFF * reach / NEIGHBOURHOOD) ** 2)))
+              weights.push(Math.exp(-d2 / (2 * ((FALLOFF * reach) / NEIGHBOURHOOD) ** 2)))
             }
           }
       reach *= 2
@@ -215,7 +215,12 @@ function primitiveDeltas(p: BaseBody['primitives'][number], delta: Float32Array)
 function packed(base: BaseBody, values: Float32Array): Float32Array {
   const out = new Float32Array(values.length)
   for (let i = 0; i < values.length; i += 3) {
-    const [x, y, z] = transformDirection4(base.unpacking, values[i]!, values[i + 1]!, values[i + 2]!)
+    const [x, y, z] = transformDirection4(
+      base.unpacking,
+      values[i]!,
+      values[i + 1]!,
+      values[i + 2]!,
+    )
     out[i] = x
     out[i + 1] = y
     out[i + 2] = z

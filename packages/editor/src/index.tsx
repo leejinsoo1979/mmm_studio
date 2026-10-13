@@ -92,6 +92,7 @@ export {
   regionChanged,
   resetFaceRegion,
 } from './components/editor/first-person/face-handles'
+export { FaceMotion } from './components/editor/first-person/face-motion'
 export {
   BEARD_STYLES,
   type BeardStyle,
@@ -220,7 +221,6 @@ export {
   photoPhotorealId,
   useLocalPhotoreal,
 } from './components/editor/first-person/photoreal-catalog'
-export { FaceMotion } from './components/editor/first-person/face-motion'
 export {
   type LocalPresence,
   lerpAngle,

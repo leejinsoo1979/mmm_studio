@@ -151,7 +151,9 @@ export class EmoteFace {
 
   private position(bone: FaceBone, time: number, out: Vector3): Vector3 {
     const track = this.tracks.get(`${bone}.position`)
-    return track ? out.fromArray(track.evaluate(time)) : out.copy(this.rest.bones.get(bone)!.position)
+    return track
+      ? out.fromArray(track.evaluate(time))
+      : out.copy(this.rest.bones.get(bone)!.position)
   }
 
   /** A face bone's move off its rest (mm along the face) at `time`. */
@@ -193,7 +195,8 @@ export class EmoteFace {
       const outer = this.moveOf(`${s}OuterEyebrow`, time).y
       // Brows down, or knitted (the inner ends lower than the outer: anger).
       out[`browDown${side}`] = clamp(
-        Math.max(0, -inner) / FULL.browDown + Math.max(0, outer - inner - STILL.knit) / FULL.browKnit,
+        Math.max(0, -inner) / FULL.browDown +
+          Math.max(0, outer - inner - STILL.knit) / FULL.browKnit,
       )
       out[`browOuterUp${side}`] = clamp(Math.min(outer, inner + 1) / FULL.outerBrow)
       out[`eyeBlink${side}`] = clamp(-this.moveOf(`${s}EyeBlinkTop`, time).y / FULL.blink)

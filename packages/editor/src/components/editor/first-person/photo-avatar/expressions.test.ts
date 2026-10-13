@@ -209,7 +209,8 @@ describe('face expressions', () => {
     let still = 0
     const count = teethJaw.length / 3
     for (let i = 0; i < count; i++) {
-      const y = m[1]! * teethJaw[i * 3]! + m[5]! * teethJaw[i * 3 + 1]! + m[9]! * teethJaw[i * 3 + 2]!
+      const y =
+        m[1]! * teethJaw[i * 3]! + m[5]! * teethJaw[i * 3 + 1]! + m[9]! * teethJaw[i * 3 + 2]!
       if (y < -0.01) down++
       if (Math.abs(y) < 0.0005) still++
     }
