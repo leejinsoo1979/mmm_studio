@@ -106,6 +106,36 @@ describe('capture guide', () => {
     )
   })
 
+  test('waits for a photo worth keeping: one face, enough light, from the front, eyes open, a still mouth', () => {
+    const held = (over: Partial<GuideFrame>, step = 0) =>
+      feed(startGuide(step), (t) => frame(t, over), HOLD_MS + 50)
+    const said = (over: Partial<GuideFrame>, step = 0) => guide(startGuide(step), frame(0, over))
+    const ok = { faces: 1, exposure: 150, balance: 0.95, blink: 0.1, jawOpen: 0.02, smile: 0.05 }
+    expect(held(ok).take).toBe(true)
+
+    expect(said({ ...ok, faces: 2 }).message).toContain('혼자')
+    expect(said({ ...ok, exposure: 30 }).message).toContain('어두워요')
+    expect(said({ ...ok, exposure: 250 }).message).toContain('너무 밝아요')
+    expect(said({ ...ok, balance: 0.5 }).message).toContain('정면으로 마주')
+    expect(said({ ...ok, blink: 0.8 }).message).toContain('눈을')
+    expect(said({ ...ok, jawOpen: 0.5 }).message).toContain('입을 다물고')
+    expect(said({ ...ok, smile: 0.7 }).message).toContain('무표정')
+    for (const spoilt of [{ faces: 2 }, { exposure: 30 }, { balance: 0.5 }, { blink: 0.8 }, { smile: 0.7 }]) {
+      expect(held({ ...ok, ...spoilt }).take).toBe(false)
+    }
+
+    // Light from one side matters for the front view only, whose light the skin is read under;
+    // the ¾ views still want open eyes and a still mouth.
+    expect(held({ ...ok, yaw: 45, balance: 0.4 }, 1).take).toBe(true)
+    expect(held({ ...ok, yaw: 45, smile: 0.7 }, 1).take).toBe(false)
+    // A full side view: MediaPipe reads no expression there, so none is asked for.
+    const side = { ...startGuide(2), lastYaw: 50 }
+    const lost = { ...ok, yaw: null, eyes: null, blink: 0.9, smile: 0.9, balance: null }
+    expect(feed(side, (t) => frame(t, lost), HOLD_MS + 50).take).toBe(true)
+    // Unread (no blendshapes, no face): nothing is held against the frame.
+    expect(held({ blink: null, jawOpen: null, smile: null, balance: null, exposure: null }).take).toBe(true)
+  })
+
   test('moves on step by step to the end', () => {
     let state = startGuide()
     for (let k = 0; k < CAPTURE_STEPS.length; k++) state = nextStep(state)

@@ -52,6 +52,16 @@ export type GuideFrame = {
   centre: [number, number] | null
   /** How sharp the face is (variance of the Laplacian over it). */
   sharpness: number
+  /** How many faces MediaPipe found (more than one: someone else is in the photo). */
+  faces?: number
+  /** How lit the face is: its mean luma (0–255), null with no face. */
+  exposure?: number | null
+  /** The darker cheek's luma over the lighter one's, null with no face: well under 1, lit from one side. */
+  balance?: number | null
+  /** MediaPipe's blendshapes (0–1), null with no face: the more shut eye, the open jaw, the wider smile. */
+  blink?: number | null
+  jawOpen?: number | null
+  smile?: number | null
 }
 
 export type GuideState = {
@@ -139,7 +149,7 @@ export function guide(state: GuideState, frame: GuideFrame): GuideAdvice {
       ? Math.hypot(frame.centre[0] - state.lastCentre[0], frame.centre[1] - state.lastCentre[1])
       : 0
   const next: GuideState = { ...state, lastYaw, lastCentre: frame.centre }
-  const problem = placement(step, frame, state.lastYaw)
+  const problem = placement(step, frame, state.lastYaw) ?? condition(step, frame)
   if (problem) {
     return {
       state: { ...next, since: null, best: null },
@@ -177,6 +187,38 @@ export function guide(state: GuideState, frame: GuideFrame): GuideAdvice {
     ready: true,
     take: held && best !== null,
   }
+}
+
+/** A face's mean luma below which it is too dark to read, and above which it is burnt out. */
+export const EXPOSURE = { least: 55, most: 235 }
+/** The darker cheek's share of the lighter one's light under which the face is lit from one side. */
+export const MIN_BALANCE = 0.75
+/** Blendshape levels past which the eyes read as shut, the mouth as open, the face as smiling. */
+export const EXPRESSION = { blink: 0.5, jawOpen: 0.2, smile: 0.4 }
+
+/**
+ * What else, with the pose right, would spoil the photo: someone else in it,
+ * too little or too much light, light from one side (the front view, whose
+ * light the skin is read under: its shading would stay in the skin), shut
+ * eyes or an open or smiling mouth (the avatar's face is a neutral, shut
+ * one; MediaPipe reads no expression on a full side view).
+ */
+function condition(step: CaptureStep, frame: GuideFrame): string | null {
+  if ((frame.faces ?? 1) > 1) return '다른 사람이 함께 보여요. 혼자 화면에 나와 주세요'
+  if (frame.exposure != null) {
+    if (frame.exposure < EXPOSURE.least) return '너무 어두워요. 밝은 곳으로 가거나 불을 켜 주세요'
+    if (frame.exposure > EXPOSURE.most) return '너무 밝아요. 얼굴에 바로 비치는 빛을 피해 주세요'
+  }
+  if (step.yaw === 0 && frame.balance != null && frame.balance < MIN_BALANCE) {
+    return '얼굴 한쪽이 어두워요. 창문이나 조명을 정면으로 마주 봐 주세요'
+  }
+  if (Math.abs(step.yaw) < 90) {
+    if ((frame.blink ?? 0) > EXPRESSION.blink) return '눈을 크게 떠 주세요'
+    if ((frame.jawOpen ?? 0) > EXPRESSION.jawOpen || (frame.smile ?? 0) > EXPRESSION.smile) {
+      return '입을 다물고 웃지 말고 무표정으로 있어 주세요'
+    }
+  }
+  return null
 }
 
 /** The guide after a frame was kept: on to the next step. */

@@ -257,9 +257,10 @@ export type AiPersonStep =
   | { kind: 'review' }
   | { kind: 'confirm' }
   | { kind: 'starting' }
-  /** With no paid 3D service: this browser making the avatar from the portrait. */
+  /** With no paid 3D service: this browser making the avatar from the portrait and its turned views. */
   | { kind: 'making'; fraction: number; text: string }
-  | { kind: 'made'; name: string }
+  /** `estimated`: made from the portrait alone, its profile a guess (옆모습 추정). */
+  | { kind: 'made'; name: string; notes: string[]; estimated: boolean }
   | { kind: 'error'; message: string; retryAfter: number | null; back: 'choose' | 'review' }
 
 export const portraitExpired = (portrait: Portrait, now: number) =>
@@ -326,7 +327,7 @@ export type AiPersonView =
   | { kind: 'confirm'; avatarsLeft: number | null }
   | { kind: 'starting' }
   | { kind: 'making'; fraction: number; text: string }
-  | { kind: 'made'; name: string }
+  | { kind: 'made'; name: string; notes: string[]; estimated: boolean }
   | { kind: 'error'; message: string; retryAfter: number | null; back: 'choose' | 'review' }
   | { kind: 'building'; job: AvatarJob }
   | { kind: 'done'; name: string }

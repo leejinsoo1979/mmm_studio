@@ -10,6 +10,8 @@
  * choices and signs it; `POST avatar` sends that signed photo to the 3D
  * avatar service and returns a job; `GET avatar/<job>` advances and reports
  * the job until the finished avatar is saved and listed by `GET avatars`.
+ * With no 3D service, `POST portrait/views` makes the signed photo's turned
+ * views instead and the browser builds the avatar from all of them.
  */
 
 export const AI_PERSON_SEXES = ['female', 'male'] as const
@@ -253,6 +255,16 @@ export const AI_PERSON_LABELS = {
 /** The portrait the route hands out: at most this many bytes, and a short side of at least `AI_PORTRAIT_MIN_SIDE`. */
 export const AI_PORTRAIT_MAX_BYTES = 4_000_000
 export const AI_PORTRAIT_MIN_SIDE = 768
+/** A portrait's turned views, as the photo avatar's capture slots name them. */
+export const AI_VIEW_SLOTS = ['left45', 'right45', 'left90', 'right90'] as const
+export type AiViewSlot = (typeof AI_VIEW_SLOTS)[number]
+
+/** `POST /api/photoreal-ai/portrait/views`: the views made (base64), and the slots that weren't. */
+export type AiPortraitViews = {
+  views: { slot: AiViewSlot; type: 'image/jpeg' | 'image/png'; data: string }[]
+  missing: AiViewSlot[]
+}
+
 /** A signed portrait may be turned into an avatar for this long. */
 export const AI_PORTRAIT_TOKEN_TTL_MS = 30 * 60_000
 

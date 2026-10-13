@@ -7,6 +7,7 @@ import {
   type CaptureSlot,
   discardPhotoAvatarPreview,
   type GuideState,
+  PROFILE_ESTIMATED,
   previewPhotoAvatar,
   type StoredPhotoAvatar,
   startGuide,
@@ -17,6 +18,7 @@ import {
   Camera,
   Check,
   ImageUp,
+  Images,
   LoaderCircle,
   RefreshCw,
   ShieldCheck,
@@ -28,6 +30,7 @@ import {
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { runGuidedCapture } from '@/lib/guided-capture'
 import { readPhotoAvatarStatus } from '@/lib/photo-avatar-policy'
+import { photoSlot, SLOT_YAW } from '@/lib/photo-capture'
 import { type PhotorealAiClientStatus, photorealAiClient } from '@/lib/photoreal-ai/client'
 import { cn } from '@/lib/utils'
 import {
@@ -36,15 +39,18 @@ import {
   openPicture,
   PhotoAvatarError,
   type PhotoInput,
+  stageCard,
 } from './photo-avatar-make'
 import { FOCUS_RING } from './studio-controls'
 
 /**
  * 사진으로 실사 아바타 만들기: from a guided 3D face capture (front, ¾ and
  * full side views each way — the side views give the profile its real
- * shape), from photos the player uploads, from one photo, or from an AI-made
- * fictional face (AI 인물). Everything is made and kept in this browser; the
- * avatar is shown on the stage before it is kept.
+ * shape), from 3 or 5 photos the player uploads (each filed by the way its
+ * face is turned), from one photo (its profile a guess: 옆모습 추정), or
+ * from an AI-made fictional face (AI 인물). Everything is made and kept in
+ * this browser; the avatar is shown on the stage before it is kept, and its
+ * card is a render of the avatar, never the photo.
  */
 
 type Source = 'capture' | 'photo'
@@ -55,8 +61,8 @@ type Stage =
   | { kind: 'camera' }
   | { kind: 'upload'; source: Source }
   | { kind: 'details'; source: Source }
-  | { kind: 'making'; progress: MakeProgress }
-  | { kind: 'preview'; avatar: StoredPhotoAvatar }
+  | { kind: 'making'; source: Source; progress: MakeProgress }
+  | { kind: 'preview'; avatar: StoredPhotoAvatar; notes: string[] }
   | { kind: 'error'; message: string }
 
 type Shot = { picture: HTMLImageElement | HTMLCanvasElement; url: string }
@@ -85,8 +91,10 @@ const secondary = cn(
   'flex h-10 items-center justify-center gap-1.5 rounded-full bg-white/10 px-4 font-medium text-[13px] text-white/85 transition duration-200 ease-out hover:bg-white/15 disabled:opacity-40 motion-reduce:transition-none',
   FOCUS_RING,
 )
-
-const development = process.env.NODE_ENV !== 'production'
+const sourceButton = cn(
+  'flex items-start gap-3 rounded-2xl border border-white/15 bg-white/[0.04] p-4 text-left transition hover:border-white/40 disabled:opacity-45 disabled:hover:border-white/15',
+  FOCUS_RING,
+)
 
 function Bar({ value }: { value: number }) {
   return (
@@ -99,15 +107,37 @@ function Bar({ value }: { value: number }) {
   )
 }
 
+function EstimatedBadge() {
+  return (
+    <span className="rounded-full bg-amber-300 px-2 py-0.5 font-bold text-[10px] text-neutral-950">
+      {PROFILE_ESTIMATED}
+    </span>
+  )
+}
+
 function shotOf(canvas: HTMLCanvasElement): Shot {
   return { picture: canvas, url: canvas.toDataURL('image/jpeg', 0.7) }
 }
 
+/** A chosen picture with a small copy for its slot to show (the file's own URL is let go once read). */
+function shotOfPicture(picture: HTMLImageElement): Shot {
+  const canvas = document.createElement('canvas')
+  const scale = Math.min(1, 320 / Math.max(picture.naturalWidth, picture.naturalHeight))
+  canvas.width = Math.max(1, Math.round(picture.naturalWidth * scale))
+  canvas.height = Math.max(1, Math.round(picture.naturalHeight * scale))
+  canvas.getContext('2d')!.drawImage(picture, 0, 0, canvas.width, canvas.height)
+  return { picture, url: canvas.toDataURL('image/jpeg', 0.8) }
+}
+
+/** Whether this is a touch device (a phone or tablet), where a build may run out of memory. */
+const touchDevice = () =>
+  typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true
+
 /**
  * The guided capture: the camera, an oval to put the face in, which way to
- * turn, and each pose taken by itself once the person holds it (the
- * sharpest frame of the moment). Poses can be taken again or skipped (not
- * the front one).
+ * turn, and each pose taken by itself once the person holds it still and
+ * sharp, alone, well and evenly lit, eyes open and mouth shut (the guide
+ * says what to fix). Poses can be taken again or skipped (not the front).
  */
 function GuidedCapture({
   shots,
@@ -131,8 +161,12 @@ function GuidedCapture({
   useEffect(() => {
     let stream: MediaStream | null = null
     let stopped = false
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError('이 브라우저에서는 카메라를 쓸 수 없어요. 사진을 올려 주세요.')
+      return
+    }
     navigator.mediaDevices
-      ?.getUserMedia({ video: { facingMode: 'user', width: 1280, height: 960 } })
+      .getUserMedia({ video: { facingMode: 'user', width: 1280, height: 960 } })
       .then((media) => {
         if (stopped) {
           for (const track of media.getTracks()) track.stop()
@@ -144,11 +178,18 @@ function GuidedCapture({
           void videoRef.current.play()
         }
       })
-      .catch(() =>
-        setError('카메라를 켤 수 없어요. 브라우저의 카메라 권한을 확인하거나 사진을 올려 주세요.'),
-      )
-    if (!navigator.mediaDevices)
-      setError('이 브라우저에서는 카메라를 쓸 수 없어요. 사진을 올려 주세요.')
+      .catch((reason: unknown) => {
+        const name = reason instanceof DOMException ? reason.name : ''
+        setError(
+          name === 'NotAllowedError' || name === 'SecurityError'
+            ? '카메라 권한이 없어요. 주소창 왼쪽의 자물쇠 아이콘에서 카메라를 허용하고 다시 열어 주세요. Mac에서는 시스템 설정 › 개인정보 보호 및 보안 › 카메라에서 Chrome도 켜져 있어야 해요. 사진을 올려서 만들 수도 있어요.'
+            : name === 'NotFoundError' || name === 'OverconstrainedError'
+              ? '카메라를 찾지 못했어요. 카메라가 연결돼 있는지 확인하거나 사진을 올려 주세요.'
+              : name === 'NotReadableError'
+                ? '다른 앱이 카메라를 쓰고 있어요. 그 앱을 닫고 다시 열어 주세요.'
+                : '카메라를 켤 수 없어요. 브라우저의 카메라 권한을 확인하거나 사진을 올려 주세요.',
+        )
+      })
     return () => {
       stopped = true
       for (const track of stream?.getTracks() ?? []) track.stop()
@@ -243,6 +284,7 @@ function GuidedCapture({
             'absolute inset-x-3 bottom-3 rounded-xl px-3 py-2 text-center font-semibold text-[13px]',
             ready ? 'bg-emerald-500/85 text-white' : 'bg-black/65 text-white',
           )}
+          data-guide-message
         >
           {step
             ? `${step.label} · ${message}`
@@ -261,6 +303,7 @@ function GuidedCapture({
                 FOCUS_RING,
                 current ? 'ring-2 ring-sky-400' : 'ring-1 ring-white/10 hover:ring-white/40',
               )}
+              data-capture-step={one.slot}
               key={one.slot}
               onClick={() => goTo(index)}
               title={shot ? `${one.label} 다시 찍기` : `${one.label} 찍기`}
@@ -281,6 +324,10 @@ function GuidedCapture({
           )
         })}
       </div>
+      <p className="text-[11px] text-white/45 leading-4">
+        밝고 고른 빛을 마주 보고, 안경과 모자는 벗고, 입을 다문 무표정으로 찍어 주세요. 자세를
+        잡고 잠깐 멈추면 저절로 찍혀요.
+      </p>
       <div className="flex flex-wrap gap-2">
         {step && step.slot !== 'front' && (
           <button className={secondary} onClick={() => goTo(state.step + 1)} type="button">
@@ -305,12 +352,14 @@ function UploadSlot({
   slot,
   shot,
   required,
+  busy,
   onPick,
   onClear,
 }: {
   slot: Slot
   shot: Shot | undefined
   required: boolean
+  busy: boolean
   onPick: (file: File) => void
   onClear: () => void
 }) {
@@ -324,6 +373,7 @@ function UploadSlot({
             ? 'border-transparent'
             : 'border-white/25 bg-white/[0.04] text-white/70 hover:border-white/50',
         )}
+        data-upload-slot={slot}
         htmlFor={inputId}
       >
         {shot ? (
@@ -342,6 +392,7 @@ function UploadSlot({
         <input
           accept="image/jpeg,image/png,image/webp"
           className="sr-only"
+          disabled={busy}
           id={inputId}
           onChange={(event) => {
             const file = event.target.files?.[0]
@@ -380,6 +431,7 @@ export function PhotoAvatarDialog({
   onShow,
   onKeep,
   onAiPerson,
+  capture,
 }: {
   defaultGender: AvatarGender
   onClose: () => void
@@ -390,8 +442,11 @@ export function PhotoAvatarDialog({
   onKeep: (id: string) => void
   /** Go on to AI 인물 (an AI-made fictional face). */
   onAiPerson: () => void
+  /** The stage's full-length shot of the character on it (the avatar shown): its card. */
+  capture?: () => Promise<Blob>
 }) {
   const titleId = useId()
+  const multiId = useId()
   const dialog = useRef<HTMLDivElement>(null)
   const [stage, setStage] = useState<Stage>({ kind: 'source' })
   const [faceAllowed, setFaceAllowed] = useState<boolean | null>(null)
@@ -400,7 +455,10 @@ export function PhotoAvatarDialog({
   const [gender, setGender] = useState<AvatarGender>(defaultGender)
   const [name, setName] = useState('')
   const [shots, setShots] = useState<Partial<Record<Slot, Shot>>>({})
+  const [filing, setFiling] = useState(false)
+  const [uploadNote, setUploadNote] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveFailed, setSaveFailed] = useState(false)
   const making = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -450,20 +508,71 @@ export function PhotoAvatarDialog({
     setShots((old) => ({ ...old, [slot]: shot }))
   }, [])
 
-  const pick = async (slot: Slot, file: File) => {
+  /** One photo into a slot: the slot its face shows when it can tell, else the one picked. */
+  const pick = async (slot: Slot, file: File, source: Source) => {
+    setFiling(true)
+    setUploadNote(null)
     try {
       const picture = await openPicture(file)
-      // The slot shows a small copy: the file's own URL is let go once it is read.
-      const canvas = document.createElement('canvas')
-      const scale = Math.min(1, 320 / Math.max(picture.naturalWidth, picture.naturalHeight))
-      canvas.width = Math.max(1, Math.round(picture.naturalWidth * scale))
-      canvas.height = Math.max(1, Math.round(picture.naturalHeight * scale))
-      canvas.getContext('2d')!.drawImage(picture, 0, 0, canvas.width, canvas.height)
-      const url = canvas.toDataURL('image/jpeg', 0.8)
-      setShots((old) => ({ ...old, [slot]: { picture, url } }))
+      const seen = await photoSlot(picture).catch(() => null)
+      if (seen && seen.faces > 1) {
+        setUploadNote('사진에 얼굴이 여러 개 있어요. 한 사람만 나온 사진을 골라 주세요.')
+        return
+      }
+      let target = slot
+      if (source === 'photo') {
+        if (seen?.slot && seen.slot !== 'front')
+          setUploadNote('정면 사진이 아닌 것 같아요. 정면을 보는 사진이 가장 잘 맞아요.')
+      } else if (seen?.slot && seen.slot !== slot) {
+        target = seen.slot
+        onAnnounce(`사진 속 얼굴 방향을 보고 ‘${SLOT_LABEL[target]}’ 칸에 넣었어요`)
+        setUploadNote(`사진 속 얼굴 방향을 보고 ‘${SLOT_LABEL[target]}’ 칸에 넣었어요.`)
+      }
+      setShots((old) => ({ ...old, [target]: shotOfPicture(picture) }))
     } catch (error) {
       onAnnounce(error instanceof PhotoAvatarError ? error.message : '사진을 열 수 없어요')
+    } finally {
+      setFiling(false)
     }
+  }
+
+  /** Several photos at once, each filed in the slot its face shows (the nearest to it, if two do). */
+  const pickMany = async (files: File[]) => {
+    setFiling(true)
+    setUploadNote(null)
+    const found = new Map<Slot, { shot: Shot; off: number }>()
+    let unknown = 0
+    let crowded = 0
+    for (const file of files.slice(0, 8)) {
+      try {
+        const picture = await openPicture(file)
+        const seen = await photoSlot(picture)
+        if (seen.faces > 1) {
+          crowded++
+          continue
+        }
+        if (!seen.slot) {
+          unknown++
+          continue
+        }
+        const off = seen.yaw === null ? 0 : Math.abs(seen.yaw - SLOT_YAW[seen.slot])
+        const had = found.get(seen.slot)
+        if (!had || off < had.off) found.set(seen.slot, { shot: shotOfPicture(picture), off })
+      } catch {
+        unknown++
+      }
+    }
+    setShots((old) => {
+      const next = { ...old }
+      for (const [slot, { shot }] of found) next[slot] = shot
+      return next
+    })
+    const parts = [`사진 ${found.size}장을 얼굴 방향대로 칸에 넣었어요.`]
+    if (unknown) parts.push(`방향을 알 수 없는 사진 ${unknown}장은 아래 칸을 눌러 직접 넣어 주세요.`)
+    if (crowded) parts.push(`얼굴이 여러 개인 사진 ${crowded}장은 뺐어요.`)
+    setUploadNote(parts.join(' '))
+    onAnnounce(parts[0]!)
+    setFiling(false)
   }
 
   const make = async (source: Source) => {
@@ -474,24 +583,25 @@ export function PhotoAvatarDialog({
     })
     const controller = new AbortController()
     making.current = controller
-    setStage({ kind: 'making', progress: { fraction: 0, text: '시작하고 있어요' } })
+    setStage({ kind: 'making', source, progress: { fraction: 0, text: '시작하고 있어요' } })
     onAnnounce('아바타를 만들기 시작했어요')
     try {
-      const avatar = await makePhotoAvatar({
+      const { avatar, notes } = await makePhotoAvatar({
         photos,
         gender,
         name: name.trim() || '사진 아바타',
         source,
         signal: controller.signal,
         onProgress: (progress) => {
-          if (making.current === controller) setStage({ kind: 'making', progress })
+          if (making.current === controller) setStage({ kind: 'making', source, progress })
         },
       })
       if (making.current !== controller) return
       making.current = null
       const character = previewPhotoAvatar(avatar)
       onShow(character.id)
-      setStage({ kind: 'preview', avatar })
+      setSaveFailed(false)
+      setStage({ kind: 'preview', avatar, notes })
       onAnnounce('아바타가 나왔어요. 무대에서 돌려 보며 확인해 보세요')
     } catch (error) {
       if (making.current !== controller) return
@@ -511,22 +621,35 @@ export function PhotoAvatarDialog({
     }
   }
 
+  /** 멈추기: the build let go of at once (whatever it finishes afterwards is not shown). */
+  const stop = (source: Source) => {
+    const controller = making.current
+    making.current = null
+    controller?.abort()
+    setStage({ kind: 'details', source })
+    onAnnounce('만들기를 멈췄어요')
+  }
+
   const keep = async (avatar: StoredPhotoAvatar) => {
     setSaving(true)
+    setSaveFailed(false)
+    // The card is the avatar as the stage shows it; only a fictional AI portrait may be its own card.
+    const card =
+      avatar.source !== 'ai' && capture ? await capture().then(stageCard).catch(() => null) : null
     try {
-      const character = await addPhotoAvatar({ ...avatar, name: name.trim() || avatar.name })
+      const character = await addPhotoAvatar({
+        ...avatar,
+        name: name.trim() || avatar.name,
+        ...(card ? { thumbnail: card } : {}),
+      })
       onKeep(character.id)
       onAnnounce(`‘${character.label}’을 실사 목록에 저장했어요`)
       onClose()
     } catch {
+      // The avatar stays on the stage, to be saved again once there is room.
       setSaving(false)
-      discard()
-      onAnnounce('저장하지 못했어요')
-      setStage({
-        kind: 'error',
-        message:
-          '이 브라우저에 저장하지 못했어요. 저장 공간이 부족하거나 개인정보 보호 모드일 수 있어요.',
-      })
+      setSaveFailed(true)
+      onAnnounce('저장하지 못했어요. 다시 시도할 수 있어요')
     }
   }
 
@@ -543,22 +666,43 @@ export function PhotoAvatarDialog({
 
   // While the avatar is shown on the stage, the dialog steps aside to a card at the bottom.
   if (stage.kind === 'preview') {
-    const { avatar } = stage
+    const { avatar, notes } = stage
     return (
       <div
         aria-labelledby={titleId}
-        className="fixed bottom-6 left-1/2 z-10 flex w-[min(520px,calc(100vw-32px))] -translate-x-1/2 flex-col gap-3 rounded-3xl bg-neutral-950/95 p-5 text-white shadow-2xl ring-1 ring-white/15 backdrop-blur"
+        className="fixed bottom-6 left-1/2 z-10 flex max-h-[60vh] w-[min(520px,calc(100vw-32px))] -translate-x-1/2 flex-col gap-3 overflow-y-auto rounded-3xl bg-neutral-950/95 p-5 text-white shadow-2xl ring-1 ring-white/15 backdrop-blur"
         data-focus-scope
+        data-photo-avatar-preview
         ref={dialog}
         role="dialog"
       >
-        <p className="font-bold text-[16px]" id={titleId}>
-          무대에서 확인해 보세요
+        <p className="flex items-center gap-2 font-bold text-[16px]" id={titleId}>
+          무대에서 확인해 보세요 {avatar.profileEstimated && <EstimatedBadge />}
         </p>
         <p className="text-[12px] text-white/65 leading-5">
           옆으로 돌려 코·이마·턱 모양도 확인해 보세요. 마음에 들면 이름을 정해 저장하세요. 저장한
           아바타는 이 브라우저에만 남고, 다른 플레이어에게는 기본 캐릭터로 보여요.
         </p>
+        {notes.length > 0 && (
+          <ul className="flex flex-col gap-1 rounded-xl bg-amber-400/10 px-3 py-2 text-[12px] text-amber-100 leading-5">
+            {notes.map((note) => (
+              <li className="flex items-start gap-2" key={note}>
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-300" />
+                {note}
+              </li>
+            ))}
+          </ul>
+        )}
+        {saveFailed && (
+          <p
+            className="flex items-start gap-2 rounded-xl bg-rose-500/10 px-3 py-2 text-[12px] text-rose-100 leading-5"
+            role="alert"
+          >
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-rose-300" />
+            이 브라우저에 저장하지 못했어요. 저장 공간이 부족하거나 시크릿(개인정보 보호) 창일 수
+            있어요. 아바타는 그대로 있으니 공간을 비운 뒤 ‘저장 다시 시도’를 눌러 주세요.
+          </p>
+        )}
         <label className="flex flex-col gap-1">
           <span className="font-semibold text-[12px] text-white/50">이름</span>
           <input
@@ -575,6 +719,7 @@ export function PhotoAvatarDialog({
         <div className="flex flex-wrap gap-2">
           <button
             className={primary}
+            data-photo-avatar-keep
             disabled={saving}
             onClick={() => void keep(avatar)}
             type="button"
@@ -584,7 +729,7 @@ export function PhotoAvatarDialog({
             ) : (
               <Check className="size-4" strokeWidth={3} />
             )}
-            저장
+            {saveFailed ? '저장 다시 시도' : '저장'}
           </button>
           <button
             className={secondary}
@@ -625,6 +770,7 @@ export function PhotoAvatarDialog({
         aria-modal="true"
         className="relative flex max-h-[calc(100vh-32px)] w-[min(620px,calc(100vw-32px))] flex-col gap-4 overflow-y-auto rounded-3xl bg-neutral-950 p-6 text-white shadow-2xl ring-1 ring-white/10"
         data-focus-scope
+        data-photo-avatar-dialog
         ref={dialog}
         role="dialog"
       >
@@ -653,10 +799,48 @@ export function PhotoAvatarDialog({
 
         {stage.kind === 'source' && (
           <div className="flex flex-col gap-3">
+            {faceAllowed === false ? (
+              <p
+                className="flex items-start gap-2 rounded-xl bg-white/[0.05] px-3 py-2.5 text-[12px] text-white/65 leading-5"
+                data-photo-avatar-off
+              >
+                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-300" />
+                <span>
+                  실제 사람 사진으로 만들기는 지금 꺼져 있어요. 켜려면 이 앱을 실행하는 서버의 환경
+                  변수에{' '}
+                  <code className="rounded bg-white/10 px-1">PHOTO_AVATAR_FACE_ENABLED=true</code>
+                  를 넣고 서버를 다시 시작해 주세요. 개발 모드(<code>bun dev</code>)에서는 따로
+                  켜지 않아도 켜져 있어요.
+                </span>
+              </p>
+            ) : (
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl bg-white/[0.04] p-3 ring-1 ring-white/10">
+                <input
+                  checked={consent}
+                  className="mt-0.5 size-4 shrink-0 accent-sky-400"
+                  data-photo-avatar-consent
+                  disabled={faceAllowed === null}
+                  onChange={(event) => setConsent(event.target.checked)}
+                  type="checkbox"
+                />
+                <span className="flex flex-col gap-1">
+                  <span className="text-[13px] text-white/90">
+                    성인(만 19세 이상)의 얼굴이고, 본인 얼굴이거나 얼굴 주인에게 동의를 받았어요.
+                  </span>
+                  <span className="flex items-start gap-1.5 text-[11px] text-white/50 leading-4">
+                    <ShieldCheck className="size-3.5 shrink-0 text-sky-300" />
+                    사진은 이 브라우저 안에서만 처리되고 어디에도 보내지 않아요. 사진 자체는
+                    저장하지 않고, 사진으로 만든 아바타(얼굴 모양과 피부)와 아바타를 찍은 카드
+                    그림만 이 브라우저에 저장돼요. 다른 사람을 흉내 내거나 선정적인 용도로 쓰면 안
+                    돼요.
+                  </span>
+                </span>
+              </label>
+            )}
             <button
               className={cn(
-                'flex items-start gap-3 rounded-2xl border border-sky-300/40 bg-sky-400/[0.08] p-4 text-left transition hover:border-sky-300/80 disabled:opacity-45 disabled:hover:border-sky-300/40',
-                FOCUS_RING,
+                sourceButton,
+                'border-sky-300/40 bg-sky-400/[0.08] hover:border-sky-300/80 disabled:hover:border-sky-300/40',
               )}
               data-photo-source="capture"
               disabled={!realPhotos}
@@ -672,16 +856,29 @@ export function PhotoAvatarDialog({
                   </span>
                 </span>
                 <span className="text-[12px] text-white/60 leading-5">
-                  카메라 앞에서 정면, 좌·우 45°, 좌·우 옆얼굴을 안내에 따라 찍어요. 옆모습까지 실제
-                  얼굴 모양으로 만들어요. 사진을 올려서 할 수도 있어요.
+                  카메라 앞에서 정면 → 왼쪽 45° → 왼쪽 옆얼굴 → 오른쪽 45° → 오른쪽 옆얼굴 순서로
+                  안내에 따라 찍어요. 옆모습까지 실제 얼굴 모양으로 만들어요.
                 </span>
               </span>
             </button>
             <button
-              className={cn(
-                'flex items-start gap-3 rounded-2xl border border-white/15 bg-white/[0.04] p-4 text-left transition hover:border-white/40 disabled:opacity-45 disabled:hover:border-white/15',
-                FOCUS_RING,
-              )}
+              className={sourceButton}
+              data-photo-source="upload"
+              disabled={!realPhotos}
+              onClick={() => setStage({ kind: 'upload', source: 'capture' })}
+              type="button"
+            >
+              <Images className="mt-0.5 size-6 shrink-0 text-white/70" />
+              <span className="flex flex-col gap-1">
+                <span className="font-semibold text-[14px]">사진 3장 또는 5장 올리기</span>
+                <span className="text-[12px] text-white/60 leading-5">
+                  정면·좌우 45°(·좌우 옆얼굴) 사진을 한꺼번에 올리면 얼굴 방향을 보고 알아서
+                  나눠 넣어요.
+                </span>
+              </span>
+            </button>
+            <button
+              className={sourceButton}
               data-photo-source="photo"
               disabled={!realPhotos}
               onClick={() => setStage({ kind: 'upload', source: 'photo' })}
@@ -689,56 +886,17 @@ export function PhotoAvatarDialog({
             >
               <UserRound className="mt-0.5 size-6 shrink-0 text-white/70" />
               <span className="flex flex-col gap-1">
-                <span className="font-semibold text-[14px]">내 사진 한 장</span>
+                <span className="flex items-center gap-2 font-semibold text-[14px]">
+                  내 사진 한 장 <EstimatedBadge />
+                </span>
                 <span className="text-[12px] text-white/60 leading-5">
-                  정면 사진 한 장으로 빠르게 만들어요. 옆모습은 사진으로 알 수 없어 평균 얼굴에
-                  가깝게 나와요.
+                  정면 사진 한 장으로 빠르게 만들어요. 옆모습(코 높이·이마·턱)은 사진으로 알 수
+                  없어 평균 얼굴로 추정해요. 덜 정확해요.
                 </span>
               </span>
             </button>
-            {faceAllowed === false ? (
-              <p className="flex items-start gap-2 rounded-xl bg-white/[0.05] px-3 py-2.5 text-[12px] text-white/65 leading-5">
-                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-300" />
-                <span>
-                  실제 사람 사진으로 만들기는 지금 꺼져 있어요.
-                  {development && (
-                    <>
-                      {' '}
-                      켜려면 서버 환경 변수{' '}
-                      <code className="rounded bg-white/10 px-1">
-                        PHOTO_AVATAR_FACE_ENABLED=true
-                      </code>
-                      를 넣고 다시 시작해 주세요.
-                    </>
-                  )}
-                </span>
-              </p>
-            ) : (
-              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl bg-white/[0.04] p-3 ring-1 ring-white/10">
-                <input
-                  checked={consent}
-                  className="mt-0.5 size-4 shrink-0 accent-sky-400"
-                  disabled={faceAllowed === null}
-                  onChange={(event) => setConsent(event.target.checked)}
-                  type="checkbox"
-                />
-                <span className="flex flex-col gap-1">
-                  <span className="text-[13px] text-white/90">
-                    성인의 얼굴이고, 본인 얼굴이거나 얼굴 주인에게 동의를 받았어요.
-                  </span>
-                  <span className="flex items-start gap-1.5 text-[11px] text-white/50 leading-4">
-                    <ShieldCheck className="size-3.5 shrink-0 text-sky-300" />
-                    사진은 이 브라우저 안에서만 처리되고 어디에도 보내지 않아요. 만든 아바타도 이
-                    브라우저에만 저장돼요.
-                  </span>
-                </span>
-              </label>
-            )}
             <button
-              className={cn(
-                'flex items-start gap-3 rounded-2xl border border-white/15 bg-white/[0.04] p-4 text-left transition hover:border-white/40 disabled:opacity-45 disabled:hover:border-white/15',
-                FOCUS_RING,
-              )}
+              className={sourceButton}
               data-photo-source="ai"
               disabled={!aiReady}
               onClick={onAiPerson}
@@ -751,7 +909,7 @@ export function PhotoAvatarDialog({
                   {aiStatus === null
                     ? 'AI 인물을 쓸 수 있는지 확인하고 있어요…'
                     : aiReady
-                      ? '생김새를 고르면 AI가 가상의 성인 얼굴을 그리고, 그 얼굴로 아바타를 만들어요.'
+                      ? '생김새를 고르면 AI가 가상의 성인 얼굴을 정면·45°·옆얼굴로 그리고, 그 얼굴로 아바타를 만들어요.'
                       : 'AI 인물 사진 설정이 없어 지금은 쓸 수 없어요.'}
                 </span>
               </span>
@@ -777,6 +935,7 @@ export function PhotoAvatarDialog({
               </button>
               <button
                 className={primary}
+                data-photo-avatar-next
                 disabled={!hasFront}
                 onClick={() => setStage({ kind: 'details', source: 'capture' })}
                 type="button"
@@ -797,8 +956,39 @@ export function PhotoAvatarDialog({
             <p className="text-[12px] text-white/60 leading-5">
               {stage.source === 'photo'
                 ? '얼굴 전체가 밝고 크게 나온 정면 사진 한 장을 골라 주세요. 한 사람만 나와야 해요.'
-                : '같은 날 같은 조명에서 찍은 사진을 골라 주세요. 정면은 꼭 필요하고, 옆얼굴(90°)이 있으면 코·턱 같은 옆모습이 정확해져요. 사진 속에서 코가 향한 쪽에 맞춰 넣어 주세요.'}
+                : '같은 날 같은 조명에서 찍은 정면·좌우 45° 사진 3장, 좌우 옆얼굴까지 5장을 한꺼번에 골라 주세요. 얼굴 방향을 보고 칸에 나눠 넣어요. 옆얼굴(90°)이 있으면 코·턱 같은 옆모습이 정확해져요.'}
             </p>
+            {stage.source === 'capture' && (
+              <label
+                className={cn(
+                  secondary,
+                  'cursor-pointer self-start focus-within:ring-2 focus-within:ring-sky-400',
+                  filing && 'pointer-events-none opacity-50',
+                )}
+                htmlFor={multiId}
+              >
+                {filing ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Images className="size-4" />
+                )}
+                사진 여러 장 한 번에 고르기
+                <input
+                  accept="image/jpeg,image/png,image/webp"
+                  className="sr-only"
+                  data-photo-avatar-many
+                  disabled={filing}
+                  id={multiId}
+                  multiple
+                  onChange={(event) => {
+                    const files = [...(event.target.files ?? [])]
+                    event.target.value = ''
+                    if (files.length) void pickMany(files)
+                  }}
+                  type="file"
+                />
+              </label>
+            )}
             <div
               className={cn(
                 'grid gap-2',
@@ -807,15 +997,21 @@ export function PhotoAvatarDialog({
             >
               {UPLOAD_SLOTS[stage.source].map((slot) => (
                 <UploadSlot
+                  busy={filing}
                   key={slot}
                   onClear={() => setShots(({ [slot]: _, ...rest }) => rest)}
-                  onPick={(file) => void pick(slot, file)}
+                  onPick={(file) => void pick(slot, file, stage.source)}
                   required={slot === 'front'}
                   shot={shots[slot]}
                   slot={slot}
                 />
               ))}
             </div>
+            {uploadNote && (
+              <p className="text-[12px] text-amber-100/90 leading-5" role="status">
+                {uploadNote}
+              </p>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 className={secondary}
@@ -826,7 +1022,8 @@ export function PhotoAvatarDialog({
               </button>
               <button
                 className={primary}
-                disabled={!hasFront}
+                data-photo-avatar-next
+                disabled={!hasFront || filing}
                 onClick={() => setStage({ kind: 'details', source: stage.source })}
                 type="button"
               >
@@ -881,10 +1078,11 @@ export function PhotoAvatarDialog({
                 value={name}
               />
             </label>
-            <p className="text-[12px] text-white/50 leading-5">
+            <p className="flex flex-wrap items-center gap-2 text-[12px] text-white/50 leading-5">
               사진{' '}
               {Object.keys(shots).filter((slot) => source === 'capture' || slot === 'front').length}
               장으로 만들어요. 1~2분쯤 걸려요.
+              {(source === 'photo' || Object.keys(shots).length === 1) && <EstimatedBadge />}
             </p>
             <div className="flex flex-wrap gap-2">
               <button
@@ -898,6 +1096,7 @@ export function PhotoAvatarDialog({
               </button>
               <button
                 className={primary}
+                data-photo-avatar-make
                 disabled={!hasFront}
                 onClick={() => void make(source)}
                 type="button"
@@ -917,12 +1116,12 @@ export function PhotoAvatarDialog({
             </p>
             <p className="rounded-xl bg-white/[0.05] px-3 py-2 text-[12px] text-white/55 leading-5">
               모든 계산은 이 브라우저에서 해요. 창을 닫으면 멈춰요.
+              {touchDevice() &&
+                ' 메모리가 적은 휴대폰이나 태블릿에서는 만들다 멈출 수 있어요. 그럴 땐 컴퓨터에서 해 주세요.'}
             </p>
             <button
               className={cn(secondary, 'self-start')}
-              onClick={() => {
-                making.current?.abort()
-              }}
+              onClick={() => stop(stage.source)}
               type="button"
             >
               멈추기

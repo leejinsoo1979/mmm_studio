@@ -1,6 +1,6 @@
 'use client'
 
-import { addPhotoAvatar } from '@pascal-app/editor'
+import { addPhotoAvatar, PROFILE_ESTIMATED } from '@pascal-app/editor'
 import {
   Box,
   Check,
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { detectFaces } from '@/lib/face-detect'
+import { photoSlot } from '@/lib/photo-capture'
 import { type PhotorealAiClientStatus, photorealAiClient } from '@/lib/photoreal-ai/client'
 import { portraitIssues } from '@/lib/photoreal-ai/portrait-check'
 import {
@@ -36,6 +37,7 @@ import {
   AI_PERSON_SEXES,
   AI_PERSON_SKIN_TONES,
   type AiPersonChoices,
+  type AiViewSlot,
   PHOTOREAL_AI_ERROR_TEXT,
 } from '@/lib/photoreal-ai/shared'
 import { cn } from '@/lib/utils'
@@ -64,11 +66,42 @@ import {
   unavailableCopy,
 } from './ai-person-view'
 import { AI_LABEL_TEXT, download, labelImage, stampedName } from './ai-photo-label'
-import { makePhotoAvatar, openPicture, PhotoAvatarError } from './photo-avatar-make'
+import {
+  makePhotoAvatar,
+  openPicture,
+  PhotoAvatarError,
+  type PhotoInput,
+} from './photo-avatar-make'
 import { FOCUS_RING, Segmented } from './studio-controls'
 
 /** The portraits of this dialog the player can go back to. */
 const KEPT_PORTRAITS = 4
+
+const VIEW_LABEL: Record<AiViewSlot, string> = {
+  left45: '왼쪽 45°',
+  right45: '오른쪽 45°',
+  left90: '왼쪽 옆얼굴',
+  right90: '오른쪽 옆얼굴',
+}
+
+/**
+ * The AI's turned views as photos for the build, each filed by the way its
+ * face is really turned: an image model may turn the head the other way, or
+ * not at all; such a view goes where it belongs, or is left out.
+ */
+async function fileViews(views: { slot: AiViewSlot; image: Blob }[]): Promise<PhotoInput[]> {
+  const out = new Map<AiViewSlot, PhotoInput>()
+  for (const { slot, image } of views) {
+    try {
+      const picture = await openPicture(image)
+      const seen = await photoSlot(picture).catch(() => null)
+      if (seen?.slot === 'front' || (seen && seen.faces > 1)) continue
+      const filed = seen?.slot && seen.slot !== slot && !out.has(seen.slot) ? seen.slot : slot
+      if (!out.has(filed)) out.set(filed, { picture, slot: filed })
+    } catch {}
+  }
+  return [...out.values()]
+}
 
 /** The choices last made, so the dialog opens on them again (this page only). */
 let lastChoices: AiPersonChoices = AI_PERSON_DEFAULTS
@@ -253,6 +286,8 @@ export function AiPersonDialog({
   const [choices, setChoicesState] = useState<AiPersonChoices>(lastChoices)
   const [step, setStep] = useState<AiPersonStep>({ kind: 'choose' })
   const [portraits, setPortraits] = useState<Portrait[]>([])
+  /** Turned views made of a portrait (by its URL), shown under it. */
+  const [views, setViews] = useState<{ portrait: string; slot: AiViewSlot; url: string }[]>([])
   /** The portrait shown, by its object URL. */
   const [shownUrl, setShownUrl] = useState<string | null>(null)
   const [startedAt, setStartedAt] = useState(0)
@@ -271,6 +306,7 @@ export function AiPersonDialog({
   const patch = (part: Partial<AiPersonChoices>) => setChoices({ ...choices, ...part })
 
   const shown = portraits.find(({ url }) => url === shownUrl) ?? null
+  const shownViews = views.filter((one) => one.portrait === shown?.url)
   const view = aiPersonView({
     status,
     job,
@@ -405,7 +441,16 @@ export function AiPersonDialog({
 
   const cancel = () => {
     inFlight.current?.abort()
-    making.current?.abort()
+    const building = making.current
+    making.current = null
+    building?.abort()
+  }
+
+  /** 멈추기: the build let go of at once; whatever it finishes afterwards is neither shown nor kept. */
+  const stop = () => {
+    cancel()
+    setStep({ kind: 'review' })
+    onAnnounce('만들기를 멈췄어요')
   }
 
   const build = async () => {
@@ -432,30 +477,64 @@ export function AiPersonDialog({
     onAnnounce('3D 아바타를 만들기 시작했어요. 몇 분 걸려요')
   }
 
-  /** No paid service: this browser makes the avatar from the portrait, and keeps it. */
+  /**
+   * No paid service: this browser makes the avatar from the portrait and the
+   * same person's turned views (both ¾ views and both profiles, made from the
+   * portrait), so the head is fitted to every side of the face; with no view
+   * to be had, from the portrait alone, its profile then a guess. Kept here.
+   */
   const makeHere = async () => {
     if (!shown || making.current) return
     const controller = new AbortController()
     making.current = controller
-    setStep({ kind: 'making', fraction: 0, text: '시작하고 있어요' })
+    const current = () => making.current === controller
+    setStep({
+      kind: 'making',
+      fraction: 0.02,
+      text: '같은 인물의 45°·옆얼굴 사진을 만들고 있어요 (1분쯤)',
+    })
     onAnnounce('이 얼굴로 아바타를 만들기 시작했어요')
     try {
       const picture = await openPicture(shown.blob)
-      const avatar = await makePhotoAvatar({
-        photos: [{ picture, slot: 'front' }],
+      const photos: PhotoInput[] = [{ picture, slot: 'front' }]
+      const turned = await client.createViews(shown.blob, shown.token, controller.signal)
+      if (!current()) return
+      if (turned.ok) {
+        for (const { slot, image } of turned.views) {
+          const url = URL.createObjectURL(image)
+          urls.current.add(url)
+          setViews((list) => [...list, { portrait: shown.url, slot, url }])
+        }
+        photos.push(...(await fileViews(turned.views)))
+        if (!current()) return
+      }
+      const { avatar, notes } = await makePhotoAvatar({
+        photos,
         gender: shown.sex,
         name: 'AI 인물',
         source: 'ai',
         signal: controller.signal,
         onProgress: ({ fraction, text }) => {
-          if (making.current === controller) setStep({ kind: 'making', fraction, text })
+          if (current()) setStep({ kind: 'making', fraction: 0.1 + 0.9 * fraction, text })
         },
       })
+      // Stopped meanwhile: nothing is kept.
+      if (!current()) return
       const character = await addPhotoAvatar(avatar)
-      if (making.current !== controller) return
+      if (!current()) return
       making.current = null
       onMade(character.id)
-      setStep({ kind: 'made', name: character.label })
+      setStep({
+        kind: 'made',
+        name: character.label,
+        notes: [
+          ...(photos.length === 1
+            ? ['AI가 같은 인물의 옆모습 사진을 만들지 못해 정면 사진 한 장으로 만들었어요.']
+            : []),
+          ...notes,
+        ],
+        estimated: avatar.profileEstimated === true,
+      })
       onAnnounce('AI 인물 아바타가 완성됐어요')
     } catch (error) {
       if (making.current !== controller) return
@@ -606,6 +685,23 @@ export function AiPersonDialog({
                   </button>
                 )
               })}
+            </div>
+          )}
+          {portraitShown && shownViews.length > 0 && (
+            <div
+              aria-label="같은 인물의 다른 방향 사진"
+              className="grid grid-cols-4 gap-1.5"
+              role="group"
+            >
+              {shownViews.map((one) => (
+                <img
+                  alt={VIEW_LABEL[one.slot]}
+                  className="aspect-square w-full rounded-lg object-cover ring-1 ring-white/10"
+                  key={one.url}
+                  src={one.url}
+                  title={VIEW_LABEL[one.slot]}
+                />
+              ))}
             </div>
           )}
           <p className="text-center text-[11px] text-white/45 leading-4">
@@ -897,11 +993,26 @@ export function AiPersonDialog({
             <div className="flex flex-col gap-2" role="status">
               <p className="flex items-center gap-2 font-bold text-[16px]">
                 <CircleCheck className="size-5 text-emerald-300" /> AI 인물이 완성됐어요
+                {view.estimated && (
+                  <span className="rounded-full bg-amber-300 px-2 py-0.5 font-bold text-[10px] text-neutral-950">
+                    {PROFILE_ESTIMATED}
+                  </span>
+                )}
               </p>
               <p className="text-[13px] text-white/70 leading-5">
                 ‘{view.name}’ — 실사 목록에 AI 생성 인물로 추가하고 골라 두었어요. 이 브라우저에만
                 저장돼요. 걷기·뛰기와 감정 동작을 바로 쓸 수 있어요.
               </p>
+              {view.notes.length > 0 && (
+                <ul className="flex flex-col gap-1 rounded-xl bg-amber-400/10 px-3 py-2 text-[12px] text-amber-100 leading-5">
+                  {view.notes.map((note) => (
+                    <li className="flex items-start gap-2" key={note}>
+                      <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-300" />
+                      {note}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 
@@ -1042,7 +1153,7 @@ export function AiPersonDialog({
               </button>
             )}
             {view.kind === 'making' && (
-              <button className={secondary} onClick={() => making.current?.abort()} type="button">
+              <button className={secondary} onClick={stop} type="button">
                 멈추기
               </button>
             )}

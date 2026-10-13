@@ -8,11 +8,13 @@ import type { PictureCodec } from './avatar-job'
  * pixel (hair cut from its alpha) is written as PNG and the rest as JPEG.
  */
 
-type Canvas = Pick<OffscreenCanvas, 'convertToBlob'> & {
-  getContext(id: '2d'): Pick<
-    OffscreenCanvasRenderingContext2D,
-    'createImageData' | 'putImageData'
-  > | null
+/** As much of an OffscreenCanvas as writing a picture takes. */
+type Canvas = {
+  getContext(id: '2d'): {
+    createImageData(width: number, height: number): ImageData
+    putImageData(image: ImageData, x: number, y: number): void
+  } | null
+  convertToBlob(options?: ImageEncodeOptions): Promise<Blob>
 }
 
 export function canvasCodec(

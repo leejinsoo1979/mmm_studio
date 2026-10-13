@@ -1,11 +1,11 @@
-import type { AiPersonAge, AiPersonChoices, AiPersonDetail } from './shared'
+import type { AiPersonAge, AiPersonChoices, AiPersonDetail, AiViewSlot } from './shared'
 
 /**
- * The one instruction the image model gets for an AI 인물 portrait, built
- * only here: a fixed English template whose slots take fixed text for each
- * choice. Nothing the user types reaches it (there is no free text), so no
- * name, likeness or other request can. The photo is what a single-photo 3D
- * avatar service needs:
+ * The instructions the image model gets for an AI 인물 — its portrait, and
+ * the portrait's turned views — built only here: fixed English templates
+ * whose slots take fixed text for each choice. Nothing the user types
+ * reaches them (there is no free text), so no name, likeness or other
+ * request can. The photo is what a single-photo 3D avatar service needs:
  * frontal, level, neutral, mouth closed, eyes open, evenly lit, plain light
  * background, head and shoulders, nothing on the face. The safety rules close
  * every prompt.
@@ -169,6 +169,39 @@ export function buildAiPortraitPrompt(choices: AiPersonChoices): string {
     '',
     title,
     `- The person is clearly an adult aged ${age.min} to ${age.max}. Never make them look younger than ${age.min}.`,
+    invented,
+    clothed,
+    peaceful,
+  ].join('\n')
+}
+
+/**
+ * The instruction for one turned view of the same fictional person, made
+ * from their portrait (the one image sent with it): the same person, light,
+ * clothes and framing, the head turned. Turning to one's left shows the
+ * camera one's right side and points the nose at the picture's right edge.
+ */
+export function buildAiViewPrompt(slot: AiViewSlot, age: AiPersonAge): string {
+  const left = slot === 'left45' || slot === 'left90'
+  const full = slot === 'left90' || slot === 'right90'
+  const way = left ? 'left' : 'right'
+  const seen = left ? 'right' : 'left'
+  const nose = left ? 'right' : 'left'
+  const { min, max } = AGE[age]
+  const [title, invented, clothed, peaceful] = AI_PORTRAIT_SAFETY_RULES
+  return [
+    'Image 1 is a studio photograph of one fictional adult, made for a 3D avatar. Make a new photorealistic studio photograph of exactly the same person: the same face, identity, age, skin, hair, clothing, lighting, plain light-grey background, camera height, lens and distance, and the same neutral, relaxed expression with the mouth closed and both eyes open.',
+    '',
+    'Only the pose changes:',
+    full
+      ? `- The person has turned their head and shoulders a full 90 degrees to their ${way}: a true side profile. The camera sees only the ${seen} side of the face, the nose points straight at the ${nose} edge of the image, and the profile of the forehead, nose, lips and chin stands clear against the background.`
+      : `- The person has turned their head and shoulders 45 degrees to their ${way}: a three-quarter view. The camera sees mostly the ${seen} side of the face, and the nose points toward the ${nose} side of the image.`,
+    '- The head is level, not tilted or nodding; the eyes look straight ahead the way the head points, not at the camera.',
+    '- The whole head, from the top of the hair to below the chin, and the neck stay in the frame, the head in the middle. Nothing covers the face, the ears or the profile: no hand, no hair across the face.',
+    '- One person only. No text, logos, watermarks or borders.',
+    '',
+    title,
+    `- The person is clearly an adult aged ${min} to ${max}. Never make them look younger than ${min}.`,
     invented,
     clothed,
     peaceful,

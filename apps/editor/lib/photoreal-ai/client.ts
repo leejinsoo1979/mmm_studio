@@ -2,7 +2,10 @@ import { getStudioAuthHeaders } from '../auth-client'
 import {
   AI_PORTRAIT_MAX_BYTES,
   AI_PORTRAIT_TOKEN_HEADER,
+  AI_VIEW_SLOTS,
   type AiPersonChoices,
+  type AiPortraitViews,
+  type AiViewSlot,
   type AvatarJobError,
   type AvatarJobStage,
   PHOTOREAL_AI_REMAINING_HEADER,
@@ -16,8 +19,9 @@ import {
 /**
  * The browser side of AI 인물 (`/api/photoreal-ai`): whether it is on (cached
  * for a minute), one portrait from the choices (its bytes and the signed
- * token the 3D step needs with them), the 3D job started from that portrait,
- * the job as it stands, and the user's finished AI 인물. Never throws.
+ * token the 3D step needs with them), that portrait's turned views, the 3D
+ * job started from that portrait, the job as it stands, and the user's
+ * finished AI 인물. Never throws.
  */
 
 /** The status answers from the environment only: asked again after this long. */
@@ -45,6 +49,15 @@ export type AiPortraitResult =
       image: Blob
       token: string
       portraitsLeft: number | null
+    }
+  | PhotorealAiRefusal
+
+export type AiViewsResult =
+  | {
+      ok: true
+      /** The turned views of the same fictional person, as images. */
+      views: { slot: AiViewSlot; image: Blob }[]
+      viewsLeft: number | null
     }
   | PhotorealAiRefusal
 
@@ -313,6 +326,43 @@ export function createPhotorealAiClient(deps: PhotorealAiClientDeps = {}) {
         return { ok: false, code: 'upstream' }
       }
       return { ok: true, image, token, portraitsLeft: headerCount(response) }
+    },
+
+    /**
+     * `POST /api/photoreal-ai/portrait/views`: the portrait as it came, with its
+     * token, comes back with its turned views (those the image API made).
+     */
+    async createViews(image: Blob, token: string, signal?: AbortSignal): Promise<AiViewsResult> {
+      const form = new FormData()
+      form.append('portrait', image, image.type === 'image/png' ? 'portrait.png' : 'portrait.jpg')
+      form.append('token', token)
+      let response: Response
+      try {
+        response = await send(`${ROUTE}/portrait/views`, {
+          method: 'POST',
+          cache: 'no-store',
+          headers: await headers(),
+          body: form,
+          signal,
+        })
+      } catch {
+        return { ok: false, code: signal?.aborted ? 'aborted' : 'network' }
+      }
+      if (!response.ok) return refusal(response)
+      const body = (await response.json().catch(() => null)) as Partial<AiPortraitViews> | null
+      const views: { slot: AiViewSlot; image: Blob }[] = []
+      for (const view of Array.isArray(body?.views) ? body.views : []) {
+        if (!(AI_VIEW_SLOTS as readonly string[]).includes(view?.slot)) continue
+        if (view.type !== 'image/jpeg' && view.type !== 'image/png') continue
+        if (typeof view.data !== 'string') continue
+        try {
+          const bytes = Uint8Array.from(atob(view.data), (c) => c.charCodeAt(0))
+          if (bytes.byteLength === 0 || bytes.byteLength > AI_PORTRAIT_MAX_BYTES) continue
+          views.push({ slot: view.slot, image: new Blob([bytes], { type: view.type }) })
+        } catch {}
+      }
+      if (views.length === 0) return { ok: false, code: 'upstream' }
+      return { ok: true, views, viewsLeft: headerCount(response) }
     },
 
     /** `POST /api/photoreal-ai/avatar`: the portrait as it came, with its token, starts a 3D job. */

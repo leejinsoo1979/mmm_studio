@@ -42,7 +42,14 @@ let listing: Promise<PhotorealCharacter[]> | null = null
 let generation = 0
 const readers = new Set<() => void>()
 
-type Entry = { id: string; name: string; url: string; thumbnail: string; ai: boolean }
+type Entry = {
+  id: string
+  name: string
+  url: string
+  thumbnail: string
+  ai: boolean
+  estimated: boolean
+}
 /** What the store held when last listed, and an avatar just made, shown before it is kept. */
 let stored: Entry[] = []
 let preview: StoredPhotoAvatar | null = null
@@ -51,6 +58,8 @@ const entryOf = (avatar: StoredPhotoAvatar): Entry => ({
   id: avatar.id,
   name: avatar.name,
   ai: avatar.source === 'ai',
+  // Records from before the mark was kept: one photo was the only way to have no side view.
+  estimated: avatar.profileEstimated ?? avatar.source === 'photo',
   ...urlsOf(avatar),
 })
 

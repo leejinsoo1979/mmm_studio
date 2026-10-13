@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { sniffImage } from '../ai-photo/image-header'
@@ -14,6 +22,7 @@ import {
   AI_PERSON_DEFAULTS,
   AI_PORTRAIT_TOKEN_HEADER,
   type AiPersonChoices,
+  type AiPortraitViews,
   type AvatarJobView,
   PHOTOREAL_AI_REMAINING_HEADER,
   type PhotorealAiAvatarList,
@@ -188,6 +197,17 @@ function setup(
         signal,
       })
     },
+    /** `POST portrait/views` with a portrait and its token. */
+    async views(portrait: { bytes: Uint8Array; token: string; type?: string }, user = 'user-1') {
+      const form = new FormData()
+      form.append('portrait', new Blob([portrait.bytes], { type: portrait.type ?? 'image/jpeg' }))
+      form.append('token', portrait.token)
+      const { body, contentType } = await multipart(form)
+      return request('POST', 'portrait/views', user, {
+        body,
+        headers: { 'content-type': contentType },
+      })
+    },
     async started(user = 'user-1', choices: Partial<AiPersonChoices> = {}) {
       const response = await api.start(await api.signed(user, choices), user)
       expect(response.status).toBe(202)
@@ -276,6 +296,116 @@ describe('GET status', () => {
     await mock.status()
     await mock.list()
     expect(mock.devHeaders).toEqual([true, true])
+  })
+})
+
+const NO_SERVICE = {
+  AI_AVATAR_CLIENT_ID: '',
+  AI_AVATAR_CLIENT_SECRET: '',
+  AI_AVATAR_ENABLED: 'true',
+}
+
+/** The prompt an image API call carried (an edit's form, or a generation's JSON). */
+const promptOf = (call: Call) =>
+  call.init.body instanceof FormData
+    ? String(call.init.body.get('prompt'))
+    : String(JSON.parse(String(call.init.body)).prompt)
+
+describe('POST portrait/views', () => {
+  test('makes both ¾ views and both profiles of a signed portrait, each an edit of it, once', async () => {
+    const api = setup(NO_SERVICE)
+    const portrait = await api.signed()
+    const response = await api.views(portrait)
+    expect(response.status).toBe(200)
+    expect(response.headers.get(PHOTOREAL_AI_REMAINING_HEADER)).toBe('3')
+    const body = (await response.json()) as AiPortraitViews
+    expect(body.views.map((view) => view.slot)).toEqual(['left45', 'right45', 'left90', 'right90'])
+    expect(body.missing).toEqual([])
+    for (const view of body.views) {
+      expect(view.type).toBe('image/jpeg')
+      expect(sniffImage(new Uint8Array(Buffer.from(view.data, 'base64')))?.width).toBe(1024)
+    }
+    // Four edits of the portrait itself, each told which way the head turns.
+    const edits = api.imageCalls().filter((call) => call.url.endsWith('/images/edits'))
+    expect(edits).toHaveLength(4)
+    for (const edit of edits) {
+      const sent = (edit.init.body as FormData).getAll('image[]')
+      expect(sent).toHaveLength(1)
+      expect(new Uint8Array(await (sent[0] as Blob).arrayBuffer())).toEqual(portrait.bytes)
+    }
+    const prompts = edits.map(promptOf)
+    expect(prompts.filter((text) => text.includes('90 degrees'))).toHaveLength(2)
+    expect(prompts.filter((text) => text.includes('to their left'))).toHaveLength(2)
+    for (const text of prompts) {
+      expect(text).toContain('exactly the same person')
+      expect(text).toContain('Do not make them resemble any celebrity')
+      expect(text).toContain('clearly an adult')
+    }
+    // One set per portrait.
+    expect((await api.views(portrait)).status).toBe(409)
+    expect(api.logs.filter((log) => log.step === 'views')).toEqual([
+      expect.objectContaining({ step: 'views', status: 200, outcome: 'ok', made: 4 }),
+    ])
+  })
+
+  test('a view refused or failed is left out; none at all is given back and may be asked again', async () => {
+    let failing = false
+    const api = setup(NO_SERVICE, {
+      image: (call) => {
+        if (!call.url.endsWith('/images/edits')) return openaiImage(call)
+        if (failing) return new Response('{}', { status: 500 })
+        if (promptOf(call).includes('90 degrees to their left'))
+          return Response.json(
+            { error: { code: 'moderation_blocked', message: 'safety system' } },
+            { status: 400 },
+          )
+        return openaiImage(call)
+      },
+    })
+    const some = (await (await api.views(await api.signed())).json()) as AiPortraitViews
+    expect(some.views.map((view) => view.slot)).toEqual(['left45', 'right45', 'right90'])
+    expect(some.missing).toEqual(['left90'])
+
+    failing = true
+    const portrait = await api.signed()
+    const none = await api.views(portrait)
+    expect(none.status).toBe(502)
+    expect(await none.json()).toMatchObject({ error: 'upstream' })
+    // Given back: the day's sets are as before, and the same portrait may try again.
+    failing = false
+    const again = await api.views(portrait)
+    expect(again.status).toBe(200)
+    expect(again.headers.get(PHOTOREAL_AI_REMAINING_HEADER)).toBe('2')
+  })
+
+  test('only a portrait this server signed for this user, unchanged', async () => {
+    const api = setup(NO_SERVICE)
+    const portrait = await api.signed()
+    expect((await api.views(portrait, 'user-2')).status).toBe(403)
+    expect((await api.views({ ...portrait, token: `${portrait.token}x` })).status).toBe(403)
+    const changed = Uint8Array.from(portrait.bytes)
+    changed[changed.length - 1] = changed[changed.length - 1]! ^ 1
+    expect((await api.views({ ...portrait, bytes: changed })).status).toBe(403)
+    expect((await api.views(portrait, null as unknown as string)).status).toBe(401)
+    expect(api.imageCalls().filter((call) => call.url.endsWith('/images/edits'))).toHaveLength(0)
+  })
+
+  test('the 목업 reads views laid beside its portrait, or has none', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'photoreal-ai-views-'))
+    roots.push(dir)
+    const front = join(dir, 'person.png')
+    writeFileSync(front, png(1024, 1024))
+    for (const slot of ['left45', 'right45', 'left90']) {
+      writeFileSync(join(dir, `person-${slot}.png`), png(1024, 1024))
+    }
+    const api = setup({ ...MOCK_ENV, AI_AVATAR_MOCK_PORTRAIT: front })
+    const body = (await (await api.views(await api.signed())).json()) as AiPortraitViews
+    expect(body.views.map((view) => view.slot)).toEqual(['left45', 'right45', 'left90'])
+    expect(body.missing).toEqual(['right90'])
+
+    const bare = setup(MOCK_ENV)
+    expect((await bare.views(await bare.signed())).status).toBe(502)
+    expect(bare.imageCalls()).toHaveLength(0)
   })
 })
 
