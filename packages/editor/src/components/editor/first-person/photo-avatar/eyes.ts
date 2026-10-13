@@ -370,7 +370,7 @@ export function innerSurfaces(
   const cavity = new Float32Array(count)
   // The mouth's inside has its own UV island (v up, as Blender's; the texels' rows run down).
   const inside = base.meta.headUV.boxes.mouth
-  const cavityBox = inside
+  const cavityBox: [number, number, number, number] | null = inside
     ? [
         Math.floor(inside[0] * texels.size),
         Math.floor((1 - inside[3]) * texels.size),
