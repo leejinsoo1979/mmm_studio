@@ -482,6 +482,20 @@ describe('taking the light out', () => {
     expect(blended.weight[0]!).toBe(1)
   })
 
+  test('the squarest view alone does not outvote the others that agree', () => {
+    const make = (value: number, w: number) => ({
+      color: Float32Array.from([value, value, value]),
+      weight: Float32Array.from([w]),
+    })
+    // A profile sees a brow's tail squarely, past its hairs; three front views see the brow.
+    const blended = blendViews(
+      [make(0.3, 0.66), make(0.33, 0.67), make(0.25, 0.25), make(1.07, 1)],
+      1,
+    )
+    expect(blended.color[0]!).toBeLessThan(0.4)
+    expect(blended.weight[0]!).toBe(1)
+  })
+
   test("a view's weight eases in from its edges, not across the gutter between islands", () => {
     const size = 32
     const triangle = new Int32Array(size * size).fill(-1)

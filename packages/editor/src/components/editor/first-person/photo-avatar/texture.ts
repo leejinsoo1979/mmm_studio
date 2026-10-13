@@ -873,8 +873,8 @@ const AGREE = 0.18
  * power (the squarest view dominates, so a slightly misplaced side photo
  * doesn't blur the face) and by how lit it saw the texel (`shadings`, from
  * `delight`: a shadow lifted is noisier than light); then again, with a
- * view that disagrees with the rest (a shadow the light could not explain,
- * a misplaced edge) counting less. The coverage is the best weight, less
+ * view that strays from what the views agree on (a shadow the light could
+ * not explain, a misplaced edge) counting less. The coverage is the best weight, less
  * where every view saw the texel only in shadow.
  */
 export function blendViews(
@@ -885,6 +885,8 @@ export function blendViews(
   const color = new Float32Array(count * 3)
   const weight = new Float32Array(count)
   const p = new Float64Array(views.length)
+  const order = new Float64Array(views.length)
+  const votes = new Float64Array(views.length)
   for (let i = 0; i < count; i++) {
     let total = 0
     let best = 0
@@ -904,7 +906,29 @@ export function blendViews(
       best = Math.max(best, w * (0.4 + 0.6 * lit))
     })
     if (total <= 0) continue
-    const first = Math.log(Math.max(1e-5, (0.2126 * r + 0.7152 * g + 0.0722 * b) / total))
+    // What the views agree on: their median brightness, each counted by its own weight. Their
+    // blend would be the squarest view's alone, which then never disagrees with itself: a profile
+    // seeing past a brow's hairs to the skin under them outvoted every front view of the brow.
+    let used = 0
+    let half = 0
+    views.forEach((view, k) => {
+      if (!(p[k]! > 0)) return
+      order[used] = Math.log(Math.max(1e-5, luminanceAt(view.color, i)))
+      votes[used] = view.weight[i]!
+      half += votes[used]! / 2
+      used++
+    })
+    for (let a = 1; a < used; a++)
+      for (let b2 = a; b2 > 0 && order[b2 - 1]! > order[b2]!; b2--) {
+        ;[order[b2 - 1], order[b2]] = [order[b2]!, order[b2 - 1]!]
+        ;[votes[b2 - 1], votes[b2]] = [votes[b2]!, votes[b2 - 1]!]
+      }
+    let first = order[0]!
+    for (let a = 0, seen = 0; a < used; a++) {
+      seen += votes[a]!
+      first = order[a]!
+      if (seen >= half) break
+    }
     let again = 0
     let r2 = 0
     let g2 = 0
