@@ -194,6 +194,13 @@ const SIDE_VIEW = (25 * Math.PI) / 180
 const DEPTH_PRIOR_FRONT = 60
 const DEPTH_PRIOR_SIDE = 3
 /**
+ * …and with photos turned to about 45° but none from the side: they see the face's depth only in
+ * part (the profile itself is never on their outline), so the base head holds it more.
+ */
+const DEPTH_PRIOR_THREE_QUARTER = 15
+/** A view turned more than this (radians) has the profile on its outline. */
+const PROFILE_VIEW = (60 * Math.PI) / 180
+/**
  * How strongly a principal head shape's weight is held to 0 (in standard deviations of people's
  * heads, as one measurement), and how far it may go.
  */
@@ -794,6 +801,8 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
   const restPupils = landmarkDistance(model, Float64Array.from(model.rest), 468, 473)
   /** Whether every photo faces the camera: none will ever show the face's depth. */
   const frontOnly = views.every((view) => view.landmarks && Math.abs(view.yaw) <= SIDE_VIEW)
+  /** Whether a photo shows the profile on its outline (a side view, or one turned well past ¾). */
+  const profiled = views.some((view) => !view.landmarks || Math.abs(view.yaw) > PROFILE_VIEW)
   const size0 = options.pupils ? Math.log(options.pupils / restPupils) : 0
 
   const refresh = () => {
@@ -905,7 +914,11 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
     }
     // The face's depth, as much as no photo sees it from the side, stays the base head's: the
     // targets that move the face across also move it in depth, which a front photo can't check.
-    const depthWeight = seesDepth() ? DEPTH_PRIOR_SIDE : DEPTH_PRIOR_FRONT
+    const depthWeight = seesDepth()
+      ? profiled
+        ? DEPTH_PRIOR_SIDE
+        : DEPTH_PRIOR_THREE_QUARTER
+      : DEPTH_PRIOR_FRONT
     const gram = depthGram(model)
     const gc = new Float64Array(nT)
     let cost = 0
