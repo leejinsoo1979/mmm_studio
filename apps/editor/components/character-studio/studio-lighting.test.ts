@@ -23,7 +23,6 @@ describe('STUDIO_LIGHTING', () => {
       shadowBias: -0.0003,
       normalBias: 0.012,
       softShadow: false,
-      disc: '#16191e',
     })
   })
 

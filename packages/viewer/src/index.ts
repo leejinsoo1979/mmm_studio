@@ -67,15 +67,7 @@ export {
   SUBTRACTION,
 } from './lib/csg-utils'
 export type { EdgeMode } from './lib/edge-style'
-export {
-  DEFAULT_SKIN,
-  HumanSkinMaterial,
-  type HumanSkinSettings,
-  type HumanSurface,
-  humanMaterial,
-  humanSurfaceOf,
-  skinReliefTexture,
-} from './lib/human-shading'
+export { type HumanSurface, humanMaterial, humanSurfaceOf } from './lib/human-shading'
 export {
   applyIsolation,
   clearIsolation,

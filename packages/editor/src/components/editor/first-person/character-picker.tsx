@@ -96,8 +96,10 @@ export function EditionSwitch({
 /** The player's body as picked: a 실사 character, else their Rocketbox avatar. */
 export function usePickedCharacter() {
   const rocketbox = findAvatar(useWalkthroughView((state) => state.character))
-  const real = findPhotoreal(useAvatarProfile((state) => state.real))
-  return { rocketbox, real }
+  const id = useAvatarProfile((state) => state.real)
+  // A local character's name comes with the folder's listing: shown once it has.
+  useLocalPhotoreal()
+  return { rocketbox, real: findPhotoreal(id) }
 }
 
 /**

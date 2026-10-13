@@ -490,8 +490,8 @@ function StudioLights({ state, mode }: { state: StageState; mode: StudioMode }) 
 
 /**
  * Soft image-based light, made here (no picture to download): three's
- * studio room, or for 실사 a dark room with softboxes where the lights
- * stand, whose reflections are the eyes' catchlights.
+ * studio room, or under 인물 조명 a dim room with softboxes where the
+ * lights stand, whose reflections are the eyes' catchlights.
  */
 function StudioEnvironment({ mode }: { mode: StudioMode }) {
   const gl = useThree((state) => state.gl) as unknown as WebGPURenderer
@@ -904,7 +904,7 @@ function StagedBody({
   )
 }
 
-/** A Rocketbox character in its look, its materials the studio's own (tuned for the close-up). */
+/** A Rocketbox character in its look, its materials the studio's own (tuned for the close-up, the head's maps at full size). */
 function StudioAvatar({
   avatarId,
   look,
@@ -980,7 +980,7 @@ const RING = untonedColor('#3c5a73')
 const HALO_OPACITY = 0.015
 
 /** A dark disc the character stands on, ringed in steel blue. */
-function Platform({ state, mode }: { state: StageState; mode: StudioMode }) {
+function Platform({ state }: { state: StageState }) {
   const ref = useRef<Group>(null)
   useEffect(() => {
     const { rig } = state
@@ -993,7 +993,7 @@ function Platform({ state, mode }: { state: StageState; mode: StudioMode }) {
     <group ref={ref} rotation-x={-Math.PI / 2}>
       <mesh receiveShadow>
         <circleGeometry args={[PLATFORM_RADIUS, 96]} />
-        <meshStandardMaterial color={STUDIO_LIGHTING[mode].disc} roughness={0.55} />
+        <meshStandardMaterial color="#16191e" roughness={0.55} />
       </mesh>
       <mesh position-z={0.001}>
         <ringGeometry args={[PLATFORM_RADIUS, 0.975, 128]} />
@@ -1468,7 +1468,7 @@ export function StudioStage({
         <Backdrop state={state} />
         <StudioEnvironment mode={mode} />
         <StudioLights mode={mode} state={state} />
-        <Platform mode={mode} state={state} />
+        <Platform state={state} />
         <FloorShadow shown={!HEAD_FOCUS.has(focus)} state={state} />
         <Suspense fallback={null}>
           {real ? (

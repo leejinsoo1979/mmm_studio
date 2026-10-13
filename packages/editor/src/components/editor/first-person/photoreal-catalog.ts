@@ -69,6 +69,9 @@ export const aiAvatarIdOf = (id: string) => AI_ID.exec(id)?.[2] ?? null
 /** A local file's name without its extension, for its label. */
 const stem = (file: string) => file.replace(/\.glb$/i, '')
 
+/** The names characters.json gives local characters, by id, once the folder has been listed. */
+const localNames = new Map<string, string>()
+
 /** The gender a local file's name suggests (female, woman, girl, 여…), male otherwise. */
 export function guessGender(file: string): AvatarGender {
   return /(female|woman|women|girl|lady|^f[_-]|[_-]f[_-]|여)/i.test(file) ? 'female' : 'male'
@@ -98,7 +101,7 @@ export function findPhotoreal(id: string | null | undefined): PhotorealCharacter
   const file = local[2]!
   return {
     id,
-    label: stem(file),
+    label: localNames.get(id) ?? stem(file),
     gender: local[1]!.toLowerCase() as AvatarGender,
     url: `${PHOTOREAL_LOCAL_URL}/${encodeURIComponent(file)}`,
     thumbnail: null,
@@ -115,15 +118,20 @@ export function readPhotorealId(value: unknown): string | null {
 /** One entry of the local folder's listing: the file, and the name and gender characters.json gives it. */
 export type LocalPhotorealEntry = { file: string; name?: string; gender?: AvatarGender }
 
-/** The local folder's characters, in the listing's order. */
+/**
+ * The local folder's characters, in the listing's order; their names are
+ * kept for findPhotoreal, so a saved pick shows the name too.
+ */
 export function localCharacters(entries: readonly LocalPhotorealEntry[]): PhotorealCharacter[] {
   const characters: PhotorealCharacter[] = []
   for (const entry of entries) {
     if (!/\.glb$/i.test(entry.file) || /[/\\:]/.test(entry.file)) continue
     const gender =
       entry.gender === 'male' || entry.gender === 'female' ? entry.gender : guessGender(entry.file)
-    const character = findPhotoreal(localPhotorealId(gender, entry.file))!
-    characters.push({ ...character, label: entry.name?.trim() || character.label })
+    const id = localPhotorealId(gender, entry.file)
+    const name = entry.name?.trim()
+    if (name) localNames.set(id, name)
+    characters.push(findPhotoreal(id)!)
   }
   return characters
 }

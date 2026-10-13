@@ -20,6 +20,7 @@ import {
   nodeObject,
   normalMap,
   normalView,
+  normalViewGeometry,
   property,
   roughness,
   specularF90,
@@ -42,16 +43,19 @@ import {
  * Skin shading for skin materials (SkinMaterial): light that wraps a little
  * round the terminator, further in red than in blue, as light scattered
  * under the skin does, over a shape seen through a softer copy of the
- * normal map; a broader second highlight over the main one, as skin's oily
- * top layer gives; and fine pores and creases from a tiling detail normal.
- * How much a texel is skin is the red channel of the material's roughness
- * map (glTF leaves it unused); a geometry may also carry `skinEye` (x: 1 on
- * an eyeball; y: how much its white is shaded towards the lids and
- * corners), whose eyes turn wet and sit in their sockets.
+ * normal map (the surface's own normal without one); a broader second
+ * highlight over the main one, as skin's oily top layer gives; and fine
+ * pores and creases from a tiling detail normal. How much a texel is skin
+ * is the red channel of the material's roughness map (glTF leaves it
+ * unused) unless its settings say for the whole of it; a geometry may also
+ * carry `skinEye` (x: 1 on an eyeball; y: how much its white is shaded
+ * towards the lids and corners), whose eyes turn wet and sit in their
+ * sockets.
  *
- * Every renderer draws it while it is on (setSkinShading). Off, a skin
- * material is built as the plain physical one: it costs nothing then, and
- * turning it on or off rebuilds the skin materials' shaders once.
+ * Every renderer draws it while it is on (setSkinShading), and a skin
+ * that is `always` skin whether or not. Off, a skin material is built as
+ * the plain physical one: it costs nothing then, and turning it on or off
+ * rebuilds the skin materials' shaders once.
  */
 
 /** The vertex attribute that marks a skin geometry's eyes (see above). */
@@ -60,9 +64,18 @@ export const SKIN_EYE_ATTRIBUTE = 'skinEye'
 export type SkinSettings = {
   /** How many times the detail normal tiles across the material's UVs. */
   detailRepeat: number
-  /** How much of it is skin where it has no roughness map to say: 0 when unset. */
+  /**
+   * How much all of it is skin, in place of the roughness map's red (bare
+   * feet, a scanned person's skin): unset, the map says, and without a
+   * map none of it is.
+   */
   mask?: number
+  /** Drawn as skin even while skin shading is off: a character made to be seen so. */
+  always?: boolean
 }
+
+const drawnAsSkin = (skin: SkinSettings | null): skin is SkinSettings =>
+  skin !== null && (skinOn || skin.always === true)
 
 let skinOn = false
 
@@ -78,7 +91,7 @@ export function setSkinShading(on: boolean) {
   skinOn = on
   for (const ref of live) {
     const material = ref.deref()
-    if (material?.skin) material.needsUpdate = true
+    if (material?.skin && !material.skin.always) material.needsUpdate = true
   }
 }
 
@@ -111,7 +124,7 @@ export class SkinMaterial extends MeshPhysicalMaterial {
   override customProgramCacheKey() {
     const key = super.customProgramCacheKey()
     const skin = this.skin
-    return skin && skinOn ? `${key}|skin:${skin.detailRepeat}:${skin.mask ?? 0}` : key
+    return drawnAsSkin(skin) ? `${key}|skin:${skin.detailRepeat}:${skin.mask ?? 'map'}` : key
   }
 }
 
@@ -274,7 +287,7 @@ type SkinNodes = {
   eye: any | null
   /** The normal map, sampled as loaded, its scale and type; null without one. */
   normal: { texel: any; scale: any; type: number } | null
-  /** The view normal through the softer normal map. */
+  /** The view normal through the softer normal map, or the surface's own without one. */
   soft: any
   detailRepeat: number
 }
@@ -356,17 +369,20 @@ export class SkinPhysicalNodeMaterial extends SheenSafePhysicalNodeMaterial {
   private skinNodes(builder: any): SkinNodes | null {
     const material = builder.material as SkinMaterial
     const settings = isSkinMaterial(material) ? material.skin : null
-    if (!(settings && skinOn)) return null
+    if (!drawnAsSkin(settings)) return null
     const geometry = builder.geometry as BufferGeometry
     const eye: any = geometry.hasAttribute(SKIN_EYE_ATTRIBUTE)
       ? attribute(SKIN_EYE_ATTRIBUTE, 'vec2')
       : null
-    const mask = material.roughnessMap
-      ? (materialReference('roughnessMap', 'texture') as any).r
-      : float(settings.mask ?? 0)
+    const mask =
+      settings.mask === undefined && material.roughnessMap
+        ? (materialReference('roughnessMap', 'texture') as any).r
+        : float(settings.mask ?? 0)
     const amount = eye ? mask.mul(eye.x.oneMinus()) : mask
     const { detailRepeat } = settings
-    if (!material.normalMap) return { amount, eye, normal: null, soft: normalView, detailRepeat }
+    if (!material.normalMap) {
+      return { amount, eye, normal: null, soft: normalViewGeometry, detailRepeat }
+    }
     const normalTexture = materialReference('normalMap', 'texture') as any
     // Its texture node now, so a softer sample of it follows the material's map too.
     normalTexture.updateReference(builder)
@@ -388,12 +404,15 @@ export class SkinPhysicalNodeMaterial extends SheenSafePhysicalNodeMaterial {
 
   override setupNormal() {
     const skin = this.skinBuild
-    if (!skin?.normal) return super.setupNormal()
-    const surface = skin.normal.texel.xyz.mul(2).sub(1)
+    if (!skin) return super.setupNormal()
+    const { normal } = skin
+    const surface = normal ? normal.texel.xyz.mul(2).sub(1) : vec3(0, 0, 1)
     const detail = texture(skinDetail(), uv().mul(skin.detailRepeat)).xyz.mul(2).sub(1)
     const detailed = vec3(surface.xy.add(detail.xy.mul(skin.amount.mul(DETAIL))), surface.z)
-    const node = normalMap(detailed.normalize().mul(0.5).add(0.5), skin.normal.scale) as any
-    node.normalMapType = skin.normal.type
+    const packed = detailed.normalize().mul(0.5).add(0.5)
+    if (!normal) return normalMap(packed)
+    const node = normalMap(packed, normal.scale) as any
+    node.normalMapType = normal.type
     return node
   }
 

@@ -55,7 +55,7 @@ describe('the 실사 set', () => {
     expect(readPhotorealId(PHOTOREAL_CHARACTERS[0]!.id)).toBe(PHOTOREAL_CHARACTERS[0]!.id)
   })
 
-  test('lists the local folder with characters.json’s names and genders, guessing a gender from the file', () => {
+  test('lists the local folder with characters.json’s names (kept for its saved picks) and genders, guessing a gender from the file', () => {
     const listed = localCharacters([
       { file: 'metahuman_ada.glb', name: '에이다', gender: 'female' },
       { file: 'woman-scan.glb' },
@@ -68,6 +68,7 @@ describe('the 실사 set', () => {
       ['woman-scan', 'female'],
       ['kim', 'male'],
     ])
+    expect(findPhotoreal(localPhotorealId('female', 'metahuman_ada.glb'))?.label).toBe('에이다')
     expect(guessGender('여자캐릭터.glb')).toBe('female')
     expect(guessGender('f_01.glb')).toBe('female')
     expect(guessGender('hero.glb')).toBe('male')

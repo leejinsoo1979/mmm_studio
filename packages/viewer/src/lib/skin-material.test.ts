@@ -79,6 +79,16 @@ describe('skin shading', () => {
     expect(skin.version).toBe(before.skin + 2)
   })
 
+  test('an always-skin material is keyed as skin, and left alone, while skin shading is off', () => {
+    const always = new SkinMaterial({ detailRepeat: 24, mask: 1, always: true })
+    const skin = new SkinMaterial({ detailRepeat: 24, mask: 1 })
+    expect(always.customProgramCacheKey()).not.toBe(skin.customProgramCacheKey())
+    const before = always.version
+    setSkinShading(true)
+    expect(always.customProgramCacheKey()).toBe(skin.customProgramCacheKey())
+    expect(always.version).toBe(before)
+  })
+
   test('a material that is not skin is lit as any sheen-safe physical material', () => {
     const material = new SkinPhysicalNodeMaterial()
     material.sheen = 1
@@ -186,6 +196,30 @@ describe('the shader three builds', () => {
     expect(roughness).toHaveLength(1)
     expect(roughness[0]).toContain('0.04')
     expect(roughness[0]).toContain('0.0525')
+  })
+
+  test('an always-skin material builds as skin while skin shading is off', () => {
+    const always = fragment(new SkinMaterial({ detailRepeat: 16, always: true }, maps()), false)
+    setSkinShading(true)
+    expect(always).toBe(fragment(new SkinMaterial({ detailRepeat: 16 }, maps()), false))
+    expect(always).not.toBe(plain())
+  })
+
+  test('a mask stands for the whole material, in place of its roughness map', () => {
+    setSkinShading(true)
+    const read = fragment(new SkinMaterial({ detailRepeat: 16 }, maps()), false)
+    const whole = fragment(new SkinMaterial({ detailRepeat: 16, mask: 1 }, maps()), false)
+    const reads = (shader: string) => (shader.match(/texture\(/g) ?? []).length
+    expect(reads(whole)).toBe(reads(read) - 1)
+  })
+
+  test('without a normal map, the pores tilt the surface’s own normal', () => {
+    setSkinShading(true)
+    const { normalMap: _, ...noNormal } = maps()
+    const skin = fragment(new SkinMaterial({ detailRepeat: 24, mask: 1 }, noNormal), false)
+    const bare = fragment(new MeshPhysicalMaterial(noNormal), false)
+    expect(skin).toContain('TBNViewMatrix')
+    expect(bare).not.toContain('TBNViewMatrix')
   })
 
   test('on, a head reads its eyes, a body without them builds no eye shading', () => {
