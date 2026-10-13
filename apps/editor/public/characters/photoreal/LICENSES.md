@@ -76,3 +76,48 @@ README).
   skin. Only vertex indices and weights of the CC0 base mesh; no face data
   of any person.
 - Licence: CC0 1.0, as the base bodies.
+
+## hair/ (photo avatars' hair: `<style>.bin`, `<style>.webp`, `cap.webp`, `buzz.webp`, `styles.json`)
+
+- What: the hair a photo avatar is given, matched to its photos (사진으로 실사
+  아바타): MakeHuman's hair proxies `short02`, `short03`, `bob02`, `long01`,
+  `ponytail01` and `afro01`, each bound to MakeHuman's base mesh as
+  MakeHuman binds a proxy (three base mesh vertices, weights and an offset
+  per hair vertex) so it fits whichever base body and face it is put on,
+  with a cap under its cards and a hairline tint for the scalp;
+  `long01-bob` and `long01-shoulder`, long01 cut at the jaw and at the
+  shoulders (they share `long01.webp`); and a buzz cut (`buzz`), made here:
+  a stubble shell on the scalp.
+- Source: MakeHuman 1.1.1's system assets, from Ubuntu's
+  `makehuman-data_1.1.1-1_all.deb` (archive.ubuntu.com, pool
+  universe/m/makehuman; sha256
+  `881a79c3a6640e2ecc579093f6895d161fd902856504b123ef750e843f4304a7`, fetched
+  2026-10-13), `usr/share/makehuman/data/hair/<style>/` — the `.mhclo`
+  binding, the `.npz` mesh and the `_diffuse.png` picture of each. Their
+  sha256 (first 16 hex): short02 mhclo `e379e5a370c4a61a`, npz
+  `5f489c4abe660150`, png `d668e8e413749136`; short03 `4c618b130e2f045e`,
+  `d44c62eae75b352e`, `595bdc8553609dfd`; bob02 `5142ba1bd04d7f40`,
+  `c0fc3ed9996e3dcb`, `2d2aafeac59079bc`; long01 `e9dc110dcc59a2bd`,
+  `d46e870d6924f0be`, `6bc78727a34e159f`; ponytail01 `3b911fa4cc4fbb35`,
+  `e147a61f336fb8eb`, `313a0a59b05245e6`; afro01 `7ab4f15afcf53b4a`,
+  `141059ce5266be10`, `e1dee945acd35c10`. The skin weights come from MPFB2's
+  Mixamo rig (`data/rigs/standard/weights.mixamo.json`, git clone, v2.0.18,
+  `d0a32e57`), the base mesh's faces from MPFB2's `data/3dobjs/base.obj`.
+- Licence: CC0 1.0, https://creativecommons.org/publicdomain/zero/1.0/.
+  MakeHuman's LICENSE.md (https://github.com/makehumancommunity/makehuman,
+  git clone, `a8bc2d54`), section C: the bundled assets — "the base mesh and
+  proxies … textures … clothes (any MHCLO-based asset)" — are released under
+  CC0 1.0 (the 1.1.1 package still carries the old AGPL header in each file;
+  the project's licence statement supersedes it for assets). MPFB2's
+  LICENSE.md, section C: its data is CC0 1.0. The cap, buzz and stubble
+  pictures are made by the script from noise: CC0 1.0 as the rest. No
+  attribution required; credited anyway.
+- Changes: built with `scripts/characters/build-photo-hair.py` (numpy and
+  Pillow): each picture resized to 1024, its colour turned to one neutral
+  brown (the strands' light kept, its brightest highlights rolled off) so a
+  photo's hair colour can be toned from it; the short styles' strands past
+  the nape pressed up into a 1 cm taper, thinning out down it; long01's
+  cards cut straight across 11 cm under the eyes for `long01-bob` and 26 cm
+  under them for `long01-shoulder`, thinning out over the last 2.5 cm; every
+  style's strands thinning out over the last 1.2 cm to their hairline (a
+  per-vertex alpha); WebP quality 88 with alpha.
