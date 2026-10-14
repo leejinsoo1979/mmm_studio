@@ -536,6 +536,13 @@ export function PhotoAvatarDialog({
         onAnnounce(`사진 속 얼굴 방향을 보고 ‘${SLOT_LABEL[target]}’ 칸에 넣었어요`)
         setUploadNote(`사진 속 얼굴 방향을 보고 ‘${SLOT_LABEL[target]}’ 칸에 넣었어요.`)
       }
+      // The front photo is where the face is read from: one without a face is no use.
+      if (target === 'front' && seen && seen.yaw === null) {
+        setUploadNote(
+          '이 사진에서 얼굴을 찾지 못했어요. 얼굴 전체가 밝고 크게 나온 정면 사진을 골라 주세요.',
+        )
+        return
+      }
       setShots((old) => ({ ...old, [target]: shotOfPicture(picture, lens) }))
     } catch (error) {
       onAnnounce(error instanceof PhotoAvatarError ? error.message : '사진을 열 수 없어요')
