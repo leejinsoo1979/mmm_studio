@@ -2,8 +2,9 @@
 // Makes a photo avatar off the main thread (see avatar-job.ts): fitting the
 // head to the photos and laying their skin on it takes tens of seconds.
 import { type AvatarJobReport, type PictureCodec, runAvatarJob } from './avatar-job'
-import { loadBaseBody } from './base-files'
+import { loadBaseBody, PHOTO_BASE_URL } from './base-files'
 import type { PhotoAvatarRequest } from './build-client'
+import { loadHairStyle } from './hair-library'
 
 declare const self: DedicatedWorkerGlobalScope
 
@@ -30,10 +31,16 @@ const codec: PictureCodec = {
     canvas
       .getContext('2d')!
       .putImageData(new ImageData(data as Uint8ClampedArray<ArrayBuffer>, width, height), 0, 0)
-    // WebP where the browser can write it (as the base body's pictures are); JPEG where not.
+    // WebP where the browser can write it (as the base body's pictures are); where not (Safari),
+    // PNG for a picture with any see-through pixel (hair cut from its alpha), else JPEG.
     let blob = await canvas.convertToBlob({ type: 'image/webp', quality })
-    if (blob.type !== 'image/webp')
-      blob = await canvas.convertToBlob({ type: 'image/jpeg', quality })
+    if (blob.type !== 'image/webp') {
+      let clear = false
+      for (let i = 3; i < data.length && !clear; i += 4) clear = data[i]! < 255
+      blob = await canvas.convertToBlob(
+        clear ? { type: 'image/png' } : { type: 'image/jpeg', quality },
+      )
+    }
     return { bytes: new Uint8Array(await blob.arrayBuffer()), mimeType: blob.type }
   },
 }
@@ -50,6 +57,7 @@ self.onmessage = async (event: MessageEvent<PhotoAvatarRequest>) => {
       views: request.views,
       colors: request.colors,
       codec,
+      hair: (name) => loadHairStyle(name, request.root ?? PHOTO_BASE_URL),
       progress: (progress, stage) => reply({ progress, stage }),
     })
     reply({ glb, report }, [glb.buffer])

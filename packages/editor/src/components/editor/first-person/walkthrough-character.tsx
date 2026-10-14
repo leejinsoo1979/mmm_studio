@@ -32,7 +32,7 @@ import {
 } from './locomotion'
 import { usePhotorealBody, usePhotorealEmoteClips } from './photoreal-body'
 import { findPhotoreal, type PhotorealCharacter } from './photoreal-catalog'
-import { Blinker } from './photoreal-model'
+import { Blinker, dyeHair } from './photoreal-model'
 
 /** A frame-to-frame jump faster than this (m/s) is a respawn or ride, not a step. */
 const TELEPORT_SPEED = 12
@@ -151,11 +151,19 @@ function RocketboxWalker(props: WalkerProps) {
   )
 }
 
-/** A 실사 body: the shared clips carried onto its rig, blinking; one whose rig can't take them stands in its file's pose. */
+/**
+ * A 실사 body: the shared clips carried onto its rig, blinking, a photo
+ * avatar's hair in the player's dye; one whose rig can't take them stands in
+ * its file's pose.
+ */
 function PhotorealWalker({ character, ...props }: WalkerProps & { character: PhotorealCharacter }) {
   const body = usePhotorealBody(character)
   const emoteClips = usePhotorealEmoteClips(body, true)
   const blinker = useMemo(() => new Blinker(body.model), [body.model])
+  const dye = useAvatarProfile((state) => state.look.hair)
+  useEffect(() => {
+    dyeHair(body.model, dye)
+  }, [body.model, dye])
   return (
     <Walker
       clips={body.clips}

@@ -38,13 +38,15 @@ export const STUDIO_TABS: readonly { id: StudioTab; label: string; focus: Camera
   { id: 'motion', label: '동작', focus: 'full' },
 ]
 
-/** Tabs whose tools fit the Rocketbox bodies alone: a 실사 character has none of them. */
+/** Tabs whose tools fit the Rocketbox bodies alone: a 실사 character has none of them (a photo avatar's hair takes a colour). */
 const ROCKETBOX_TABS: ReadonlySet<StudioTab> = new Set(['face', 'body', 'hair', 'makeup', 'skin'])
 
 /** An NPC has no game keys, so no 동작; a 실사 character keeps 프리셋 and 동작. */
-export const studioTabs = (npc: boolean, real = false) =>
+export const studioTabs = (npc: boolean, real = false, photo = false) =>
   STUDIO_TABS.filter(
-    (tab) => !(npc && tab.id === 'motion') && !(real && ROCKETBOX_TABS.has(tab.id)),
+    (tab) =>
+      !(npc && tab.id === 'motion') &&
+      !(real && ROCKETBOX_TABS.has(tab.id) && !(photo && tab.id === 'hair')),
   )
 
 export const TAB_FOCUS = Object.fromEntries(
@@ -178,6 +180,8 @@ export const REAL_CATEGORY: Category = { id: 'real', label: '실사', subTabs: [
 /** A tab's rail. An NPC's face has no photo (scenes are public); the 실사 set is one list. */
 export function categoriesOf(tab: StudioTab, npc: boolean, real = false): readonly Category[] {
   if (tab === 'preset' && real) return [REAL_CATEGORY]
+  // A photo avatar's hair is matched to its photos: only its colour is the player's.
+  if (tab === 'hair' && real) return CATEGORIES.hair.filter(({ id }) => id === 'color')
   if (tab === 'face')
     return npc ? FACE_CATEGORIES.filter(({ id }) => id !== 'photo') : FACE_CATEGORIES
   return CATEGORIES[tab]

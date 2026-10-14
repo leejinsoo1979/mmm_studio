@@ -31,6 +31,7 @@ import {
 } from './lib/browser'
 import { deltaERgb } from '../../packages/editor/src/components/editor/first-person/photo-avatar/__bench__/colour'
 import { buildPage } from './lib/build-page'
+import { STYLE_NAMES, styleGlb } from './lib/hair-styles'
 import { type Head, heldOutHead, TUNING } from './lib/heads'
 import {
   g3Checks,
@@ -68,13 +69,16 @@ const { values: flags } = parseArgs({
     fixtures: { type: 'boolean', default: false },
     'fixtures-out': { type: 'string' },
     'keep-images': { type: 'boolean', default: true },
+    'hair-styles': { type: 'boolean', default: false },
+    styles: { type: 'string' },
   },
 })
 
 const cache = resolve(flags.cache ?? process.env.BENCH_CACHE ?? join(tmpdir(), 'photo-avatar-bench'))
 const heldout = Boolean(flags.heldout)
 let heads: Head[]
-if (flags.heldout) {
+if (flags['hair-styles']) heads = []
+else if (flags.heldout) {
   if (flags.set || flags.heads) throw new Error('--heldout runs held-out heads only')
   heads = flags.heldout.split(',').map((id) => heldOutHead(id.trim(), REPO, cache))
 } else if (flags.heads) {
@@ -92,7 +96,7 @@ const configs = new Set<Config>(
     return c as Config
   }),
 )
-const out = resolve(flags.out ?? join(cache, 'out', heldout ? 'heldout' : 'tuning'))
+const out = resolve(flags.out ?? join(cache, 'out', flags['hair-styles'] ? 'hair-styles' : heldout ? 'heldout' : 'tuning'))
 const dist = join(cache, 'dist')
 mkdirSync(out, { recursive: true })
 
@@ -324,8 +328,11 @@ async function skin(call: Call, head: Head, name: string, align: unknown) {
 async function hair(call: Call, head: Head, name: string) {
   const avatar = await call('avatarHair', name)
   const holes = await call('hairHoles', name)
-  holes.sheet.forEach((url: string, k: number) => save(`${head.id}/hair/idle-${k}.jpg`, url))
-  return { avatar, holes: { results: holes.results } }
+  for (const shot of holes.sheet) {
+    save(`${head.id}/hair/${shot.pose}-${shot.view}.jpg`, shot.url)
+    save(`${head.id}/hair/holes-${shot.pose}-${shot.view}.png`, shot.holes)
+  }
+  return { avatar, holes: { results: holes.results, stretch: holes.stretch } }
 }
 
 async function eyes(call: Call, name: string, align: unknown) {
@@ -421,6 +428,56 @@ function hairDeltaE(result: any): number {
   const a = result.hair?.avatar?.albedo
   const t = result.truth?.hairAlbedo
   return a && t ? deltaERgb(a, t) : Number.NaN
+}
+
+/**
+ * The hair library's styles on both base bodies at rest (and bald): each one's class as the bench
+ * reads an avatar's, its picture's colour, and holes from 8 sides in 3 poses, with every view saved.
+ */
+async function hairStyles() {
+  const { chrome, call } = await session()
+  const rows: any[] = []
+  try {
+    for (const gender of ['male', 'female'] as const) {
+      for (const style of [null, ...STYLE_NAMES]) {
+        const id = `${style ?? 'bald'}-${gender}`
+        if (flags.styles && !flags.styles.split(',').includes(id)) continue
+        const file = join(cache, 'styles', `${id}.glb`)
+        mkdirSync(join(cache, 'styles'), { recursive: true })
+        const glb = await styleGlb(style, gender)
+        writeFileSync(file, glb)
+        await call('adopt', id, `./heads/styles/${id}.glb`, gender)
+        const avatar = await call('avatarHair', id)
+        const holes = await call('hairHoles', id)
+        for (const shot of holes.sheet) {
+          save(`${id}/${shot.pose}-${shot.view}.jpg`, shot.url)
+          save(`${id}/holes-${shot.pose}-${shot.view}.png`, shot.holes)
+        }
+        const worst = Math.max(...holes.results.map((r: any) => (Number.isFinite(r.holes) ? r.holes : 1)))
+        const torn = Math.max(0, ...holes.stretch.map((s: any) => s.torn))
+        rows.push({ style: style ?? 'bald', gender, class: avatar.class, albedo: avatar.albedo, bytes: glb.byteLength, worstHole: worst, torn, holes: holes.results, stretch: holes.stretch })
+        console.log(`  ${id}: ${avatar.class.length} (lowest ${avatar.class.lowest?.toFixed(3)}), worst hole ${(worst * 100).toFixed(3)} %, torn ${(torn * 100).toFixed(2)} %, ${glb.byteLength} bytes`)
+        await call('forget', id)
+      }
+    }
+  } finally {
+    await stopChrome(chrome)
+  }
+  saveJson('styles.json', rows)
+  const table = [
+    '| style | body | class | lowest (m) | worst hole | torn or folded (worst pose) | GLB bytes |',
+    '|---|---|---|---|---|---|---|',
+  ]
+  for (const r of rows)
+    table.push(`| ${r.style} | ${r.gender} | ${r.class.length} | ${r.class.lowest?.toFixed(3) ?? '—'} | ${(r.worstHole * 100).toFixed(3)} % | ${(r.torn * 100).toFixed(2)} % | ${r.bytes} |`)
+  writeFileSync(join(out, 'styles.md'), `${table.join('\n')}\n`)
+}
+
+if (flags['hair-styles']) {
+  await hairStyles()
+  server.stop()
+  console.log(`hair styles: ${join(out, 'styles.md')}`)
+  process.exit(0)
 }
 
 const results: { head: Head; result: any }[] = []

@@ -125,8 +125,25 @@ export function g7Checks(hair: any, head: Head, truthHair: any): Check[] {
     )
   }
   if (wanted && !['bald', 'buzz'].includes(wanted)) {
-    const worst = Math.max(...(hair.holes?.results ?? []).map((r: any) => (finite(r.holes) ? r.holes : 1)))
-    out.push(check('G7', 'holes (worst of 8 views × 3 poses)', worst, `≤ ${GATES.G7.holes * 100} %`, worst <= GATES.G7.holes))
+    const results = hair.holes?.results ?? []
+    const worst = Math.max(...results.map((r: any) => (finite(r.holes) ? r.holes : 1)))
+    const at = results.find((r: any) => r.holes === worst)
+    out.push({
+      ...check('G7', 'holes (worst of 8 views × 3 poses)', worst, `≤ ${GATES.G7.holes * 100} %`, worst <= GATES.G7.holes),
+      note:
+        at && finite(at.singleSample)
+          ? `${at.pose} ${at.view}: ${((at.singleSample / Math.max(at.holes, 1e-9)) * 100).toFixed(0)} % of its holes show skin in one sample of four`
+          : '',
+    })
+  }
+  const stretch = hair.holes?.stretch ?? []
+  if (stretch.length) {
+    const torn = Math.max(...stretch.map((s: any) => s.torn))
+    const at = stretch.find((s: any) => s.torn === torn)
+    out.push({
+      ...check('G7', 'hair triangles torn or folded (worst pose)', torn, 'not gated', null),
+      note: `${at.pose}: an edge ${at.worst.toFixed(1)} times its length at rest at worst`,
+    })
   }
   return out
 }

@@ -69,7 +69,8 @@ export function mpfbHead(seed: number): Head {
 }
 
 export const TUNING: Head[] = [
-  rocketbox('f01', 'Female_Adult_01', 'female', 'medium'),
+  // A blonde ponytail reaching past the shoulders (its own cards end 23 cm under the eyes).
+  rocketbox('f01', 'Female_Adult_01', 'female', 'long-tied'),
   rocketbox('m01', 'Male_Adult_01', 'male', 'short'),
   rocketbox('m05', 'Male_Adult_05', 'male', 'short'),
   rocketbox('m10', 'Male_Adult_10', 'male', 'short'),

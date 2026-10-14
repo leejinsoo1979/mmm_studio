@@ -1,0 +1,68 @@
+{
+ "about": "Photo avatar hair (build-photo-hair.py): per style its file and what hair-match.ts matches on.",
+ "styles": {
+  "buzz": {
+   "length": "buzz",
+   "tied": false,
+   "volume": "flat",
+   "fringe": false,
+   "file": "buzz.bin"
+  },
+  "short02": {
+   "length": "short",
+   "tied": false,
+   "volume": "normal",
+   "fringe": false,
+   "file": "short02.bin"
+  },
+  "short03": {
+   "length": "short",
+   "tied": false,
+   "volume": "normal",
+   "fringe": true,
+   "file": "short03.bin"
+  },
+  "bob02": {
+   "length": "medium",
+   "tied": false,
+   "volume": "normal",
+   "fringe": true,
+   "file": "bob02.bin"
+  },
+  "long01-bob": {
+   "length": "medium",
+   "tied": false,
+   "volume": "normal",
+   "fringe": false,
+   "file": "long01-bob.bin"
+  },
+  "long01-shoulder": {
+   "length": "long",
+   "tied": false,
+   "volume": "normal",
+   "fringe": false,
+   "file": "long01-shoulder.bin"
+  },
+  "long01": {
+   "length": "long",
+   "tied": false,
+   "volume": "normal",
+   "fringe": false,
+   "file": "long01.bin"
+  },
+  "ponytail01": {
+   "length": "long",
+   "tied": true,
+   "volume": "normal",
+   "fringe": false,
+   "file": "ponytail01.bin"
+  },
+  "afro01": {
+   "length": "medium",
+   "tied": false,
+   "volume": "big",
+   "fringe": false,
+   "file": "afro01.bin"
+  }
+ }
+}

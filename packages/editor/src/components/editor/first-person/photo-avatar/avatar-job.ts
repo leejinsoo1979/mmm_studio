@@ -1,8 +1,11 @@
 import { type AvatarImages, type BaseBody, baseMeshMoves, buildAvatarGlb } from './base-body'
 import type { Camera } from './camera'
-import { toneGains } from './fill'
 import { type FitOptions, type FitResult, type FitView, fitHead, PUPIL_DISTANCE } from './fit'
 import { editMaterials } from './glb'
+import { type DressedPicture, dressHair } from './hair-glb'
+import type { HairStyle, HairStyleName } from './hair-library'
+import { type HairReading, hairStyleFor, readHair } from './hair-match'
+import { hairGains, scalpDensity, tintScalp, tonePicture } from './hair-paint'
 import type { FaceBlendshapes, SegmentMasks } from './segment'
 import { fillTriangles } from './silhouette'
 import { SKIN_MATERIAL_EDITS, skinTextures } from './skin-texture'
@@ -49,6 +52,11 @@ export type PictureCodec = {
   ) => Promise<{ bytes: Uint8Array; mimeType: string }>
 }
 
+/** A style of the hair library and its pictures (bytes as served), by name (see hair-library.ts). */
+export type HairSource = (
+  name: HairStyleName,
+) => Promise<{ style: HairStyle; pictures: Map<string, Uint8Array> }>
+
 export type AvatarJobReport = {
   views: FitResult['views']
   /** Per view, how well a smooth light explained its skin (r²). */
@@ -57,6 +65,8 @@ export type AvatarJobReport = {
   photoShare: number
   /** Each view's solved camera (the fitted head's frame to its pixels). */
   cameras: Camera[]
+  /** The hair read off the photos and the style given for it (null: bald). */
+  hair: HairReading & { style: HairStyleName | null }
   seconds: { fit: number; texture: number; pack: number }
 }
 
@@ -65,6 +75,9 @@ export type AvatarJobResult = {
   report: AvatarJobReport
   fit: FitResult
 }
+
+/** The hair's colour (sRGB) where no photo showed any. */
+const UNSEEN_HAIR = '#3b2a20'
 
 const hexLinear = (hex: string): [number, number, number] => {
   const n = Number.parseInt(hex.replace('#', ''), 16)
@@ -89,6 +102,7 @@ export async function runAvatarJob({
   views,
   colors,
   codec,
+  hair,
   progress = () => {},
   fitOptions = {},
 }: {
@@ -96,6 +110,7 @@ export async function runAvatarJob({
   views: CaptureView[]
   colors: CaptureColors
   codec: PictureCodec
+  hair: HairSource
   progress?: (fraction: number, stage: 'fit' | 'texture' | 'pack') => void
   /** The fit's settings, past what the capture implies. */
   fitOptions?: FitOptions
@@ -120,6 +135,19 @@ export async function runAvatarJob({
     roughness,
     progress: (fraction) => progress(0.45 + 0.4 * fraction, 'texture'),
   })
+
+  const gender = base.meta.gender
+  const reading = readHair(views, fit, base, skin.albedo)
+  const styleName = hairStyleFor(reading, gender)
+  const style = styleName ? await hair(styleName) : null
+  const hairColour = reading.colour ?? hexLinear(colors.hair ?? UNSEEN_HAIR)
+  if (style)
+    tintScalp(
+      skin.head,
+      scalpDensity(style.style, gender, base.headSkin.mesh, base.headSkin.weld, head.width),
+      hairColour,
+    )
+
   const images: AvatarImages = new Map()
   images.set('head_color', await codec.encode(skin.head, head.width, head.height, 0.92))
   images.set('body_color', await codec.encode(skin.body, body.width, body.height, 0.9))
@@ -139,24 +167,28 @@ export async function runAvatarJob({
       ),
     )
   }
-  if (colors.hair) {
-    const hair = await decodeImage(base, 'hair_color', codec)
-    const hairMedian = imageMedian(hair.data, (i) => hair.data[i * 4 + 3]! > 128)
-    images.set(
-      'hair_color',
-      await codec.encode(
-        tone(hair.data, toneGains(hairMedian, hexLinear(colors.hair)), 6),
-        hair.width,
-        hair.height,
-        0.9,
-      ),
-    )
+  const pictures = new Map<string, DressedPicture>()
+  if (style) {
+    const decoded = new Map<string, Awaited<ReturnType<PictureCodec['decode']>>>()
+    for (const [file, bytes] of style.pictures)
+      decoded.set(file, await codec.decode(bytes, 'image/webp'))
+    const own = style.style.parts.find((part) => part.material === 'Hair')!.texture
+    const gains = hairGains(decoded.get(own)!.data, hairColour)
+    for (const [file, picture] of decoded) {
+      pictures.set(
+        file,
+        await codec.encode(tonePicture(picture.data, gains), picture.width, picture.height, 0.9),
+      )
+    }
   }
   const textured = performance.now()
   progress(0.92, 'pack')
-  const glb = editMaterials(
-    buildAvatarGlb(base, moves, images, { dropBrows: true }),
-    SKIN_MATERIAL_EDITS,
+  const basemesh = new Float64Array(base.basemesh.length)
+  for (let i = 0; i < basemesh.length; i++) basemesh[i] = base.basemesh[i]! + moves[i]!
+  const glb = dressHair(
+    editMaterials(buildAvatarGlb(base, moves, images, { dropBrows: true }), SKIN_MATERIAL_EDITS),
+    base,
+    { style: style?.style ?? null, gender, basemesh, pictures, colour: hairColour },
   )
   progress(1, 'pack')
   const done = performance.now()
@@ -168,6 +200,7 @@ export async function runAvatarJob({
       lightFit: skin.lightFit,
       photoShare: skin.photoShare,
       cameras: fit.cameras,
+      hair: { ...reading, style: styleName },
       seconds: {
         fit: (fitted - started) / 1000,
         texture: (textured - fitted) / 1000,
@@ -184,34 +217,6 @@ async function decodeImage(base: BaseBody, name: string, codec: PictureCodec) {
   const view = json.bufferViews[image.bufferView]
   const bytes = bin.subarray(view.byteOffset ?? 0, (view.byteOffset ?? 0) + view.byteLength)
   return codec.decode(bytes, image.mimeType)
-}
-
-/** Median linear colour of an RGBA image's pixels that `use` picks (every third pixel: plenty). */
-function imageMedian(
-  data: ArrayLike<number>,
-  use: (i: number) => boolean,
-): [number, number, number] {
-  const channels: number[][] = [[], [], []]
-  for (let i = 0; i < data.length / 4; i += 3) {
-    if (!use(i)) continue
-    for (let k = 0; k < 3; k++) channels[k]!.push(srgbToLinear(data[i * 4 + k]!))
-  }
-  return channels.map((list) => (list.length ? median(list) : 0.3)) as [number, number, number]
-}
-
-/** An RGBA image with per-channel gains (linear), alpha kept; gains clamped to `limit`. */
-function tone(
-  data: ArrayLike<number>,
-  gains: [number, number, number],
-  limit = 4,
-): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(data.length)
-  const g = gains.map((value) => Math.min(limit, Math.max(1 / limit, value)))
-  for (let i = 0; i < data.length; i += 4) {
-    for (let k = 0; k < 3; k++) out[i + k] = linearToSrgb(srgbToLinear(data[i + k]!) * g[k]!)
-    out[i + 3] = data[i + 3]!
-  }
-  return out
 }
 
 /**
