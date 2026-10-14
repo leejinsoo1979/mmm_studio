@@ -28,6 +28,8 @@ import {
 export type PhotoInput = {
   picture: HTMLImageElement | HTMLCanvasElement | ImageBitmap
   slot: CaptureSlot
+  /** The camera's 35 mm-equivalent focal length, where the photo's EXIF says. */
+  lens?: number | null
 }
 
 export type MakeProgress = { fraction: number; text: string }
@@ -131,7 +133,7 @@ export async function makePhotoAvatar({
       fraction: (0.15 * k) / photos.length,
       text: `사진을 읽고 있어요 (${k + 1}/${photos.length})`,
     })
-    read.push(await readPhoto(photo.picture, photo.slot))
+    read.push(await readPhoto(photo.picture, photo.slot, photo.lens))
     stopped()
   }
   const problem = photoProblem(read)

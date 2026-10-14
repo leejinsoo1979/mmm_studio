@@ -14,6 +14,7 @@ import {
 } from '@pascal-app/editor'
 import { type DetectedFace, detectFaces, sampleFaceColors } from './face-detect'
 import { quietMediaPipe } from './mediapipe-quiet'
+import { focalPixels } from './photo-exif'
 import { type PoseSlot, SIDE_YAW, type SlotReading, slotFromReading } from './photo-slot'
 
 /**
@@ -254,8 +255,16 @@ export type ReadPhoto = {
   canvas: HTMLCanvasElement
 }
 
-/** One photo read: its pixels, landmarks and turn, and the person's outline (skin comes after). */
-export async function readPhoto(picture: Picture, slot: CaptureSlot): Promise<ReadPhoto> {
+/**
+ * One photo read: its pixels, landmarks and turn, and the person's outline
+ * (skin comes after). `lens`: the camera's 35 mm-equivalent focal length
+ * where the photo says (EXIF, see photo-exif.ts); else the fit finds it.
+ */
+export async function readPhoto(
+  picture: Picture,
+  slot: CaptureSlot,
+  lens?: number | null,
+): Promise<ReadPhoto> {
   const { canvas, pixels } = workingCopy(picture)
   const { largest: face, count } = await detectFaces(canvas)
   const asked = slot === 'free' ? 0 : SLOT_YAW[slot]
@@ -270,6 +279,7 @@ export async function readPhoto(picture: Picture, slot: CaptureSlot): Promise<Re
     slot,
     width: canvas.width,
     height: canvas.height,
+    ...(lens ? { focal: focalPixels(lens, canvas.width, canvas.height) } : {}),
     rgba: pixels.data,
     landmarks,
     mask,

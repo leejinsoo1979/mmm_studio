@@ -160,9 +160,14 @@ export async function runAvatarJob({
   })
   // The front photo sets the exposure the others are matched to.
   const front = views.findIndex((view) => view.slot === 'front')
-  const reference = projected[front >= 0 ? front : 0]!
-  for (const view of projected) if (view !== reference) matchExposure(view, reference, kind)
+  for (const view of projected) {
+    const reference = projected[front >= 0 ? front : 0]!
+    if (view !== reference) matchExposure(view, reference, kind)
+  }
   const blended = blendViews(projected, WORKING * WORKING)
+  // Each view's projection (16 MB at the working size) is not read again: let it go before the
+  // fill and the pictures need their own memory (a phone's tab has little to spare).
+  projected.length = 0
 
   // The photos' skin in the tone the texture should hold (the front photo's skin, read on the page).
   const target = hexLinear(colors.skin)

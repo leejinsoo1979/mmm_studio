@@ -31,6 +31,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { runGuidedCapture } from '@/lib/guided-capture'
 import { readPhotoAvatarStatus } from '@/lib/photo-avatar-policy'
 import { photoSlot, SLOT_YAW } from '@/lib/photo-capture'
+import { lensOf, readExifLens } from '@/lib/photo-exif'
 import { type PhotorealAiClientStatus, photorealAiClient } from '@/lib/photoreal-ai/client'
 import { cn } from '@/lib/utils'
 import {
@@ -65,7 +66,8 @@ type Stage =
   | { kind: 'preview'; avatar: StoredPhotoAvatar; notes: string[] }
   | { kind: 'error'; message: string }
 
-type Shot = { picture: HTMLImageElement | HTMLCanvasElement; url: string }
+/** A photo for a pose, a small copy of it to show, and its lens where its EXIF says (uploads). */
+type Shot = { picture: HTMLImageElement | HTMLCanvasElement; url: string; lens?: number | null }
 
 /**
  * An uploaded photo's slot by where the nose points in the picture (a turn to one's left puts it
@@ -120,13 +122,19 @@ function shotOf(canvas: HTMLCanvasElement): Shot {
 }
 
 /** A chosen picture with a small copy for its slot to show (the file's own URL is let go once read). */
-function shotOfPicture(picture: HTMLImageElement): Shot {
+function shotOfPicture(picture: HTMLImageElement, lens: number | null): Shot {
   const canvas = document.createElement('canvas')
   const scale = Math.min(1, 320 / Math.max(picture.naturalWidth, picture.naturalHeight))
   canvas.width = Math.max(1, Math.round(picture.naturalWidth * scale))
   canvas.height = Math.max(1, Math.round(picture.naturalHeight * scale))
   canvas.getContext('2d')!.drawImage(picture, 0, 0, canvas.width, canvas.height)
-  return { picture, url: canvas.toDataURL('image/jpeg', 0.8) }
+  return { picture, url: canvas.toDataURL('image/jpeg', 0.8), lens }
+}
+
+/** A chosen file opened, with the lens its EXIF names for it. */
+async function openUpload(file: File) {
+  const [picture, exif] = await Promise.all([openPicture(file), readExifLens(file)])
+  return { picture, lens: lensOf(exif, picture.naturalWidth, picture.naturalHeight) }
 }
 
 /** Whether this is a touch device (a phone or tablet), where a build may run out of memory. */
@@ -513,7 +521,7 @@ export function PhotoAvatarDialog({
     setFiling(true)
     setUploadNote(null)
     try {
-      const picture = await openPicture(file)
+      const { picture, lens } = await openUpload(file)
       const seen = await photoSlot(picture).catch(() => null)
       if (seen && seen.faces > 1) {
         setUploadNote('사진에 얼굴이 여러 개 있어요. 한 사람만 나온 사진을 골라 주세요.')
@@ -528,7 +536,7 @@ export function PhotoAvatarDialog({
         onAnnounce(`사진 속 얼굴 방향을 보고 ‘${SLOT_LABEL[target]}’ 칸에 넣었어요`)
         setUploadNote(`사진 속 얼굴 방향을 보고 ‘${SLOT_LABEL[target]}’ 칸에 넣었어요.`)
       }
-      setShots((old) => ({ ...old, [target]: shotOfPicture(picture) }))
+      setShots((old) => ({ ...old, [target]: shotOfPicture(picture, lens) }))
     } catch (error) {
       onAnnounce(error instanceof PhotoAvatarError ? error.message : '사진을 열 수 없어요')
     } finally {
@@ -545,7 +553,7 @@ export function PhotoAvatarDialog({
     let crowded = 0
     for (const file of files.slice(0, 8)) {
       try {
-        const picture = await openPicture(file)
+        const { picture, lens } = await openUpload(file)
         const seen = await photoSlot(picture)
         if (seen.faces > 1) {
           crowded++
@@ -557,7 +565,7 @@ export function PhotoAvatarDialog({
         }
         const off = seen.yaw === null ? 0 : Math.abs(seen.yaw - SLOT_YAW[seen.slot])
         const had = found.get(seen.slot)
-        if (!had || off < had.off) found.set(seen.slot, { shot: shotOfPicture(picture), off })
+        if (!had || off < had.off) found.set(seen.slot, { shot: shotOfPicture(picture, lens), off })
       } catch {
         unknown++
       }
@@ -580,7 +588,7 @@ export function PhotoAvatarDialog({
     const slots = source === 'photo' ? (['front'] as const) : UPLOAD_SLOTS.capture
     const photos: PhotoInput[] = slots.flatMap((slot) => {
       const shot = shots[slot]
-      return shot ? [{ picture: shot.picture, slot }] : []
+      return shot ? [{ picture: shot.picture, slot, lens: shot.lens }] : []
     })
     const controller = new AbortController()
     making.current = controller
