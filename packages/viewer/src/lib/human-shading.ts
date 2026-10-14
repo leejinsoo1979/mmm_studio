@@ -1,10 +1,13 @@
 import {
-  AdditiveBlending,
+  AddEquation,
+  CustomBlending,
   type Material,
   type MeshPhysicalMaterial,
   MeshStandardMaterial,
+  OneFactor,
   type Texture,
   Vector2,
+  ZeroFactor,
 } from 'three'
 import {
   float,
@@ -105,7 +108,16 @@ function corneaOf(source: Material): SheenSafePhysicalNodeMaterial {
   material.ior = CORNEA_IOR
   material.transparent = true
   material.depthWrite = false
-  material.blending = AdditiveBlending
+  // Its colour adds over the eye, its alpha does not: summed to 2 in the scene pass's float
+  // target, post-processing's composite (which mixes the background in by that alpha) paints
+  // the eye solid white.
+  material.blending = CustomBlending
+  material.blendEquation = AddEquation
+  material.blendSrc = OneFactor
+  material.blendDst = OneFactor
+  material.blendEquationAlpha = AddEquation
+  material.blendSrcAlpha = ZeroFactor
+  material.blendDstAlpha = OneFactor
   return material
 }
 

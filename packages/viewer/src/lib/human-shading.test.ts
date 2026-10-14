@@ -1,7 +1,16 @@
 // @ts-expect-error — bun:test is provided by the Bun runtime; viewer does not
 // depend on @types/bun so the import type is unresolved at compile time.
 import { describe, expect, test } from 'bun:test'
-import { AdditiveBlending, type MeshPhysicalMaterial, MeshStandardMaterial, Texture } from 'three'
+import {
+  AddEquation,
+  AdditiveBlending,
+  CustomBlending,
+  type MeshPhysicalMaterial,
+  MeshStandardMaterial,
+  OneFactor,
+  Texture,
+  ZeroFactor,
+} from 'three'
 import { humanMaterial, humanSurfaceOf } from './human-shading'
 
 describe('human surfaces', () => {
@@ -33,8 +42,25 @@ describe('human surfaces', () => {
     expect(cornea.color.getHex()).toBe(0x000000)
     expect(cornea.transparent).toBe(true)
     expect(cornea.depthWrite).toBe(false)
-    expect(cornea.blending).toBe(AdditiveBlending)
+    expect(cornea.blending).toBe(CustomBlending)
+    expect([cornea.blendEquation, cornea.blendSrc, cornea.blendDst]).toEqual([
+      AddEquation,
+      OneFactor,
+      OneFactor,
+    ])
     expect(cornea.roughness).toBeLessThan(0.1)
+  })
+
+  test('the cornea leaves the alpha under it as it was, so composites by alpha keep the eye', () => {
+    const cornea = humanMaterial(
+      new MeshStandardMaterial({ name: 'Eye_Cornea' }),
+      'cornea',
+    ) as MeshStandardMaterial
+    expect([cornea.blendEquationAlpha, cornea.blendSrcAlpha, cornea.blendDstAlpha]).toEqual([
+      AddEquation,
+      ZeroFactor,
+      OneFactor,
+    ])
   })
 
   test('a cornea that carries a picture keeps it, drawn as the wet eye', () => {
