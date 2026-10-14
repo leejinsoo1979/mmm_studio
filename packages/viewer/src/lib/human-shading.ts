@@ -35,7 +35,8 @@ export type HumanSurface = 'skin' | 'eyes' | 'cornea' | 'hair' | 'lashes' | 'mou
  * them (MakeHuman `Human.body`, Avaturn `Head`/`Body`, `AvatarHead`,
  * Character Creator `Std_Skin_Head`, MetaHuman `M_Head`): what isn't skin,
  * eyes, hair, lashes or the mouth is clothing. A cornea is the clear shell
- * some eyes have over the iris (`Eye_Cornea`, `Std_Cornea_L`).
+ * some eyes have over the iris (`Eye_Cornea`, `Std_Cornea_L`); one that
+ * carries a picture is drawn as the eye (see `humanMaterial`).
  */
 export function humanSurfaceOf(name: string): HumanSurface {
   const plain = name.toLowerCase()
@@ -153,7 +154,12 @@ export function humanMaterial(
     sharpen(material.normalMap)
     return material
   }
-  if (surface === 'cornea') return corneaOf(source)
+  if (surface === 'cornea') {
+    // A cornea with a picture of its own (an exporter that paints the eye's colour on its shell)
+    // would go black drawn as reflections alone: it is drawn as the eye instead.
+    if ((source as MeshStandardMaterial).map) return humanMaterial(source, 'eyes', { anisotropy })
+    return corneaOf(source)
+  }
   const material = new SheenSafePhysicalNodeMaterial()
   copyStandard(material, source)
   sharpen(material.map)

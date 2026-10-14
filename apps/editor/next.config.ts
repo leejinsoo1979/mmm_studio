@@ -1,4 +1,7 @@
 import type { NextConfig } from 'next'
+import { contentSecurityPolicy } from './lib/connect-policy'
+
+const policy = contentSecurityPolicy()
 
 const nextConfig: NextConfig = {
   // Self-contained server bundle (`.next/standalone`) — the desktop app
@@ -34,6 +37,11 @@ const nextConfig: NextConfig = {
       '@react-three/fiber': './node_modules/@react-three/fiber',
       '@react-three/drei': './node_modules/@react-three/drei',
     },
+  },
+  // Every page and worker may only fetch from the sources lib/connect-policy.ts lists.
+  async headers() {
+    if (!policy) return []
+    return [{ source: '/:path*', headers: [{ key: 'Content-Security-Policy', value: policy }] }]
   },
   experimental: {
     serverActions: {

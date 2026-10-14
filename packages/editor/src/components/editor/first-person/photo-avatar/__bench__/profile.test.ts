@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { Vec3 } from './linalg'
+import type { Vec3 } from '../linalg'
 import { type HeadSurface, profileCurve, profileError } from './profile'
 
 /** Where the landmarks the measure reads sit on a made-up face (x, y in metres). */

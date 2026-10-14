@@ -322,6 +322,7 @@ export class GlbWriter {
     delete image.uri
   }
 
+  /** The file as written, without what nothing reads any more (see `compact`). */
   finish(): Uint8Array {
     const bin = new Uint8Array(this.length)
     let at = 0
@@ -329,8 +330,129 @@ export class GlbWriter {
       bin.set(part, at)
       at += part.byteLength
     }
-    // Buffer 0 is the binary chunk; its length grows with what was appended.
-    this.json.buffers[0].byteLength = bin.byteLength
-    return writeGlb(this.json, bin)
+    return writeGlb(this.json, compact(this.json, bin))
   }
+}
+
+/** Calls `visit` on every place `json` names an accessor (its holder and key). */
+function accessorRefs(json: GltfJson, visit: (holder: GltfJson, key: string) => void) {
+  for (const mesh of json.meshes ?? []) {
+    for (const primitive of mesh.primitives ?? []) {
+      for (const name of Object.keys(primitive.attributes ?? {})) visit(primitive.attributes, name)
+      if (primitive.indices !== undefined) visit(primitive, 'indices')
+      for (const target of primitive.targets ?? [])
+        for (const name of Object.keys(target)) visit(target, name)
+    }
+  }
+  for (const skin of json.skins ?? [])
+    if (skin.inverseBindMatrices !== undefined) visit(skin, 'inverseBindMatrices')
+  for (const animation of json.animations ?? []) {
+    for (const sampler of animation.samplers ?? []) {
+      visit(sampler, 'input')
+      visit(sampler, 'output')
+    }
+  }
+}
+
+/** Calls `visit` on every place `json` names a buffer view. */
+function viewRefs(json: GltfJson, visit: (holder: GltfJson, key: string) => void) {
+  for (const accessor of json.accessors ?? []) {
+    if (accessor.bufferView !== undefined) visit(accessor, 'bufferView')
+    if (accessor.sparse) {
+      visit(accessor.sparse.indices, 'bufferView')
+      visit(accessor.sparse.values, 'bufferView')
+    }
+  }
+  for (const image of json.images ?? [])
+    if (image.bufferView !== undefined) visit(image, 'bufferView')
+}
+
+/** The kept items of a list (by old index) and each old index's new one. */
+function keepOnly<T>(list: T[], used: Set<number>): { kept: T[]; index: Map<number, number> } {
+  const index = new Map<number, number>()
+  const kept: T[] = []
+  list.forEach((item, i) => {
+    if (!used.has(i)) return
+    index.set(i, kept.length)
+    kept.push(item)
+  })
+  return { kept, index }
+}
+
+/**
+ * `json` (changed in place) and its binary chunk without what nothing reads:
+ * the meshes no node draws, the accessors nothing names, and the bytes of
+ * every buffer view nothing names (a replaced picture's, a moved mesh's old
+ * positions), the rest packed again in order. A texture that names a picture
+ * through EXT_texture_webp that is not WebP (Safari's canvas can't write
+ * WebP) names it plainly, so the file stays valid glTF.
+ */
+function compact(json: GltfJson, bin: Uint8Array): Uint8Array {
+  const drawn = new Set<number>()
+  for (const node of json.nodes ?? []) if (node.mesh !== undefined) drawn.add(node.mesh)
+  const meshes = keepOnly(json.meshes ?? [], drawn)
+  json.meshes = meshes.kept
+  for (const node of json.nodes ?? [])
+    if (node.mesh !== undefined) node.mesh = meshes.index.get(node.mesh)
+
+  const read = new Set<number>()
+  accessorRefs(json, (holder, key) => read.add(holder[key]))
+  const accessors = keepOnly(json.accessors ?? [], read)
+  json.accessors = accessors.kept
+  accessorRefs(json, (holder, key) => {
+    holder[key] = accessors.index.get(holder[key])
+  })
+
+  const named = new Set<number>()
+  viewRefs(json, (holder, key) => named.add(holder[key]))
+  const views = keepOnly<GltfJson>(json.bufferViews ?? [], named)
+  // Each kept view's bytes in the binary chunk: its own, or the compressed ones meshopt's names
+  // (its view then lies in the data-less fallback buffer, which stays as it is).
+  const spans = views.kept.map((view) => {
+    const meshopt = view.extensions?.EXT_meshopt_compression
+    if (meshopt && (meshopt.buffer ?? 0) === 0) {
+      return { holder: meshopt, start: meshopt.byteOffset ?? 0, length: meshopt.byteLength }
+    }
+    if ((view.buffer ?? 0) === 0) {
+      return { holder: view, start: view.byteOffset ?? 0, length: view.byteLength }
+    }
+    return null
+  })
+  let size = 0
+  for (const span of spans) if (span) size = Math.ceil(size / 4) * 4 + span.length
+  const packed = new Uint8Array(size)
+  let at = 0
+  for (const span of spans) {
+    if (!span) continue
+    at = Math.ceil(at / 4) * 4
+    packed.set(bin.subarray(span.start, span.start + span.length), at)
+    span.holder.byteOffset = at
+    at += span.length
+  }
+  json.bufferViews = views.kept
+  viewRefs(json, (holder, key) => {
+    holder[key] = views.index.get(holder[key])
+  })
+  json.buffers[0].byteLength = packed.byteLength
+
+  let webp = false
+  for (const texture of json.textures ?? []) {
+    const source = texture.extensions?.EXT_texture_webp?.source
+    if (source === undefined) continue
+    if (json.images?.[source]?.mimeType === 'image/webp') {
+      webp = true
+      continue
+    }
+    texture.source = source
+    delete texture.extensions.EXT_texture_webp
+    if (Object.keys(texture.extensions).length === 0) delete texture.extensions
+  }
+  if (!webp) {
+    for (const key of ['extensionsUsed', 'extensionsRequired']) {
+      if (!json[key]) continue
+      json[key] = json[key].filter((name: string) => name !== 'EXT_texture_webp')
+      if (json[key].length === 0) delete json[key]
+    }
+  }
+  return packed
 }

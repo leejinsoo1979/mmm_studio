@@ -26,6 +26,11 @@ export function buildPhotoAvatar(
     new Worker(new URL('./avatar-worker.ts', import.meta.url), { type: 'module' }),
 ): Promise<{ glb: Uint8Array; report: AvatarJobReport }> {
   return new Promise((resolve, reject) => {
+    // An abort already heard never fires again: a listener added now would wait for nothing.
+    if (signal?.aborted) {
+      reject(new DOMException('aborted', 'AbortError'))
+      return
+    }
     const worker = makeWorker()
     const stop = () => {
       worker.terminate()

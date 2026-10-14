@@ -34,6 +34,8 @@ export type PhotorealCharacter = {
   ai?: boolean
   /** Made from photos in this browser and kept in it (photo-avatar/store.ts). */
   photo?: boolean
+  /** A photo avatar made from one photo: its profile is a guess (옆모습 추정). */
+  estimated?: boolean
 }
 
 const BASE = '/characters/photoreal'
@@ -103,8 +105,16 @@ export const PHOTO_AVATAR_SCHEME = 'photo-avatar:'
 export const PHOTO_AVATAR_CREDIT = '사진으로 만든 아바타 · 이 브라우저에만'
 /** The credit one made from an AI 인물's portrait carries. */
 export const PHOTO_AVATAR_AI_CREDIT = `${PHOTOREAL_AI_CREDIT} · 이 브라우저에만`
+/** What a photo avatar made from one photo is marked with: its profile is guessed, not seen. */
+export const PROFILE_ESTIMATED = '옆모습 추정'
 
-type PhotoAvatarEntry = { name: string; url: string; thumbnail: string; ai?: boolean }
+type PhotoAvatarEntry = {
+  name: string
+  url: string
+  thumbnail: string
+  ai?: boolean
+  estimated?: boolean
+}
 
 /** The photo avatars this page has read from the browser's store: name and object URLs, by stored id. */
 const photoAvatars = new Map<string, PhotoAvatarEntry>()
@@ -155,10 +165,16 @@ export function findPhotoreal(id: string | null | undefined): PhotorealCharacter
       gender: photo[1] as AvatarGender,
       url: known?.url ?? `${PHOTO_AVATAR_SCHEME}${stored}`,
       thumbnail: known?.thumbnail ?? null,
-      credit: known?.ai ? PHOTO_AVATAR_AI_CREDIT : PHOTO_AVATAR_CREDIT,
+      credit: [
+        known?.estimated ? PROFILE_ESTIMATED : null,
+        known?.ai ? PHOTO_AVATAR_AI_CREDIT : PHOTO_AVATAR_CREDIT,
+      ]
+        .filter(Boolean)
+        .join(' · '),
       local: true,
       photo: true,
       ...(known?.ai ? { ai: true } : {}),
+      ...(known?.estimated ? { estimated: true } : {}),
     }
   }
   const local = LOCAL_ID.exec(id)

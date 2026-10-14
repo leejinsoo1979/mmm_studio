@@ -61,7 +61,7 @@ import {
   type Vec3,
 } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/linalg'
 import { transformPoint4 } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/mat4'
-import { profileError } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/profile'
+import { profileError } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/__bench__/profile'
 import { classMap } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/segment'
 import { fillTriangles } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/silhouette'
 import { retargetClip, rigRest } from '../../../packages/editor/src/components/editor/first-person/humanoid-rig'

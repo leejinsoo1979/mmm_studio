@@ -7,6 +7,7 @@ import {
   HOLD_MS,
   LEVEL_PITCH,
   nextStep,
+  PATIENCE_MS,
   sharpness,
   startGuide,
 } from './capture-guide'
@@ -104,6 +105,93 @@ describe('capture guide', () => {
     expect(guide(startGuide(2), frame(0, { yaw: null, eyes: null })).message).toBe(
       CAPTURE_STEPS[2]!.prompt,
     )
+  })
+
+  test('waits for a photo worth keeping: one face, enough light, from the front, eyes open, a still mouth', () => {
+    const held = (over: Partial<GuideFrame>, step = 0) =>
+      feed(startGuide(step), (t) => frame(t, over), HOLD_MS + 50)
+    const said = (over: Partial<GuideFrame>, step = 0) => guide(startGuide(step), frame(0, over))
+    const ok = {
+      faces: 1,
+      lit: 180,
+      burnt: 0.01,
+      balance: 0.95,
+      blink: 0.1,
+      jawOpen: 0.02,
+      smile: 0.05,
+    }
+    expect(held(ok).take).toBe(true)
+
+    expect(said({ ...ok, faces: 2 }).message).toContain('혼자')
+    expect(said({ ...ok, lit: 30 }).message).toContain('어두워요')
+    // A dark skin in good light: its highlights are lit, however dark the skin's own tone.
+    expect(held({ ...ok, lit: 110 }).take).toBe(true)
+    expect(said({ ...ok, burnt: 0.6 }).message).toContain('너무 밝아요')
+    expect(said({ ...ok, balance: 0.5 }).message).toContain('정면으로 마주')
+    expect(said({ ...ok, blink: 0.8 }).message).toContain('눈을')
+    expect(said({ ...ok, jawOpen: 0.5 }).message).toContain('입을 다물고')
+    expect(said({ ...ok, smile: 0.7 }).message).toContain('무표정')
+    for (const spoilt of [
+      { faces: 2 },
+      { lit: 30 },
+      { burnt: 0.6 },
+      { balance: 0.5 },
+      { blink: 0.8 },
+      { smile: 0.7 },
+    ]) {
+      expect(held({ ...ok, ...spoilt }).take).toBe(false)
+    }
+
+    // Asked to face the light for a while; a person who can't (a lamp that won't move) is taken
+    // as they are, told so.
+    const sideLit = feed(
+      startGuide(),
+      (t) => frame(t, { ...ok, balance: 0.5 }),
+      PATIENCE_MS + HOLD_MS + 100,
+    )
+    expect(sideLit.take).toBe(true)
+    expect(
+      feed(startGuide(), (t) => frame(t, { ...ok, balance: 0.5 }), PATIENCE_MS - 200).take,
+    ).toBe(false)
+    expect(
+      feed(startGuide(), (t) => frame(t, { ...ok, balance: 0.5 }), PATIENCE_MS + 300).message,
+    ).toContain('이대로 찍을게요')
+    // Eyes MediaPipe reads as shut however open they are (narrow or hooded ones, or a closed-eyed
+    // scan) are asked about, then taken as they are: no one is held at the camera for them.
+    expect(feed(startGuide(), (t) => frame(t, { ...ok, blink: 0.8 }), PATIENCE_MS - 200).take).toBe(
+      false,
+    )
+    const shut = feed(startGuide(), (t) => frame(t, { ...ok, blink: 0.8 }), PATIENCE_MS + 300)
+    expect(shut.message).toContain('눈이 감겨 보여요. 이대로 찍을게요')
+    expect(
+      feed(startGuide(), (t) => frame(t, { ...ok, blink: 0.8 }), PATIENCE_MS + HOLD_MS + 100).take,
+    ).toBe(true)
+    // So is a mouth that reads as open or smiling.
+    expect(
+      feed(
+        startGuide(1),
+        (t) => frame(t, { ...ok, yaw: 45, smile: 0.7 }),
+        PATIENCE_MS + HOLD_MS + 100,
+      ).take,
+    ).toBe(true)
+    // What can always be fixed is waited for however long it takes.
+    for (const spoilt of [{ faces: 2 }, { lit: 30 }, { burnt: 0.6 }]) {
+      expect(feed(startGuide(), (t) => frame(t, { ...ok, ...spoilt }), PATIENCE_MS * 3).take).toBe(
+        false,
+      )
+    }
+    // Light from one side matters for the front view only, whose light the skin is read under;
+    // the ¾ views still want open eyes and a still mouth.
+    expect(held({ ...ok, yaw: 45, balance: 0.4 }, 1).take).toBe(true)
+    expect(held({ ...ok, yaw: 45, smile: 0.7 }, 1).take).toBe(false)
+    // A full side view: MediaPipe reads no expression there, so none is asked for.
+    const side = { ...startGuide(2), lastYaw: 50 }
+    const lost = { ...ok, yaw: null, eyes: null, blink: 0.9, smile: 0.9, balance: null }
+    expect(feed(side, (t) => frame(t, lost), HOLD_MS + 50).take).toBe(true)
+    // Unread (no blendshapes, no face): nothing is held against the frame.
+    expect(
+      held({ blink: null, jawOpen: null, smile: null, balance: null, lit: null, burnt: null }).take,
+    ).toBe(true)
   })
 
   test('moves on step by step to the end', () => {

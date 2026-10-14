@@ -7,6 +7,7 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { loadEmoteClips } from './emote-player'
 import { type RigRest, retargetClip, rigRest } from './humanoid-rig'
 import { MOTION_SETS, type MotionSet, scaledGaits } from './locomotion'
+import { useHeldModel } from './photo-avatar/model-cache'
 import { usePhotorealUrl } from './photo-avatar/use-photo-avatars'
 import type { PhotorealCharacter } from './photoreal-catalog'
 import { postureHeight, preparePhotorealModel } from './photoreal-model'
@@ -57,7 +58,9 @@ export function usePhotorealBody(
   { anisotropy = 1, strideScale = 1 }: { anisotropy?: number; strideScale?: number } = {},
 ): PhotorealBody {
   const motion = MOTION_SETS[character.gender]
-  const body = useGLTF(usePhotorealUrl(character))
+  const url = usePhotorealUrl(character)
+  const body = useGLTF(url)
+  useHeldModel(url, body.scene)
   const moves = useGLTF(motion.url)
   const prepared = useMemo(() => {
     const model = preparePhotorealModel(body.scene, anisotropy)

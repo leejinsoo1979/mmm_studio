@@ -81,10 +81,23 @@ describe('readPhotorealAiConfig', () => {
       ok: false,
       reason: 'not_configured',
     })
-    // No keys: no paid service, and this browser makes the avatar; one key alone is broken.
-    expect(readPhotorealAiConfig({ ...IMAGE })).toMatchObject({
+    // No keys: no paid service, and this browser makes the avatar, once the owner turns it on
+    // (its pictures cost on the AI 실사 사진 key); one key alone is broken.
+    expect(readPhotorealAiConfig({ ...IMAGE })).toEqual({
+      ok: false,
+      reason: 'not_enabled',
+      part: 'portrait',
+    })
+    expect(readPhotorealAiConfig({ ...IMAGE, AI_AVATAR_ENABLED: 'yes' })).toMatchObject({
+      ok: false,
+      reason: 'not_enabled',
+    })
+    expect(readPhotorealAiConfig({ ...IMAGE, AI_AVATAR_ENABLED: 'true' })).toMatchObject({
       ok: true,
-      config: { service: null },
+      config: {
+        service: null,
+        viewLimits: { userDaily: 4, globalDaily: 25 },
+      },
     })
     expect(readPhotorealAiConfig({ ...IMAGE, AI_AVATAR_CLIENT_ID: 'id' })).toEqual({
       ok: false,
@@ -162,6 +175,14 @@ describe('readPhotorealAiConfig', () => {
         CWD,
       ),
     ).toMatchObject({ config: { mockGlbPath: '/tmp/a.glb', mockPortraitPath: '/tmp/p.jpg' } })
+    // As a setup with no service keys: the browser makes the avatar.
+    expect(
+      readPhotorealAiConfig({ AI_AVATAR_MOCK: 'true', AI_AVATAR_MOCK_SERVICE: 'false' }, CWD),
+    ).toMatchObject({ ok: true, config: { mock: true, service: null } })
+    expect(readPhotorealAiConfig({ AI_AVATAR_MOCK: 'true' }, CWD)).toMatchObject({
+      ok: true,
+      config: { service: { clientId: 'mock-client' } },
+    })
     expect(readPhotorealAiConfig({ AI_AVATAR_MOCK: 'true', NODE_ENV: 'production' })).toMatchObject(
       {
         ok: false,

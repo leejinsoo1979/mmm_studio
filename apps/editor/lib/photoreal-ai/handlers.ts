@@ -29,8 +29,8 @@ import {
 import { createSendLedger, type LedgerRefusal, type SendLedger } from './ledger'
 import { createMetaPersonService } from './metaperson'
 import { createMetaPersonFake } from './metaperson-fake'
-import { portraitImage, producePortrait } from './portrait'
-import { portraitSha, signPortrait, verifyPortrait } from './portrait-token'
+import { type PortraitImage, portraitImage, producePortrait } from './portrait'
+import { type PortraitClaim, portraitSha, signPortrait, verifyPortrait } from './portrait-token'
 import type { AvatarService, ServiceFetch } from './service'
 import {
   AI_PERSON_AGES,
@@ -50,6 +50,7 @@ import {
   AI_PORTRAIT_MAX_BYTES,
   AI_PORTRAIT_TOKEN_HEADER,
   type AiPersonChoices,
+  type AiPortraitViews,
   AVATAR_JOB_POLL_MS,
   detailsAllowed,
   PHOTOREAL_AI_REMAINING_HEADER,
@@ -58,6 +59,7 @@ import {
   type PhotorealAiStatus,
 } from './shared'
 import { type AvatarStore, createFileAvatarStore, JOB_ID } from './store'
+import { produceViews } from './views'
 
 /**
  * `/api/photoreal-ai/*`, AI 인물: a photorealistic portrait of a fictional
@@ -66,6 +68,7 @@ import { type AvatarStore, createFileAvatarStore, JOB_ID } from './store'
  *
  *   GET    /                          availability and what is left today
  *   POST   /portrait                  { choices } → the image, with a signed token header
+ *   POST   /portrait/views            multipart portrait + token → its turned views (JSON)
  *   POST   /avatar                    multipart portrait + token → a 3D job (202)
  *   GET    /avatar/<job>              advances and reports the job
  *   GET    /avatars                   the user's finished AI avatars
@@ -100,6 +103,15 @@ export type PhotorealAiUsage =
       bytesOut: number
     }
   | {
+      step: 'views'
+      mock: boolean
+      status: number
+      outcome: PhotorealAiRouteError | 'ok'
+      made: number
+      missing: string[]
+      ms: number
+    }
+  | {
       step: 'avatar'
       event: 'start' | 'done' | 'failed' | 'cleanup_failed'
       mock: boolean
@@ -124,6 +136,8 @@ export type PhotorealAiHandlerDeps = {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
   log?: (usage: PhotorealAiUsage) => void
   portraitLimiter?: AiPhotoLimiter
+  /** Sets of a portrait's turned views (one take a set). */
+  viewLimiter?: AiPhotoLimiter
   avatarLimiter?: AiPhotoLimiter
   /** The store for a store directory (default: files on disk). */
   store?: (dir: string) => AvatarStore
@@ -226,6 +240,7 @@ export function createPhotorealAiHandlers(deps: PhotorealAiHandlerDeps) {
   const sleep = deps.sleep ?? sleepFor
   const log = deps.log ?? ((usage: PhotorealAiUsage) => console.info('[photoreal-ai]', usage))
   const portraitLimiter = deps.portraitLimiter ?? createAiPhotoLimiter(now)
+  const viewLimiter = deps.viewLimiter ?? createAiPhotoLimiter(now)
   const avatarLimiter = deps.avatarLimiter ?? createAiPhotoLimiter(now)
   const timeouts = { ...TIMEOUTS, ...deps.timeouts }
   const makeStore = deps.store ?? createFileAvatarStore
@@ -446,6 +461,139 @@ export function createPhotorealAiHandlers(deps: PhotorealAiHandlerDeps) {
         },
       }),
     )
+  }
+
+  /**
+   * A portrait's turned views (both ¾ views and both profiles), made from the
+   * portrait this server signed for this user, once per portrait: the browser
+   * fits the avatar to them all. Answers what came, as base64 JSON.
+   */
+  async function views(request: Request): Promise<Response> {
+    const started = now()
+    const begun = await begin(request)
+    if ('refused' in begun) return begun.refused
+    const { config, uid } = begun
+    const signed = await signedPortrait(request, uid, config)
+    if ('refused' in signed) return signed.refused
+    const { image, claim, expires } = signed
+
+    const { ledger } = storeOf(config.storeDir)
+    const key = `views:${claim.sha}`
+    let claimed: boolean
+    try {
+      claimed = await ledger.claim(key, expires)
+    } catch {
+      return refuse(request, 503, 'unavailable')
+    }
+    if (!claimed) return refuse(request, 409, 'portrait_used')
+    const limit = viewLimiter.take({
+      userKey: `uid:${uid}`,
+      anonymous: false,
+      ip: npcClientIp(request),
+      limits: config.viewLimits,
+    })
+    if (!limit.ok) {
+      await ledger.unclaim(key).catch(() => {})
+      if (limit.code === 'busy') return refuse(request, 429, 'busy')
+      return refuse(request, 429, 'rate_limited', {
+        retryAfter: limit.retryAfter,
+        scope: limit.scope,
+      })
+    }
+    let outcome: Awaited<ReturnType<typeof produceViews>> | null = null
+    try {
+      outcome = await produceViews(
+        config,
+        image,
+        claim.age,
+        uid,
+        { request: request.signal, deadline: AbortSignal.timeout(timeouts.portraitMs) },
+        { fetch: send, sleep, mockDelayMs: timeouts.mockPortraitMs },
+      )
+    } finally {
+      const none = (outcome?.views.length ?? 0) === 0
+      // A set that made nothing is given back (one refused for its content is not), and the
+      // portrait may ask again.
+      limit.release(none && !outcome?.blocked)
+      if (none) await ledger.unclaim(key).catch(() => {})
+    }
+    const made = outcome.views.length
+    const status = made ? 200 : outcome.blocked ? 422 : 502
+    log({
+      step: 'views',
+      mock: config.mock,
+      status,
+      outcome: made ? 'ok' : outcome.blocked ? 'blocked' : 'upstream',
+      made,
+      missing: outcome.missing.map(({ slot, detail }) => `${slot}:${detail}`),
+      ms: now() - started,
+    })
+    if (!made) return refuse(request, status, outcome.blocked ? 'blocked' : 'upstream')
+    const body: AiPortraitViews = {
+      views: outcome.views.map((view) => ({
+        slot: view.slot,
+        type: view.type,
+        data: Buffer.from(view.bytes).toString('base64'),
+      })),
+      missing: outcome.missing.map(({ slot }) => slot),
+    }
+    const response = sceneApiJson(request, body)
+    response.headers.set(PHOTOREAL_AI_REMAINING_HEADER, String(limit.remainingToday))
+    response.headers.set('Cache-Control', 'no-store')
+    return response
+  }
+
+  /** A portrait sent back as multipart with its token: this server's, for this user, in time. */
+  async function signedPortrait(
+    request: Request,
+    uid: string,
+    config: PhotorealAiConfig,
+  ): Promise<
+    { image: PortraitImage; claim: PortraitClaim; expires: number } | { refused: Response }
+  > {
+    const contentType = request.headers.get('content-type') ?? ''
+    if (!/^multipart\/form-data\s*;/i.test(contentType)) {
+      return { refused: refuse(request, 415, 'unsupported_type') }
+    }
+    if (Number(request.headers.get('content-length')) > MAX_AVATAR_BODY) {
+      return { refused: refuse(request, 413, 'too_large') }
+    }
+    if (!request.body) return { refused: refuse(request, 400, 'invalid_request') }
+    const raw = await readBodyCapped(request.body, MAX_AVATAR_BODY).catch(() => undefined)
+    if (raw === undefined) return { refused: refuse(request, 400, 'invalid_request') }
+    if (raw === null) return { refused: refuse(request, 413, 'too_large') }
+    let form: FormData
+    try {
+      form = await new Response(raw, { headers: { 'content-type': contentType } }).formData()
+    } catch {
+      return { refused: refuse(request, 400, 'invalid_request') }
+    }
+    const part = form.get('portrait')
+    const token = form.get('token')
+    if (
+      [...form.keys()].length !== 2 ||
+      !(part instanceof Blob) ||
+      typeof token !== 'string' ||
+      part.size > AI_PORTRAIT_MAX_BYTES
+    ) {
+      return { refused: refuse(request, 400, 'invalid_request') }
+    }
+    const bytes = new Uint8Array(await part.arrayBuffer())
+    const checked = portraitImage(bytes)
+    if (!checked.ok) return { refused: refuse(request, 422, 'portrait_invalid') }
+    const verified = verifyPortrait(token, bytes, uid, { env, now: now() })
+    if (!verified.ok) {
+      return {
+        refused:
+          verified.code === 'expired'
+            ? refuse(request, 410, 'portrait_expired')
+            : refuse(request, 403, 'portrait_invalid'),
+      }
+    }
+    if (Boolean(verified.claim.mock) !== config.mock) {
+      return { refused: refuse(request, 403, 'portrait_invalid') }
+    }
+    return { image: checked.image, claim: verified.claim, expires: verified.expires }
   }
 
   /** Whether the user has a build going (kept in the store: a restart doesn't forget it). */
@@ -858,6 +1006,7 @@ export function createPhotorealAiHandlers(deps: PhotorealAiHandlerDeps) {
   return {
     status,
     portrait,
+    views,
     startAvatar,
     pollAvatar,
     listAvatars,
@@ -872,6 +1021,9 @@ export function createPhotorealAiHandlers(deps: PhotorealAiHandlerDeps) {
       if (rest.length > 0) return notFound()
       if (!head && method === 'GET') return status(request)
       if (head === 'portrait' && !second && method === 'POST') return portrait(request)
+      if (head === 'portrait' && second === 'views' && !third && method === 'POST') {
+        return views(request)
+      }
       if (head === 'avatar' && !second && method === 'POST') return startAvatar(request)
       if (head === 'avatar' && second && !third && method === 'GET') {
         return pollAvatar(request, second)

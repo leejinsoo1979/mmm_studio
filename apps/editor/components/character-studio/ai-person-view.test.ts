@@ -175,6 +175,7 @@ describe('the lists', () => {
   test('each unavailable reason says what to set up, but only in development', () => {
     const reasons = [
       'disabled',
+      'not_enabled',
       'not_configured',
       'no_api_key',
       'moderation_required',
@@ -195,6 +196,7 @@ describe('the lists', () => {
     expect(unavailableCopy('service_not_configured', true)).toContainEqual({
       code: 'AI_AVATAR_SERVICE',
     })
+    expect(unavailableCopy('not_enabled', true)).toContainEqual({ code: 'AI_AVATAR_ENABLED=true' })
   })
 })
 
@@ -243,10 +245,13 @@ describe('aiPersonView', () => {
     // With no paid service, this browser making the avatar, then done.
     const making: AiPersonStep = { kind: 'making', fraction: 0.4, text: '피부' }
     expect(view({ step: making })).toEqual(making)
-    expect(view({ step: { kind: 'made', name: 'AI 인물' } })).toEqual({
+    const made: AiPersonStep = {
       kind: 'made',
       name: 'AI 인물',
-    })
+      notes: ['옆모습 추정'],
+      estimated: true,
+    }
+    expect(view({ step: made })).toEqual(made)
   })
 
   test('review and confirm carry the counts left', () => {

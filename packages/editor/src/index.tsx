@@ -169,10 +169,14 @@ export {
 export {
   CAPTURE_STEPS,
   type CaptureStep,
+  EXPOSURE,
+  EXPRESSION,
   type GuideFrame,
   type GuideState,
   guide,
+  MIN_BALANCE,
   nextStep,
+  PATIENCE_MS,
   sharpness,
   startGuide,
 } from './components/editor/first-person/photo-avatar/capture-guide'
@@ -217,6 +221,7 @@ export {
   PHOTOREAL_LOCAL_FOLDER,
   PHOTOREAL_LOOK_NOTE,
   type PhotorealCharacter,
+  PROFILE_ESTIMATED,
   photoAvatarIdOf,
   photoPhotorealId,
   useLocalPhotoreal,

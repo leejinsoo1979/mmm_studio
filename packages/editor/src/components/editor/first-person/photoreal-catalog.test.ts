@@ -13,6 +13,7 @@ import {
   PHOTOREAL_AI_CREDIT,
   PHOTOREAL_CHARACTERS,
   PHOTOREAL_LOCAL_URL,
+  PROFILE_ESTIMATED,
   photoAvatarIdOf,
   photoPhotorealId,
   readPhotorealId,
@@ -153,6 +154,15 @@ describe('the 실사 set', () => {
       { id: stored, name: 'AI 인물', url: 'blob:glb', thumbnail: 'blob:thumb', ai: true },
     ])
     expect(findPhotoreal(id)).toMatchObject({ ai: true, credit: PHOTO_AVATAR_AI_CREDIT })
+    // One made from a single photo says its profile is a guess.
+    registerPhotoAvatars([
+      { id: stored, name: '한 장', url: 'blob:glb', thumbnail: 'blob:thumb', estimated: true },
+    ])
+    expect(findPhotoreal(id)).toMatchObject({
+      estimated: true,
+      credit: `${PROFILE_ESTIMATED} · ${PHOTO_AVATAR_CREDIT}`,
+    })
+    expect(PROFILE_ESTIMATED).toBe('옆모습 추정')
     registerPhotoAvatars([])
     expect(findPhotoreal(id)?.url).toBe(`${PHOTO_AVATAR_SCHEME}${stored}`)
     for (const bad of [

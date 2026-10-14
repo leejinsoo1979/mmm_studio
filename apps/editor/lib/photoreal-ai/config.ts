@@ -15,12 +15,16 @@ import type { PhotorealAiUnavailableReason } from './shared'
  * with its own extra params and caps, and is needed. The 3D step uses the
  * paid avatar service when its keys (`AI_AVATAR_CLIENT_ID/SECRET`) are set;
  * without them the browser makes the avatar from the portrait itself (the
- * photo avatar pipeline), so a portrait is never paid for nothing. Broken
- * settings fail closed.
+ * photo avatar pipeline) and its turned views, so a portrait is never paid
+ * for nothing, and the feature is on only with `AI_AVATAR_ENABLED=true`.
+ * Broken settings fail closed.
  *
  * `AI_AVATAR_MOCK=true` runs the whole flow with no external call (a drawn
  * portrait, and the avatar service's protocol answered in-process): ignored
- * when `NODE_ENV` is `production`.
+ * when `NODE_ENV` is `production`. With `AI_AVATAR_MOCK_SERVICE=false` it
+ * has no 3D service, as a setup with no service keys: the browser makes the
+ * avatar from the portrait and its turned views (local files beside
+ * `AI_AVATAR_MOCK_PORTRAIT`).
  *
  * A build already started is carried to its end, and the service's copy
  * deleted, with `readJobService` alone: switching the feature off, or the
@@ -52,6 +56,11 @@ export type PhotorealAiConfig = {
   /** `AI_AVATAR_PORTRAIT_EXTRA_PARAMS`. */
   portraitExtraParams: AiPhotoExtraParams
   portraitLimits: PhotorealAiLimits
+  /**
+   * The turned views of a portrait (both ¾ views and both profiles: four pictures a set), each
+   * set counted once against these.
+   */
+  viewLimits: PhotorealAiLimits
   /** The paid 3D service; null when its keys are not set (the browser makes the avatar). */
   service: AvatarServiceConfig | null
   avatarLimits: PhotorealAiLimits
@@ -68,6 +77,8 @@ type Env = Record<string, string | undefined>
 export const METAPERSON_BASE_URL = 'https://api.avatarsdk.com'
 const DEFAULT_PORTRAIT_DAILY = 100
 const DEFAULT_PORTRAIT_USER_DAILY = 8
+const DEFAULT_VIEWS_DAILY = 25
+const DEFAULT_VIEWS_USER_DAILY = 4
 const DEFAULT_AVATAR_DAILY = 10
 const DEFAULT_AVATAR_USER_DAILY = 2
 /** apps/editor/data is ignored by git. */
@@ -186,7 +197,9 @@ export function readPhotorealAiConfig(
   if (!portraitExtraParams) return { ok: false, reason: 'not_configured', part: 'portrait' }
 
   let image: AiPhotoConfig | null = null
-  let service: AvatarServiceConfig | null = MOCK_SERVICE
+  // `AI_AVATAR_MOCK_SERVICE=false`: the 목업 as with no paid service, the browser making the avatar.
+  let service: AvatarServiceConfig | null =
+    value(env, 'AI_AVATAR_MOCK_SERVICE') === 'false' ? null : MOCK_SERVICE
   if (!mock) {
     // No face photo is ever sent here, so AI 실사 사진's face switch must not turn this off.
     const photo = readAiPhotoConfig({ ...env, AI_PHOTO_FACE_ENABLED: undefined })
@@ -195,6 +208,11 @@ export function readPhotorealAiConfig(
     service = readService(env)
     if (!service && serviceKeysSet(env)) {
       return { ok: false, reason: 'service_not_configured', part: 'avatar' }
+    }
+    // With no paid service its pictures are all it costs, on the AI 실사 사진 key: a deployment
+    // set up for AI 실사 사진 alone must not start paying for them unasked.
+    if (!service && value(env, 'AI_AVATAR_ENABLED') !== 'true') {
+      return { ok: false, reason: 'not_enabled', part: 'portrait' }
     }
   }
 
@@ -213,6 +231,13 @@ export function readPhotorealAiConfig(
           value(env, 'AI_AVATAR_PORTRAIT_DAILY_LIMIT'),
           DEFAULT_PORTRAIT_DAILY,
         ),
+      },
+      viewLimits: {
+        userDaily: positiveInt(
+          value(env, 'AI_AVATAR_VIEWS_USER_DAILY_LIMIT'),
+          DEFAULT_VIEWS_USER_DAILY,
+        ),
+        globalDaily: positiveInt(value(env, 'AI_AVATAR_VIEWS_DAILY_LIMIT'), DEFAULT_VIEWS_DAILY),
       },
       service,
       avatarLimits: {

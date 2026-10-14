@@ -1,5 +1,6 @@
 import type { FaceLandmarker } from '@mediapipe/tasks-vision'
 import { FACE_PARTS, FACE_POINT_INDICES, type FacePoint, packPoints } from '@pascal-app/editor'
+import { quietMediaPipe } from './mediapipe-quiet'
 
 /**
  * Finding a face in a player's photo with MediaPipe's Face Landmarker (its
@@ -52,6 +53,7 @@ export function loadFaceLandmarker(): Promise<FaceLandmarker> {
 }
 
 async function createFaceLandmarker(onContextLost: () => void) {
+  quietMediaPipe()
   const { FaceLandmarker } = await import('@mediapipe/tasks-vision')
   const create = async (delegate: 'GPU' | 'CPU') => {
     // MediaPipe's WebGL canvas (its own fallback kind, which every browser can run WebGL on),

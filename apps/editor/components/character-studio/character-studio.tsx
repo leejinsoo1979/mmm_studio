@@ -35,6 +35,7 @@ import {
   PHOTOREAL_LOOK_NOTE,
   type PhotorealCharacter,
   PhotorealThumbnail,
+  PROFILE_ESTIMATED,
   photoAvatarIdOf,
   removePhotoAvatar,
   useAvatarProfile,
@@ -428,6 +429,14 @@ function RealGallery({
                 {entry.ai && (
                   <span className="absolute top-1.5 left-1.5 rounded-full bg-sky-400/90 px-1.5 py-0.5 font-bold text-[9px] text-neutral-950">
                     AI
+                  </span>
+                )}
+                {entry.estimated && (
+                  <span
+                    className="absolute inset-x-1.5 bottom-1.5 truncate rounded-full bg-amber-300/90 px-1.5 py-0.5 text-center font-bold text-[9px] text-neutral-950"
+                    title="사진 한 장으로 만들어 옆모습(코·이마·턱)은 평균 얼굴로 추정했어요"
+                  >
+                    {PROFILE_ESTIMATED}
                   </span>
                 )}
               </span>
@@ -1759,6 +1768,7 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
 
       {photoOpen && (
         <PhotoAvatarDialog
+          capture={() => aiCapture('full')}
           defaultGender={real?.gender ?? 'female'}
           onAiPerson={() => {
             setPhotoOpen(false)

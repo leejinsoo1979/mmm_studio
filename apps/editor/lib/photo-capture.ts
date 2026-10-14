@@ -3,6 +3,7 @@ import {
   type CaptureColors,
   type CaptureSlot,
   type CaptureView,
+  classPlane,
   eyesShut,
   type GuideFrame,
   hairColor,
@@ -13,6 +14,9 @@ import {
   skinModel,
 } from '@pascal-app/editor'
 import { type DetectedFace, detectFaces, sampleFaceColors } from './face-detect'
+import { quietMediaPipe } from './mediapipe-quiet'
+import { focalPixels } from './photo-exif'
+import { type PoseSlot, SIDE_YAW, type SlotReading, slotFromReading } from './photo-slot'
 
 /**
  * Reading photos for a photo avatar, all in this browser: each photo
@@ -55,6 +59,7 @@ function loadSegmenter(model: string): Promise<ImageSegmenter> {
   const found = segmenters.get(model)
   if (found) return found
   const loading = (async () => {
+    quietMediaPipe()
     const { ImageSegmenter } = await import('@mediapipe/tasks-vision')
     const create = (delegate: 'GPU' | 'CPU') =>
       ImageSegmenter.createFromOptions(
@@ -251,8 +256,16 @@ export type ReadPhoto = {
   canvas: HTMLCanvasElement
 }
 
-/** One photo read: its pixels, landmarks and turn, and the person's outline (skin comes after). */
-export async function readPhoto(picture: Picture, slot: CaptureSlot): Promise<ReadPhoto> {
+/**
+ * One photo read: its pixels, landmarks and turn, and the person's outline
+ * (skin comes after). `lens`: the camera's 35 mm-equivalent focal length
+ * where the photo says (EXIF, see photo-exif.ts); else the fit finds it.
+ */
+export async function readPhoto(
+  picture: Picture,
+  slot: CaptureSlot,
+  lens?: number | null,
+): Promise<ReadPhoto> {
   const { canvas, pixels } = workingCopy(picture)
   const { largest: face, count } = await detectFaces(canvas)
   const asked = slot === 'free' ? 0 : SLOT_YAW[slot]
@@ -267,6 +280,7 @@ export async function readPhoto(picture: Picture, slot: CaptureSlot): Promise<Re
     slot,
     width: canvas.width,
     height: canvas.height,
+    ...(lens ? { focal: focalPixels(lens, canvas.width, canvas.height) } : {}),
     rgba: pixels.data,
     landmarks,
     mask,
@@ -281,6 +295,88 @@ export async function readPhoto(picture: Picture, slot: CaptureSlot): Promise<Re
     ...(face && !side ? openness(face.points) : {}),
   }
   return { view, face, faces: count, canvas }
+}
+
+/**
+ * Which pose an uploaded photo shows (see photo-slot.ts): MediaPipe's turn,
+ * or for a side view the segmenter's face skin and hair across the head;
+ * null when the photo can't tell. Also how many faces it holds.
+ */
+export async function photoSlot(
+  picture: Picture,
+): Promise<{ slot: PoseSlot | null; yaw: number | null; faces: number }> {
+  const { canvas } = workingCopy(picture)
+  const { largest: face, count } = await detectFaces(canvas)
+  const yaw = face?.yaw ?? null
+  const reading: SlotReading = {
+    yaw,
+    faceSkinX: null,
+    hairX: null,
+    headX: null,
+    neckX: null,
+    headWidth: canvas.width,
+  }
+  if (yaw === null || Math.abs(yaw) >= SIDE_YAW) {
+    const person = await personMask(canvas, null)
+    const box = headBox(canvas.width, canvas.height, null, person)
+    if (box) {
+      const classes = await classMasks(canvas, null, person)
+      Object.assign(reading, sideReading(canvas.width, canvas.height, box, person, classes))
+      // A side view's guessed turn says less than its outline.
+      reading.yaw = null
+    }
+  }
+  return { slot: slotFromReading(reading), yaw, faces: count }
+}
+
+/** The middles (x) of a side view's face skin, hair, head outline and neck, in its head's box. */
+function sideReading(
+  width: number,
+  height: number,
+  box: HeadBox,
+  person: Uint8Array,
+  classes: SegmentMasks,
+): Omit<SlotReading, 'yaw'> {
+  const faceSkin = classPlane(classes, 'faceSkin')
+  const hair = classPlane(classes, 'hair')
+  const sums = { face: [0, 0], hair: [0, 0], head: [0, 0], neck: [0, 0] }
+  const add = (sum: number[], x: number) => {
+    sum[0]! += x
+    sum[1]! += 1
+  }
+  // The head fills about the box's top two thirds; the neck is the band under it.
+  const headBottom = box.y + box.size * 0.62
+  const neckBottom = box.y + box.size * 0.8
+  for (let y = Math.max(0, Math.floor(box.y)); y < Math.min(height, neckBottom); y++) {
+    for (let x = Math.max(0, Math.floor(box.x)); x < Math.min(width, box.x + box.size); x++) {
+      const i = y * width + x
+      if (person[i]! < 128) continue
+      if (y < headBottom) {
+        add(sums.head, x)
+        if (faceSkin[i]! > 127) add(sums.face, x)
+        if (hair[i]! > 127) add(sums.hair, x)
+      } else add(sums.neck, x)
+    }
+  }
+  // A few stray pixels are not a face or hair to judge by.
+  const least = box.size * box.size * 0.01
+  const middle = ([sum, count]: number[]) => (count! > least ? sum! / count! : null)
+  let left = width
+  let right = 0
+  for (let y = Math.max(0, Math.floor(box.y)); y < Math.min(height, headBottom); y++) {
+    for (let x = Math.max(0, Math.floor(box.x)); x < Math.min(width, box.x + box.size); x++) {
+      if (person[y * width + x]! < 128) continue
+      left = Math.min(left, x)
+      right = Math.max(right, x)
+    }
+  }
+  return {
+    faceSkinX: middle(sums.face),
+    hairX: middle(sums.hair),
+    headX: middle(sums.head),
+    neckX: middle(sums.neck),
+    headWidth: Math.max(1, right - left),
+  }
 }
 
 const hex = (rgb: readonly number[]) =>
@@ -396,7 +492,7 @@ export async function readGuideFrame(
   const context = canvas.getContext('2d', { willReadFrequently: true })!
   context.drawImage(frame, 0, 0, canvas.width, canvas.height)
   const { width, height } = canvas
-  const { largest: face } = await detectFaces(canvas)
+  const { largest: face, count: faces } = await detectFaces(canvas)
   let box: [number, number, number, number] | null = null
   let centre: [number, number] | null = null
   let person = false
@@ -438,6 +534,7 @@ export async function readGuideFrame(
     }
   }
   let sharp = 0
+  let light: FaceLight = { lit: null, burnt: null, balance: null }
   if (box) {
     const pixels = context.getImageData(0, 0, width, height).data
     const gray = new Float32Array(width * height)
@@ -445,6 +542,7 @@ export async function readGuideFrame(
       gray[i] = 0.299 * pixels[i * 4]! + 0.587 * pixels[i * 4 + 1]! + 0.114 * pixels[i * 4 + 2]!
     }
     sharp = sharpness(gray, width, box)
+    if (face) light = faceLight(gray, width, height, face.points)
   }
   const eyes = face
     ? Math.hypot(
@@ -452,6 +550,8 @@ export async function readGuideFrame(
         face.points[468]![1] - face.points[473]![1],
       ) / width
     : null
+  const shape = (...names: string[]) =>
+    face?.blendshapes ? Math.max(...names.map((name) => face.blendshapes?.[name] ?? 0)) : null
   return {
     time,
     yaw: face?.yaw ?? null,
@@ -461,7 +561,115 @@ export async function readGuideFrame(
     person,
     centre,
     sharpness: sharp,
+    faces,
+    ...light,
+    blink: shape('eyeBlinkLeft', 'eyeBlinkRight'),
+    jawOpen: shape('jawOpen'),
+    smile: shape('mouthSmileLeft', 'mouthSmileRight'),
   }
+}
+
+/**
+ * How lit a face is (the luma, 0–255, its brightest twentieth reaches, and
+ * its share burnt out to white) and how evenly (the darker cheek's luma over
+ * the lighter one's).
+ */
+export type FaceLight = { lit: number | null; burnt: number | null; balance: number | null }
+
+/** How lit and how evenly a read photo's face is (see `faceLight`); nulls without a face. */
+export function photoLight(photo: ReadPhoto): FaceLight {
+  const { face, view } = photo
+  if (!face) return { lit: null, burnt: null, balance: null }
+  const gray = new Float32Array(view.width * view.height)
+  for (let i = 0; i < gray.length; i++) {
+    gray[i] =
+      0.299 * view.rgba[i * 4]! + 0.587 * view.rgba[i * 4 + 1]! + 0.114 * view.rgba[i * 4 + 2]!
+  }
+  return faceLight(gray, view.width, view.height, face.points)
+}
+
+/** The landmarks at the middle of each cheek. */
+const CHEEKS = [50, 280] as const
+
+/**
+ * How lit a face is, over its landmarks' box trimmed to the middle half (the
+ * eyes, nose and cheeks): the luma its brightest twentieth reaches — a dark
+ * skin's highlights and eyes' whites are as bright as a pale one's in the
+ * same light, so this tells a dark room, not a dark skin — and the share at
+ * white; and how evenly (the darker cheek's mean luma over the lighter
+ * one's, each over a disc a fifth of the eyes' distance across).
+ */
+function faceLight(
+  gray: Float32Array,
+  width: number,
+  height: number,
+  points: DetectedFace['points'],
+): FaceLight {
+  const mean = (
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    inside: (x: number, y: number) => boolean,
+  ) => {
+    let sum = 0
+    let count = 0
+    for (let y = Math.max(0, Math.floor(y0)); y < Math.min(height, Math.ceil(y1)); y++) {
+      for (let x = Math.max(0, Math.floor(x0)); x < Math.min(width, Math.ceil(x1)); x++) {
+        if (!inside(x, y)) continue
+        sum += gray[y * width + x]!
+        count++
+      }
+    }
+    return count ? sum / count : null
+  }
+  const xs = points.map((p) => p[0])
+  const ys = points.map((p) => p[1])
+  const [left, right, top, bottom] = [
+    Math.min(...xs),
+    Math.max(...xs),
+    Math.min(...ys),
+    Math.max(...ys),
+  ]
+  const [w, h] = [right - left, bottom - top]
+  const histogram = new Uint32Array(256)
+  let pixels = 0
+  for (let y = Math.max(0, Math.floor(top + h / 4)); y < Math.min(height, bottom - h / 4); y++) {
+    for (let x = Math.max(0, Math.floor(left + w / 4)); x < Math.min(width, right - w / 4); x++) {
+      histogram[Math.min(255, Math.max(0, Math.round(gray[y * width + x]!)))]!++
+      pixels++
+    }
+  }
+  let lit: number | null = null
+  let burnt: number | null = null
+  if (pixels) {
+    let above = 0
+    for (let level = 255; level >= 0; level--) {
+      above += histogram[level]!
+      if (above >= pixels * 0.05) {
+        lit = level
+        break
+      }
+    }
+    let white = 0
+    for (let level = 250; level < 256; level++) white += histogram[level]!
+    burnt = white / pixels
+  }
+  const eyes = Math.hypot(points[468]![0] - points[473]![0], points[468]![1] - points[473]![1])
+  const radius = Math.max(2, eyes / 5)
+  const cheek = (index: number) => {
+    const [cx, cy] = points[index]!
+    return mean(
+      cx - radius,
+      cy - radius,
+      cx + radius,
+      cy + radius,
+      (x, y) => (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius,
+    )
+  }
+  const [a, b] = CHEEKS.map(cheek)
+  const balance = a && b ? Math.min(a, b) / Math.max(a, b) : null
+  return { lit, burnt, balance }
 }
 
 /** The card picture of a photo avatar: the front photo about the face, as tall as the cards (128 × 208). */

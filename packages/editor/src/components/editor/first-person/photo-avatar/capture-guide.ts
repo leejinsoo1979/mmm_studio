@@ -52,6 +52,21 @@ export type GuideFrame = {
   centre: [number, number] | null
   /** How sharp the face is (variance of the Laplacian over it). */
   sharpness: number
+  /** How many faces MediaPipe found (more than one: someone else is in the photo). */
+  faces?: number
+  /**
+   * How lit the face is whatever its skin's tone: the luma (0–255) its
+   * brightest twentieth reaches (a lit forehead, the eyes' whites), null with no face.
+   */
+  lit?: number | null
+  /** The share of the face burnt out to white (0–1), null with no face. */
+  burnt?: number | null
+  /** The darker cheek's luma over the lighter one's, null with no face: well under 1, lit from one side. */
+  balance?: number | null
+  /** MediaPipe's blendshapes (0–1), null with no face: the more shut eye, the open jaw, the wider smile. */
+  blink?: number | null
+  jawOpen?: number | null
+  smile?: number | null
 }
 
 export type GuideState = {
@@ -63,6 +78,11 @@ export type GuideState = {
   /** The last turn MediaPipe saw (degrees): which side a face too far turned for it is on. */
   lastYaw: number | null
   lastCentre: [number, number] | null
+  /**
+   * When something the person was asked to fix but may not be able to (see
+   * `askedProblem`) was first seen in this pose (ms), null while it hasn't been.
+   */
+  asked: number | null
 }
 
 export const startGuide = (step = 0): GuideState => ({
@@ -71,6 +91,7 @@ export const startGuide = (step = 0): GuideState => ({
   best: null,
   lastYaw: null,
   lastCentre: null,
+  asked: null,
 })
 
 /** How long (ms) the person holds a pose before its frame is taken. */
@@ -138,8 +159,14 @@ export function guide(state: GuideState, frame: GuideFrame): GuideAdvice {
     frame.centre && state.lastCentre
       ? Math.hypot(frame.centre[0] - state.lastCentre[0], frame.centre[1] - state.lastCentre[1])
       : 0
-  const next: GuideState = { ...state, lastYaw, lastCentre: frame.centre }
-  const problem = placement(step, frame, state.lastYaw)
+  const soft = askedProblem(step, frame)
+  const asked = state.asked ?? (soft ? frame.time : null)
+  // Asked for a while and not able to (a lamp that can't move, eyes that read as shut however
+  // open they are): taken as it is.
+  const patient = soft !== null && asked !== null && frame.time - asked >= PATIENCE_MS
+  const next: GuideState = { ...state, lastYaw, lastCentre: frame.centre, asked }
+  const problem =
+    placement(step, frame, state.lastYaw) ?? condition(frame) ?? (patient ? null : soft?.ask)
   if (problem) {
     return {
       state: { ...next, since: null, best: null },
@@ -173,10 +200,69 @@ export function guide(state: GuideState, frame: GuideFrame): GuideAdvice {
   }
   return {
     state: { ...next, since, best },
-    message: held ? '찍었어요' : '좋아요, 그대로 멈춰 주세요',
+    message: held
+      ? '찍었어요'
+      : soft
+        ? `${soft.taken}. 이대로 찍을게요, 그대로 멈춰 주세요`
+        : '좋아요, 그대로 멈춰 주세요',
     ready: true,
     take: held && best !== null,
   }
+}
+
+/**
+ * Under `lit` the face is too dark to read (a dark skin in good light still
+ * lights well past it: its highlights do), past `burnt` of it at white it is burnt out.
+ */
+export const EXPOSURE = { lit: 60, burnt: 0.25 }
+/** The darker cheek's share of the lighter one's light under which the face is lit from one side. */
+export const MIN_BALANCE = 0.75
+/** How long (ms) the guide asks for what may not be fixable (see `askedProblem`) before it takes the pose as it is. */
+export const PATIENCE_MS = 4000
+/** Blendshape levels past which the eyes read as shut, the mouth as open, the face as smiling. */
+export const EXPRESSION = { blink: 0.5, jawOpen: 0.2, smile: 0.4 }
+
+/**
+ * What the person is asked to fix but may not be able to, so it is asked
+ * about for PATIENCE_MS and then let be: light from one side on the front
+ * view (whose light the skin is read under: its shading would stay in the
+ * skin; a lamp may not move), and on the front and ¾ views shut eyes or an
+ * open or smiling mouth (the avatar's face is a neutral, shut one; but
+ * MediaPipe reads some open eyes, narrow or hooded ones, as half shut, and
+ * no one must be held at the camera for it). MediaPipe reads no expression
+ * on a full side view. `ask` is said while asking, `taken` once let be.
+ */
+function askedProblem(step: CaptureStep, frame: GuideFrame): { ask: string; taken: string } | null {
+  if (step.yaw === 0 && frame.balance != null && frame.balance < MIN_BALANCE) {
+    return {
+      ask: '얼굴 한쪽이 어두워요. 창문이나 조명을 정면으로 마주 봐 주세요',
+      taken: '빛이 한쪽에서 와요',
+    }
+  }
+  if (Math.abs(step.yaw) < 90) {
+    if ((frame.blink ?? 0) > EXPRESSION.blink)
+      return { ask: '눈을 크게 떠 주세요', taken: '눈이 감겨 보여요' }
+    if ((frame.jawOpen ?? 0) > EXPRESSION.jawOpen || (frame.smile ?? 0) > EXPRESSION.smile) {
+      return {
+        ask: '입을 다물고 웃지 말고 무표정으로 있어 주세요',
+        taken: '입 모양이 무표정이 아니에요',
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * What else, with the pose right, would spoil the photo and can always be
+ * fixed: someone else in it, too little or too much light.
+ */
+function condition(frame: GuideFrame): string | null {
+  if ((frame.faces ?? 1) > 1) return '다른 사람이 함께 보여요. 혼자 화면에 나와 주세요'
+  if (frame.lit != null && frame.lit < EXPOSURE.lit)
+    return '너무 어두워요. 밝은 곳으로 가거나 불을 켜 주세요'
+  if (frame.burnt != null && frame.burnt > EXPOSURE.burnt)
+    return '너무 밝아요. 얼굴에 바로 비치는 빛을 피해 주세요'
+  return null
 }
 
 /** The guide after a frame was kept: on to the next step. */
