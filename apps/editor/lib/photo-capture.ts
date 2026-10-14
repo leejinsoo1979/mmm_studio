@@ -510,7 +510,7 @@ export async function readGuideFrame(
     }
   }
   let sharp = 0
-  let light: FaceLight = { exposure: null, balance: null }
+  let light: FaceLight = { lit: null, burnt: null, balance: null }
   if (box) {
     const pixels = context.getImageData(0, 0, width, height).data
     const gray = new Float32Array(width * height)
@@ -545,13 +545,17 @@ export async function readGuideFrame(
   }
 }
 
-/** How lit a face is (its mean luma, 0–255) and how evenly (the darker cheek's luma over the lighter one's). */
-export type FaceLight = { exposure: number | null; balance: number | null }
+/**
+ * How lit a face is (the luma, 0–255, its brightest twentieth reaches, and
+ * its share burnt out to white) and how evenly (the darker cheek's luma over
+ * the lighter one's).
+ */
+export type FaceLight = { lit: number | null; burnt: number | null; balance: number | null }
 
 /** How lit and how evenly a read photo's face is (see `faceLight`); nulls without a face. */
 export function photoLight(photo: ReadPhoto): FaceLight {
   const { face, view } = photo
-  if (!face) return { exposure: null, balance: null }
+  if (!face) return { lit: null, burnt: null, balance: null }
   const gray = new Float32Array(view.width * view.height)
   for (let i = 0; i < gray.length; i++) {
     gray[i] =
@@ -564,8 +568,11 @@ export function photoLight(photo: ReadPhoto): FaceLight {
 const CHEEKS = [50, 280] as const
 
 /**
- * How lit a face is (the mean luma inside its landmarks' box, trimmed to the
- * middle half) and how evenly (the darker cheek's mean luma over the lighter
+ * How lit a face is, over its landmarks' box trimmed to the middle half (the
+ * eyes, nose and cheeks): the luma its brightest twentieth reaches — a dark
+ * skin's highlights and eyes' whites are as bright as a pale one's in the
+ * same light, so this tells a dark room, not a dark skin — and the share at
+ * white; and how evenly (the darker cheek's mean luma over the lighter
  * one's, each over a disc a fifth of the eyes' distance across).
  */
 function faceLight(
@@ -601,7 +608,29 @@ function faceLight(
     Math.max(...ys),
   ]
   const [w, h] = [right - left, bottom - top]
-  const exposure = mean(left + w / 4, top + h / 4, right - w / 4, bottom - h / 4, () => true)
+  const histogram = new Uint32Array(256)
+  let pixels = 0
+  for (let y = Math.max(0, Math.floor(top + h / 4)); y < Math.min(height, bottom - h / 4); y++) {
+    for (let x = Math.max(0, Math.floor(left + w / 4)); x < Math.min(width, right - w / 4); x++) {
+      histogram[Math.min(255, Math.max(0, Math.round(gray[y * width + x]!)))]!++
+      pixels++
+    }
+  }
+  let lit: number | null = null
+  let burnt: number | null = null
+  if (pixels) {
+    let above = 0
+    for (let level = 255; level >= 0; level--) {
+      above += histogram[level]!
+      if (above >= pixels * 0.05) {
+        lit = level
+        break
+      }
+    }
+    let white = 0
+    for (let level = 250; level < 256; level++) white += histogram[level]!
+    burnt = white / pixels
+  }
   const eyes = Math.hypot(points[468]![0] - points[473]![0], points[468]![1] - points[473]![1])
   const radius = Math.max(2, eyes / 5)
   const cheek = (index: number) => {
@@ -616,7 +645,7 @@ function faceLight(
   }
   const [a, b] = CHEEKS.map(cheek)
   const balance = a && b ? Math.min(a, b) / Math.max(a, b) : null
-  return { exposure, balance }
+  return { lit, burnt, balance }
 }
 
 /** The card picture of a photo avatar: the front photo about the face, as tall as the cards (128 × 208). */

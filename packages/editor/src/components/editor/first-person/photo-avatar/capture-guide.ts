@@ -54,8 +54,13 @@ export type GuideFrame = {
   sharpness: number
   /** How many faces MediaPipe found (more than one: someone else is in the photo). */
   faces?: number
-  /** How lit the face is: its mean luma (0–255), null with no face. */
-  exposure?: number | null
+  /**
+   * How lit the face is whatever its skin's tone: the luma (0–255) its
+   * brightest twentieth reaches (a lit forehead, the eyes' whites), null with no face.
+   */
+  lit?: number | null
+  /** The share of the face burnt out to white (0–1), null with no face. */
+  burnt?: number | null
   /** The darker cheek's luma over the lighter one's, null with no face: well under 1, lit from one side. */
   balance?: number | null
   /** MediaPipe's blendshapes (0–1), null with no face: the more shut eye, the open jaw, the wider smile. */
@@ -201,8 +206,11 @@ export function guide(state: GuideState, frame: GuideFrame): GuideAdvice {
   }
 }
 
-/** A face's mean luma below which it is too dark to read, and above which it is burnt out. */
-export const EXPOSURE = { least: 55, most: 235 }
+/**
+ * Under `lit` the face is too dark to read (a dark skin in good light still
+ * lights well past it: its highlights do), past `burnt` of it at white it is burnt out.
+ */
+export const EXPOSURE = { lit: 60, burnt: 0.25 }
 /** The darker cheek's share of the lighter one's light under which the face is lit from one side. */
 export const MIN_BALANCE = 0.75
 /** How long (ms) the guide asks to face the light before it takes the front view lit as it is. */
@@ -227,10 +235,10 @@ function lightProblem(step: CaptureStep, frame: GuideFrame): string | null {
  */
 function condition(step: CaptureStep, frame: GuideFrame): string | null {
   if ((frame.faces ?? 1) > 1) return '다른 사람이 함께 보여요. 혼자 화면에 나와 주세요'
-  if (frame.exposure != null) {
-    if (frame.exposure < EXPOSURE.least) return '너무 어두워요. 밝은 곳으로 가거나 불을 켜 주세요'
-    if (frame.exposure > EXPOSURE.most) return '너무 밝아요. 얼굴에 바로 비치는 빛을 피해 주세요'
-  }
+  if (frame.lit != null && frame.lit < EXPOSURE.lit)
+    return '너무 어두워요. 밝은 곳으로 가거나 불을 켜 주세요'
+  if (frame.burnt != null && frame.burnt > EXPOSURE.burnt)
+    return '너무 밝아요. 얼굴에 바로 비치는 빛을 피해 주세요'
   if (Math.abs(step.yaw) < 90) {
     if ((frame.blink ?? 0) > EXPRESSION.blink) return '눈을 크게 떠 주세요'
     if ((frame.jawOpen ?? 0) > EXPRESSION.jawOpen || (frame.smile ?? 0) > EXPRESSION.smile) {

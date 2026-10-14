@@ -111,19 +111,30 @@ describe('capture guide', () => {
     const held = (over: Partial<GuideFrame>, step = 0) =>
       feed(startGuide(step), (t) => frame(t, over), HOLD_MS + 50)
     const said = (over: Partial<GuideFrame>, step = 0) => guide(startGuide(step), frame(0, over))
-    const ok = { faces: 1, exposure: 150, balance: 0.95, blink: 0.1, jawOpen: 0.02, smile: 0.05 }
+    const ok = {
+      faces: 1,
+      lit: 180,
+      burnt: 0.01,
+      balance: 0.95,
+      blink: 0.1,
+      jawOpen: 0.02,
+      smile: 0.05,
+    }
     expect(held(ok).take).toBe(true)
 
     expect(said({ ...ok, faces: 2 }).message).toContain('혼자')
-    expect(said({ ...ok, exposure: 30 }).message).toContain('어두워요')
-    expect(said({ ...ok, exposure: 250 }).message).toContain('너무 밝아요')
+    expect(said({ ...ok, lit: 30 }).message).toContain('어두워요')
+    // A dark skin in good light: its highlights are lit, however dark the skin's own tone.
+    expect(held({ ...ok, lit: 110 }).take).toBe(true)
+    expect(said({ ...ok, burnt: 0.6 }).message).toContain('너무 밝아요')
     expect(said({ ...ok, balance: 0.5 }).message).toContain('정면으로 마주')
     expect(said({ ...ok, blink: 0.8 }).message).toContain('눈을')
     expect(said({ ...ok, jawOpen: 0.5 }).message).toContain('입을 다물고')
     expect(said({ ...ok, smile: 0.7 }).message).toContain('무표정')
     for (const spoilt of [
       { faces: 2 },
-      { exposure: 30 },
+      { lit: 30 },
+      { burnt: 0.6 },
       { balance: 0.5 },
       { blink: 0.8 },
       { smile: 0.7 },
@@ -155,7 +166,7 @@ describe('capture guide', () => {
     expect(feed(side, (t) => frame(t, lost), HOLD_MS + 50).take).toBe(true)
     // Unread (no blendshapes, no face): nothing is held against the frame.
     expect(
-      held({ blink: null, jawOpen: null, smile: null, balance: null, exposure: null }).take,
+      held({ blink: null, jawOpen: null, smile: null, balance: null, lit: null, burnt: null }).take,
     ).toBe(true)
   })
 

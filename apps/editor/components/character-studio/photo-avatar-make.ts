@@ -65,8 +65,8 @@ export function photoProblem(photos: ReadPhoto[]): string | null {
     return '정면 사진에서 얼굴을 찾지 못했어요. 얼굴 전체가 밝고 크게 나온 사진으로 다시 해 주세요.'
   if (photos.some((photo) => photo.faces > 1))
     return '사진에 얼굴이 여러 개 있어요. 한 사람만 나온 사진을 써 주세요.'
-  const { exposure } = photoLight(front)
-  if (exposure !== null && exposure < EXPOSURE.least)
+  const { lit } = photoLight(front)
+  if (lit !== null && lit < EXPOSURE.lit)
     return '사진이 너무 어두워요. 밝은 곳에서 얼굴에 빛이 고르게 닿게 다시 찍어 주세요.'
   for (const photo of photos) {
     const { mask, width, height } = photo.view
