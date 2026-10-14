@@ -21,7 +21,10 @@ import type { PhotorealAiUnavailableReason } from './shared'
  *
  * `AI_AVATAR_MOCK=true` runs the whole flow with no external call (a drawn
  * portrait, and the avatar service's protocol answered in-process): ignored
- * when `NODE_ENV` is `production`.
+ * when `NODE_ENV` is `production`. With `AI_AVATAR_MOCK_SERVICE=false` it
+ * has no 3D service, as a setup with no service keys: the browser makes the
+ * avatar from the portrait and its turned views (local files beside
+ * `AI_AVATAR_MOCK_PORTRAIT`).
  *
  * A build already started is carried to its end, and the service's copy
  * deleted, with `readJobService` alone: switching the feature off, or the
@@ -194,7 +197,9 @@ export function readPhotorealAiConfig(
   if (!portraitExtraParams) return { ok: false, reason: 'not_configured', part: 'portrait' }
 
   let image: AiPhotoConfig | null = null
-  let service: AvatarServiceConfig | null = MOCK_SERVICE
+  // `AI_AVATAR_MOCK_SERVICE=false`: the 목업 as with no paid service, the browser making the avatar.
+  let service: AvatarServiceConfig | null =
+    value(env, 'AI_AVATAR_MOCK_SERVICE') === 'false' ? null : MOCK_SERVICE
   if (!mock) {
     // No face photo is ever sent here, so AI 실사 사진's face switch must not turn this off.
     const photo = readAiPhotoConfig({ ...env, AI_PHOTO_FACE_ENABLED: undefined })

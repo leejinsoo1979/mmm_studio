@@ -175,6 +175,14 @@ describe('readPhotorealAiConfig', () => {
         CWD,
       ),
     ).toMatchObject({ config: { mockGlbPath: '/tmp/a.glb', mockPortraitPath: '/tmp/p.jpg' } })
+    // As a setup with no service keys: the browser makes the avatar.
+    expect(
+      readPhotorealAiConfig({ AI_AVATAR_MOCK: 'true', AI_AVATAR_MOCK_SERVICE: 'false' }, CWD),
+    ).toMatchObject({ ok: true, config: { mock: true, service: null } })
+    expect(readPhotorealAiConfig({ AI_AVATAR_MOCK: 'true' }, CWD)).toMatchObject({
+      ok: true,
+      config: { service: { clientId: 'mock-client' } },
+    })
     expect(readPhotorealAiConfig({ AI_AVATAR_MOCK: 'true', NODE_ENV: 'production' })).toMatchObject(
       {
         ok: false,
