@@ -136,7 +136,31 @@ export function readAccessor(
   const width = WIDTH[accessor.type]!
   const count = accessor.count as number
   const values = new Float64Array(count * width)
-  if (accessor.bufferView === undefined) return { values, width, count }
+  if (accessor.bufferView !== undefined) readDense(glb, views, accessor, values)
+  if (accessor.sparse) {
+    const { sparse } = accessor
+    const indexType = COMPONENT[sparse.indices.componentType]!
+    const indexBytes = views[sparse.indices.bufferView]!
+    const indexData = new DataView(indexBytes.buffer, indexBytes.byteOffset, indexBytes.byteLength)
+    const valueType = COMPONENT[accessor.componentType]!
+    const valueBytes = views[sparse.values.bufferView]!
+    const valueData = new DataView(valueBytes.buffer, valueBytes.byteOffset, valueBytes.byteLength)
+    const indexStart = sparse.indices.byteOffset ?? 0
+    const valueStart = sparse.values.byteOffset ?? 0
+    for (let i = 0; i < sparse.count; i++) {
+      const at = indexType.read(indexData, indexStart + i * indexType.size)
+      for (let k = 0; k < width; k++) {
+        const raw = valueType.read(valueData, valueStart + (i * width + k) * valueType.size)
+        values[at * width + k] = accessor.normalized ? normalise(raw, accessor.componentType) : raw
+      }
+    }
+  }
+  return { values, width, count }
+}
+
+function readDense(glb: Glb, views: Uint8Array[], accessor: GltfJson, values: Float64Array) {
+  const width = WIDTH[accessor.type]!
+  const count = accessor.count as number
   const component = COMPONENT[accessor.componentType]!
   const viewInfo = glb.json.bufferViews[accessor.bufferView]
   const bytes = views[accessor.bufferView]!
@@ -153,7 +177,6 @@ export function readAccessor(
       values[i * width + k] = normalized ? normalise(raw, accessor.componentType) : raw
     }
   }
-  return { values, width, count }
 }
 
 /** A primitive of a mesh as read: its attributes (floats), triangle indices and material name. */
@@ -247,6 +270,45 @@ export class GlbWriter {
       }
       accessor.min = min
       accessor.max = max
+    }
+    this.json.accessors.push(accessor)
+    return this.json.accessors.length - 1
+  }
+
+  /**
+   * Appends a float VEC3 accessor of `count` items, all zero but those at
+   * `indices` (ascending), which hold `values`: a sparse accessor, or one
+   * with no data at all when nothing is set; its index.
+   */
+  addSparseVec3(count: number, indices: Uint32Array, values: Float32Array): number {
+    const min = [0, 0, 0]
+    const max = [0, 0, 0]
+    for (let i = 0; i < values.length; i++) {
+      min[i % 3] = Math.min(min[i % 3]!, values[i]!)
+      max[i % 3] = Math.max(max[i % 3]!, values[i]!)
+    }
+    const accessor: GltfJson = { componentType: 5126, count, type: 'VEC3', min, max }
+    if (indices.length) {
+      const wide = count > 65535
+      const packedIndices = wide ? indices : Uint16Array.from(indices)
+      accessor.sparse = {
+        count: indices.length,
+        indices: {
+          bufferView: this.addView(
+            new Uint8Array(
+              packedIndices.buffer,
+              packedIndices.byteOffset,
+              packedIndices.byteLength,
+            ),
+          ),
+          componentType: wide ? 5125 : 5123,
+        },
+        values: {
+          bufferView: this.addView(
+            new Uint8Array(values.buffer, values.byteOffset, values.byteLength),
+          ),
+        },
+      }
     }
     this.json.accessors.push(accessor)
     return this.json.accessors.length - 1

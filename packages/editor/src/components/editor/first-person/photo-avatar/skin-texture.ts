@@ -1,6 +1,7 @@
 import type { CaptureView } from './avatar-job'
 import { type BaseBody, movedPositions } from './base-body'
 import type { Camera } from './camera'
+import { eyesShut, lidTexels } from './eyes'
 import {
   distanceTo,
   EYE_RINGS,
@@ -77,6 +78,13 @@ export type SkinOutput = {
   roughness: Uint8ClampedArray
   /** The face's skin colour (linear RGB) with the light taken out. */
   albedo: [number, number, number]
+  /**
+   * What the photos' colours (linear, as shown) were scaled by to be the
+   * texture's, the light's shading aside: their cast and exposure taken out.
+   */
+  gains: [number, number, number]
+  /** The head's texels at the size the photos were laid at. */
+  texels: Texels
   /** Per view, how well a smooth light explained its skin (r²). */
   lightFit: number[]
   /** How much of the head's texels a photo saw well. */
@@ -193,6 +201,7 @@ export function skinTextures({
   const texels = rasterizeUv(mesh, WORKING)
   const landmarkUv = landmarkUvs(base.head, headSkin.weld, headSkin.mesh.uvs)
   const features = texelFeatures(texels, landmarkUv)
+  const lids = lidTexels(landmarkUv, WORKING, features.brows)
   const balance = whiteBalance(views)
 
   const projected: ProjectedView[] = []
@@ -229,6 +238,7 @@ export function skinTextures({
       camera,
       depthBuffer(occluder, camera),
     )
+    if (eyesShut(view)) for (let i = 0; i < lids.length; i++) if (lids[i]) seen.weight[i] = 0
     featherWeights(seen.weight, texels, FEATHER)
     projected.push(seen)
     progress((0.5 * (k + 1)) / views.length)
@@ -405,6 +415,8 @@ export function skinTextures({
     body: bodyPixels,
     roughness: headRoughness(base, roughness, albedo, texels),
     albedo,
+    gains: balance.map((g) => g * exposure) as [number, number, number],
+    texels,
     lightFit,
     photoShare: skinTexels ? seenTexels / skinTexels : 0,
   }

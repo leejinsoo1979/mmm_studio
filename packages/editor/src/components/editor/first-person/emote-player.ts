@@ -9,25 +9,83 @@ import {
   LoopRepeat,
 } from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { type GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { type AvatarGender, avatarGender, type RocketboxAvatar } from './avatar-catalog'
 import { fitClips } from './avatar-rig'
-import { EMOTES, type EmoteCue, emoteClipsUrl, isEmoteId, ONCE_MAX_SECONDS } from './emotes'
+import { EmoteFace, faceRest } from './emote-face'
+import {
+  EMOTES,
+  type EmoteCue,
+  type EmoteId,
+  emoteClipsUrl,
+  isEmoteId,
+  ONCE_MAX_SECONDS,
+} from './emotes'
 import { MOTION_SETS } from './locomotion'
 
-const emoteFiles = new Map<AvatarGender, Promise<AnimationClip[]>>()
+const emoteFiles = new Map<AvatarGender, Promise<GLTF>>()
+const emoteFaces = new Map<AvatarGender, Promise<Map<EmoteId, EmoteFace>>>()
 
-/** A gender's emote clips (one file each, fetched the first time a body needs them). */
-export function loadEmoteClips(gender: AvatarGender): Promise<AnimationClip[]> {
-  let clips = emoteFiles.get(gender)
-  if (!clips) {
+/** A gender's emotes file (one each, fetched the first time a body needs it). */
+function loadEmoteFile(gender: AvatarGender): Promise<GLTF> {
+  let file = emoteFiles.get(gender)
+  if (!file) {
     const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)
-    clips = loader.loadAsync(emoteClipsUrl(gender)).then((gltf) => gltf.animations)
+    file = loader.loadAsync(emoteClipsUrl(gender))
     // A failed download can be tried again later.
-    clips.catch(() => emoteFiles.delete(gender))
-    emoteFiles.set(gender, clips)
+    file.catch(() => emoteFiles.delete(gender))
+    emoteFiles.set(gender, file)
   }
-  return clips
+  return file
+}
+
+/** A gender's emote clips. */
+export function loadEmoteClips(gender: AvatarGender): Promise<AnimationClip[]> {
+  return loadEmoteFile(gender).then((gltf) => gltf.animations)
+}
+
+/** The faces a gender's emote clips make (emote-face.ts), by emote; those that move no face are left out. */
+export function loadEmoteFaces(gender: AvatarGender): Promise<Map<EmoteId, EmoteFace>> {
+  let faces = emoteFaces.get(gender)
+  if (!faces) {
+    faces = loadEmoteFile(gender).then((gltf) => {
+      const found = new Map<EmoteId, EmoteFace>()
+      const rest = faceRest(gltf.scene)
+      if (!rest) return found
+      for (const clip of gltf.animations) {
+        const face = new EmoteFace(clip, rest)
+        if (isEmoteId(clip.name) && face.moves) found.set(clip.name, face)
+      }
+      return found
+    })
+    faces.catch(() => emoteFaces.delete(gender))
+    emoteFaces.set(gender, faces)
+  }
+  return faces
+}
+
+/** The faces of a gender's emotes (null until they arrive); fetched only once `wanted`. */
+export function useEmoteFaces(
+  gender: AvatarGender,
+  wanted: boolean,
+): ReadonlyMap<EmoteId, EmoteFace> | null {
+  const [loaded, setLoaded] = useState<{
+    gender: AvatarGender
+    faces: Map<EmoteId, EmoteFace>
+  } | null>(null)
+  useEffect(() => {
+    if (!wanted || loaded?.gender === gender) return
+    let current = true
+    loadEmoteFaces(gender)
+      .then((faces) => {
+        if (current) setLoaded({ gender, faces })
+      })
+      .catch(() => {})
+    return () => {
+      current = false
+    }
+  }, [gender, loaded?.gender, wanted])
+  return loaded?.gender === gender ? loaded.faces : null
 }
 
 /**
@@ -73,9 +131,21 @@ export class EmoteLayer {
   private action: AnimationAction | null = null
   private fading: AnimationAction[] = []
   private played = 0
+  /** The emote the body shows (playing, or fading out after it) and its clip's action. */
+  private shown: { id: EmoteId; action: AnimationAction } | null = null
   private clips = new Map<string, AnimationClip>()
 
   constructor(private readonly mixer: AnimationMixer) {}
+
+  /** The emote the body shows (fading in, playing or fading out); null when none does. */
+  get showing(): EmoteId | null {
+    return this.weight > 0 ? (this.shown?.id ?? null) : null
+  }
+
+  /** Where (s) the clip of the emote showing is. */
+  get time(): number {
+    return this.shown?.action.time ?? 0
+  }
 
   setClips(clips: readonly AnimationClip[] | null) {
     this.clips = new Map((clips ?? []).map((clip) => [clip.name, clip]))
@@ -101,6 +171,7 @@ export class EmoteLayer {
         action.play()
         this.action = action
         this.cue = cue
+        this.shown = { id: cue.id, action }
         this.played = 0
       }
     }
@@ -125,6 +196,7 @@ export class EmoteLayer {
       for (const action of this.fading) action.stop()
       this.fading = []
       this.weight = 0
+      this.shown = null
     }
     return this.weight
   }

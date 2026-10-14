@@ -60,25 +60,34 @@ export const BROW_RINGS = [
 ] as const
 
 /**
- * A ring of landmarks (x, y per landmark in `points`) pushed out from its
- * centre by `grow` (a fraction of its size), scaled. A landmark far from
- * the rest is left out: in the texture, a few of the lids' and lips' inner
- * points sit on their inner islands (the eye sockets, the mouth), and a
- * ring through them would sweep across the face.
+ * A ring's landmarks (x, y per landmark in `points`) that lie with the rest
+ * of it. A few of the landmark map's points (an eye's corner, an inner lip)
+ * sit on skin out of sight of the photos it was made from — inside the
+ * mouth, in the eye socket — whose texture coordinates are on another
+ * island: a ring through them would cut across the face. Points without a
+ * place (NaN) are left out too.
  */
+export function ringLandmarks(points: ArrayLike<number>, indices: readonly number[]): number[] {
+  const known = indices.filter((i) => Number.isFinite(points[i * 2]!))
+  const middle = (k: 0 | 1) => {
+    const sorted = known.map((i) => points[i * 2 + k]!).sort((a, b) => a - b)
+    return sorted[sorted.length >> 1] ?? 0
+  }
+  const mx = middle(0)
+  const my = middle(1)
+  const reach = known.map((i) => Math.hypot(points[i * 2]! - mx, points[i * 2 + 1]! - my))
+  const typical = [...reach].sort((a, b) => a - b)[reach.length >> 1] ?? 0
+  return known.filter((_, k) => reach[k]! <= 3 * typical + 1e-9)
+}
+
+/** A ring of landmarks (ringLandmarks') pushed out from its centre by `grow` (a fraction of its size), scaled. */
 export function ring(
   points: ArrayLike<number>,
   indices: readonly number[],
   grow: number,
   scale = 1,
 ): number[] {
-  const middle = (values: number[]) => values.sort((a, b) => a - b)[Math.floor(values.length / 2)]!
-  const mx = middle(indices.map((i) => points[i * 2]!))
-  const my = middle(indices.map((i) => points[i * 2 + 1]!))
-  const reach = middle(indices.map((i) => Math.hypot(points[i * 2]! - mx, points[i * 2 + 1]! - my)))
-  const kept = indices.filter(
-    (i) => Math.hypot(points[i * 2]! - mx, points[i * 2 + 1]! - my) <= 3 * reach + 1e-9,
-  )
+  const kept = ringLandmarks(points, indices)
   let cx = 0
   let cy = 0
   for (const i of kept) {

@@ -3,6 +3,7 @@ import {
   type CaptureColors,
   type CaptureSlot,
   type CaptureView,
+  eyesShut,
   type GuideFrame,
   hairColor,
   SEGMENT_CLASSES,
@@ -302,8 +303,9 @@ const toLinear = (byte: number) => {
 
 /**
  * Marks where every photo shows bare skin (by the front photo's cheeks) and
- * reads the colours the avatar's textures take: skin and eyes as the face
- * swap reads them, the hair from above the forehead in the same exposure.
+ * reads the colours the avatar's textures take: skin as the face swap reads
+ * it, the eyes from the photo that shows them open (`irisColour`), the hair
+ * from above the forehead in the same exposure.
  */
 export function finishPhotos(photos: ReadPhoto[]): CaptureColors | null {
   const front =
@@ -347,7 +349,29 @@ export function finishPhotos(photos: ReadPhoto[]): CaptureColors | null {
       hair = hex(found.map((c) => toSrgbByte(c * gain)))
     }
   }
-  return { skin: colors.skin, eyes: colors.eyes, hair }
+  return { skin: colors.skin, eyes: irisColour(photos), hair }
+}
+
+/** Past this turn (degrees) a photo's irises are too foreshortened to read. */
+const IRIS_TURN = 30
+
+/**
+ * The irises' colour as the eye texture holds it, from the photo that shows
+ * them best: eyes open (a shut or squinting eye shows only lid, which would
+ * give the avatar flesh-coloured irises), the face nearest straight on.
+ * Null when no photo shows them: the avatar keeps its base's brown iris.
+ */
+function irisColour(photos: ReadPhoto[]): string | null {
+  const open = photos
+    .filter((photo) => photo.face && !eyesShut(photo.view) && Math.abs(photo.face.yaw) <= IRIS_TURN)
+    .sort((a, b) => Math.abs(a.face!.yaw) - Math.abs(b.face!.yaw))
+  for (const photo of open) {
+    const { rgba, width, height } = photo.view
+    const pixels = { data: rgba as Uint8ClampedArray, width, height }
+    const { eyes } = sampleFaceColors(pixels, photo.face!.points)
+    if (eyes) return eyes
+  }
+  return null
 }
 
 /** The camera's frames are read this wide for the guide: enough to find a face, quick to. */

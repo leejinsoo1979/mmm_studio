@@ -65,6 +65,30 @@ README).
   socks under the jeans, are removed. The thumbnails are renders in the
   character studio's lighting.
 
+## mpfb-face-expressions.bin, mpfb-face-expressions.json
+
+- What: 28 face expression shapes for photo avatars, named as ARKit blend
+  shapes (eyeBlink, eyeSquint, eyeWide, browDown, browInnerUp,
+  browOuterUp, jawOpen, mouthSmile, mouthFrown, mouthStretch,
+  mouthUpperUp, mouthLowerDown, mouthPress, mouthPucker, mouthFunnel,
+  noseSneer; left and right where a face has two): per shape, the base
+  mesh vertices it moves (skin, and the helpers the brows, lashes, teeth
+  and tongue are bound to) and their deltas.
+- Source: MPFB2, https://github.com/makehumancommunity/mpfb2 (git clone,
+  v2.0.18, commit `d0a32e57`), `src/mpfb/data/targets/expression/units/`
+  (african, asian and caucasian), mixed by race as the base bodies are
+  (asian 0.6, caucasian 0.3, african 0.1). Its LICENSE.md, section C:
+  CC0 1.0.
+- Licence: CC0 1.0, https://creativecommons.org/publicdomain/zero/1.0/. No
+  attribution required; credited anyway.
+- Changes: built with `scripts/characters/build-mpfb-expressions.py`: each
+  shape one unit or a sum of units, split into the face's halves where
+  ARKit has a side (blended over 1 cm at the middle), the tongue carried
+  rigidly with the lower teeth where a shape moves them (MakeHuman's
+  mouth-open leaves it behind), deltas in 0.01 mm steps. sha256: `.bin`
+  `c7599b41905ee9b6d9cad83434631d74fe8f3ccea281928e64fb43abb3277d44`,
+  `.json` `9df5e2a908567b938e734fa522ae28b497d5114854f0164072bf5b53705fbdfc`.
+
 ## mpfb-base-male.landmarks.json, mpfb-base-female.landmarks.json
 
 - What: where MediaPipe Face Landmarker's 478 face landmarks sit on each

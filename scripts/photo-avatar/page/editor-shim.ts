@@ -6,5 +6,6 @@ export { type Point as FacePoint } from '../../../packages/editor/src/components
 export * from '../../../packages/editor/src/components/editor/first-person/photo-avatar/avatar-job'
 export * from '../../../packages/editor/src/components/editor/first-person/photo-avatar/build-client'
 export * from '../../../packages/editor/src/components/editor/first-person/photo-avatar/capture-guide'
+export { eyesShut } from '../../../packages/editor/src/components/editor/first-person/photo-avatar/eyes'
 export * from '../../../packages/editor/src/components/editor/first-person/photo-avatar/segment'
 export * from '../../../packages/editor/src/components/editor/first-person/photo-avatar/skin-map'

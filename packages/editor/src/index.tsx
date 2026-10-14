@@ -60,7 +60,11 @@ export {
   PhotorealThumbnail,
   usePickedCharacter,
 } from './components/editor/first-person/character-picker'
-export { EmoteLayer, useEmoteClips } from './components/editor/first-person/emote-player'
+export {
+  EmoteLayer,
+  useEmoteClips,
+  useEmoteFaces,
+} from './components/editor/first-person/emote-player'
 export {
   canBindKey,
   DEFAULT_EMOTE_KEYS,
@@ -88,6 +92,7 @@ export {
   regionChanged,
   resetFaceRegion,
 } from './components/editor/first-person/face-handles'
+export { FaceMotion } from './components/editor/first-person/face-motion'
 export {
   BEARD_STYLES,
   type BeardStyle,
@@ -171,6 +176,7 @@ export {
   sharpness,
   startGuide,
 } from './components/editor/first-person/photo-avatar/capture-guide'
+export { eyesShut } from './components/editor/first-person/photo-avatar/eyes'
 export {
   classMap,
   classPlane,
@@ -215,7 +221,7 @@ export {
   photoPhotorealId,
   useLocalPhotoreal,
 } from './components/editor/first-person/photoreal-catalog'
-export { Blinker, dyeHair } from './components/editor/first-person/photoreal-model'
+export { dyeHair } from './components/editor/first-person/photoreal-model'
 export {
   type LocalPresence,
   lerpAngle,

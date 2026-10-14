@@ -1,5 +1,20 @@
 import { type AvatarImages, type BaseBody, baseMeshMoves, buildAvatarGlb } from './base-body'
 import type { Camera } from './camera'
+import { type Expression, transferExpressions } from './expressions'
+import {
+  eyeTexture,
+  innerSurfaces,
+  LASHES,
+  lashPositions,
+  lipsTogether,
+  paintInnerSurfaces,
+  photoWhites,
+  scleraColour,
+  sealLips,
+  TEETH_TONE,
+  TONGUE_TONE,
+  toneImage,
+} from './eyes'
 import { type FitOptions, type FitResult, type FitView, fitHead, PUPIL_DISTANCE } from './fit'
 import { editMaterials } from './glb'
 import { type DressedPicture, dressHair } from './hair-glb'
@@ -7,9 +22,8 @@ import type { HairStyle, HairStyleName } from './hair-library'
 import { type HairReading, hairStyleFor, readHair } from './hair-match'
 import { hairGains, scalpDensity, tintScalp, tonePicture } from './hair-paint'
 import type { FaceBlendshapes, SegmentMasks } from './segment'
-import { fillTriangles } from './silhouette'
 import { SKIN_MATERIAL_EDITS, skinTextures } from './skin-texture'
-import { linearToSrgb, median, srgbToLinear } from './texture'
+import { srgbToLinear } from './texture'
 
 /**
  * A photo avatar made, start to finish, from photos already read (each
@@ -99,6 +113,7 @@ export function fitCapture(
 
 export async function runAvatarJob({
   base,
+  expressions,
   views,
   colors,
   codec,
@@ -107,6 +122,8 @@ export async function runAvatarJob({
   fitOptions = {},
 }: {
   base: BaseBody
+  /** The face's expressions on the base mesh (base-files.ts), carried onto the fitted head. */
+  expressions: readonly Expression[]
   views: CaptureView[]
   colors: CaptureColors
   codec: PictureCodec
@@ -121,7 +138,9 @@ export async function runAvatarJob({
   const fitted = performance.now()
   progress(0.45, 'texture')
 
-  const moves = baseMeshMoves(base, fit.positions)
+  const fitMoves = baseMeshMoves(base, fit.positions)
+  const jaw = expressions.find((one) => one.name === 'jawOpen')
+  const moves = jaw && lipsTogether(views) ? sealLips(base, fitMoves, jaw) : fitMoves
   const head = await decodeImage(base, 'head_color', codec)
   const body = await decodeImage(base, 'body_color', codec)
   const roughness = await decodeImage(base, 'head_roughness', codec)
@@ -135,6 +154,13 @@ export async function runAvatarJob({
     roughness,
     progress: (fraction) => progress(0.45 + 0.4 * fraction, 'texture'),
   })
+  paintInnerSurfaces(
+    skin.head,
+    head.width,
+    innerSurfaces(base, moves, skin.texels),
+    skin.texels.size,
+    skin.albedo,
+  )
 
   const gender = base.meta.gender
   const reading = readHair(views, fit, base, skin.albedo)
@@ -155,16 +181,32 @@ export async function runAvatarJob({
     'head_roughness',
     await codec.encode(skin.roughness, roughness.width, roughness.height, 0.9),
   )
-  if (colors.eyes) {
+  const whites = photoWhites(views)
+  if (colors.eyes || whites) {
     const eyes = await decodeImage(base, 'eye_color', codec)
     images.set(
       'eye_color',
       await codec.encode(
-        tintIris(base, eyes, hexLinear(colors.eyes)),
+        eyeTexture(
+          base,
+          eyes,
+          colors.eyes ? hexLinear(colors.eyes) : null,
+          whites ? scleraColour(whites, skin.gains) : null,
+        ),
         eyes.width,
         eyes.height,
         0.92,
       ),
+    )
+  }
+  for (const [name, gains] of [
+    ['teeth_color', TEETH_TONE],
+    ['tongue_color', TONGUE_TONE],
+  ] as const) {
+    const picture = await decodeImage(base, name, codec)
+    images.set(
+      name,
+      await codec.encode(toneImage(picture, gains), picture.width, picture.height, 0.9),
     )
   }
   const pictures = new Map<string, DressedPicture>()
@@ -185,8 +227,15 @@ export async function runAvatarJob({
   progress(0.92, 'pack')
   const basemesh = new Float64Array(base.basemesh.length)
   for (let i = 0; i < basemesh.length; i++) basemesh[i] = base.basemesh[i]! + moves[i]!
+  const lashes = lashPositions(base, moves, gender)
+  const avatar = buildAvatarGlb(base, moves, images, {
+    dropBrows: true,
+    expressions: transferExpressions(base, moves, expressions),
+    placed: lashes ? new Map([[lashes.index, lashes.positions]]) : undefined,
+    opacity: { Eyelashes: LASHES[gender].opacity },
+  })
   const glb = dressHair(
-    editMaterials(buildAvatarGlb(base, moves, images, { dropBrows: true }), SKIN_MATERIAL_EDITS),
+    editMaterials(avatar, SKIN_MATERIAL_EDITS),
     base,
     { style: style?.style ?? null, gender, basemesh, pictures, colour: hairColour },
   )
@@ -217,40 +266,4 @@ async function decodeImage(base: BaseBody, name: string, codec: PictureCodec) {
   const view = json.bufferViews[image.bufferView]
   const bytes = bin.subarray(view.byteOffset ?? 0, (view.byteOffset ?? 0) + view.byteLength)
   return codec.decode(bytes, image.mimeType)
-}
-
-/**
- * The eye texture with its iris in the person's colour: each iris texel's
- * colour replaced by the target's, scaled by how light the texel is
- * against the iris's average, so the iris keeps its fibres and its dark rim.
- */
-function tintIris(
-  base: BaseBody,
-  image: { data: ArrayLike<number>; width: number; height: number },
-  target: [number, number, number],
-): Uint8ClampedArray {
-  const out = Uint8ClampedArray.from(image.data)
-  const p = base.primitives.find((one) => one.material === 'Eye_Iris')
-  if (!p?.attributes.TEXCOORD_0) return out
-  const uv = p.attributes.TEXCOORD_0.values
-  const xy = new Float32Array(uv.length)
-  for (let i = 0; i < uv.length; i += 2) {
-    xy[i] = uv[i]! * image.width
-    xy[i + 1] = uv[i + 1]! * image.height
-  }
-  const mask = new Uint8Array(image.width * image.height)
-  fillTriangles(xy, p.indices, image.width, image.height, mask)
-  const light = (i: number) =>
-    0.2126 * srgbToLinear(image.data[i * 4]!) +
-    0.7152 * srgbToLinear(image.data[i * 4 + 1]!) +
-    0.0722 * srgbToLinear(image.data[i * 4 + 2]!)
-  const lights: number[] = []
-  for (let i = 0; i < mask.length; i++) if (mask[i]) lights.push(light(i))
-  const average = Math.max(median(lights), 1e-4)
-  for (let i = 0; i < mask.length; i++) {
-    if (!mask[i]) continue
-    const scale = light(i) / average
-    for (let k = 0; k < 3; k++) out[i * 4 + k] = linearToSrgb(target[k]! * scale)
-  }
-  return out
 }
