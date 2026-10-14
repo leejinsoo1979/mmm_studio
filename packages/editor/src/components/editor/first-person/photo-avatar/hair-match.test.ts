@@ -175,3 +175,28 @@ describe('reading hair off photos', () => {
     })
   }
 })
+
+describe('a lone photo whose lens was guessed', () => {
+  test("is measured as through a phone's lens: short hair from a phone, taken for a portrait, stays short", async () => {
+    const base = await loadBaseForTests('male')
+    const { views, fit } = photographed(base, 'male', 'short02')
+    const front = [views[0]!]
+    const phone = fit.cameras[0]!
+    const truth = readHair(front, { ...fit, cameras: [phone] }, base, SKIN)
+    // The same photo framed the same at the eyes through a lens three times as long, three times as far.
+    const depth = toCamera(phone, base.head.frame.eyes)[2]
+    const [x, y, z] = phone.translation
+    const portrait: Camera = {
+      ...phone,
+      focal: phone.focal * 3,
+      translation: [x, y, z + 2 * depth],
+    }
+    const taken = { ...fit, cameras: [portrait] }
+    const asSeen = readHair(front, taken, base, SKIN)
+    const guessed = readHair(front, taken, base, SKIN, { lensGuessed: true })
+    expect(truth.length).toBe('short')
+    expect(asSeen.measures.thicknessMm).toBeLessThan(truth.measures.thicknessMm - 5)
+    expect(guessed.measures.thicknessMm).toBeCloseTo(truth.measures.thicknessMm, 3)
+    expect(guessed.length).toBe('short')
+  })
+})

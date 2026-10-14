@@ -115,6 +115,11 @@ export type FitOptions = {
    * sets the head's size, which no photo can (a bigger head further away looks the same).
    */
   pupils?: number
+  /**
+   * What the face was doing in the photos (per region vertex, xyz m: a smile, eyes narrowed by
+   * it), held while the shape is fitted — so the shape need not make it — and kept in the head.
+   */
+  expression?: Float64Array
 }
 
 export type FitViewReport = {
@@ -126,6 +131,8 @@ export type FitViewReport = {
   skinOutlinePoints: number
   /** Their RMS misfit (mm). */
   skinOutlineMm: number
+  /** Points of the head's contour held to the edge of the photo's face skin. */
+  faceEdgePoints: number
   yaw: number
 }
 
@@ -157,6 +164,19 @@ const FRONT_CONTOUR_GATE = 15
 const FRONT_CONTOUR_BAND = 3
 /** How far inside an outline landmark (mm) a front photo must show the face's skin for its edge to be the face's own. */
 const OUTLINE_INSIDE = [3, 4.5, 6] as const
+/** How far (mm) the head's contour strays from the edge of a front photo's face skin. */
+const FACE_EDGE_SIGMA = 0.9
+/**
+ * How far (mm) past MediaPipe's outline of the face its edge may show: further out, the
+ * segmenter's face skin is the ears' or runs on over them.
+ */
+const FACE_MARGIN = 6
+/** Where (mm past the edge of the face skin) what lies beyond it is read. */
+const FACE_BEYOND = [2, 4] as const
+/** How far behind the ears' front (m) the face's edge is looked for (the jaw's angle lies there). */
+const FACE_BACK = 0.03
+/** A vertex an ear's target moves further than this (m) is the ear's: no edge of the face's. */
+const EAR_MOVE = 0.0005
 /** How far below the chin the outline still counts (m): below is the collar and the shoulders. */
 const OUTLINE_CUT = 0.05
 /** The face's bumps: their spacing and width (m), and their priors (mm): size, and between neighbours. */
@@ -301,6 +321,8 @@ type Prepared = {
   pivot: Vec3
   /** How each region vertex on this view's outline was found to be held (0 not yet, 1 skin, 2 covered). */
   labels: Int8Array
+  /** A view facing the camera: the face's edge as it shows (see `faceEdge`), or null. */
+  face: FaceEdge | null
 }
 
 /** The normal equations of a weighted least-squares problem, built one sparse row at a time. */
@@ -793,6 +815,7 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
     scale: 1,
     pivot: [0, 0, 0],
     labels: new Int8Array(nV),
+    face: faceEdge(view, nV),
   }))
 
   // The view facing the camera most squarely, among those with landmarks, sets the rest.
@@ -808,7 +831,13 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
   const cameras: Camera[] = views.map((view) => startCamera(model, view, null))
   const focal0 = cameras[front]!.focal
   /** The region as the targets and bumps shape it, before the head's size: then as solved. */
-  let shaped = shapePositions(model, coefficients)
+  const expression = options.expression
+  const displaced = () => {
+    const field = fieldDisplacement(model, bumps)
+    if (expression) for (let i = 0; i < field.length; i++) field[i] = field[i]! + expression[i]!
+    return field
+  }
+  let shaped = shapePositions(model, coefficients, expression)
   let positions = grown(model, shaped, pivotBody, grow)
   const restPupils = landmarkDistance(model, Float64Array.from(model.rest), 468, 473)
   /** Whether every photo faces the camera: none will ever show the face's depth. */
@@ -900,7 +929,7 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
       )
     }
     if (layout.shape >= 0 || layout.field >= 0)
-      shaped = shapePositions(model, coefficients, fieldDisplacement(model, bumps))
+      shaped = shapePositions(model, coefficients, displaced())
     positions = grown(model, shaped, pivotBody, grow)
   }
 
@@ -1036,7 +1065,10 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
   /** One damped Gauss–Newton step over `layout` (view `only`'s data alone, if given), kept only if it lowers the cost. */
   let damping = 1e-3
   const iterate = (layout: Layout, only = -1) => {
-    for (const p of prepared) p.labels.fill(0)
+    for (const p of prepared) {
+      p.labels.fill(0)
+      p.face?.labels.fill(0)
+    }
     const normal = new Normal(layout.size)
     accumulate(normal, layout, only)
     priors(normal, layout)
@@ -1175,7 +1207,10 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
   if (options.detail ?? multi) converge(detailLayout, rounds)
 
   const scored = new Normal(1)
-  for (const p of prepared) p.labels.fill(0)
+  for (const p of prepared) {
+    p.labels.fill(0)
+    p.face?.labels.fill(0)
+  }
   const reports = accumulate(scored, held(views.length))
   return {
     coefficients,
@@ -1386,6 +1421,52 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
       }
     }
 
+    // With photos from the front only, the face's own edge where they show it: the head's
+    // occluding contour from the eyes down to under the chin, ears aside, onto the edge of the
+    // photo's face skin — both ways where the background, clothes or the neck lie past it, only
+    // outwards where hair does (hair over a cheek hides the face's edge), and not at all where
+    // face skin goes on (to the ears). Turned photos' outlines say the face's width better.
+    let faceEdgePoints = 0
+    if (p.face && frontOnly) {
+      const lower = lowerFace(model)
+      const region = new Uint8Array(view.width * view.height)
+      fillTriangles(xy, faceTriangles(model), view.width, view.height, region, 1)
+      const contour = smoothContour(
+        positions,
+        normalsNow,
+        xy,
+        model.triangles,
+        centre,
+        r,
+        (a, b, c) => lower[a] === 1 && lower[b] === 1 && lower[c] === 1,
+        { data: region, width: view.width, height: view.height },
+      )
+      const { sdf, labels } = p.face
+      for (const c of contour) {
+        const [d, gx, gy] = sampleField(sdf, view.width, view.height, c.x, c.y)
+        const length = Math.hypot(gx, gy) || 1
+        const v0 = dominant(c)
+        let label = labels[v0]!
+        if (!label) {
+          label = edgeKind(
+            p.face,
+            view,
+            c.x - (d * gx) / length,
+            c.y - (d * gy) / length,
+            gx / length,
+            gy / length,
+            s,
+          )
+          labels[v0] = label
+        }
+        const residual = d / s
+        if (label === EDGE_NONE || (label === EDGE_HAIR && residual >= 0)) continue
+        pointOf(c)
+        row(residual, 1 / FACE_EDGE_SIGMA ** 2, verts3, weights3, gx / length, gy / length)
+        faceEdgePoints++
+      }
+    }
+
     // The person's outline.
     let skinOutlinePoints = 0
     let skinOutlineSum = 0
@@ -1456,6 +1537,7 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
       outlinePoints,
       skinOutlinePoints,
       skinOutlineMm: skinOutlinePoints ? Math.sqrt(skinOutlineSum / skinOutlinePoints) : 0,
+      faceEdgePoints,
       yaw,
     }
   }
@@ -1627,11 +1709,136 @@ function frontOutline(
   return out
 }
 
+/** What lies past the edge of the face skin. */
+const EDGE_NONE = 3
+const EDGE_HAIR = 2
+const EDGE_BARE = 1
+
+/** A front photo's face skin, as a field, and what lies around it. */
+type FaceEdge = {
+  /** Signed distance (pixels) to the edge of the face skin near MediaPipe's outline of the face. */
+  sdf: Float32Array
+  hair: Uint8Array
+  skin: Uint8Array
+  /** How each region vertex on the contour was found to be held (0 not yet, else an EDGE_). */
+  labels: Int8Array
+}
+
+/**
+ * The face skin of a photo with a face, where the segmenter read the photo at its size, cut to
+ * FACE_MARGIN round MediaPipe's outline of the face (the segmenter's face skin takes in the ears).
+ */
+function faceEdge(view: FitView, count: number): FaceEdge | null {
+  const { classes, landmarks: lm, width, height } = view
+  if (!(classes && lm && classes.width === width && classes.height === height)) return null
+  const fan: number[] = []
+  let mx = 0
+  let my = 0
+  for (const i of OVAL) {
+    fan.push(lm[i * 2]!, lm[i * 2 + 1]!)
+    mx += lm[i * 2]! / OVAL.length
+    my += lm[i * 2 + 1]! / OVAL.length
+  }
+  fan.push(mx, my)
+  const triangles: number[] = []
+  for (let k = 0; k < OVAL.length; k++) triangles.push(OVAL.length, k, (k + 1) % OVAL.length)
+  const oval = new Uint8Array(width * height)
+  fillTriangles(fan, triangles, width, height, oval, 1)
+  const away = signedDistanceField(oval, width, height)
+  const pupils = Math.hypot(lm[468 * 2]! - lm[473 * 2]!, lm[468 * 2 + 1]! - lm[473 * 2 + 1]!)
+  const margin = (FACE_MARGIN * pupils) / ((PUPIL_DISTANCE.male + PUPIL_DISTANCE.female) * 500)
+  const skin = classPlane(classes, 'faceSkin')
+  const face = new Uint8Array(width * height)
+  for (let i = 0; i < face.length; i++) face[i] = skin[i]! > 127 && away[i]! <= margin ? 255 : 0
+  return {
+    sdf: signedDistanceField(face, width, height, 127),
+    hair: classPlane(classes, 'hair'),
+    skin,
+    labels: new Int8Array(count),
+  }
+}
+
+/** What lies just past the face skin's edge at (x, y), outwards along (ux, uy): `scale` pixels a mm. */
+function edgeKind(
+  face: FaceEdge,
+  view: FitView,
+  x: number,
+  y: number,
+  ux: number,
+  uy: number,
+  scale: number,
+): number {
+  let hair = 0
+  let skin = 0
+  for (const mm of FACE_BEYOND) {
+    const bx = x + ux * mm * scale
+    const by = y + uy * mm * scale
+    hair = Math.max(hair, sampleByte(face.hair, view.width, view.height, bx, by))
+    skin = Math.max(skin, sampleByte(face.skin, view.width, view.height, bx, by))
+  }
+  return skin > 127 ? EDGE_NONE : hair > 127 ? EDGE_HAIR : EDGE_BARE
+}
+
+const lowerFaces = new WeakMap<HeadModel, Uint8Array>()
+/**
+ * The skin a front photo shows the face's edge on: from the eyes down to just under the chin,
+ * back past the ears' front to the jaw's angle, the ears themselves left out (what their
+ * targets move).
+ */
+function lowerFace(model: HeadModel): Uint8Array {
+  const cached = lowerFaces.get(model)
+  if (cached) return cached
+  const { rest, frame } = model
+  const n = model.vertices.length
+  const ear = new Uint8Array(n)
+  const isEar = model.targetNames.map((name) => /^[lr]-ear-/.test(name))
+  const d = model.basisDelta
+  for (let v = 0; v < n; v++) {
+    for (let b = model.basisStart[v]!; b < model.basisStart[v + 1]!; b++) {
+      if (
+        isEar[model.basisTarget[b]!] &&
+        Math.hypot(d[b * 3]!, d[b * 3 + 1]!, d[b * 3 + 2]!) > EAR_MOVE
+      )
+        ear[v] = 1
+    }
+  }
+  const out = new Uint8Array(n)
+  for (let v = 0; v < n; v++) {
+    const y = rest[v * 3 + 1]!
+    if (
+      model.skin[v] &&
+      !ear[v] &&
+      rest[v * 3 + 2]! > frame.earZ - FACE_BACK &&
+      y < frame.eyes[1] + 0.01 &&
+      y > frame.chinY - 0.02
+    )
+      out[v] = 1
+  }
+  lowerFaces.set(model, out)
+  return out
+}
+
+const faceTriangleLists = new WeakMap<HeadModel, Uint32Array>()
+/** The face's triangles (ahead of the ears, above the neck): what hides its contour's inner side. */
+function faceTriangles(model: HeadModel): Uint32Array {
+  const cached = faceTriangleLists.get(model)
+  if (cached) return cached
+  const face = flags(model).face
+  const t = model.triangles
+  const out: number[] = []
+  for (let k = 0; k < t.length; k += 3)
+    if (face[t[k]!] && face[t[k + 1]!] && face[t[k + 2]!]) out.push(t[k]!, t[k + 1]!, t[k + 2]!)
+  const made = Uint32Array.from(out)
+  faceTriangleLists.set(model, made)
+  return made
+}
+
 const emptyReport: FitViewReport = {
   landmarksMm: 0,
   outlinePoints: 0,
   skinOutlinePoints: 0,
   skinOutlineMm: 0,
+  faceEdgePoints: 0,
   yaw: 0,
 }
 

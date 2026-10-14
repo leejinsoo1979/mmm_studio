@@ -1,5 +1,5 @@
 import { type AvatarImages, type BaseBody, baseMeshMoves, buildAvatarGlb } from './base-body'
-import type { Camera } from './camera'
+import { type Camera, loneFocal } from './camera'
 import { type Expression, transferExpressions } from './expressions'
 import {
   eyeTexture,
@@ -111,10 +111,68 @@ export function fitCapture(
   })
 }
 
+/**
+ * The expressions a lone photo's face keeps on the avatar, as MediaPipe read them: smiling eyes
+ * (the lower lids risen under them) and a smile are as much how a face is known in its photo as
+ * its shape. A capture asks for a resting face, which these leave as it is.
+ */
+const KEPT_EXPRESSIONS = [
+  'eyeSquintLeft',
+  'eyeSquintRight',
+  'eyeBlinkLeft',
+  'eyeBlinkRight',
+  'mouthSmileLeft',
+  'mouthSmileRight',
+] as const
+/** Past this, a blink in a photo is the eyes shutting, not their rest: kept no further. */
+const KEPT_BLINK = 0.35
+
+/** A lone photo's expression (see KEPT_EXPRESSIONS) on the fitted region's vertices, or undefined. */
+export function photoExpression(
+  base: BaseBody,
+  expressions: readonly Expression[],
+  views: CaptureView[],
+): Float64Array | undefined {
+  const shapes = views.length === 1 ? views[0]!.blendshapes : null
+  if (!shapes) return undefined
+  const { vertices } = base.head
+  const region = new Int32Array(base.basemesh.length / 3).fill(-1)
+  vertices.forEach((v, i) => {
+    region[v] = i
+  })
+  const out = new Float64Array(vertices.length * 3)
+  let any = false
+  for (const name of KEPT_EXPRESSIONS) {
+    const expression = expressions.find((one) => one.name === name)
+    let weight = Math.min(1, Math.max(0, shapes[name] ?? 0))
+    if (name.startsWith('eyeBlink')) weight = Math.min(KEPT_BLINK, weight)
+    if (!(expression && weight > 0)) continue
+    any = true
+    expression.vertices.forEach((v, k) => {
+      const i = region[v]!
+      if (i < 0) return
+      for (let c = 0; c < 3; c++)
+        out[i * 3 + c] = out[i * 3 + c]! + weight * expression.deltas[k * 3 + c]!
+    })
+  }
+  return any ? out : undefined
+}
+
+/**
+ * The views as the job fits them: a lone photo whose file doesn't say its lens is taken through a
+ * portrait's (camera.ts loneFocal), which its hair's reading is told of (hair-match.ts).
+ */
+function withLens(views: CaptureView[]): { views: CaptureView[]; lensGuessed: boolean } {
+  const lone = views.length === 1 ? views[0]! : null
+  if (!(lone?.landmarks && lone.focal === undefined)) return { views, lensGuessed: false }
+  const focal = loneFocal(lone.width, lone.height, lone.landmarks)
+  return { views: [{ ...lone, focal }], lensGuessed: true }
+}
+
 export async function runAvatarJob({
   base,
   expressions,
-  views,
+  views: photos,
   colors,
   codec,
   hair,
@@ -134,7 +192,11 @@ export async function runAvatarJob({
 }): Promise<AvatarJobResult> {
   const started = performance.now()
   progress(0.02, 'fit')
-  const fit = fitCapture(base, views, fitOptions)
+  const { views, lensGuessed } = withLens(photos)
+  const fit = fitCapture(base, views, {
+    expression: photoExpression(base, expressions, views),
+    ...fitOptions,
+  })
   const fitted = performance.now()
   progress(0.45, 'texture')
 
@@ -163,7 +225,7 @@ export async function runAvatarJob({
   )
 
   const gender = base.meta.gender
-  const reading = readHair(views, fit, base, skin.albedo)
+  const reading = readHair(views, fit, base, skin.albedo, { lensGuessed })
   const styleName = hairStyleFor(reading)
   const style = styleName ? await hair(styleName) : null
   const hairColour = reading.colour ?? hexLinear(colors.hair ?? UNSEEN_HAIR)

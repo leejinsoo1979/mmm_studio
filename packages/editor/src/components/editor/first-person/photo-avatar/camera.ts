@@ -123,6 +123,30 @@ export function defaultFocal(width: number, height: number): number {
 }
 
 /**
+ * The nearest (m) a lone photo whose file doesn't say its lens is taken to have been taken from:
+ * a portrait's usual metre. Such photos are mostly crops (profile and ID pictures, a face cut out
+ * of a larger photo), and the phone's lens would put the camera a hand's breadth from a face that
+ * fills one: the face's sides and jaw, further from it than the nose and eyes, would be read as
+ * drawn smaller than they are and fitted broader — a round face seen from a step away.
+ */
+const PORTRAIT_DISTANCE = 1
+/** Adults' mean pupil distance (m), both sexes: what tells the face's distance from its size. */
+const PUPILS = 0.0635
+
+/**
+ * The focal length (pixels) for a lone photo, `width` × `height`, whose lens nothing says: the
+ * phone's, or the longer one that puts the camera `PORTRAIT_DISTANCE` from the eyes MediaPipe
+ * found (`landmarks`, its 478 points).
+ */
+export function loneFocal(width: number, height: number, landmarks: ArrayLike<number>): number {
+  const pupils = Math.hypot(
+    landmarks[468 * 2]! - landmarks[473 * 2]!,
+    landmarks[468 * 2 + 1]! - landmarks[473 * 2 + 1]!,
+  )
+  return Math.max(defaultFocal(width, height), (PORTRAIT_DISTANCE * pupils) / PUPILS)
+}
+
+/**
  * A camera on an image `width` × `height` (focal length `focal`, else the
  * usual phone or webcam one), looking at a head with `rotation`, its point
  * `target` (body space) landing on the image at `at`, `distance` metres away.

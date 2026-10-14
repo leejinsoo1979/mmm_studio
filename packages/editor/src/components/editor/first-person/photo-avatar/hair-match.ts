@@ -1,8 +1,8 @@
 import { deltaE } from '../look-pixels'
 import type { CaptureView } from './avatar-job'
-import { distanceTo } from './features'
 import type { BaseBody } from './base-body'
-import { type Camera, cameraCentre, project } from './camera'
+import { type Camera, cameraCentre, defaultFocal, project } from './camera'
+import { distanceTo } from './features'
 import type { FitResult } from './fit'
 import type { HairLength, HairStyleName } from './hair-library'
 import type { Rgb } from './hair-paint'
@@ -112,6 +112,7 @@ export function readHair(
   fit: FitResult,
   base: BaseBody,
   skinAlbedo: Rgb,
+  { lensGuessed = false }: { lensGuessed?: boolean } = {},
 ): HairReading {
   const model = base.head
   const positions = fit.positions
@@ -181,9 +182,10 @@ export function readHair(
   let thicknessViews = 0
   for (const d of data) {
     const { width, height } = d.view
+    const camera = lensGuessed ? phoneLens(d.camera, d.view, eyes) : d.camera
     const xy = new Float32Array(count * 2)
     for (let i = 0; i < count; i++) {
-      const [u, v] = project(d.camera, [
+      const [u, v] = project(camera, [
         positions[i * 3]!,
         positions[i * 3 + 1]!,
         positions[i * 3 + 2]!,
@@ -193,12 +195,12 @@ export function readHair(
     }
     const skull = new Uint8Array(width * height)
     fillTriangles(xy, model.triangles, width, height, skull, 1)
-    const eyeRow = Math.round(project(d.camera, eyes)[1])
+    const eyeRow = Math.round(project(camera, eyes)[1])
     const top = Math.max(0, Math.min(height, eyeRow))
-    const depth = toCameraDepth(d.camera, eyes)
+    const depth = toCameraDepth(camera, eyes)
     // Only what lies within hair's reach of the head is the hair: the segmenters take bits of a
     // busy background for the person too.
-    const reach = (HAIR_REACH * d.camera.focal) / depth
+    const reach = (HAIR_REACH * camera.focal) / depth
     const apart = distanceTo(skull, width, height)
     let extra = 0
     let edge = 0
@@ -220,7 +222,7 @@ export function readHair(
       }
     }
     if (edge < 10) continue
-    thickness += ((extra / edge) * depth) / d.camera.focal
+    thickness += ((extra / edge) * depth) / camera.focal
     thicknessViews++
     // How far the hair rises over the crown, in the middle third of the head's width.
     let skullTop = height
@@ -245,7 +247,7 @@ export function readHair(
         }
       }
     }
-    crown += ((skullTop - hairTop) * depth) / d.camera.focal
+    crown += ((skullTop - hairTop) * depth) / camera.focal
   }
   measures.thicknessMm = thicknessViews ? (thickness / thicknessViews) * 1000 : 0
   measures.crownMm = thicknessViews ? (crown / thicknessViews) * 1000 : 0
@@ -298,8 +300,7 @@ export function readHair(
   const lowestMm = measures.lowestMm ?? 0
   const sideMm = measures.sideMm ?? lowestMm
   const underChin = (measures.chinMm - lowestMm) / 1000
-  const long =
-    underChin >= LONG_UNDER_CHIN || (measures.cut && underChin >= CUT_UNDER_CHIN)
+  const long = underChin >= LONG_UNDER_CHIN || (measures.cut && underChin >= CUT_UNDER_CHIN)
   const length: HairLength = bald
     ? 'bald'
     : long
@@ -346,6 +347,23 @@ function pixelOf(camera: Camera, p: Vec3): number {
   const y = Math.floor(v)
   if (x < 0 || y < 0 || x >= camera.width || y >= camera.height) return -1
   return y * camera.width + x
+}
+
+/**
+ * The camera a guessed lens's hair is measured standing off the skull
+ * through: the thresholds (BUZZ_MM, BIG_MM, BIG_CROWN_MM) are a phone lens's,
+ * and the farther the camera, the more of the skull its outline takes in and
+ * the thinner the same hair reads (some 15 mm thinner from a metre). A lone
+ * photo taken as a portrait's (camera.ts loneFocal) may as well be a phone's,
+ * whose short hair would then read as a buzz cut: it is measured through the
+ * phone's lens moved in to frame the head the same at the eyes.
+ */
+function phoneLens(camera: Camera, view: CaptureView, eyes: Vec3): Camera {
+  const focal = defaultFocal(view.width, view.height)
+  if (camera.focal <= focal) return camera
+  const depth = toCameraDepth(camera, eyes)
+  const [x, y, z] = camera.translation
+  return { ...camera, focal, translation: [x, y, z + depth * (focal / camera.focal - 1)] }
 }
 
 function toCameraDepth(camera: Camera, p: Vec3): number {
