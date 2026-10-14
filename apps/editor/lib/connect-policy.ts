@@ -15,6 +15,10 @@
  * - Firebase sign-in, Firestore (shared worlds, presentations) and Storage;
  * - the GLB decoders three.js fetches (Draco from gstatic, KTX2's Basis
  *   transcoder from jsDelivr);
+ * - the editor's icons, which @iconify/react fetches by name from Iconify's
+ *   API or its two fallback hosts;
+ * - the origins scenes may take assets from (`PASCAL_ALLOWED_ASSET_ORIGINS`,
+ *   core's asset-url allowlist), when the owner lists them;
  * - in development, the dev server's hot-reload socket.
  * Anything else an owner's own content needs goes in `CSP_CONNECT_SRC`
  * (space-separated origins), and `CSP_CONNECT_SRC=off` sends no policy.
@@ -33,6 +37,7 @@ const FIREBASE = [
   'https://firebasestorage.googleapis.com',
 ]
 const DECODERS = ['https://www.gstatic.com', 'https://cdn.jsdelivr.net']
+const ICONS = ['https://api.iconify.design', 'https://api.simplesvg.com', 'https://api.unisvg.com']
 const DEV_SOCKETS = ['ws://localhost:*', 'ws://127.0.0.1:*']
 
 /** A URL's origin, or null when it is not an http(s) URL. */
@@ -67,6 +72,8 @@ export function connectSources(env: Env = process.env): string[] | null {
     ...FIREBASE,
     originOf(env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN) ?? DEFAULT_AUTH_DOMAIN,
     ...DECODERS,
+    ...ICONS,
+    ...(env.PASCAL_ALLOWED_ASSET_ORIGINS?.split(',').map(originOf) ?? []),
     ...(env.NODE_ENV === 'development' ? DEV_SOCKETS : []),
     ...(extra ? extra.split(/\s+/).map(sourceOf) : []),
   ]

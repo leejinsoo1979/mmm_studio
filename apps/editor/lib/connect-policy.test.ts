@@ -24,7 +24,7 @@ describe('connect policy', () => {
     expect(sources).not.toContain('*')
   })
 
-  test('lets through what the app loads: itself, local files, assets, catalog, sign-in, shared worlds, decoders', () => {
+  test('lets through what the app loads: itself, local files, assets, catalog, sign-in, shared worlds, decoders, icons', () => {
     const sources = connectSources({ NODE_ENV: 'production' })!
     for (const url of [
       'http://localhost:3002/api/photo-avatar',
@@ -37,6 +37,9 @@ describe('connect policy', () => {
       'https://mmm-studio-7a14c.firebaseapp.com/__/auth/handler',
       'https://www.gstatic.com/draco/versioned/decoders/1.5.5/draco_decoder.wasm',
       'https://cdn.jsdelivr.net/gh/pmndrs/drei-assets@master/basis/basis_transcoder.wasm',
+      'https://api.iconify.design/lucide.json?icons=swatch-book',
+      'https://api.simplesvg.com/charm.json?icons=stack-push',
+      'https://api.unisvg.com/lucide.json?icons=square',
     ]) {
       expect(allowed(sources, url)).toBe(true)
     }
@@ -52,6 +55,15 @@ describe('connect policy', () => {
     expect(sources).toContain('https://cdn.example.com')
     expect(sources).toContain('https://other-app.firebaseapp.com')
     expect(sources).not.toContain('https://editor.pascal.app')
+  })
+
+  test('takes in the origins scenes may load assets from, when the owner lists them', () => {
+    const sources = connectSources({
+      PASCAL_ALLOWED_ASSET_ORIGINS: 'https://models.example.org, https://cdn.other.com/x,ftp://no',
+    })!
+    expect(allowed(sources, 'https://models.example.org/a/chair.glb')).toBe(true)
+    expect(allowed(sources, 'https://cdn.other.com/tex.jpg')).toBe(true)
+    expect(sources.some((source) => source.startsWith('ftp'))).toBe(false)
   })
 
   test('the dev server’s hot-reload socket only in development', () => {

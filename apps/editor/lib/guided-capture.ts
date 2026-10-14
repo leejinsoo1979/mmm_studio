@@ -62,7 +62,12 @@ export function runGuidedCapture(
         const read = await readGuideFrame(frame, performance.now(), Math.abs(step.yaw) === 90)
         if (stopped) return
         const advice = guide(state.current, read)
-        if (advice.state.best?.time === read.time) copyFrame(playing, best)
+        // The frame judged, not the video as it is now: it has moved on while the frame was read.
+        if (advice.state.best?.time === read.time) {
+          best.width = frame.width
+          best.height = frame.height
+          best.getContext('2d')!.drawImage(frame, 0, 0)
+        }
         events.onAdvice(advice.message, advice.ready)
         if (advice.take) {
           const taken = document.createElement('canvas')
