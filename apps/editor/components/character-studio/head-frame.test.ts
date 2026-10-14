@@ -9,7 +9,7 @@ import {
   SkinnedMesh,
   Uint16BufferAttribute,
 } from 'three'
-import { aiShotFraming, headFraming, headSpan } from './head-frame'
+import { aiShotFraming, closeIn, closeness, headFraming, headSpan } from './head-frame'
 
 type Point = { at: [number, number, number]; bones: [number, number]; weights: [number, number] }
 
@@ -267,5 +267,34 @@ describe('framing an AI photo', () => {
   test('goes by the body’s height until its head is found', () => {
     const aim = aiShotFraming('full', null, 1.6, 1.1, 2 / 3)
     expect(share(0, aim) - share(1.76, aim)).toBeCloseTo(0.9, 6)
+  })
+})
+
+describe('closing in on the face from a wider framing', () => {
+  const wide = { x: 0, y: 1, half: 1 }
+  const face = { x: 0.05, y: 1.6, half: 0.2 }
+
+  test('aims as the wider framing at its own size, and at the face once zoomed down to it', () => {
+    expect(closeness(1, 0.2)).toBe(0)
+    expect(closeness(1.3, 0.2)).toBe(0)
+    expect(closeness(0.2, 0.2)).toBe(1)
+    expect(closeness(0.1, 0.2)).toBe(1)
+    expect(closeIn(wide, face, 1, 0.2)).toEqual(wide)
+    const near = closeIn({ ...wide, half: 0.2 }, face, 0.2, 0.2)
+    expect(near.x).toBeCloseTo(face.x, 9)
+    expect(near.y).toBeCloseTo(face.y, 9)
+    expect(near.half).toBe(0.2)
+  })
+
+  test('slides its aim by the share of the way in scale', () => {
+    // Halfway in scale (zoom √0.2) is halfway to the face.
+    const half = closeIn(wide, face, Math.sqrt(0.2), 0.2)
+    expect(half.y).toBeCloseTo(1.3, 9)
+    expect(half.x).toBeCloseTo(0.025, 9)
+  })
+
+  test('never closes in where the face is no smaller than the framing', () => {
+    expect(closeness(0.5, 1)).toBe(0)
+    expect(closeness(0.5, Number.NaN)).toBe(0)
   })
 })

@@ -61,17 +61,11 @@ import {
   hoverHandle,
   setHandleState,
 } from './face-handles'
-import {
-  closeIn,
-  type HeadFraming,
-  type HeadSpan,
-  headFraming,
-  headSpan,
-} from './head-frame'
+import { closeIn, type HeadFraming, type HeadSpan, headFraming, headSpan } from './head-frame'
 import { DRAG_THRESHOLD, pointerMove, snapTurn, viewTurn } from './sculpt-gesture'
 import {
-  CLOSES_IN,
   type CameraFocus,
+  CLOSES_IN,
   type StageInsets,
   type StagePose,
   type StageView,
@@ -190,6 +184,12 @@ const TURN_STEP = Math.PI / 12
 /** How much one wheel notch's delta (px) zooms, and one +/− key press. */
 const WHEEL_ZOOM = 0.001
 const KEY_ZOOM = 1.15
+/**
+ * Within this of the face's zoom, the 얼굴 button goes back out: the face's
+ * zoom drifts a few per cent as the head turns (its span changes with the
+ * view), so an exact match would close in again instead.
+ */
+const AT_FACE = 1.2
 /** The most pixels the canvas's drawing buffer holds: a full-bleed stage at dpr 2 could be 5120 × 2880. */
 const MOST_PIXELS = 8.3e6
 
@@ -211,7 +211,6 @@ function ease(state: Spring, target: number, delta: number) {
 
 /** The head with the hair below it to the shoulders. */
 const HEAD_FOCUS: ReadonlySet<CameraFocus> = new Set<HeadFocus>(['hair', 'face', 'eyes', 'mouth'])
-
 
 const withHair = (span: HeadSpan): HeadSpan => ({
   ...span,
@@ -307,7 +306,11 @@ function framingFor(
   }
   if (focus === 'upper') {
     const top = head?.top ?? height
-    return closing({ top, bottom: top - UPPER_REACH * height, x: head?.x ?? 0 }, UPPER_FILL, UPPER_ASPECT)
+    return closing(
+      { top, bottom: top - UPPER_REACH * height, x: head?.x ?? 0 },
+      UPPER_FILL,
+      UPPER_ASPECT,
+    )
   }
   if (!head) {
     const { look, span } = FRAMING[focus as HeadFocus]
@@ -1225,7 +1228,7 @@ export function StudioStage({
   }, [state])
   const closeUp = useCallback(() => {
     if (!CLOSES_IN.has(state.focus)) return
-    state.zoom = state.zoom <= state.faceZoom * 1.01 ? 1 : state.faceZoom
+    state.zoom = state.zoom <= state.faceZoom * AT_FACE ? 1 : state.faceZoom
   }, [state])
 
   useImperativeHandle(
