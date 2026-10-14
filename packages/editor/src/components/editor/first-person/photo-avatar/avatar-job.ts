@@ -234,11 +234,13 @@ export async function runAvatarJob({
     placed: lashes ? new Map([[lashes.index, lashes.positions]]) : undefined,
     opacity: { Eyelashes: LASHES[gender].opacity },
   })
-  const glb = dressHair(
-    editMaterials(avatar, SKIN_MATERIAL_EDITS),
-    base,
-    { style: style?.style ?? null, gender, basemesh, pictures, colour: hairColour },
-  )
+  const glb = dressHair(editMaterials(avatar, SKIN_MATERIAL_EDITS), base, {
+    style: style?.style ?? null,
+    gender,
+    basemesh,
+    pictures,
+    colour: hairColour,
+  })
   progress(1, 'pack')
   const done = performance.now()
   return {

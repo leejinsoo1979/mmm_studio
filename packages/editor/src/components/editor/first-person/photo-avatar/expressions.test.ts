@@ -173,8 +173,9 @@ describe('face expressions', () => {
           expect(accessor.max).toHaveLength(3)
         }
     }
-    for (const mesh of ['Body', 'Eyebrows', 'Eyelashes', 'Teeth', 'Tongue'])
-      expect(withTargets).toContain(mesh)
+    for (const mesh of ['Body', 'Eyelashes', 'Teeth', 'Tongue']) expect(withTargets).toContain(mesh)
+    // The brows painted on the skin instead, no node draws their cards: the file leaves them out.
+    expect(out.json.meshes.some((mesh: { name: string }) => mesh.name === 'Eyebrows')).toBe(false)
     expect(withTargets).not.toContain('Eyes')
     for (const mesh of withTargets) expect(mesh).not.toStartWith('Outfit_')
 
