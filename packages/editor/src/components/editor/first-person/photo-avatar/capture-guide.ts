@@ -73,6 +73,8 @@ export type GuideState = {
   /** The last turn MediaPipe saw (degrees): which side a face too far turned for it is on. */
   lastYaw: number | null
   lastCentre: [number, number] | null
+  /** When light from one side was first seen in this pose (ms), null while it hasn't been. */
+  uneven: number | null
 }
 
 export const startGuide = (step = 0): GuideState => ({
@@ -81,6 +83,7 @@ export const startGuide = (step = 0): GuideState => ({
   best: null,
   lastYaw: null,
   lastCentre: null,
+  uneven: null,
 })
 
 /** How long (ms) the person holds a pose before its frame is taken. */
@@ -148,8 +151,13 @@ export function guide(state: GuideState, frame: GuideFrame): GuideAdvice {
     frame.centre && state.lastCentre
       ? Math.hypot(frame.centre[0] - state.lastCentre[0], frame.centre[1] - state.lastCentre[1])
       : 0
-  const next: GuideState = { ...state, lastYaw, lastCentre: frame.centre }
-  const problem = placement(step, frame, state.lastYaw) ?? condition(step, frame)
+  const light = lightProblem(step, frame)
+  const uneven = state.uneven ?? (light ? frame.time : null)
+  // Asked to face the light for a while and not able to (a lamp that can't move): taken as it is.
+  const patient = light !== null && uneven !== null && frame.time - uneven >= LIGHT_PATIENCE_MS
+  const next: GuideState = { ...state, lastYaw, lastCentre: frame.centre, uneven }
+  const problem =
+    placement(step, frame, state.lastYaw) ?? condition(step, frame) ?? (patient ? null : light)
   if (problem) {
     return {
       state: { ...next, since: null, best: null },
@@ -183,7 +191,11 @@ export function guide(state: GuideState, frame: GuideFrame): GuideAdvice {
   }
   return {
     state: { ...next, since, best },
-    message: held ? '찍었어요' : '좋아요, 그대로 멈춰 주세요',
+    message: held
+      ? '찍었어요'
+      : light
+        ? '빛이 한쪽에서 와요. 이대로 찍을게요, 그대로 멈춰 주세요'
+        : '좋아요, 그대로 멈춰 주세요',
     ready: true,
     take: held && best !== null,
   }
@@ -193,24 +205,31 @@ export function guide(state: GuideState, frame: GuideFrame): GuideAdvice {
 export const EXPOSURE = { least: 55, most: 235 }
 /** The darker cheek's share of the lighter one's light under which the face is lit from one side. */
 export const MIN_BALANCE = 0.75
+/** How long (ms) the guide asks to face the light before it takes the front view lit as it is. */
+export const LIGHT_PATIENCE_MS = 4000
 /** Blendshape levels past which the eyes read as shut, the mouth as open, the face as smiling. */
 export const EXPRESSION = { blink: 0.5, jawOpen: 0.2, smile: 0.4 }
 
 /**
+ * Light from one side on the front view, whose light the skin is read under:
+ * its shading would stay in the skin. Asked about, not insisted on.
+ */
+function lightProblem(step: CaptureStep, frame: GuideFrame): string | null {
+  if (step.yaw !== 0 || frame.balance == null || frame.balance >= MIN_BALANCE) return null
+  return '얼굴 한쪽이 어두워요. 창문이나 조명을 정면으로 마주 봐 주세요'
+}
+
+/**
  * What else, with the pose right, would spoil the photo: someone else in it,
- * too little or too much light, light from one side (the front view, whose
- * light the skin is read under: its shading would stay in the skin), shut
- * eyes or an open or smiling mouth (the avatar's face is a neutral, shut
- * one; MediaPipe reads no expression on a full side view).
+ * too little or too much light, shut eyes or an open or smiling mouth (the
+ * avatar's face is a neutral, shut one; MediaPipe reads no expression on a
+ * full side view).
  */
 function condition(step: CaptureStep, frame: GuideFrame): string | null {
   if ((frame.faces ?? 1) > 1) return '다른 사람이 함께 보여요. 혼자 화면에 나와 주세요'
   if (frame.exposure != null) {
     if (frame.exposure < EXPOSURE.least) return '너무 어두워요. 밝은 곳으로 가거나 불을 켜 주세요'
     if (frame.exposure > EXPOSURE.most) return '너무 밝아요. 얼굴에 바로 비치는 빛을 피해 주세요'
-  }
-  if (step.yaw === 0 && frame.balance != null && frame.balance < MIN_BALANCE) {
-    return '얼굴 한쪽이 어두워요. 창문이나 조명을 정면으로 마주 봐 주세요'
   }
   if (Math.abs(step.yaw) < 90) {
     if ((frame.blink ?? 0) > EXPRESSION.blink) return '눈을 크게 떠 주세요'

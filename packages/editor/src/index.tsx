@@ -169,6 +169,7 @@ export {
   type GuideFrame,
   type GuideState,
   guide,
+  LIGHT_PATIENCE_MS,
   MIN_BALANCE,
   nextStep,
   sharpness,

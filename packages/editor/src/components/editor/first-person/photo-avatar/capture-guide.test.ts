@@ -6,6 +6,7 @@ import {
   guide,
   HOLD_MS,
   LEVEL_PITCH,
+  LIGHT_PATIENCE_MS,
   nextStep,
   sharpness,
   startGuide,
@@ -130,6 +131,20 @@ describe('capture guide', () => {
       expect(held({ ...ok, ...spoilt }).take).toBe(false)
     }
 
+    // Asked to face the light for a while; a person who can't (a lamp that won't move) is taken
+    // as they are, told so.
+    const sideLit = feed(
+      startGuide(),
+      (t) => frame(t, { ...ok, balance: 0.5 }),
+      LIGHT_PATIENCE_MS + HOLD_MS + 100,
+    )
+    expect(sideLit.take).toBe(true)
+    expect(
+      feed(startGuide(), (t) => frame(t, { ...ok, balance: 0.5 }), LIGHT_PATIENCE_MS - 200).take,
+    ).toBe(false)
+    expect(
+      feed(startGuide(), (t) => frame(t, { ...ok, balance: 0.5 }), LIGHT_PATIENCE_MS + 300).message,
+    ).toContain('이대로 찍을게요')
     // Light from one side matters for the front view only, whose light the skin is read under;
     // the ¾ views still want open eyes and a still mouth.
     expect(held({ ...ok, yaw: 45, balance: 0.4 }, 1).take).toBe(true)
