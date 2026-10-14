@@ -169,9 +169,9 @@ export {
   type GuideFrame,
   type GuideState,
   guide,
-  LIGHT_PATIENCE_MS,
   MIN_BALANCE,
   nextStep,
+  PATIENCE_MS,
   sharpness,
   startGuide,
 } from './components/editor/first-person/photo-avatar/capture-guide'

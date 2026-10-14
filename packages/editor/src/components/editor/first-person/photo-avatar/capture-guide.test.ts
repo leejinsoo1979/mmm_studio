@@ -6,8 +6,8 @@ import {
   guide,
   HOLD_MS,
   LEVEL_PITCH,
-  LIGHT_PATIENCE_MS,
   nextStep,
+  PATIENCE_MS,
   sharpness,
   startGuide,
 } from './capture-guide'
@@ -147,15 +147,39 @@ describe('capture guide', () => {
     const sideLit = feed(
       startGuide(),
       (t) => frame(t, { ...ok, balance: 0.5 }),
-      LIGHT_PATIENCE_MS + HOLD_MS + 100,
+      PATIENCE_MS + HOLD_MS + 100,
     )
     expect(sideLit.take).toBe(true)
     expect(
-      feed(startGuide(), (t) => frame(t, { ...ok, balance: 0.5 }), LIGHT_PATIENCE_MS - 200).take,
+      feed(startGuide(), (t) => frame(t, { ...ok, balance: 0.5 }), PATIENCE_MS - 200).take,
     ).toBe(false)
     expect(
-      feed(startGuide(), (t) => frame(t, { ...ok, balance: 0.5 }), LIGHT_PATIENCE_MS + 300).message,
+      feed(startGuide(), (t) => frame(t, { ...ok, balance: 0.5 }), PATIENCE_MS + 300).message,
     ).toContain('이대로 찍을게요')
+    // Eyes MediaPipe reads as shut however open they are (narrow or hooded ones, or a closed-eyed
+    // scan) are asked about, then taken as they are: no one is held at the camera for them.
+    expect(feed(startGuide(), (t) => frame(t, { ...ok, blink: 0.8 }), PATIENCE_MS - 200).take).toBe(
+      false,
+    )
+    const shut = feed(startGuide(), (t) => frame(t, { ...ok, blink: 0.8 }), PATIENCE_MS + 300)
+    expect(shut.message).toContain('눈이 감겨 보여요. 이대로 찍을게요')
+    expect(
+      feed(startGuide(), (t) => frame(t, { ...ok, blink: 0.8 }), PATIENCE_MS + HOLD_MS + 100).take,
+    ).toBe(true)
+    // So is a mouth that reads as open or smiling.
+    expect(
+      feed(
+        startGuide(1),
+        (t) => frame(t, { ...ok, yaw: 45, smile: 0.7 }),
+        PATIENCE_MS + HOLD_MS + 100,
+      ).take,
+    ).toBe(true)
+    // What can always be fixed is waited for however long it takes.
+    for (const spoilt of [{ faces: 2 }, { lit: 30 }, { burnt: 0.6 }]) {
+      expect(feed(startGuide(), (t) => frame(t, { ...ok, ...spoilt }), PATIENCE_MS * 3).take).toBe(
+        false,
+      )
+    }
     // Light from one side matters for the front view only, whose light the skin is read under;
     // the ¾ views still want open eyes and a still mouth.
     expect(held({ ...ok, yaw: 45, balance: 0.4 }, 1).take).toBe(true)
