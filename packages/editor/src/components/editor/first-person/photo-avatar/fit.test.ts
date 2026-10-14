@@ -1,12 +1,12 @@
 import { beforeAll, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { type HeadSurface, type ProfileError, profileError } from './__bench__/profile'
+import { syntheticCapture } from './__bench__/synthetic-capture'
 import { readBaseBody } from './base-body'
 import { type FitView, fitHead } from './fit'
 import { type HeadModel, landmarkPosition, readFaceTargets, shapePositions } from './head-model'
 import type { Vec3 } from './linalg'
-import { type HeadSurface, type ProfileError, profileError } from './profile'
-import { syntheticCapture } from './synthetic-capture'
 
 /**
  * The fit measured against a known head: the female base body reshaped

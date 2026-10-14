@@ -36,6 +36,8 @@ describe('photo slot', () => {
   test('a photo that can’t tell is not filed', () => {
     expect(slotFromReading(unseen)).toBeNull()
     // Face and hair, head and neck too close together to tell a side by.
-    expect(slotFromReading({ ...unseen, faceSkinX: 500, hairX: 495, headX: 500, neckX: 498 })).toBeNull()
+    expect(
+      slotFromReading({ ...unseen, faceSkinX: 500, hairX: 495, headX: 500, neckX: 498 }),
+    ).toBeNull()
   })
 })

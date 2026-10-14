@@ -1,8 +1,8 @@
-import { type Camera, cameraLookingAt, headRotation, toCamera } from './camera'
-import type { FitView } from './fit'
-import { type HeadModel, landmarkPosition } from './head-model'
-import type { Vec3 } from './linalg'
-import { fillTriangles } from './silhouette'
+import { type Camera, cameraLookingAt, headRotation, toCamera } from '../camera'
+import type { FitView } from '../fit'
+import { type HeadModel, landmarkPosition } from '../head-model'
+import type { Vec3 } from '../linalg'
+import { fillTriangles } from '../silhouette'
 
 /**
  * Photos of a known head, made up: what a capture of it would give the fit

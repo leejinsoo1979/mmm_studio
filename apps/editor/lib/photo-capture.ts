@@ -13,6 +13,7 @@ import {
   skinModel,
 } from '@pascal-app/editor'
 import { type DetectedFace, detectFaces, sampleFaceColors } from './face-detect'
+import { quietMediaPipe } from './mediapipe-quiet'
 import { type PoseSlot, SIDE_YAW, type SlotReading, slotFromReading } from './photo-slot'
 
 /**
@@ -56,6 +57,7 @@ function loadSegmenter(model: string): Promise<ImageSegmenter> {
   const found = segmenters.get(model)
   if (found) return found
   const loading = (async () => {
+    quietMediaPipe()
     const { ImageSegmenter } = await import('@mediapipe/tasks-vision')
     const create = (delegate: 'GPU' | 'CPU') =>
       ImageSegmenter.createFromOptions(
@@ -562,7 +564,13 @@ function faceLight(
   height: number,
   points: DetectedFace['points'],
 ): FaceLight {
-  const mean = (x0: number, y0: number, x1: number, y1: number, inside: (x: number, y: number) => boolean) => {
+  const mean = (
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    inside: (x: number, y: number) => boolean,
+  ) => {
     let sum = 0
     let count = 0
     for (let y = Math.max(0, Math.floor(y0)); y < Math.min(height, Math.ceil(y1)); y++) {
@@ -576,15 +584,24 @@ function faceLight(
   }
   const xs = points.map((p) => p[0])
   const ys = points.map((p) => p[1])
-  const [left, right, top, bottom] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+  const [left, right, top, bottom] = [
+    Math.min(...xs),
+    Math.max(...xs),
+    Math.min(...ys),
+    Math.max(...ys),
+  ]
   const [w, h] = [right - left, bottom - top]
   const exposure = mean(left + w / 4, top + h / 4, right - w / 4, bottom - h / 4, () => true)
   const eyes = Math.hypot(points[468]![0] - points[473]![0], points[468]![1] - points[473]![1])
   const radius = Math.max(2, eyes / 5)
   const cheek = (index: number) => {
     const [cx, cy] = points[index]!
-    return mean(cx - radius, cy - radius, cx + radius, cy + radius, (x, y) =>
-      (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius,
+    return mean(
+      cx - radius,
+      cy - radius,
+      cx + radius,
+      cy + radius,
+      (x, y) => (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius,
     )
   }
   const [a, b] = CHEEKS.map(cheek)

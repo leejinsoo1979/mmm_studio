@@ -17,8 +17,8 @@ import {
   ArrowRight,
   Camera,
   Check,
-  ImageUp,
   Images,
+  ImageUp,
   LoaderCircle,
   RefreshCw,
   ShieldCheck,
@@ -325,8 +325,8 @@ function GuidedCapture({
         })}
       </div>
       <p className="text-[11px] text-white/45 leading-4">
-        밝고 고른 빛을 마주 보고, 안경과 모자는 벗고, 입을 다문 무표정으로 찍어 주세요. 자세를
-        잡고 잠깐 멈추면 저절로 찍혀요.
+        밝고 고른 빛을 마주 보고, 안경과 모자는 벗고, 입을 다문 무표정으로 찍어 주세요. 자세를 잡고
+        잠깐 멈추면 저절로 찍혀요.
       </p>
       <div className="flex flex-wrap gap-2">
         {step && step.slot !== 'front' && (
@@ -568,7 +568,8 @@ export function PhotoAvatarDialog({
       return next
     })
     const parts = [`사진 ${found.size}장을 얼굴 방향대로 칸에 넣었어요.`]
-    if (unknown) parts.push(`방향을 알 수 없는 사진 ${unknown}장은 아래 칸을 눌러 직접 넣어 주세요.`)
+    if (unknown)
+      parts.push(`방향을 알 수 없는 사진 ${unknown}장은 아래 칸을 눌러 직접 넣어 주세요.`)
     if (crowded) parts.push(`얼굴이 여러 개인 사진 ${crowded}장은 뺐어요.`)
     setUploadNote(parts.join(' '))
     onAnnounce(parts[0]!)
@@ -635,7 +636,11 @@ export function PhotoAvatarDialog({
     setSaveFailed(false)
     // The card is the avatar as the stage shows it; only a fictional AI portrait may be its own card.
     const card =
-      avatar.source !== 'ai' && capture ? await capture().then(stageCard).catch(() => null) : null
+      avatar.source !== 'ai' && capture
+        ? await capture()
+            .then(stageCard)
+            .catch(() => null)
+        : null
     try {
       const character = await addPhotoAvatar({
         ...avatar,
@@ -698,9 +703,9 @@ export function PhotoAvatarDialog({
             className="flex items-start gap-2 rounded-xl bg-rose-500/10 px-3 py-2 text-[12px] text-rose-100 leading-5"
             role="alert"
           >
-            <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-rose-300" />
-            이 브라우저에 저장하지 못했어요. 저장 공간이 부족하거나 시크릿(개인정보 보호) 창일 수
-            있어요. 아바타는 그대로 있으니 공간을 비운 뒤 ‘저장 다시 시도’를 눌러 주세요.
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-rose-300" />이 브라우저에
+            저장하지 못했어요. 저장 공간이 부족하거나 시크릿(개인정보 보호) 창일 수 있어요. 아바타는
+            그대로 있으니 공간을 비운 뒤 ‘저장 다시 시도’를 눌러 주세요.
           </p>
         )}
         <label className="flex flex-col gap-1">
@@ -808,9 +813,9 @@ export function PhotoAvatarDialog({
                 <span>
                   실제 사람 사진으로 만들기는 지금 꺼져 있어요. 켜려면 이 앱을 실행하는 서버의 환경
                   변수에{' '}
-                  <code className="rounded bg-white/10 px-1">PHOTO_AVATAR_FACE_ENABLED=true</code>
-                  를 넣고 서버를 다시 시작해 주세요. 개발 모드(<code>bun dev</code>)에서는 따로
-                  켜지 않아도 켜져 있어요.
+                  <code className="rounded bg-white/10 px-1">PHOTO_AVATAR_FACE_ENABLED=true</code>를
+                  넣고 서버를 다시 시작해 주세요. 개발 모드(<code>bun dev</code>)에서는 따로 켜지
+                  않아도 켜져 있어요.
                 </span>
               </p>
             ) : (
@@ -872,8 +877,8 @@ export function PhotoAvatarDialog({
               <span className="flex flex-col gap-1">
                 <span className="font-semibold text-[14px]">사진 3장 또는 5장 올리기</span>
                 <span className="text-[12px] text-white/60 leading-5">
-                  정면·좌우 45°(·좌우 옆얼굴) 사진을 한꺼번에 올리면 얼굴 방향을 보고 알아서
-                  나눠 넣어요.
+                  정면·좌우 45°(·좌우 옆얼굴) 사진을 한꺼번에 올리면 얼굴 방향을 보고 알아서 나눠
+                  넣어요.
                 </span>
               </span>
             </button>
@@ -890,8 +895,8 @@ export function PhotoAvatarDialog({
                   내 사진 한 장 <EstimatedBadge />
                 </span>
                 <span className="text-[12px] text-white/60 leading-5">
-                  정면 사진 한 장으로 빠르게 만들어요. 옆모습(코 높이·이마·턱)은 사진으로 알 수
-                  없어 평균 얼굴로 추정해요. 덜 정확해요.
+                  정면 사진 한 장으로 빠르게 만들어요. 옆모습(코 높이·이마·턱)은 사진으로 알 수 없어
+                  평균 얼굴로 추정해요. 덜 정확해요.
                 </span>
               </span>
             </button>

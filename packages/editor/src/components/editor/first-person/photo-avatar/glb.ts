@@ -291,7 +291,8 @@ function viewRefs(json: GltfJson, visit: (holder: GltfJson, key: string) => void
       visit(accessor.sparse.values, 'bufferView')
     }
   }
-  for (const image of json.images ?? []) if (image.bufferView !== undefined) visit(image, 'bufferView')
+  for (const image of json.images ?? [])
+    if (image.bufferView !== undefined) visit(image, 'bufferView')
 }
 
 /** The kept items of a list (by old index) and each old index's new one. */

@@ -30,12 +30,7 @@ import { createSendLedger, type LedgerRefusal, type SendLedger } from './ledger'
 import { createMetaPersonService } from './metaperson'
 import { createMetaPersonFake } from './metaperson-fake'
 import { type PortraitImage, portraitImage, producePortrait } from './portrait'
-import {
-  type PortraitClaim,
-  portraitSha,
-  signPortrait,
-  verifyPortrait,
-} from './portrait-token'
+import { type PortraitClaim, portraitSha, signPortrait, verifyPortrait } from './portrait-token'
 import type { AvatarService, ServiceFetch } from './service'
 import {
   AI_PERSON_AGES,
@@ -553,7 +548,9 @@ export function createPhotorealAiHandlers(deps: PhotorealAiHandlerDeps) {
     request: Request,
     uid: string,
     config: PhotorealAiConfig,
-  ): Promise<{ image: PortraitImage; claim: PortraitClaim; expires: number } | { refused: Response }> {
+  ): Promise<
+    { image: PortraitImage; claim: PortraitClaim; expires: number } | { refused: Response }
+  > {
     const contentType = request.headers.get('content-type') ?? ''
     if (!/^multipart\/form-data\s*;/i.test(contentType)) {
       return { refused: refuse(request, 415, 'unsupported_type') }

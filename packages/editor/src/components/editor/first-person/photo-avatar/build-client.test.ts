@@ -29,10 +29,15 @@ describe('photo avatar build client', () => {
     const controller = new AbortController()
     controller.abort()
     let made = 0
-    const build = buildPhotoAvatar(request, () => {}, controller.signal, () => {
-      made++
-      return standIn().make()
-    })
+    const build = buildPhotoAvatar(
+      request,
+      () => {},
+      controller.signal,
+      () => {
+        made++
+        return standIn().make()
+      },
+    )
     await expect(build).rejects.toThrow('aborted')
     expect(made).toBe(0)
   })
@@ -41,7 +46,12 @@ describe('photo avatar build client', () => {
     const { worker, sent, make } = standIn()
     const controller = new AbortController()
     const progress: number[] = []
-    const build = buildPhotoAvatar(request, ({ fraction }) => progress.push(fraction), controller.signal, make)
+    const build = buildPhotoAvatar(
+      request,
+      ({ fraction }) => progress.push(fraction),
+      controller.signal,
+      make,
+    )
     expect(sent).toHaveLength(1)
     worker.onmessage!({ data: { progress: 0.3, stage: 'fit' } })
     controller.abort()

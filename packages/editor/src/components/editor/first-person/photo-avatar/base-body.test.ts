@@ -157,13 +157,15 @@ describe('base body', () => {
     for (const name of ['hair_color', 'head_color']) {
       const texture = textureOf(name)
       expect(texture.extensions?.EXT_texture_webp).toBeUndefined()
-      expect(json.images[texture.source].mimeType).toBe(name === 'hair_color' ? 'image/png' : 'image/jpeg')
+      expect(json.images[texture.source].mimeType).toBe(
+        name === 'hair_color' ? 'image/png' : 'image/jpeg',
+      )
     }
     const hair = json.images[textureOf('hair_color').source]
     const view = json.bufferViews[hair.bufferView]
-    expect(Array.from(glb.bin.subarray(view.byteOffset, view.byteOffset + view.byteLength))).toEqual(
-      Array.from(png.bytes),
-    )
+    expect(
+      Array.from(glb.bin.subarray(view.byteOffset, view.byteOffset + view.byteLength)),
+    ).toEqual(Array.from(png.bytes))
     // The others are still WebP, so the extension is still needed.
     expect(json.extensionsRequired).toContain('EXT_texture_webp')
 
@@ -196,7 +198,8 @@ describe('base body', () => {
     const { json } = parseGlb(out)
     expect(json.extensionsUsed).not.toContain('EXT_texture_webp')
     expect(json.extensionsRequired).not.toContain('EXT_texture_webp')
-    for (const texture of json.textures) expect(json.images[texture.source].mimeType).toBe('image/jpeg')
+    for (const texture of json.textures)
+      expect(json.images[texture.source].mimeType).toBe('image/jpeg')
   })
 
   test('no moves write the base body’s shape again', async () => {

@@ -120,7 +120,13 @@ describe('capture guide', () => {
     expect(said({ ...ok, blink: 0.8 }).message).toContain('눈을')
     expect(said({ ...ok, jawOpen: 0.5 }).message).toContain('입을 다물고')
     expect(said({ ...ok, smile: 0.7 }).message).toContain('무표정')
-    for (const spoilt of [{ faces: 2 }, { exposure: 30 }, { balance: 0.5 }, { blink: 0.8 }, { smile: 0.7 }]) {
+    for (const spoilt of [
+      { faces: 2 },
+      { exposure: 30 },
+      { balance: 0.5 },
+      { blink: 0.8 },
+      { smile: 0.7 },
+    ]) {
       expect(held({ ...ok, ...spoilt }).take).toBe(false)
     }
 
@@ -133,7 +139,9 @@ describe('capture guide', () => {
     const lost = { ...ok, yaw: null, eyes: null, blink: 0.9, smile: 0.9, balance: null }
     expect(feed(side, (t) => frame(t, lost), HOLD_MS + 50).take).toBe(true)
     // Unread (no blendshapes, no face): nothing is held against the frame.
-    expect(held({ blink: null, jawOpen: null, smile: null, balance: null, exposure: null }).take).toBe(true)
+    expect(
+      held({ blink: null, jawOpen: null, smile: null, balance: null, exposure: null }).take,
+    ).toBe(true)
   })
 
   test('moves on step by step to the end', () => {

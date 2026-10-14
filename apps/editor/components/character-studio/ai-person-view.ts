@@ -187,7 +187,9 @@ export function unavailableCopy(reason: AiPersonUnavailableReason, setup: boolea
       return [t('관리자가 AI 인물 만들기를 꺼 두었어요.')]
     case 'not_enabled':
       return [
-        t('AI 인물은 AI 실사 사진과 같은 이미지 키로 사진을 만들어 비용이 들어요 (한 명에 사진 5장). 켜려면 서버 환경 변수 '),
+        t(
+          'AI 인물은 AI 실사 사진과 같은 이미지 키로 사진을 만들어 비용이 들어요 (한 명에 사진 5장). 켜려면 서버 환경 변수 ',
+        ),
         c('AI_AVATAR_ENABLED=true'),
         t('를 넣고 다시 시작해 주세요. 개발 서버에서는 '),
         c('AI_AVATAR_MOCK=true'),

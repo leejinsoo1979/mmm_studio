@@ -85,13 +85,18 @@ export function photoNotes(photos: ReadPhoto[]): string[] {
     notes.push(
       '옆모습 추정: 사진 한 장으로는 코 높이·이마·턱 같은 옆모습을 알 수 없어 평균 얼굴로 추정했어요. 3D 얼굴 촬영으로 옆에서도 찍으면 실제 모양이 돼요.',
     )
-  } else if (!photos.some((photo) => photo.view.slot === 'left90' || photo.view.slot === 'right90')) {
+  } else if (
+    !photos.some((photo) => photo.view.slot === 'left90' || photo.view.slot === 'right90')
+  ) {
     notes.push('옆얼굴(90°) 사진이 없어 코·턱 옆모습이 덜 정확할 수 있어요.')
   }
   const shapes = front?.view.blendshapes
   if (shapes) {
     const most = (...names: string[]) => Math.max(...names.map((name) => shapes[name] ?? 0))
-    if (most('mouthSmileLeft', 'mouthSmileRight') > EXPRESSION.smile || most('jawOpen') > EXPRESSION.jawOpen)
+    if (
+      most('mouthSmileLeft', 'mouthSmileRight') > EXPRESSION.smile ||
+      most('jawOpen') > EXPRESSION.jawOpen
+    )
       notes.push('정면 사진이 웃거나 입을 벌린 얼굴이라 입 모양이 실제와 다를 수 있어요.')
     if (most('eyeBlinkLeft', 'eyeBlinkRight') > EXPRESSION.blink)
       notes.push('정면 사진에서 눈을 감고 있어 눈동자 색은 기본색으로 했어요.')
@@ -154,6 +159,13 @@ export async function makePhotoAvatar({
   }
   stopped()
   const profileEstimated = !read.some((photo) => photo.view.slot !== 'front')
+  const notes = photoNotes(read)
+  const seen = built.report.photoShare
+  if (seen < THIN_PHOTO_SHARE) {
+    notes.push(
+      `사진이 머리 피부의 ${Math.round(seen * 100)}%만 보여 줘서 나머지는 비슷한 피부색으로 채웠어요. 여러 방향에서 찍으면 더 실제 같아요.`,
+    )
+  }
   return {
     avatar: {
       id: crypto.randomUUID(),
@@ -165,9 +177,16 @@ export async function makePhotoAvatar({
       glb: new Blob([built.glb as Uint8Array<ArrayBuffer>], { type: 'model/gltf-binary' }),
       thumbnail,
     },
-    notes: photoNotes(read),
+    notes,
   }
 }
+
+/**
+ * Below this share of the head's skin seen well in some photo, most of the
+ * skin is filled in, not photographed (one front photo sees about a quarter;
+ * five turns see about half: the rest is scalp, ears' backs and under the jaw).
+ */
+const THIN_PHOTO_SHARE = 0.3
 
 const toBlob = (canvas: HTMLCanvasElement, type: string, quality?: number) =>
   new Promise<Blob>((resolve, reject) =>

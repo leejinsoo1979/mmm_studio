@@ -90,7 +90,7 @@ export async function produceViews(
       return
     }
     const result = await readAiPhotoResponse(image.provider, response).catch(() => null)
-    if (!result || !result.ok) {
+    if (!result?.ok) {
       if (result?.code === 'blocked') outcome.blocked = true
       outcome.missing.push({ slot, detail: result?.detail ?? result?.code ?? 'read' })
       return
@@ -107,7 +107,10 @@ export async function produceViews(
       })
       if (verdict !== 'clear') {
         if (verdict === 'flagged') outcome.blocked = true
-        outcome.missing.push({ slot, detail: verdict === 'flagged' ? 'output_flagged' : 'moderation' })
+        outcome.missing.push({
+          slot,
+          detail: verdict === 'flagged' ? 'output_flagged' : 'moderation',
+        })
         return
       }
     }

@@ -245,7 +245,12 @@ describe('aiPersonView', () => {
     // With no paid service, this browser making the avatar, then done.
     const making: AiPersonStep = { kind: 'making', fraction: 0.4, text: '피부' }
     expect(view({ step: making })).toEqual(making)
-    const made: AiPersonStep = { kind: 'made', name: 'AI 인물', notes: ['옆모습 추정'], estimated: true }
+    const made: AiPersonStep = {
+      kind: 'made',
+      name: 'AI 인물',
+      notes: ['옆모습 추정'],
+      estimated: true,
+    }
     expect(view({ step: made })).toEqual(made)
   })
 

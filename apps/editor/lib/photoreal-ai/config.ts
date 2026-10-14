@@ -228,7 +228,10 @@ export function readPhotorealAiConfig(
         ),
       },
       viewLimits: {
-        userDaily: positiveInt(value(env, 'AI_AVATAR_VIEWS_USER_DAILY_LIMIT'), DEFAULT_VIEWS_USER_DAILY),
+        userDaily: positiveInt(
+          value(env, 'AI_AVATAR_VIEWS_USER_DAILY_LIMIT'),
+          DEFAULT_VIEWS_USER_DAILY,
+        ),
         globalDaily: positiveInt(value(env, 'AI_AVATAR_VIEWS_DAILY_LIMIT'), DEFAULT_VIEWS_DAILY),
       },
       service,

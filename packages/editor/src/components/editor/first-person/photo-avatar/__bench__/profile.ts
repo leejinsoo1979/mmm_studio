@@ -1,4 +1,4 @@
-import { applySimilarity, similarity, type Vec3 } from './linalg'
+import { applySimilarity, similarity, type Vec3 } from '../linalg'
 
 /**
  * Measuring a fitted head's profile against the true head's, in
