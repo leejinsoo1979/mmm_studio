@@ -31,6 +31,7 @@ import {
   transpose3,
   type Vec3,
 } from './linalg'
+import { classPlane, type SegmentMasks } from './segment'
 import {
   fillTriangles,
   type SmoothContourPoint,
@@ -78,6 +79,8 @@ export type FitView = {
   skin?: Uint8Array | null
   /** How much each pixel shows strands of hair or beard (0–255), or null: what the outline may lie under. */
   covered?: Uint8Array | null
+  /** What each pixel is (the multiclass segmenter's planes), or null: where the face's own skin shows. */
+  classes?: SegmentMasks | null
   /** The head's turn (radians, > 0 to the subject's left): as measured, or as the capture asked for. */
   yaw: number
   pitch?: number
@@ -145,6 +148,15 @@ const COVERED_SIGMA = 2
 const HUBER = 3
 /** An outline landmark is matched to the head's outline only this close (mm). */
 const CONTOUR_GATE = 8
+/**
+ * With photos from the front only, an outline landmark is matched to where the head's outline
+ * crosses the line from the face's middle through it, within this (mm) of it, and this (mm)
+ * either side of that line.
+ */
+const FRONT_CONTOUR_GATE = 15
+const FRONT_CONTOUR_BAND = 3
+/** How far inside an outline landmark (mm) a front photo must show the face's skin for its edge to be the face's own. */
+const OUTLINE_INSIDE = [3, 4.5, 6] as const
 /** How far below the chin the outline still counts (m): below is the collar and the shoulders. */
 const OUTLINE_CUT = 0.05
 /** The face's bumps: their spacing and width (m), and their priors (mm): size, and between neighbours. */
@@ -1356,23 +1368,11 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
         (a, b, c) => flag.face[a] === 1 && flag.face[b] === 1 && flag.face[c] === 1,
         null,
       )
-      const gate = CONTOUR_GATE * s
-      for (const i of OVAL) {
-        const lx = lm[i * 2]!
-        const ly = lm[i * 2 + 1]!
-        if (view.covered && sampleByte(view.covered, view.width, view.height, lx, ly) > 127)
-          continue
-        let best: SmoothContourPoint | null = null
-        let bestDistance = gate
-        for (const c of contour) {
-          const d = Math.hypot(c.x - lx, c.y - ly)
-          if (d < bestDistance) {
-            bestDistance = d
-            best = c
-          }
-        }
-        if (!best) continue
-        const residual = (best.nx * (best.x - lx) + best.ny * (best.y - ly)) / s
+      const matches = frontOnly
+        ? frontOutline(view, lm, contour, s)
+        : nearestOutline(view, lm, contour, CONTOUR_GATE * s)
+      for (const [i, best] of matches) {
+        const residual = (best.nx * (best.x - lm[i * 2]!) + best.ny * (best.y - lm[i * 2 + 1]!)) / s
         pointOf(best)
         row(
           residual,
@@ -1538,6 +1538,93 @@ export function fitHead(model: HeadModel, views: FitView[], options: FitOptions 
       cost: bestCost,
     }
   }
+}
+
+/** The head's outline nearest each outline landmark not under strands, within `gate` pixels. */
+function nearestOutline(
+  view: FitView,
+  lm: Float32Array,
+  contour: SmoothContourPoint[],
+  gate: number,
+): [number, SmoothContourPoint][] {
+  const out: [number, SmoothContourPoint][] = []
+  for (const i of OVAL) {
+    const lx = lm[i * 2]!
+    const ly = lm[i * 2 + 1]!
+    if (view.covered && sampleByte(view.covered, view.width, view.height, lx, ly) > 127) continue
+    let best: SmoothContourPoint | null = null
+    let bestDistance = gate
+    for (const c of contour) {
+      const d = Math.hypot(c.x - lx, c.y - ly)
+      if (d < bestDistance) {
+        bestDistance = d
+        best = c
+      }
+    }
+    if (best) out.push([i, best])
+  }
+  return out
+}
+
+/**
+ * The outline landmarks a front photo gives, each with the head's outline across from the face's
+ * middle through it. With no turned photo they are all that says how wide the face is, so they
+ * count wherever the photo shows the face's own skin just inside them — an edge against the
+ * hair beside it is busy, but still the face's — and reach further, so a head first fitted much
+ * narrower or wider than the face is still drawn to it. Hair or a beard over the edge puts
+ * MediaPipe's point on its guess of the face under it, which the head need not follow.
+ */
+function frontOutline(
+  view: FitView,
+  lm: Float32Array,
+  contour: SmoothContourPoint[],
+  scale: number,
+): [number, SmoothContourPoint][] {
+  const gate = FRONT_CONTOUR_GATE * scale
+  const band = FRONT_CONTOUR_BAND * scale
+  const faceSkin =
+    view.classes && view.classes.width === view.width && view.classes.height === view.height
+      ? classPlane(view.classes, 'faceSkin')
+      : null
+  const own = faceSkin ?? view.skin ?? null
+  let mx = 0
+  let my = 0
+  for (const i of OVAL) {
+    mx += lm[i * 2]! / OVAL.length
+    my += lm[i * 2 + 1]! / OVAL.length
+  }
+  const out: [number, SmoothContourPoint][] = []
+  for (const i of OVAL) {
+    const lx = lm[i * 2]!
+    const ly = lm[i * 2 + 1]!
+    const reach = Math.hypot(lx - mx, ly - my)
+    if (reach < 1) continue
+    const ux = (lx - mx) / reach
+    const uy = (ly - my) / reach
+    let skin = 0
+    let covered = view.covered ? 255 : 0
+    for (const mm of OUTLINE_INSIDE) {
+      const x = lx - ux * mm * scale
+      const y = ly - uy * mm * scale
+      if (own) skin = Math.max(skin, sampleByte(own, view.width, view.height, x, y))
+      if (view.covered)
+        covered = Math.min(covered, sampleByte(view.covered, view.width, view.height, x, y))
+    }
+    if ((own && skin <= 127) || covered > 127) continue
+    let best: SmoothContourPoint | null = null
+    let bestOff = gate
+    for (const c of contour) {
+      const rx = c.x - mx
+      const ry = c.y - my
+      const off = Math.abs(rx * ux + ry * uy - reach)
+      if (off >= bestOff || Math.abs(rx * uy - ry * ux) > band) continue
+      if (c.nx * ux + c.ny * uy < 0.5) continue
+      bestOff = off
+      best = c
+    }
+    if (best) out.push([i, best])
+  }
+  return out
 }
 
 const emptyReport: FitViewReport = {

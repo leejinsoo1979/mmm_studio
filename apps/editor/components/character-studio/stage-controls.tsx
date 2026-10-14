@@ -11,10 +11,14 @@ const VIEWS: readonly { id: Exclude<StageView, 'free'>; label: string; hint: str
   { id: 'side', label: '측면', hint: '옆에서 보기 · 다시 누르면 반대쪽' },
 ]
 
+const CLOSE_UP_HINT = '얼굴 가까이 보기 · 다시 누르면 전체'
+
 /**
  * At the free rect's top right: LIVE (the avatar breathes and moves, or
- * holds still facing the camera) where the tab holds it still, and the
- * turntable's preset angles everywhere.
+ * holds still facing the camera) where the tab holds it still, the
+ * turntable's preset angles everywhere, and 얼굴 where the view holds more
+ * than the face: it closes in on the face (the angles still turn it), and
+ * back out.
  */
 export function StageControls({
   place,
@@ -23,6 +27,7 @@ export function StageControls({
   onLive,
   view,
   onView,
+  onCloseUp,
 }: {
   /**
    * CSS px from the screen's right edge (the free rect's top right), or
@@ -34,6 +39,8 @@ export function StageControls({
   onLive: (live: boolean) => void
   view: StageView
   onView: (view: Exclude<StageView, 'free'>) => void
+  /** Null where the view already frames the face. */
+  onCloseUp: (() => void) | null
 }) {
   return (
     <div
@@ -98,6 +105,20 @@ export function StageControls({
             {label}
           </button>
         ))}
+        {onCloseUp && (
+          <button
+            aria-label={CLOSE_UP_HINT}
+            className={cn(
+              'h-8 w-14 border-white/10 border-t text-[12px] text-white/70 transition duration-200 ease-out hover:bg-white/10 motion-reduce:transition-none',
+              'outline-none focus-visible:outline-2 focus-visible:outline-sky-400 focus-visible:outline-offset-[-2px]',
+            )}
+            onClick={onCloseUp}
+            title={CLOSE_UP_HINT}
+            type="button"
+          >
+            얼굴
+          </button>
+        )}
       </div>
     </div>
   )

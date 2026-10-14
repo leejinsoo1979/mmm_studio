@@ -1,6 +1,7 @@
 import type { HairStyle } from './hair-library'
+import type { HeadFrame } from './head-model'
 import { rasterTriangle } from './silhouette'
-import { linearToSrgb, srgbToLinear, type UvMesh } from './texture'
+import { linearToSrgb, smooth, srgbToLinear, type Texels, type UvMesh } from './texture'
 
 /**
  * A hair style's pictures in the person's hair colour, and the hairline on
@@ -93,6 +94,43 @@ export function scalpDensity(
   }
   return out
 }
+
+/**
+ * Where the photos show the person's hair over their scalp, on the head's
+ * texture (size × size, 0–1): the crown and the back and sides of the head
+ * (never the face, nor a fringe's forehead) take the hair's roots there, so
+ * a parting or a gap between the style's cards shows the person's hair, not
+ * their skin, and the hairline is theirs. `hair` is per texel of `texels`.
+ */
+export function scalpCover(
+  hair: Float32Array,
+  texels: Texels,
+  frame: HeadFrame,
+  size: number,
+): Float32Array {
+  const out = new Float32Array(size * size)
+  const working = texels.size
+  for (let y = 0; y < size; y++) {
+    const ty = Math.min(working - 1, Math.floor(((y + 0.5) / size) * working))
+    for (let x = 0; x < size; x++) {
+      const tx = Math.min(working - 1, Math.floor(((x + 0.5) / size) * working))
+      const t = ty * working + tx
+      if (!(hair[t]! > 0) || texels.triangle[t]! < 0) continue
+      const up = texels.position[t * 3 + 1]! - frame.eyes[1]
+      const back = frame.earZ - texels.position[t * 3 + 2]!
+      const scalp = Math.max(
+        smooth(SCALP_FLOOR - 0.01, SCALP_FLOOR, up),
+        smooth(0, 0.01, back) * smooth(SIDE_FLOOR - 0.01, SIDE_FLOOR, up),
+      )
+      out[y * size + x] = hair[t]! * scalp
+    }
+  }
+  return out
+}
+
+/** Above this (m over the eyes) the head is scalp, under hair wherever a photo shows hair; behind the ears, above this. */
+const SCALP_FLOOR = 0.065
+const SIDE_FLOOR = 0.01
 
 /** The head's texture (RGBA, in place) tinted towards the hair's roots by `density`. */
 export function tintScalp(pixels: Uint8ClampedArray, density: Float32Array, colour: Rgb) {

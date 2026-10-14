@@ -267,19 +267,25 @@ describe("the photos' colour cast and light", () => {
     const dim = exposureFromWhites(
       photo(
         [128, 128, 128],
-        [130, 130, 130].map((v) => v),
+        [150, 150, 150].map((v) => v),
       ),
     )
     const bright = exposureFromWhites(
       photo(
         [128, 128, 128],
-        [130, 130, 130].map((v) => linearToSrgb((v / 255) ** 2.2 * 2)),
+        [150, 150, 150].map((v) => linearToSrgb((v / 255) ** 2.2 * 2)),
       ),
     )
     expect(dim / bright).toBeGreaterThan(1.6)
     expect(exposureFromWhites(photo([128, 128, 128], [130, 130, 130], 1))).toBe(1)
     expect(exposureFromWhites(photo([128, 128, 128], null))).toBe(1)
   })
+})
+
+test('dim whites lift the skin by a quarter at most: they are more often shaded than the photo dark', () => {
+  const dim = exposureFromWhites(photo([60, 40, 30], [90, 90, 90]))
+  expect(dim).toBeGreaterThan(1)
+  expect(dim).toBeLessThanOrEqual(1.25)
 })
 
 describe("a photo's mouth", () => {

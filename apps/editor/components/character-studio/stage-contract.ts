@@ -16,6 +16,12 @@ import type { AiPhotoFraming } from '@/lib/ai-photo/client'
  */
 export type CameraFocus = 'full' | 'upper' | 'hair' | 'face' | 'eyes' | 'mouth' | 'legs' | 'feet'
 
+/**
+ * The framings that hold more than the face (the whole body, the upper body,
+ * the head with its hair): zoomed in, they close in on the face.
+ */
+export const CLOSES_IN: ReadonlySet<CameraFocus> = new Set<CameraFocus>(['full', 'upper', 'hair'])
+
 /** The turntable's preset angles; 'free' once turned off them. */
 export type StageView = 'front' | 'angle' | 'side' | 'free'
 
@@ -64,6 +70,8 @@ export type StudioStageApi = {
   setView: (view: Exclude<StageView, 'free'>) => void
   /** Zoom back to 1 for the current focus. */
   frame: () => void
+  /** Close in on the face from a wider framing (the whole body, the hair), or back out once there. */
+  closeUp: () => void
   capture: (request: StageCapture) => Promise<Blob>
 }
 

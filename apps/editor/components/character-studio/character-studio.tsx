@@ -88,6 +88,7 @@ import {
 } from './sculpt-bar'
 import { SlidePanel } from './slide-panel'
 import {
+  CLOSES_IN,
   type SculptEvent,
   type SculptSettings,
   STUDIO_FILTERS,
@@ -1591,6 +1592,11 @@ function Studio({ target: studioTarget }: { target: StudioTarget }) {
       <div className={chrome} inert={uiHidden}>
         <StageControls
           live={live}
+          onCloseUp={
+            CLOSES_IN.has(focusOf(tab, current.id, panelOpen))
+              ? () => stageRef.current?.closeUp()
+              : null
+          }
           onLive={setLive}
           onView={(next) => stageRef.current?.setView(next)}
           place={controlsRight ? { right: insets.right + 16 } : { left: 24 }}

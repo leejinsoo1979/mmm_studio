@@ -85,6 +85,8 @@ export type PhotoImage = {
   skin?: Uint8Array | null
   hair?: Uint8Array | null
   openings?: Float32Array | null
+  /** The photo's hair itself (0–255), not reached onto the skin: where the head under it is the hair's. */
+  cover?: Uint8Array | null
 }
 
 const SRGB_TO_LINEAR = (() => {
@@ -220,6 +222,8 @@ export type ProjectedView = {
   color: Float32Array
   /** How much to trust it (0–1). */
   weight: Float32Array
+  /** How surely the photo shows hair over each texel it sees (0–1), where it has a `cover`. */
+  hair?: Float32Array
 }
 
 export const smooth = (a: number, b: number, x: number) => {
@@ -272,6 +276,7 @@ export function projectView(
   const count = texels.size * texels.size
   const color = new Float32Array(count * 3)
   const weight = new Float32Array(count)
+  const hair = photo.cover ? new Float32Array(count) : undefined
   const r = camera.rotation
   const t = camera.translation
   const { width, height } = camera
@@ -307,6 +312,9 @@ export function projectView(
     const py = Math.floor(v)
     // Hidden behind nearer skin (the nose, the cheek seen past): 3 mm of grace.
     if (qz > depth[py * width + px]! + 0.003) continue
+    if (hair && photo.cover)
+      hair[i] =
+        smooth(0.3, 0.8, sampleByte(photo.cover, width, height, u, v)) * smooth(0.12, 0.5, facing)
     let w = smooth(0.12, 0.5, facing) * open
     w *= smooth(0, margin, Math.min(u, v, width - u, height - v))
     if (photo.mask) w *= smooth(0.5, 0.95, sampleByte(photo.mask, width, height, u, v))
@@ -321,7 +329,7 @@ export function projectView(
     weight[i] = w
     sampleRgb(photo, u, v, color, i * 3)
   }
-  return { color, weight }
+  return hair ? { color, weight, hair } : { color, weight }
 }
 
 /** A box average (`radius` texels out) of a size × size image. */

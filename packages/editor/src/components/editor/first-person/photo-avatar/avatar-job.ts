@@ -20,7 +20,7 @@ import { editMaterials } from './glb'
 import { type DressedPicture, dressHair } from './hair-glb'
 import type { HairStyle, HairStyleName } from './hair-library'
 import { type HairReading, hairStyleFor, readHair } from './hair-match'
-import { hairGains, scalpDensity, tintScalp, tonePicture } from './hair-paint'
+import { hairGains, scalpCover, scalpDensity, tintScalp, tonePicture } from './hair-paint'
 import type { FaceBlendshapes, SegmentMasks } from './segment'
 import { SKIN_MATERIAL_EDITS, skinTextures } from './skin-texture'
 import { srgbToLinear } from './texture'
@@ -164,15 +164,21 @@ export async function runAvatarJob({
 
   const gender = base.meta.gender
   const reading = readHair(views, fit, base, skin.albedo)
-  const styleName = hairStyleFor(reading, gender)
+  const styleName = hairStyleFor(reading)
   const style = styleName ? await hair(styleName) : null
   const hairColour = reading.colour ?? hexLinear(colors.hair ?? UNSEEN_HAIR)
-  if (style)
-    tintScalp(
-      skin.head,
-      scalpDensity(style.style, gender, base.headSkin.mesh, base.headSkin.weld, head.width),
-      hairColour,
+  if (style) {
+    const density = scalpDensity(
+      style.style,
+      gender,
+      base.headSkin.mesh,
+      base.headSkin.weld,
+      head.width,
     )
+    const seen = scalpCover(skin.hair, skin.texels, base.head.frame, head.width)
+    for (let i = 0; i < density.length; i++) density[i] = Math.max(density[i]!, seen[i]!)
+    tintScalp(skin.head, density, hairColour)
+  }
 
   const images: AvatarImages = new Map()
   images.set('head_color', await codec.encode(skin.head, head.width, head.height, 0.92))

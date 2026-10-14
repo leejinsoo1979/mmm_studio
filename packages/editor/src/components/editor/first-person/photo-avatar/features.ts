@@ -5,11 +5,12 @@ import type { Texels } from './texture'
 
 /**
  * The face's features where the head's texture holds them: the eyes'
- * openings (the eyeballs show there, never the photo), and the lips and
- * brows, which the photos give whatever their colour. Found by MediaPipe's
- * landmarks, which sit at fixed places on the head, so the same outlines
- * serve every photo. Each is a soft mask (0–1) that fades over a few texels
- * either side of its outline, so nothing laid by it ends in a hard edge.
+ * openings (the eyeballs show there, never the photo), and the lips, brows,
+ * the lids round the eyes and the nose's wings and nostrils, which the
+ * photos give whatever their colour. Found by MediaPipe's landmarks, which
+ * sit at fixed places on the head, so the same outlines serve every photo.
+ * Each is a soft mask (0–1) that fades over a few texels either side of its
+ * outline, so nothing laid by it ends in a hard edge.
  */
 
 /** Each landmark's place in the head's texture (u, v per landmark), NaN where it has none. */
@@ -104,6 +105,32 @@ export function ring(
     )
   }
   return out
+}
+
+/**
+ * A ring round some landmarks (points in `points`), in order of their angle
+ * about their middle, pushed out from it by `grow` (a fraction of its size),
+ * scaled: for a feature whose landmarks are not listed round it.
+ */
+export function aroundRing(
+  points: ArrayLike<number>,
+  indices: readonly number[],
+  grow: number,
+  scale = 1,
+): number[] {
+  const known = indices.filter((i) => Number.isFinite(points[i * 2]!))
+  let cx = 0
+  let cy = 0
+  for (const i of known) {
+    cx += points[i * 2]! / known.length
+    cy += points[i * 2 + 1]! / known.length
+  }
+  const order = [...known].sort(
+    (a, b) =>
+      Math.atan2(points[a * 2 + 1]! - cy, points[a * 2]! - cx) -
+      Math.atan2(points[b * 2 + 1]! - cy, points[b * 2]! - cx),
+  )
+  return ring(points, order, grow, scale)
 }
 
 /** Fills a closed ring (a fan from its centre: the rings here are star-shaped about it) into `out`. */
@@ -207,7 +234,7 @@ export type TexelFeatures = {
   size: number
   /** The eyes' openings: the eyeballs show there, never a photo. */
   eye: Float32Array
-  /** The lips and brows: taken from the photos whatever their colour (not by the skin's). */
+  /** The lips, brows, lids and nostrils: taken from the photos whatever their colour (not by the skin's). */
   feature: Float32Array
   /** The lips alone. */
   lips: Float32Array
@@ -226,6 +253,17 @@ const AROUND_LIPS = 0.35
 const AROUND_FEATHER = 8
 const BROW_FEATHER = 7
 const EYE_FEATHER = 2
+/**
+ * Round each eye, out to the lid's fold and the skin under the lower lid (a share of the eye's
+ * size), and round the nose's wings and nostrils: their lashes' line, folds and shadows are what
+ * a face is known by, and too dark or busy to pass for skin.
+ */
+const EYE_SURROUND = 0.6
+const SURROUND_FEATHER = 6
+const NOSE_BASE = [
+  4, 1, 19, 94, 2, 98, 327, 64, 294, 129, 358, 49, 279, 48, 278, 115, 344, 220, 440, 45, 275, 5,
+] as const
+const NOSE_GROW = 0.15
 
 /** The features' soft masks, from the landmarks' places in the texture. */
 export function texelFeatures(texels: Texels, landmarkUv: Float32Array): TexelFeatures {
@@ -242,14 +280,19 @@ export function texelFeatures(texels: Texels, landmarkUv: Float32Array): TexelFe
   fillRing(ring(landmarkUv, LIPS_INNER, 0.1, size), size, size, mouthInside)
   const aroundInside = new Uint8Array(size * size)
   fillRing(ring(landmarkUv, LIPS_OUTER, AROUND_LIPS, size), size, size, aroundInside)
+  const surroundInside = new Uint8Array(size * size)
+  for (const eye of EYE_RINGS)
+    fillRing(ring(landmarkUv, eye, EYE_SURROUND, size), size, size, surroundInside)
+  fillRing(aroundRing(landmarkUv, NOSE_BASE, NOSE_GROW, size), size, size, surroundInside)
   const lips = featherMask(lipsInside, size, size, LIP_FEATHER * scale)
   const brows = featherMask(browsInside, size, size, BROW_FEATHER * scale)
   const eye = featherMask(eyeInside, size, size, EYE_FEATHER * scale)
   const mouth = featherMask(mouthInside, size, size, LIP_FEATHER * scale)
   const around = featherMask(aroundInside, size, size, AROUND_FEATHER * scale)
+  const surround = featherMask(surroundInside, size, size, SURROUND_FEATHER * scale)
   const feature = new Float32Array(size * size)
   for (let i = 0; i < feature.length; i++) {
-    feature[i] = Math.max(lips[i]!, brows[i]!) * (1 - eye[i]!)
+    feature[i] = Math.max(lips[i]!, brows[i]!, surround[i]!) * (1 - eye[i]!)
     if (texels.triangle[i]! < 0) feature[i] = 0
   }
   return { size, eye, feature, lips, brows, mouth, around }

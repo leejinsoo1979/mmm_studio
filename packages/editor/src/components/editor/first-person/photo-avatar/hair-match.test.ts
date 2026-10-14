@@ -165,8 +165,8 @@ describe('reading hair off photos', () => {
       expect(reading.length).toBe(length as never)
       if (name === 'ponytail01') expect(reading.tied).toBe(true)
       if (name?.startsWith('long01')) expect(reading.tied).toBe(false)
-      if (name) expect(hairStyleFor(reading, gender)).toBe(name)
-      else expect(hairStyleFor(reading, gender)).toBeNull()
+      if (name) expect(hairStyleFor(reading)).toBe(name)
+      else expect(hairStyleFor(reading)).toBeNull()
       if (name) {
         // The photos' light is their own here (skin photographed as its colour): the hair's comes back as drawn, lifted for its shade.
         const colour = reading.colour!

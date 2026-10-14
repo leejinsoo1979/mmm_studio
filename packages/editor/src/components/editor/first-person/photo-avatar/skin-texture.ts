@@ -89,6 +89,8 @@ export type SkinOutput = {
   lightFit: number[]
   /** How much of the head's texels a photo saw well. */
   photoShare: number
+  /** How surely the photos show hair over each texel (at the texels' size, 0–1). */
+  hair: Float32Array
 }
 
 /** Texels per side the photos are laid at (the face island then holds ≈ 730 photo pixels across). */
@@ -234,6 +236,8 @@ export function skinTextures({
             HAIRLINE * eyeDistance(view),
           ),
         openings: faceOpenings(view.landmarks, view.width, view.height),
+        cover:
+          classes && softPlane(classPlane(classes, 'hair'), view.width, view.height, 2 * soften),
       },
       camera,
       depthBuffer(occluder, camera),
@@ -243,6 +247,9 @@ export function skinTextures({
     projected.push(seen)
     progress((0.5 * (k + 1)) / views.length)
   })
+  const hair = new Float32Array(WORKING * WORKING)
+  for (const seen of projected)
+    if (seen.hair) for (let i = 0; i < hair.length; i++) hair[i] = Math.max(hair[i]!, seen.hair[i]!)
   // The front photo sets the scale the others' light and exposure are read against.
   const front = Math.max(
     0,
@@ -251,16 +258,18 @@ export function skinTextures({
   const delit = delightTogether(projected, texels, features, cameras, front)
   const shadings = delit.map((one) => one.shading)
   const lightFit = delit.map((one) => one.fit)
-  // A smile or an open mouth stretches the lips over the teeth: they no longer lie where the
-  // head's closed lips are, so such a photo gives the lips their colour, not their shape.
+  // An open mouth stretches the lips over the teeth: they no longer lie where the head's closed
+  // lips are, so such a photo gives the lips their colour, not their shape. A smile with the lips
+  // shut leaves them where the fit put them (on the photo's own lip landmarks), and they are the
+  // photo's.
   const movedLips: number[][] = [[], [], []]
   projected.forEach((seen, k) => {
-    const moved = mouthMoved(views[k]!)
-    if (moved <= 0) return
+    if (mouthMoved(views[k]!) <= 0) return
+    const opened = mouthOpened(views[k]!)
     for (let i = 0; i < seen.weight.length; i++) {
       if (features.lips[i]! >= 0.8 && features.mouth[i]! <= 0.1 && seen.weight[i]! >= 0.5)
         for (let c = 0; c < 3; c++) movedLips[c]!.push(seen.color[i * 3 + c]!)
-      seen.weight[i] = seen.weight[i]! * (1 - moved * features.around[i]!)
+      seen.weight[i] = seen.weight[i]! * (1 - opened * features.around[i]!)
     }
   })
   progress(0.6)
@@ -419,6 +428,7 @@ export function skinTextures({
     texels,
     lightFit,
     photoShare: skinTexels ? seenTexels / skinTexels : 0,
+    hair,
   }
 }
 
@@ -455,6 +465,18 @@ export function mouthMoved(view: CaptureView): number {
   if (!shapes) return 0
   const smile = Math.max(shapes.mouthSmileLeft ?? 0, shapes.mouthSmileRight ?? 0)
   return Math.max(smooth(0.25, 0.5, smile), smooth(0.12, 0.3, shapes.jawOpen ?? 0))
+}
+
+/**
+ * How far a photo's lips have parted (0–1): the jaw dropped, or the lips
+ * apart over the teeth (MediaPipe's inner lip landmarks). None for a
+ * profile.
+ */
+export function mouthOpened(view: CaptureView): number {
+  return Math.max(
+    smooth(0.12, 0.3, view.blendshapes?.jawOpen ?? 0),
+    smooth(0.1, 0.3, view.mouthOpen ?? 0),
+  )
 }
 
 /** The head's skin and the body's (neck, shoulders) as they stand after `moves`: what hides the face from a camera. */
@@ -534,14 +556,20 @@ export function whiteBalance(views: CaptureView[]): [number, number, number] {
  * own exposure and light level are read off its whites against this.
  */
 const WHITE_REFERENCE = 0.41
-/** The most the whites may brighten or darken the skin: past it they were more likely misread. */
+/** The most the whites may darken the skin: past it they were more likely misread. */
 const EXPOSURE_LIMIT = 1.8
+/**
+ * The most they may brighten it. Whites read dim far more often because the lids and brows shade
+ * them, or the eyes are a few pixels across, than because the photo was dark (a dark photo is
+ * asked for again): lifting the skin by them turned dark skin light.
+ */
+const EXPOSURE_LIFT = 1
 /**
  * The most light the fairest cheek reflects (luminance, as albedo): under
  * half, as measured skin reflects at green. A photo whose whites could not
  * be read, or read too dark, never makes the skin brighter than that.
  */
-const SKIN_CEILING = 0.45
+const SKIN_CEILING = 0.62
 
 /**
  * What skin's surface reflects of the light, colourless, as a share of it
@@ -572,7 +600,7 @@ export function exposureFromWhites(
   untoneNeutral(scene)
   const brightness = luminance(scene[0]!, scene[1]!, scene[2]!)
   if (!(brightness > 0)) return 1
-  return Math.min(EXPOSURE_LIMIT, Math.max(1 / EXPOSURE_LIMIT, WHITE_REFERENCE / brightness))
+  return Math.min(EXPOSURE_LIFT, Math.max(1 / EXPOSURE_LIMIT, WHITE_REFERENCE / brightness))
 }
 
 /** Whites less saturated than this ((max − min) / max, their cast taken out) are white; more is lid, lash or iris. */

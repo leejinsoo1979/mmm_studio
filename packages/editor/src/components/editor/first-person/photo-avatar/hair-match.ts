@@ -1,12 +1,12 @@
-import type { AvatarGender } from '../avatar-catalog'
 import { deltaE } from '../look-pixels'
 import type { CaptureView } from './avatar-job'
+import { distanceTo } from './features'
 import type { BaseBody } from './base-body'
 import { type Camera, cameraCentre, project } from './camera'
 import type { FitResult } from './fit'
 import type { HairLength, HairStyleName } from './hair-library'
 import type { Rgb } from './hair-paint'
-import { type HeadModel, vertexNormals } from './head-model'
+import { type HeadModel, landmarkPosition, vertexNormals } from './head-model'
 import type { Vec3 } from './linalg'
 import { classPlane } from './segment'
 import { fillTriangles } from './silhouette'
@@ -34,8 +34,14 @@ export type HairReading = {
     views: number
     scalpHair: number
     thicknessMm: number
+    /** How far the hair rises over the crown. */
+    crownMm: number
     lowestMm: number | null
     sideMm: number | null
+    /** The fitted chin's height (mm from the eyes): how long hair is is judged against it. */
+    chinMm: number
+    /** The lowest hair runs off a photo's bottom edge: it reaches further than it shows. */
+    cut: boolean
     fringe: number
   }
 }
@@ -54,12 +60,24 @@ const BALD_SCALP = 0.35
  * segmenter took for hair.
  */
 const BARE_SCALP_DE = 12
-/** Hair standing less than this (mm) off the skull is a buzz cut, more than this a big volume. */
+/**
+ * Hair standing less than this (mm) off the skull is a buzz cut, more than this a big volume (an
+ * afro). Thick hair falling past the temples, a full bob's or long waves', reads 35–60 mm.
+ */
 const BUZZ_MM = 10
-const BIG_MM = 45
-/** Lowest hair anywhere (mm from the eyes) at or below this is long, and below this past the shoulders. */
-const LONG_MM = -150
-const SHOULDER_MM = -330
+const BIG_MM = 70
+/** …and an afro also rises this far (mm) over the crown, where a full bob's or long waves' volume is at the sides. */
+const BIG_CROWN_MM = 55
+/** The furthest (m) hair stands off the head: past it, what the segmenters call the person is not hair. */
+const HAIR_REACH = 0.15
+/**
+ * Hair reaching this far under the chin (m) is long, and this far past shoulder length: the
+ * library's bobs end at the chin, its shoulder-length hair 15 cm under it, its long hair 48 cm.
+ */
+const LONG_UNDER_CHIN = 0.07
+const SHOULDER_UNDER_CHIN = 0.25
+/** Hair still showing at a photo's bottom edge this far under the chin (m) goes on past it: long. */
+const CUT_UNDER_CHIN = 0.035
 /**
  * Hair beside the face, seen from the front, reaching this low (mm from the
  * eyes) is medium: a bob falls to the jaw, where short hair ends by the ears
@@ -113,12 +131,16 @@ export function readHair(
       person[i] = (view.mask ? view.mask[i]! : 255 - background[i]!) > SURE ? 1 : 0
     data.push({ view, camera, hair, skin: (i) => face[i]! + body[i]!, person })
   })
+  const chin = landmarkPosition(model, positions, 152)?.[1] ?? model.frame.chinY
   const measures = {
     views: data.length,
     scalpHair: 0,
     thicknessMm: 0,
+    crownMm: 0,
     lowestMm: null as number | null,
     sideMm: null as number | null,
+    chinMm: (chin - eyes[1]) * 1000,
+    cut: false,
     fringe: 0,
   }
   if (!data.length) {
@@ -155,6 +177,7 @@ export function readHair(
   // How far the hair stands off the skull, above the eyes: the outline's area past the fitted
   // head's, over the head's outline there.
   let thickness = 0
+  let crown = 0
   let thicknessViews = 0
   for (const d of data) {
     const { width, height } = d.view
@@ -172,13 +195,18 @@ export function readHair(
     fillTriangles(xy, model.triangles, width, height, skull, 1)
     const eyeRow = Math.round(project(d.camera, eyes)[1])
     const top = Math.max(0, Math.min(height, eyeRow))
+    const depth = toCameraDepth(d.camera, eyes)
+    // Only what lies within hair's reach of the head is the hair: the segmenters take bits of a
+    // busy background for the person too.
+    const reach = (HAIR_REACH * d.camera.focal) / depth
+    const apart = distanceTo(skull, width, height)
     let extra = 0
     let edge = 0
     for (let y = 0; y < top; y++) {
       for (let x = 0; x < width; x++) {
         const i = y * width + x
         const outline = d.person[i] || d.hair[i]! > SURE
-        if (outline && !skull[i]) extra++
+        if (outline && !skull[i] && apart[i]! <= reach) extra++
         if (
           skull[i] &&
           (x === 0 ||
@@ -192,11 +220,35 @@ export function readHair(
       }
     }
     if (edge < 10) continue
-    const depth = toCameraDepth(d.camera, eyes)
     thickness += ((extra / edge) * depth) / d.camera.focal
     thicknessViews++
+    // How far the hair rises over the crown, in the middle third of the head's width.
+    let skullTop = height
+    let left = width
+    let right = 0
+    for (let i = 0; i < skull.length; i++) {
+      if (!skull[i]) continue
+      const y = Math.floor(i / width)
+      const x = i % width
+      if (y < skullTop) skullTop = y
+      left = Math.min(left, x)
+      right = Math.max(right, x)
+    }
+    const third = (right - left) / 3
+    let hairTop = skullTop
+    for (let y = 0; y < skullTop && hairTop === skullTop; y++) {
+      for (let x = Math.ceil(left + third); x <= right - third; x++) {
+        const i = y * width + x
+        if ((d.person[i] || d.hair[i]! > SURE) && apart[i]! <= reach) {
+          hairTop = y
+          break
+        }
+      }
+    }
+    crown += ((skullTop - hairTop) * depth) / d.camera.focal
   }
   measures.thicknessMm = thicknessViews ? (thickness / thicknessViews) * 1000 : 0
+  measures.crownMm = thicknessViews ? (crown / thicknessViews) * 1000 : 0
 
   // How low the hair reaches: the lowest hair pixel joined to the hair over the skull, put on the
   // vertical through the head's middle; in the front photos, that is beside the face.
@@ -207,7 +259,10 @@ export function readHair(
     const row = lowestHairRow(d, model, positions)
     if (row === null) continue
     const height = heightAtRow(d.camera, middle, row) - eyes[1]
-    lowest = Math.min(lowest, height)
+    if (height < lowest) {
+      lowest = height
+      measures.cut = row >= d.view.height - CUT_ROWS
+    }
     if (Math.abs(d.view.yaw) < 0.35) side = Math.min(side, height)
   }
   measures.lowestMm = Number.isFinite(lowest) ? lowest * 1000 : null
@@ -242,9 +297,12 @@ export function readHair(
   // Hair hanging past the neck is long however flat it lies on top (a ponytail).
   const lowestMm = measures.lowestMm ?? 0
   const sideMm = measures.sideMm ?? lowestMm
+  const underChin = (measures.chinMm - lowestMm) / 1000
+  const long =
+    underChin >= LONG_UNDER_CHIN || (measures.cut && underChin >= CUT_UNDER_CHIN)
   const length: HairLength = bald
     ? 'bald'
-    : lowestMm <= LONG_MM
+    : long
       ? 'long'
       : sideMm <= SIDE_MM
         ? 'medium'
@@ -255,7 +313,11 @@ export function readHair(
     length,
     tied: length === 'long' && sideMm > SIDE_MM,
     volume:
-      measures.thicknessMm > BIG_MM ? 'big' : measures.thicknessMm < BUZZ_MM ? 'flat' : 'normal',
+      measures.thicknessMm > BIG_MM && measures.crownMm > BIG_CROWN_MM
+        ? 'big'
+        : measures.thicknessMm < BUZZ_MM
+          ? 'flat'
+          : 'normal',
     fringe: measures.fringe > FRINGE_SHARE,
     colour,
     measures,
@@ -263,16 +325,19 @@ export function readHair(
 }
 
 /** The library's style for a reading: none for a bald head. */
-export function hairStyleFor(reading: HairReading, gender: AvatarGender): HairStyleName | null {
+export function hairStyleFor(reading: HairReading): HairStyleName | null {
   if (reading.length === 'bald') return null
   if (reading.length === 'buzz') return 'buzz'
   if (reading.volume === 'big') return 'afro01'
   if (reading.length === 'long') {
     if (reading.tied) return 'ponytail01'
-    return (reading.measures.lowestMm ?? 0) > SHOULDER_MM ? 'long01-shoulder' : 'long01'
+    const { chinMm, lowestMm } = reading.measures
+    // Hair a photo cuts off short of that is given shoulder length: how far it goes on is not seen.
+    return chinMm - (lowestMm ?? 0) < SHOULDER_UNDER_CHIN * 1000 ? 'long01-shoulder' : 'long01'
   }
   if (reading.length === 'medium') return reading.fringe ? 'bob02' : 'long01-bob'
-  return reading.fringe || gender === 'female' ? 'short03' : 'short02'
+  // The library's short cut with a fringe sweeps it over an eye: only a fringe the photo shows earns it.
+  return reading.fringe ? 'short03' : 'short02'
 }
 
 function pixelOf(camera: Camera, p: Vec3): number {
@@ -302,6 +367,9 @@ function heightAtRow(camera: Camera, middle: Vec3, row: number): number {
   }
   return best
 }
+
+/** Hair this close (rows) to a photo's bottom edge runs off it. */
+const CUT_ROWS = 3
 
 /**
  * The lowest row of hair joined (through hair) to the hair about the skull's

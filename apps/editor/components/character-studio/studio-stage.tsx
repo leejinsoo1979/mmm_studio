@@ -61,16 +61,23 @@ import {
   hoverHandle,
   setHandleState,
 } from './face-handles'
-import { type HeadFraming, type HeadSpan, headFraming, headSpan } from './head-frame'
+import {
+  closeIn,
+  type HeadFraming,
+  type HeadSpan,
+  headFraming,
+  headSpan,
+} from './head-frame'
 import { DRAG_THRESHOLD, pointerMove, snapTurn, viewTurn } from './sculpt-gesture'
-import type {
-  CameraFocus,
-  StageInsets,
-  StagePose,
-  StageView,
-  StudioFilterId,
-  StudioStageApi,
-  StudioStageProps,
+import {
+  CLOSES_IN,
+  type CameraFocus,
+  type StageInsets,
+  type StagePose,
+  type StageView,
+  type StudioFilterId,
+  type StudioStageApi,
+  type StudioStageProps,
 } from './stage-contract'
 import { createBackdrop, floorGlowEllipse, freeRoomCentre } from './studio-backdrop'
 import {
@@ -205,6 +212,7 @@ function ease(state: Spring, target: number, delta: number) {
 /** The head with the hair below it to the shoulders. */
 const HEAD_FOCUS: ReadonlySet<CameraFocus> = new Set<HeadFocus>(['hair', 'face', 'eyes', 'mouth'])
 
+
 const withHair = (span: HeadSpan): HeadSpan => ({
   ...span,
   bottom: span.bottom - (span.top - span.bottom) * HAIR_DROP,
@@ -231,6 +239,11 @@ type StageState = {
   /** The look's height scale. */
   scale: number
   zoom: number
+  /**
+   * The zoom at which a framing that closes in (CLOSES_IN) frames the face as
+   * the 얼굴 framing does; 1 until the head is found.
+   */
+  faceZoom: number
   /** The turntable's turn asked for (radians), and the avatar's turn as it eases there. */
   yaw: number
   turned: number
@@ -245,9 +258,10 @@ type StageState = {
   rig: CaptureRig
 }
 
-const clampZoom = (focus: CameraFocus, zoom: number) => {
+const clampZoom = (focus: CameraFocus, zoom: number, faceZoom = 1) => {
   const [low, high] = LENS[focus].zoom
-  return Math.min(high, Math.max(low, zoom))
+  const closest = CLOSES_IN.has(focus) ? Math.min(low, faceZoom * LENS.face.zoom[0]) : low
+  return Math.min(high, Math.max(closest, zoom))
 }
 
 /** Where the camera aims, and how much it sees, for a focus: centred in the free room. */
@@ -258,13 +272,23 @@ function framingFor(
 ): HeadFraming {
   const { focus, insets } = state
   const stage = { width: size.width, height: size.height, insets }
-  const zoom = clampZoom(focus, state.zoom)
+  const zoom = clampZoom(focus, state.zoom, state.faceZoom)
   const height = stature * state.scale
+  const head = state.model.current ? headSpan(state.model.current) : null
+  /** A wider framing at `zoom`, its aim sliding to the face's as it closes in. */
+  const closing = (span: HeadSpan, fill: number, aspect?: number) => {
+    const wide = headFraming(span, stage, fill, { aspect, zoom })
+    if (!head) {
+      state.faceZoom = 1
+      return wide
+    }
+    const face = headFraming(head, stage, FACE_FILL)
+    state.faceZoom = (face.half * zoom) / wide.half
+    const near = headFraming(head, stage, FACE_FILL, { zoom: wide.half / face.half })
+    return closeIn(wide, near, zoom, state.faceZoom)
+  }
   if (focus === 'full') {
-    return headFraming({ top: stature * TALLEST, bottom: 0, x: 0 }, stage, FULL_FILL, {
-      aspect: FULL_ASPECT,
-      zoom,
-    })
+    return closing({ top: stature * TALLEST, bottom: 0, x: 0 }, FULL_FILL, FULL_ASPECT)
   }
   if (focus === 'legs' || focus === 'feet') {
     const hips = state.model.current ? hipsHeight(state.model.current) : null
@@ -281,15 +305,9 @@ function framingFor(
           zoom,
         })
   }
-  const head = state.model.current ? headSpan(state.model.current) : null
   if (focus === 'upper') {
     const top = head?.top ?? height
-    return headFraming(
-      { top, bottom: top - UPPER_REACH * height, x: head?.x ?? 0 },
-      stage,
-      UPPER_FILL,
-      { aspect: UPPER_ASPECT, zoom },
-    )
+    return closing({ top, bottom: top - UPPER_REACH * height, x: head?.x ?? 0 }, UPPER_FILL, UPPER_ASPECT)
   }
   if (!head) {
     const { look, span } = FRAMING[focus as HeadFocus]
@@ -316,7 +334,7 @@ function framingFor(
     )
   }
   return focus === 'hair'
-    ? headFraming(withHair(head), stage, HAIR_FILL, { zoom })
+    ? closing(withHair(head), HAIR_FILL)
     : headFraming(head, stage, FACE_FILL, { zoom })
 }
 
@@ -1145,6 +1163,7 @@ export function StudioStage({
     stature: DEFAULT_STATURE,
     scale: 1,
     zoom: 1,
+    faceZoom: 1,
     yaw: 0,
     turned: 0,
     sign: 1,
@@ -1204,12 +1223,17 @@ export function StudioStage({
   const frame = useCallback(() => {
     state.zoom = 1
   }, [state])
+  const closeUp = useCallback(() => {
+    if (!CLOSES_IN.has(state.focus)) return
+    state.zoom = state.zoom <= state.faceZoom * 1.01 ? 1 : state.faceZoom
+  }, [state])
 
   useImperativeHandle(
     ref,
     (): StudioStageApi => ({
       setView,
       frame,
+      closeUp,
       capture: (request) => {
         const model = state.model.current
         if (!(model && state.rig.gl)) {
@@ -1224,7 +1248,7 @@ export function StudioStage({
         }
       },
     }),
-    [setView, frame, state],
+    [setView, frame, closeUp, state],
   )
 
   // A handle in hand is put back when the handles go (another tab, the UI
@@ -1326,7 +1350,11 @@ export function StudioStage({
       const [a, b] = [...pointers.current.values()]
       if (a && b) {
         const distance = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y))
-        state.zoom = clampZoom(state.focus, (current.zoom * current.distance) / distance)
+        state.zoom = clampZoom(
+          state.focus,
+          (current.zoom * current.distance) / distance,
+          state.faceZoom,
+        )
       }
       return
     }
@@ -1380,7 +1408,11 @@ export function StudioStage({
     if (!element) return
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
-      state.zoom = clampZoom(state.focus, state.zoom * Math.exp(event.deltaY * WHEEL_ZOOM))
+      state.zoom = clampZoom(
+        state.focus,
+        state.zoom * Math.exp(event.deltaY * WHEEL_ZOOM),
+        state.faceZoom,
+      )
     }
     element.addEventListener('wheel', onWheel, { passive: false })
     return () => element.removeEventListener('wheel', onWheel)
@@ -1424,11 +1456,11 @@ export function StudioStage({
         }
         case '+':
         case '=':
-          state.zoom = clampZoom(state.focus, state.zoom / KEY_ZOOM)
+          state.zoom = clampZoom(state.focus, state.zoom / KEY_ZOOM, state.faceZoom)
           break
         case '-':
         case '_':
-          state.zoom = clampZoom(state.focus, state.zoom * KEY_ZOOM)
+          state.zoom = clampZoom(state.focus, state.zoom * KEY_ZOOM, state.faceZoom)
           break
         case 'Home':
           setView('front')

@@ -243,6 +243,34 @@ export function headFraming(
   }
 }
 
+/**
+ * How far a wider framing (the whole body, the upper body, the head with
+ * its hair) has closed in on the face, 0–1: none at its own size (zoom 1),
+ * all of the way where its zoom has brought it down to the face's framing
+ * (`faceZoom`, the face's half-height over the wider one's), by the share of
+ * the way in scale (log).
+ */
+export function closeness(zoom: number, faceZoom: number): number {
+  if (!(zoom < 1) || !(faceZoom < 1)) return 0
+  return Math.min(1, Math.log(zoom) / Math.log(faceZoom))
+}
+
+/**
+ * A wider framing zoomed in (`wide`, its size already zoomed) that closes in
+ * on the face as it shrinks: its aim slides to the face's (`face`, framed at
+ * the same size), so the wheel, a pinch or the face button end on the face,
+ * not on the chest.
+ */
+export function closeIn(
+  wide: HeadFraming,
+  face: HeadFraming,
+  zoom: number,
+  faceZoom: number,
+): HeadFraming {
+  const t = closeness(zoom, faceZoom)
+  return { x: wide.x + (face.x - wide.x) * t, y: wide.y + (face.y - wide.y) * t, half: wide.half }
+}
+
 /** The share of a body's height its head (crown to chin) takes, for a body whose head can't be found. */
 const HEAD_SHARE = 0.13
 
