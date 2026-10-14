@@ -9,6 +9,7 @@ import {
   mirrorTexels,
   mirrorVertices,
   mouthMoved,
+  sharpenSmallFace,
   skinLevels,
   softPlane,
   symmetrise,
@@ -282,10 +283,8 @@ describe("the photos' colour cast and light", () => {
   })
 })
 
-test('dim whites lift the skin by a quarter at most: they are more often shaded than the photo dark', () => {
-  const dim = exposureFromWhites(photo([60, 40, 30], [90, 90, 90]))
-  expect(dim).toBeGreaterThan(1)
-  expect(dim).toBeLessThanOrEqual(1.25)
+test('dim whites never lift the skin: they are more often shaded than the photo dark', () => {
+  expect(exposureFromWhites(photo([60, 40, 30], [90, 90, 90]))).toBe(1)
 })
 
 describe("a photo's mouth", () => {
@@ -366,5 +365,30 @@ describe('the ears', () => {
     }
     // The cheeks are untouched.
     expect(color[0]).toBe(before[0])
+  })
+})
+
+describe("a small photo's face", () => {
+  /** An 8 × 8 grey picture with a darker 4 × 4 square in it: an edge to sharpen. */
+  const picture = () => {
+    const rgb = new Float32Array(8 * 8 * 3).fill(0.5)
+    for (let y = 2; y < 6; y++)
+      for (let x = 2; x < 6; x++) rgb.fill(0.2, (y * 8 + x) * 3, (y * 8 + x) * 3 + 3)
+    return rgb
+  }
+
+  test('is sharpened when small, its flat parts kept as they are', () => {
+    const rgb = picture()
+    sharpenSmallFace(rgb, 8, 8, 40)
+    // Just inside the edge darker, just outside it lighter; far from it, as it was.
+    expect(rgb[(2 * 8 + 3) * 3]!).toBeLessThan(0.2)
+    expect(rgb[(1 * 8 + 3) * 3]!).toBeGreaterThan(0.5)
+    expect(rgb[(7 * 8 + 7) * 3]!).toBeCloseTo(0.5, 6)
+  })
+
+  test('is left alone when large', () => {
+    const rgb = picture()
+    sharpenSmallFace(rgb, 8, 8, 200)
+    expect(Array.from(rgb)).toEqual(Array.from(picture()))
   })
 })

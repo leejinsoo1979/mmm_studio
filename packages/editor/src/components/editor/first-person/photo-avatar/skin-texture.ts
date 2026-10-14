@@ -138,6 +138,43 @@ export function hairline(
   return out
 }
 
+/**
+ * A face this many pixels or fewer between the irises (a thumbnail, a cropped profile picture) is
+ * enlarged several times over the head's texture, and its eyes, brows and lips blur there. It is
+ * sharpened first (an unsharp mask of its finest detail), by SHARPEN at half this size and under,
+ * less up to it.
+ */
+const SMALL_FACE = 120
+const SHARPEN = 0.7
+
+/** A photo's linear RGB (in place) with its finest detail strengthened, as much as its face is small. */
+export function sharpenSmallFace(rgb: Float32Array, width: number, height: number, pupils: number) {
+  const amount = SHARPEN * (1 - smooth(SMALL_FACE / 2, SMALL_FACE, pupils))
+  if (!(amount > 0)) return
+  const source = Float32Array.from(rgb)
+  const at = (x: number, y: number, c: number) =>
+    source[
+      (Math.min(height - 1, Math.max(0, y)) * width + Math.min(width - 1, Math.max(0, x))) * 3 + c
+    ]!
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      for (let c = 0; c < 3; c++) {
+        // A 3 × 3 binomial blur.
+        const blurred =
+          (4 * at(x, y, c) +
+            2 * (at(x - 1, y, c) + at(x + 1, y, c) + at(x, y - 1, c) + at(x, y + 1, c)) +
+            at(x - 1, y - 1, c) +
+            at(x + 1, y - 1, c) +
+            at(x - 1, y + 1, c) +
+            at(x + 1, y + 1, c)) /
+          16
+        const i = (y * width + x) * 3 + c
+        rgb[i] = Math.max(0, source[i]! + amount * (source[i]! - blurred))
+      }
+    }
+  }
+}
+
 /** A one-byte map blurred (a box `radius` out, twice: a tent). */
 export function softPlane(
   plane: Uint8Array,
@@ -211,6 +248,7 @@ export function skinTextures({
     const camera = cameras[k]!
     const rgb = sceneRgb(view.rgba, view.width, view.height)
     for (let i = 0; i < rgb.length; i++) rgb[i] = rgb[i]! * balance[i % 3]!
+    sharpenSmallFace(rgb, view.width, view.height, eyeDistance(view))
     const classes =
       view.classes && view.classes.width === view.width && view.classes.height === view.height
         ? view.classes
@@ -501,6 +539,12 @@ export function occluderMesh(base: BaseBody, moves: Float64Array): UvMesh {
 
 /** Past this (a factor, either way) a cast's red or blue is the light's, not the scene's own colour. */
 const CAST_LEEWAY = 1.08
+/**
+ * The most a cast is taken out (a factor on red or blue). Past it the light's colour is the
+ * scene's as much as the camera's (low sun, a warm room), and a small photo's whites are partly
+ * the lids' and the skin's: taking out all of it turned warm skin pink and grey.
+ */
+const CAST_LIMIT = 1.25
 
 /**
  * Per-channel gains (linear, brightness kept) taking out a colour cast the
@@ -543,7 +587,9 @@ export function whiteBalance(views: CaptureView[]): [number, number, number] {
     const a = lean(background, k)
     const b = lean(whites, k)
     if (a * b <= 0) continue
-    const cast = Math.sign(a) * Math.max(0, Math.min(Math.abs(a), Math.abs(b)) - leeway)
+    const cast =
+      Math.sign(a) *
+      Math.min(Math.log(CAST_LIMIT), Math.max(0, Math.min(Math.abs(a), Math.abs(b)) - leeway))
     gains[k] = Math.exp(-cast)
   }
   const kept = luminance(gains[0], gains[1], gains[2])
